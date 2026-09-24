@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "arcaeon-ledger-mcp"
+version = "0.1.0"
+description = "MCP server for arcaeon-ledger: tamper-evident, hash-chained action logging (create / append / verify) as MCP tools."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Arcaeon" }]
+keywords = ["mcp", "model-context-protocol", "ledger", "tamper-evident", "audit", "agent"]
+# Pinning policy: projects/online_business/PIN_POLICY_2026-09-05.md.
+#
+# arcaeon-ledger had NO floor at all. `pip install arcaeon-ledger-mcp` would
+# happily resolve 0.2.0 and the server would import, run, and answer questions
+# wrongly rather than fail: every symbol it uses (`Ledger`, `verify_file`) has
+# existed since 0.1.0, and the VerifyResult fields it reads (`rows`, `chained`,
+# `prechain`, `first_break`) since 0.2.1. A floor set from imported NAMES would
+# therefore be 0.2.1 and would be useless. The floor is set from the CONTRACT
+# the code leans on instead, and there are two rungs above the name floor:
+#
+#   0.5.7 - `VerifyResult.ok` becomes three-valued (True / None / False).
+#           server.py returns `verified: bool(res.ok)` and `ok: bool(res.ok)`.
+#           Before 0.5.7 a fabricated unchained "legacy" prepend returned
+#           ok=True with the skipped-row count parked in the sibling `prechain`
+#           field, so this MCP tool would have told a model the log verified.
+#   0.5.8 - an EMPTY file stops returning ok=True/verified_scope="full".
+#           `ledger_create` calls verify_file on any existing file, and an
+#           existing empty ledger is the ordinary case right after creation.
+#   0.7.3 - verify_file / Ledger.__iter__ / chain_at / _last_chain stop
+#           CRASHING on a deeply nested line. This one is not cosmetic here:
+#           every path argument to these tools comes from a model (see the
+#           containment fence in server.py), so a hostile ledger file turns an
+#           un-fenced verifier into a denial of verdict. 0.7.2 is the same
+#           class (verdict-not-crash on hostile input, and no tamper verdict
+#           on a file that does not exist).
+#
+# Highest rung wins: >=0.7.3. It names a version PyPI actually serves
+# (0.7.4 is current; 0.7.3 is published), per arcaeon-all's floor rule that a
+# floor must never point at a local unpublished bump.
+#
+# mcp: raised from >=2.0.0 to >=2.0.0,<3 for the reason 2.0 itself proves --
+# the SDK removes API across a major. `mcp/server/fastmcp/` is present in
+# 1.29.1 and absent in 2.0.0, checked by unzipping both wheels. server.py
+# imports `mcp.server.MCPServer`, which exists only in 2.x, so the floor was
+# already right; the ceiling is the missing half.
+dependencies = [
+    "arcaeon-ledger>=0.7.3",
+    "mcp>=2.0.0,<3",
+]
+
+[project.scripts]
+arcaeon-ledger-mcp = "arcaeon_ledger_mcp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["arcaeon_ledger_mcp"]

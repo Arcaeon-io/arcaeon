@@ -1,0 +1,243 @@
+{
+  "schema": "arcaeon-offers/v1",
+  "updated": "2026-09-24T12:00:00Z",
+  "vendor": {
+    "name": "Arcaeon",
+    "legal_form": "sole proprietorship (DBA Arcaeon)",
+    "agent": {
+      "name": "Nora",
+      "the_colony": "@nora",
+      "moltbook": "nora_cyan",
+      "commonlog": "commonlog.ai/a/LTVN6PTQ06CD0EIRJK38MVH94O"
+    },
+    "contact": "hello@arcaeon.io",
+    "org": "https://huggingface.co/Arcaeon",
+    "ai_readable": [
+      "/llms.txt",
+      "/llms-full.txt",
+      "/ai.md"
+    ]
+  },
+  "honesty_contract": "Every product lists what it does NOT prove alongside what it does. Claims ship with the means to verify them. This file is the single source of truth for what Arcaeon charges for: the paid offers are the Witnessed plan and the two Apify actors listed below. A charge that does not correspond to an offer in this file is not ours — treat it as fraudulent.",
+  "products": [
+    {
+      "id": "arcaeon",
+      "name": "arcaeon",
+      "version": "0.9.0",
+      "status": "built_pending_pypi",
+      "status_note": "version and status are synced from products.yaml (the one place they live) by `py site.py build`; publish day flips status to shipped there, not here",
+      "price_usd": 0,
+      "install": "pip install arcaeon",
+      "requires_python": ">=3.10",
+      "base_dependencies": [],
+      "extras": {
+        "mcp": "`arcaeon mcp` (the MCP server), `vet serve`, `vet probe`; pulls in the MCP Python SDK",
+        "ts": "vet's TypeScript checks; pulls in tree-sitter",
+        "sign": "signed vet reports, receipt signature checks; pulls in cryptography",
+        "all": "all three"
+      },
+      "verify": "arcaeon selftest",
+      "pypi": "https://pypi.org/project/arcaeon/",
+      "families": {
+        "Record": [
+          "log",
+          "verify",
+          "receipt",
+          "once",
+          "proxy",
+          "pin",
+          "deal"
+        ],
+        "Prove": [
+          "reconcile",
+          "audit",
+          "vet",
+          "badge",
+          "seal",
+          "baseline",
+          "compact"
+        ],
+        "Save": [
+          "distill",
+          "dedup",
+          "meter"
+        ]
+      },
+      "doors": {
+        "install": "pip install arcaeon (https://arcaeon.io/get)",
+        "ai": "pip install \"arcaeon[mcp]\" then `arcaeon mcp` (MCP server on stdio)",
+        "hosted": "`stamp` without a key inside a free daily allowance; `pin --remote`, `seal` and `credits` need ARCAEON_KEY; the priced hosted offers are the `hosted-witness` entry below",
+        "browser": "https://arcaeon.io/tools",
+        "dispute": "https://arcaeon.io/dispute (coming; the deal lane runs locally, hosted verdicts for deal tapes are not live)"
+      },
+      "replaces": [
+        "arcaeon-ledger",
+        "arcaeon-adapter",
+        "arcaeon-receipt",
+        "arcaeon-audit",
+        "arcaeon-mcp-vet",
+        "arcaeon-once",
+        "arcaeon-compact",
+        "arcaeon-continuity",
+        "arcaeon-baseline",
+        "arcaeon-dedup",
+        "arcaeon-distill",
+        "arcaeon-meter",
+        "arcaeon-all"
+      ],
+      "migration": "https://arcaeon.io/migrate",
+      "claims": [
+        "every row is hash-chained to the row before it; an edit, a deletion or a reorder breaks every later link and `arcaeon verify` names the first broken line",
+        "one exit-code table for every verb: 0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK (never a pass)",
+        "no network on import; the hosted verbs, `proxy --pin-witness` and `receipt cite` open a connection only when run"
+      ],
+      "non_proofs": [
+        "truncation without a pin: cut the most recent rows off and what is left still checks out; a witness pin closes that, only as of the last pin",
+        "truth: the chain records whatever was written, true or not",
+        "authorship: who wrote a row is data in the row, not a signature",
+        "a MATCHED reconcile or deal means two tapes agree; two recorders run by one party can write two agreeing tapes of a lie",
+        "vet and badge report what their own checks found in the bytes they read; not a review by a person and not a safety certification"
+      ]
+    },
+    {
+      "id": "arcaeon-verified-snapshot",
+      "name": "Arcaeon Verified Snapshot",
+      "version": "0.1.9",
+      "status": "live",
+      "price_usd": null,
+      "pricing": "pay-per-event on Apify's own usage-based platform pricing — not a flat subscription or a Stripe charge from us; running it means paying Apify for the run",
+      "platform": "Apify",
+      "actor_id": "qi1AAY5TcgZZjQgFD",
+      "claims": [
+        "schema arcaeon-verified-snapshot/2: binds the URL, capture time, SHA-256 of the raw fetched bytes, HTTP status, and the final URL after redirects into one Ed25519-signed statement — a 404 body or a redirected body cannot be presented as a verified 200 of the original URL",
+        "change one byte of the captured content and the hash no longer matches",
+        "every record carries its own how_to_verify string; verify_snapshot(record, content) recomputes the hash and checks the signature, returning valid / legacy / the reason it's neither"
+      ],
+      "non_proofs": [
+        "that the signing key is ours — the signature checks out against a public key carried in the record itself, which proves internal consistency, not ownership; compare it against https://arcaeon.io/.well-known/arcaeon/snapshot-signing-keys.json, fetched separately, over a connection the record didn't control",
+        "that anyone else saw the same page — a geo-varied, personalized, or logged-in view is a different page from what we captured",
+        "legacy /1 records: http_status and final_url sit outside the signature and should be treated as unproven even when the signature itself checks out"
+      ]
+    },
+    {
+      "id": "arcaeon-hiring-alerts",
+      "name": "Public-Safety Hiring Alerts",
+      "version": "0.1.1",
+      "status": "live",
+      "price_usd": null,
+      "pricing": "pay-per-event on Apify's own usage-based platform pricing — not a flat subscription or a Stripe charge from us; running it means paying Apify for the run",
+      "platform": "Apify",
+      "actor_id": "D6dqtGiepmZh2Zbuf",
+      "claims": [
+        "one result per open 911 dispatcher / police / fire / corrections / EMS posting across US government job boards, filtered by role family and state, each carrying the live url on the source board",
+        "bounded by design: no retries, capped fetches, roughly one request per role and state"
+      ],
+      "non_proofs": [
+        "coverage — the source today is governmentjobs.com, the dominant US public-safety board; an agency that posts only on its own site never appears in this feed",
+        "a quiet result means nothing matched the filters on that board, not that no agency is hiring",
+        "role matching is a title filter, a heuristic — it reads titles, not job descriptions"
+      ]
+    },
+    {
+      "id": "hosted-witness",
+      "name": "Arcaeon Hosted Witness",
+      "status": "live",
+      "description": "pin your ledger head with a party you can't advance; free tier + one paid tier live",
+      "price_usd": 0,
+      "endpoint": "https://witness.arcaeon.io",
+      "status_page": "https://witness.arcaeon.io/status",
+      "public_record": "https://github.com/dan8433-user/arcaeon-witness-pins",
+      "claims": [
+        "pin ledger heads with a party the writer can't advance",
+        "pin store is a public git history — witness record itself tamper-evident; cadence deadlines make a missed pin stranger-gradeable",
+        "monotonic guard: a witness never goes backward; same-height re-mints land in a public conflict log",
+        "daily OpenTimestamps Bitcoin anchor; /api/verify gives one-call public proof-of-inclusion"
+      ],
+      "non_proofs": [
+        "proves no-truncation/no-rewrite only relative to what it saw, only as recent as the last pin — the pin gap is the security parameter",
+        "auth is bearer-key only (Stage-0); owner-signature auth is designed (STAGE1_SIGNATURE_DESIGN) but not built — a leaked key can assert liveness"
+      ],
+      "tiers": [
+        {
+          "plan": "free",
+          "price_usd": 0,
+          "cap": "100 pins/month",
+          "how": "email hello@arcaeon.io or ask Nora for a key"
+        },
+        {
+          "plan": "witnessed",
+          "price_usd_month": 9,
+          "cap": "2,000 pins/month",
+          "checkout": "https://buy.stripe.com/6oUaEYd987LP3xy21b0RG04",
+          "note": "Stripe-hosted checkout; provisioning within a day of the receipt email. Self-hosting the witness library remains free forever. Reframed as the human/org convenience door (COUNCIL_PRICING_REVIEW_2026-08-14.md), not the agent-default unit — see the three prepaid credit packs below for that. (A prepaid credit-pack rail for agents is designed and staged, pending a Stripe webhook + live checkout — NOT yet purchasable.)"
+        },
+        {
+          "plan": "mini",
+          "rail": "prepaid_credit_pack",
+          "price_usd": 5,
+          "cap": "1,000 pins",
+          "price_per_pin_usd": 0.005,
+          "fee_drag_pct_on_charge": 8.9,
+          "checkout": "https://buy.stripe.com/aFa4gAb10ead3xy35f0RG08",
+          "status": "live",
+          "note": "Single $5 charge; the entry pack — same per-pin price as Starter, smallest honest batch above the card-fee floor."
+        },
+        {
+          "plan": "starter",
+          "rail": "prepaid_credit_pack",
+          "price_usd": 15,
+          "cap": "3,000 pins",
+          "price_per_pin_usd": 0.005,
+          "fee_drag_pct_on_charge": 4.9,
+          "checkout": "https://buy.stripe.com/fZu3cwc541nrc448pz0RG05",
+          "status": "live",
+          "note": "Single $15 Stripe charge clears the $0.31 zero-margin floor (fee-floor math: COUNCIL_PRICING_REVIEW_2026-08-14.md) by ~48x. Pins draw down from the prepaid balance afterward — they are never their own Stripe charge, which is the entire point of the pack. Checkout activating this week, pending the decrementing-balance + instant-top-up build named as a hard gate in the same review."
+        },
+        {
+          "plan": "standard",
+          "rail": "prepaid_credit_pack",
+          "price_usd": 50,
+          "cap": "12,000 pins",
+          "price_per_pin_usd": 0.0042,
+          "fee_drag_pct_on_charge": 3.5,
+          "checkout": "https://buy.stripe.com/14A3cwglkd694BC49j0RG06",
+          "status": "live",
+          "note": "Single $50 charge clears the $0.31 floor by ~161x. Fee drag drops from 4.9% (Starter) to 3.5% as batch size grows — the whole reason multiple pack sizes exist instead of one. Checkout activating this week, same build gate as Starter."
+        },
+        {
+          "plan": "bulk",
+          "rail": "prepaid_credit_pack",
+          "price_usd": 150,
+          "cap": "40,000 pins",
+          "price_per_pin_usd": 0.0038,
+          "fee_drag_pct_on_charge": 3.1,
+          "checkout": "https://buy.stripe.com/9B68wQb108PTfgg8pz0RG07",
+          "status": "live",
+          "note": "Single $150 charge clears the $0.31 floor by ~484x, fee drag down to 3.1% (asymptoting toward Stripe's 2.9% as charge size grows). Checkout activating this week, same build gate as Starter.",
+          "rate_note": "Honest capacity note: pins are rate-shaped above ~100/hour today; a 40,000-pin pack consumed at full speed will throttle. Stated up front rather than discovered; capacity raise (KV migration) is on the roadmap."
+        }
+      ],
+      "tier_naming_note": "Starter / Standard / Bulk are the ratified names (COUNCIL_PRICING_REVIEW_2026-08-14.md §2.2, CEO ratification #1). Same three prices and pin caps as originally staged; naming reconciled here so the site and the ratified pricing doc don't drift apart.",
+      "credit_pack_gate": "Gate satisfied 2026-08-16: the balance-tracking build shipped (webhook live, signature-enforced, applied_events idempotency regression-tested) before any checkout URL went live — the original ordering rule was honored, then retired."
+    },
+    {
+      "id": "arcaeon-cite",
+      "status": "reserved",
+      "note": "name reserved; not built. Listed for honesty — there is no product here yet."
+    }
+  ],
+  "payment": {
+    "live_offers": 2,
+    "offers": [
+      "hosted-witness Witnessed plan ($9/mo, Stripe checkout)",
+      "hosted-witness prepaid credit packs (Mini $5/1,000 pins, Starter $15/3,000, Standard $50/12,000, Bulk $150/40,000) — Stripe checkout LIVE; credits applied AUTOMATICALLY — checkout lands on the fulfil page, which verifies the session server-side against Stripe and mints the key / applies the credits instantly (webhook backstop, idempotent re-retrieval from the receipt email); if the machine path ever fails, hello@arcaeon.io applies them by hand"
+    ],
+    "note": "TWO live paid offers, listed above. This file is the single source of truth: any Arcaeon charge that does not correspond to one of these is not ours. The `arcaeon` package is free, and verification is free for everyone forever and identical at every tier, because it never touches our systems.",
+    "correction": "2026-08-14: this file previously declared 1 live offer and marked the two Apify actors 'in_development' while they had been priced and public since 2026-08-13 — a compaction-loss error. Corrected; a charge for either actor was always legitimate.",
+    "correction_2026_08_20": "The 8/19 correction below was true when written and stale within days, in the opposite direction: instant fulfilment shipped (the fulfil page + webhook backstop), and this catalog kept saying manual-within-a-day while the checkout was actually crediting instantly. Same lesson, other side: surfaces drift in BOTH directions, and an under-claim is still a false record. Caught by the 8/20 auditor sitting cross-reading pricing.html against this file.",
+    "correction_2026_08_19": "This file previously listed the credit packs as 'Pending (NOT live) ... checkout: null' while all four Stripe payment links were returning 200 and would have taken a customer's money. Three of our own surfaces disagreed about whether the packs were for sale: this catalog said no, the site's own badge said 'staged, not yet buyable', and the site's own prose two lines below it said 'Live as of Aug 16'. Found 2026-08-19 by testing the links instead of reading the labels. Corrected to the true state, which is BUYABLE WITH MANUAL FULFILMENT: checkout works and takes payment, and credits are applied by hand within about a day (send receipt + key to hello@arcaeon.io). The Mini $5 pack was missing from the old list entirely. No purchase was ever affected — live mode has never carried a completed paid session.",
+    "correction_2026_08_29": "The two Apify actors (verified-snapshot, public-safety-hiring-alerts) were removed from this catalog and from every Arcaeon surface on 2026-08-29, pending full unpublish via Apify support. They are no longer offered. No active subscriptions existed; usage was negligible.",
+    "correction_2026_09_05": "The 8/29 removal above did not hold: both actors kept shipping (arcaeon-verified-snapshot to build 0.1.9, arcaeon-hiring-alerts to build 0.1.1 — both gate-verified against the real Apify build history, not assumed) and this file simply never caught back up. Reinstated in `products` above as `arcaeon-verified-snapshot` and `arcaeon-hiring-alerts`, live. They are billed through Apify's own usage-based platform pricing (pay-per-event), not through Stripe, so they are not counted in `live_offers` below — that count is scoped to charges Arcaeon collects directly via Stripe. Also added: `arcaeon-mcp-vet` (free PyPI package; its optional `--sealed` scan spends an existing hosted-witness credit, so it rides the same Stripe-collected credit balance already counted below, not a new offer).",
+    "correction_2026_09_24": "The thirteen free library entries (and the FACTS display name) were collapsed into one product, `arcaeon`, the single package they merged into. No price changed: the package is free, the two paid offers above are unchanged. The old names map to the new imports and commands at https://arcaeon.io/migrate."
+  }
+}

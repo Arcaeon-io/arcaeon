@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arcaeon-ledger"
+# one patch above the old line: PyPI last 0.8.0
+version = "0.8.1"
+description = "Compatibility shim: arcaeon-ledger is now part of arcaeon (arcaeon.record.ledger). Installs arcaeon; goes away with arcaeon 1.0.0."
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Arcaeon" }]
+dependencies = ["arcaeon>=0.9,<1"]
+
+[project.scripts]
+arcaeon-ledger = "arcaeon_ledger:_script_arcaeon_ledger"
+
+[project.urls]
+Homepage = "https://arcaeon.io"
+
+[tool.setuptools]
+packages = ["arcaeon_ledger"]

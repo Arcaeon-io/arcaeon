@@ -1,0 +1,1573 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Arcaeon Receipt Verifier</title>
+<meta name="description" content="Paste or drop a receipt JSON file. Everything runs in your browser: the digest is recomputed with SHA-256, and nothing is uploaded anywhere.">
+<style>
+  :root {
+    color-scheme: dark light;
+    --bg: #0b0c0e;
+    --panel: #141619;
+    --panel-2: #191c1f;
+    --border: #2a2d31;
+    --text: #e6e8eb;
+    --muted: #9aa0a6;
+    --accent: #6ee7b7;
+    --accent-strong: #34d399;
+    --fail: #f87171;
+    --warn: #fbbf24;
+    --link: #8ab4f8;
+    --mono-bg: #0f1113;
+    --mono-border: #2f3338;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      --bg: #f6f7f8;
+      --panel: #ffffff;
+      --panel-2: #f0f1f3;
+      --border: #dcdfe3;
+      --text: #1b1d1f;
+      --muted: #5b6066;
+      --accent: #0a7d4c;
+      --accent-strong: #056238;
+      --fail: #b3261e;
+      --warn: #8a5a00;
+      --link: #1a56b0;
+      --mono-bg: #f0f1f3;
+      --mono-border: #d7dade;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  main {
+    max-width: 880px;
+    margin: 0 auto;
+    padding: 32px 20px 80px;
+  }
+  h1 {
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0 0 4px;
+    letter-spacing: 0.01em;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 13.5px;
+    margin: 0 0 28px;
+  }
+  h2 {
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin: 0 0 10px;
+    font-weight: 600;
+  }
+  section.panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px 20px;
+    margin-bottom: 16px;
+  }
+  code, pre, .mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 13px;
+  }
+  pre {
+    background: var(--mono-bg);
+    border: 1px solid var(--mono-border);
+    border-radius: 6px;
+    padding: 12px 14px;
+    overflow-x: auto;
+    margin: 8px 0;
+    white-space: pre;
+  }
+  textarea#receipt-input {
+    width: 100%;
+    min-height: 200px;
+    background: var(--mono-bg);
+    color: var(--text);
+    border: 1px solid var(--mono-border);
+    border-radius: 6px;
+    padding: 12px 14px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    resize: vertical;
+  }
+  #dropzone {
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    color: var(--muted);
+    font-size: 13px;
+    margin-top: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  #dropzone.drag {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  button, .btn {
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 600;
+    padding: 8px 16px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--panel-2);
+    color: var(--text);
+    cursor: pointer;
+  }
+  button.primary {
+    background: var(--accent-strong);
+    border-color: var(--accent-strong);
+    color: #06120c;
+  }
+  button:hover { filter: brightness(1.08); }
+  input[type=file] { display: none; }
+  #error {
+    display: none;
+    color: var(--fail);
+    border: 1px solid var(--fail);
+    background: color-mix(in srgb, var(--fail) 10%, transparent);
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-top: 12px;
+    font-size: 13.5px;
+    white-space: pre-wrap;
+  }
+  .verdict {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 15px;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .verdict .tag {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    letter-spacing: 0.04em;
+  }
+  .tag.pass { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent-strong); border: 1px solid var(--accent-strong); }
+  .tag.fail { background: color-mix(in srgb, var(--fail) 18%, transparent); color: var(--fail); border: 1px solid var(--fail); }
+  .tag.warn { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); border: 1px solid var(--warn); }
+  .tag.neutral { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
+  .reason { color: var(--muted); font-size: 13.5px; }
+  .digest-line { margin-top: 10px; }
+  .digest-label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px; }
+  .digest-value { word-break: break-all; }
+  dl.fields { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+  dl.fields dt { color: var(--muted); font-size: 13px; }
+  dl.fields dd { margin: 0; }
+  ul.plain { margin: 4px 0; padding-left: 20px; }
+  ul.plain li { margin: 2px 0; }
+  .scope-block { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 640px) { .scope-block { grid-template-columns: 1fr; } }
+  .scope-col h3 { font-size: 13px; margin: 0 0 6px; }
+  .scope-col.proves h3 { color: var(--accent-strong); }
+  .scope-col.not-proves h3 { color: var(--warn); }
+  table.checks {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  table.checks th, table.checks td {
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    padding: 6px 10px;
+    vertical-align: top;
+  }
+  table.checks th { color: var(--muted); font-weight: 600; }
+  .table-wrap { overflow-x: auto; }
+  table.checks td .tag {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+  .batch-summary {
+    font-size: 15px;
+    font-weight: 700;
+    margin: 2px 0 10px;
+  }
+  .batch-counts { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  button.linkish {
+    background: none;
+    border: none;
+    color: var(--link);
+    padding: 0;
+    font-size: 12.5px;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+  .notice {
+    border: 1px solid var(--warn);
+    background: color-mix(in srgb, var(--warn) 10%, transparent);
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 13.5px;
+    margin: 8px 0;
+  }
+  .notice.strong {
+    border-color: var(--fail);
+    background: color-mix(in srgb, var(--fail) 10%, transparent);
+  }
+  a { color: var(--link); }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  hr.sep { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+  footer {
+    color: var(--muted);
+    font-size: 12px;
+    margin-top: 40px;
+    text-align: center;
+  }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Arcaeon Receipt Verifier</h1>
+  <p class="subtitle">
+    Paste or drop a receipt JSON file below. Everything runs in this page --
+    the body digest is recomputed with your browser's own SHA-256, nothing
+    is uploaded anywhere. This checks what the receipt itself claims; it does
+    not re-walk the issuer's ledger file (it does not have it) and it does
+    not run <code>ots verify</code> for you (see the anchor section).
+  </p>
+
+  <section class="panel">
+    <h2>Receipt</h2>
+    <textarea id="receipt-input" spellcheck="false" placeholder="Paste receipt JSON here..."></textarea>
+    <div id="dropzone">
+      <span>or drop one <code>.json</code> receipt &mdash; or a whole class of them,
+        up to <strong id="cap-text">20</strong> at once &mdash; anywhere on this page</span>
+      <div class="row">
+        <button id="choose-file-btn" type="button">Choose file(s)&hellip;</button>
+        <input type="file" id="file-input" accept="application/json,.json" multiple>
+      </div>
+    </div>
+    <div class="row" style="margin-top:14px;">
+      <button id="verify-btn" class="primary" type="button">Verify receipt</button>
+      <button id="clear-btn" type="button">Clear</button>
+    </div>
+    <div id="error"></div>
+  </section>
+
+  <section id="section-batch" class="panel" hidden>
+    <h2>Batch (<span id="batch-count">0</span> receipts)</h2>
+    <div class="batch-summary" id="batch-summary"></div>
+    <div class="batch-counts" id="batch-counts"></div>
+    <div class="table-wrap"><table class="checks" id="batch-table"></table></div>
+    <p class="reason" style="margin-top:10px;">
+      Three verdicts, never two. <strong>VERIFIED</strong> means the seven body
+      fields hash to the digest on the receipt and nothing attached outside
+      the body contradicts it. <strong>BROKEN</strong> means they do not hash,
+      or an attachment contradicts the receipt (a witness block that disagrees
+      with the ledger block or with its own pin, or an attestation signature
+      made over a different digest). Fields the issuer merely asserts, such as
+      whether a witness is hosted, are shown as <strong>claimed</strong> in
+      the detail column and are never what earns the VERIFIED. <strong>COULD NOT LOOK</strong> means this page could not
+      reach a verdict at all &mdash; the file would not open, would not parse,
+      or carries a number outside what json-c14n v1 can canonicalize. A
+      receipt this page could not look at is never counted as either of the other two.
+    </p>
+    <p class="reason">
+      As with a single receipt, this page was not given anybody's ledger file,
+      so the sequence claim on each receipt is out of scope here. To check that
+      too, run <code>arcaeon-receipt verify --batch &lt;directory&gt;</code>
+      where the ledger lives.
+    </p>
+  </section>
+
+  <section id="results" class="panel" hidden>
+    <h2>Body digest</h2>
+    <div id="verdict-body" class="verdict"></div>
+    <div class="reason" id="verdict-body-reason"></div>
+    <div class="digest-line">
+      <div class="digest-label">Claimed on receipt</div>
+      <div class="digest-value mono" id="digest-claimed">&mdash;</div>
+    </div>
+    <div class="digest-line">
+      <div class="digest-label">Recomputed here (7 body fields, json-c14n v1, sha256)</div>
+      <div class="digest-value mono" id="digest-computed">&mdash;</div>
+    </div>
+  </section>
+
+  <section id="section-scope" class="panel" hidden>
+    <h2>Scope</h2>
+    <div class="scope-block">
+      <div class="scope-col proves">
+        <h3>This receipt proves</h3>
+        <ul class="plain" id="scope-proves"></ul>
+      </div>
+      <div class="scope-col not-proves">
+        <h3>This receipt does not prove</h3>
+        <ul class="plain" id="scope-not-proves"></ul>
+      </div>
+    </div>
+    <div id="scope-method" class="reason" style="margin-top:10px;"></div>
+  </section>
+
+  <section id="section-checks" class="panel" hidden>
+    <h2>Checks</h2>
+    <div class="table-wrap"><table class="checks" id="checks-table"></table></div>
+  </section>
+
+  <section id="section-subject" class="panel" hidden>
+    <h2>Subject</h2>
+    <pre id="subject-pre" class="mono"></pre>
+  </section>
+
+  <section id="section-ledger" class="panel" hidden>
+    <h2>Ledger</h2>
+    <dl class="fields" id="ledger-fields"></dl>
+    <p class="reason"><span class="tag neutral">CLAIMED</span> Sequence
+      relative to the issuer's other receipts. This page cannot re-walk the
+      ledger file itself (it was not given one) -- it only shows what the
+      receipt claims about its row. These fields sit outside the body digest.</p>
+  </section>
+
+  <section id="section-witness" class="panel" hidden>
+    <h2>Witness</h2>
+    <div id="witness-notice"></div>
+    <dl class="fields" id="witness-fields"></dl>
+    <div id="witness-link-wrap"></div>
+  </section>
+
+  <section id="section-anchor" class="panel" hidden>
+    <h2>Anchor (OpenTimestamps)</h2>
+    <dl class="fields" id="anchor-fields"></dl>
+    <div id="anchor-body"></div>
+  </section>
+
+  <section id="section-attsig" class="panel" hidden>
+    <h2>Attestation signature</h2>
+    <div id="attsig-verdict" class="verdict"></div>
+    <div class="reason" id="attsig-reason"></div>
+    <dl class="fields" id="attsig-fields"></dl>
+  </section>
+
+  <section class="panel">
+    <details>
+      <summary>What this page can and cannot canonicalize</summary>
+      <div style="margin-top:10px; font-size:13.5px; color:var(--muted);">
+        <p>Supported, exactly: JSON integers of any size (the literal digit
+          text is preserved and reproduced byte for byte, matching Python's
+          arbitrary-precision <code>int</code>) and any finite JSON floating
+          point number that fits an IEEE-754 double, reformatted to match
+          Python's <code>repr()</code> exactly (fixed notation for
+          <code>10<sup>-4</sup> &le; |x| &lt; 10<sup>16</sup></code>-ish
+          magnitudes such as <code>1.0</code>, <code>0.5</code>,
+          <code>-2.25</code>; scientific notation with a zero-padded,
+          signed exponent outside that range, such as <code>1e+16</code> and
+          <code>1e-07</code>).</p>
+        <p>Refused loudly, never silently mismatched: a float literal whose
+          magnitude overflows a double to Infinity (Python's own encoder
+          refuses these the same way, via <code>allow_nan=False</code>), and
+          any malformed JSON. A refusal shows up as COULD NOT LOOK with the
+          reason stated plainly (a single file that will not parse at all
+          stops at a plain error before any verdict) -- it is never reported
+          as VERIFIED, and never as BROKEN, which is kept for a digest that
+          does not match.</p>
+      </div>
+    </details>
+  </section>
+
+  <footer>arcaeon-receipt / verify-receipt.html &middot; static, offline, no upload</footer>
+</main>
+
+<script>
+"use strict";
+
+/* ============================================================================
+ * json-c14n v1 canonicalizer.
+ *
+ * Reproduces, byte for byte, what arcaeon_ledger.digest_json computes as:
+ *   json.dumps(value, sort_keys=True, separators=(",", ":"),
+ *             ensure_ascii=False, allow_nan=False)
+ * followed by sha256 of the UTF-8 encoding of that string.
+ *
+ * This block is extracted verbatim (between the two marker comments) and run
+ * under Node by tests/test_verify_page_parity.py against the vectors in
+ * tools/c14n_vectors.py. It must stay pure and synchronous -- no DOM, no
+ * fetch, no crypto -- so it evaluates identically in a browser and in a bare
+ * Node -e script.
+ * ==========================================================================*/
+// C14N-START
+
+function C14NError(message) {
+  this.name = "C14NError";
+  this.message = message;
+}
+C14NError.prototype = Object.create(Error.prototype);
+
+// --- parser: JSON text -> a tagged tree that keeps int vs float distinct ---
+// Node shapes: {t:'null'}, {t:'bool', v}, {t:'str', v}, {t:'num', kind, raw},
+// {t:'arr', v: Array<node>}, {t:'obj', v: Map<string, node>} (Map so a
+// duplicate key resolves the same way Python's json.loads does: last write
+// wins, and lookups are by exact string).
+function parseC14NValue(text) {
+  let i = 0;
+  const n = text.length;
+
+  function fail(msg) { throw new C14NError(msg + " (at position " + i + ")"); }
+
+  function skipWs() {
+    while (i < n) {
+      const c = text[i];
+      if (c === " " || c === "\t" || c === "\n" || c === "\r") { i++; }
+      else { break; }
+    }
+  }
+
+  function parseValue() {
+    skipWs();
+    if (i >= n) { fail("unexpected end of input"); }
+    const c = text[i];
+    if (c === "{") { return parseObject(); }
+    if (c === "[") { return parseArray(); }
+    if (c === '"') { return { t: "str", v: parseString() }; }
+    if (c === "-" || (c >= "0" && c <= "9")) { return parseNumber(); }
+    if (text.startsWith("true", i)) { i += 4; return { t: "bool", v: true }; }
+    if (text.startsWith("false", i)) { i += 5; return { t: "bool", v: false }; }
+    if (text.startsWith("null", i)) { i += 4; return { t: "null", v: null }; }
+    fail("unexpected token " + JSON.stringify(c));
+  }
+
+  function parseObject() {
+    i++; // consume '{'
+    const map = new Map();
+    skipWs();
+    if (text[i] === "}") { i++; return { t: "obj", v: map }; }
+    for (;;) {
+      skipWs();
+      if (text[i] !== '"') { fail("expected a string key"); }
+      const key = parseString();
+      skipWs();
+      if (text[i] !== ":") { fail('expected ":"'); }
+      i++;
+      const val = parseValue();
+      map.set(key, val); // duplicate key: last one wins, same as json.loads
+      skipWs();
+      if (text[i] === ",") { i++; continue; }
+      if (text[i] === "}") { i++; break; }
+      fail('expected "," or "}"');
+    }
+    return { t: "obj", v: map };
+  }
+
+  function parseArray() {
+    i++; // consume '['
+    const arr = [];
+    skipWs();
+    if (text[i] === "]") { i++; return { t: "arr", v: arr }; }
+    for (;;) {
+      arr.push(parseValue());
+      skipWs();
+      if (text[i] === ",") { i++; continue; }
+      if (text[i] === "]") { i++; break; }
+      fail('expected "," or "]"');
+    }
+    return { t: "arr", v: arr };
+  }
+
+  function parseString() {
+    i++; // consume opening quote
+    let out = "";
+    for (;;) {
+      if (i >= n) { fail("unterminated string"); }
+      const c = text[i];
+      if (c === '"') { i++; break; }
+      if (c === "\\") {
+        i++;
+        const e = text[i];
+        if (e === '"') { out += '"'; i++; }
+        else if (e === "\\") { out += "\\"; i++; }
+        else if (e === "/") { out += "/"; i++; }
+        else if (e === "b") { out += "\b"; i++; }
+        else if (e === "f") { out += "\f"; i++; }
+        else if (e === "n") { out += "\n"; i++; }
+        else if (e === "r") { out += "\r"; i++; }
+        else if (e === "t") { out += "\t"; i++; }
+        else if (e === "u") {
+          const hex = text.slice(i + 1, i + 5);
+          if (!/^[0-9a-fA-F]{4}$/.test(hex)) { fail("bad \\u escape"); }
+          out += String.fromCharCode(parseInt(hex, 16));
+          i += 5;
+        } else {
+          fail("bad escape \\" + e);
+        }
+      } else if (c.charCodeAt(0) < 0x20) {
+        fail("unescaped control character in string literal");
+      } else {
+        out += c;
+        i++;
+      }
+    }
+    return out;
+  }
+
+  function isDigit(c) { return c >= "0" && c <= "9"; }
+
+  function parseNumber() {
+    const start = i;
+    if (text[i] === "-") { i++; }
+    if (text[i] === "0") {
+      i++;
+    } else if (isDigit(text[i])) {
+      while (i < n && isDigit(text[i])) { i++; }
+    } else {
+      fail("invalid number");
+    }
+    let isFloat = false;
+    if (text[i] === ".") {
+      isFloat = true;
+      i++;
+      if (!isDigit(text[i])) { fail("invalid number: digit required after '.'"); }
+      while (i < n && isDigit(text[i])) { i++; }
+    }
+    if (text[i] === "e" || text[i] === "E") {
+      isFloat = true;
+      i++;
+      if (text[i] === "+" || text[i] === "-") { i++; }
+      if (!isDigit(text[i])) { fail("invalid number: digit required in exponent"); }
+      while (i < n && isDigit(text[i])) { i++; }
+    }
+    return { t: "num", kind: isFloat ? "float" : "int", raw: text.slice(start, i) };
+  }
+
+  const result = parseValue();
+  skipWs();
+  if (i !== n) { fail("trailing data after the JSON value"); }
+  return result;
+}
+
+// --- key ordering: Unicode CODE POINT order, matching Python's `str` `<` ---
+// (Deliberately NOT UTF-16 code-unit order / RFC 8785 JCS order -- those
+// diverge from this recipe for keys containing astral-plane characters. See
+// arcaeon_ledger/artefact.py's own note on this exact divergence.)
+function codepoints(s) {
+  return Array.from(s).map(function (ch) { return ch.codePointAt(0); });
+}
+function compareByCodepoint(a, b) {
+  const A = codepoints(a), B = codepoints(b);
+  const len = Math.min(A.length, B.length);
+  for (let k = 0; k < len; k++) {
+    if (A[k] !== B[k]) { return A[k] - B[k]; }
+  }
+  return A.length - B.length;
+}
+
+// --- string encoding: escape only what Python's ensure_ascii=False escapes ---
+function encodeC14NString(s) {
+  let out = '"';
+  for (let k = 0; k < s.length; k++) {
+    const c = s[k];
+    const code = s.charCodeAt(k);
+    if (c === '"') { out += '\\"'; }
+    else if (c === "\\") { out += "\\\\"; }
+    else if (c === "\n") { out += "\\n"; }
+    else if (c === "\r") { out += "\\r"; }
+    else if (c === "\t") { out += "\\t"; }
+    else if (code === 0x08) { out += "\\b"; }
+    else if (code === 0x0c) { out += "\\f"; }
+    else if (code < 0x20) { out += "\\u" + code.toString(16).padStart(4, "0"); }
+    else { out += c; }
+  }
+  return out + '"';
+}
+
+// --- integers: reproduce the literal digit text exactly (arbitrary precision) ---
+function formatC14NInt(raw) {
+  let s = raw;
+  let neg = false;
+  if (s[0] === "-") { neg = true; s = s.slice(1); }
+  if (/^0+$/.test(s)) { return "0"; } // Python: int("-0") == 0 -> "0"
+  return (neg ? "-" : "") + s;
+}
+
+// --- floats: reformat to Python's repr() shape from JS's own shortest,
+// round-trip-correct decimal digits (via toExponential()). Both languages
+// implement the same "shortest string that round-trips to this double"
+// contract; only the LAYOUT (fixed vs scientific, exponent padding, sign)
+// differs, and that layout is reproduced here explicitly. ---
+function formatC14NFloat(raw) {
+  const num = Number(raw);
+  if (!isFinite(num)) {
+    throw new C14NError("float overflows to Infinity, cannot canonicalize (Python's " +
+      "own encoder refuses this too, via allow_nan=False): " + raw);
+  }
+  if (num === 0) {
+    // Number(raw) with raw "-0.0" or "-0" written as a float literal yields
+    // JS's signed zero; toExponential() on -0 drops the sign, so it must be
+    // recovered explicitly.
+    return (Object.is(num, -0) ? "-0.0" : "0.0");
+  }
+  const neg = num < 0;
+  const abs = Math.abs(num);
+  const exp = abs.toExponential(); // shortest round-trip digits, e.g. "1.5e+300"
+  const m = /^(\d)(?:\.(\d+))?e([+-]\d+)$/.exec(exp);
+  if (!m) { throw new C14NError("could not parse exponential form: " + exp); }
+  const digits = m[1] + (m[2] || "");
+  const exponent = parseInt(m[3], 10); // value == digits[0].digits[1:] * 10^exponent
+  const decpt = exponent + 1;          // Python dtoa convention: value == 0.<digits> * 10^decpt
+  const useExp = (decpt <= -4) || (decpt > 16); // CPython's float_repr_style threshold
+  let body;
+  if (useExp) {
+    const mantissa = digits.length > 1 ? (digits[0] + "." + digits.slice(1)) : digits[0];
+    const e = decpt - 1;
+    const esign = e < 0 ? "-" : "+";
+    const estr = String(Math.abs(e)).padStart(2, "0");
+    body = mantissa + "e" + esign + estr;
+  } else if (decpt <= 0) {
+    body = "0." + "0".repeat(-decpt) + digits;
+  } else if (decpt >= digits.length) {
+    body = digits + "0".repeat(decpt - digits.length) + ".0";
+  } else {
+    body = digits.slice(0, decpt) + "." + digits.slice(decpt);
+  }
+  return (neg ? "-" : "") + body;
+}
+
+function canonicalizeC14N(node) {
+  switch (node.t) {
+    case "null": return "null";
+    case "bool": return node.v ? "true" : "false";
+    case "str": return encodeC14NString(node.v);
+    case "num": return node.kind === "int" ? formatC14NInt(node.raw) : formatC14NFloat(node.raw);
+    case "arr": return "[" + node.v.map(canonicalizeC14N).join(",") + "]";
+    case "obj": {
+      const keys = Array.from(node.v.keys()).sort(compareByCodepoint);
+      return "{" + keys.map(function (k) {
+        return encodeC14NString(k) + ":" + canonicalizeC14N(node.v.get(k));
+      }).join(",") + "}";
+    }
+    default: throw new C14NError("unknown node type " + node.t);
+  }
+}
+
+// Entry point used by both this page and the parity test: JSON text in,
+// canonical json-c14n v1 string out.
+function c14nCanonicalize(text) {
+  return canonicalizeC14N(parseC14NValue(text));
+}
+
+// C14N-END
+
+/* ============================================================================
+ * Page logic: parse the pasted receipt, recompute the body digest, render
+ * scope / checks / ledger / witness / anchor.
+ * ==========================================================================*/
+
+const BODY_FIELDS = ["receipt_version", "kind", "issued_at", "subject", "checks", "scope", "extra"];
+
+// CROSSCHECK-START
+/* ----------------------------------------------------------------------------
+ * The cross-checks, one source for two pages (2026-09-22).
+ *
+ * Everything between CROSSCHECK-START and CROSSCHECK-END is also what
+ * verify-any.html runs on an Arcaeon receipt: tools/extract_c14n.py writes it,
+ * byte for byte, to web/universal/crosscheck_pinned.js, and
+ * tests/test_universal_checker.py fails if the two ever differ. So the two
+ * pages cannot disagree about a witness block or an attestation signature
+ * without that test going red. Pure: no DOM. Needs the C14N block above and a
+ * sha256Hex(bytes) -> Promise<hex> from the page that loads it.
+ * --------------------------------------------------------------------------*/
+
+function getField(objNode, key) {
+  if (!objNode || objNode.t !== "obj" || !objNode.v.has(key)) { return null; }
+  return objNode.v.get(key);
+}
+function asString(node) { return node && node.t === "str" ? node.v : null; }
+
+function prettyNode(node, ind) {
+  const pad = "  ".repeat(ind);
+  const pad2 = "  ".repeat(ind + 1);
+  switch (node.t) {
+    case "null": return "null";
+    case "bool": return node.v ? "true" : "false";
+    case "num": return node.raw; // display raw literal text: never lossy, even for huge ints
+    case "str": return JSON.stringify(node.v);
+    case "arr":
+      if (node.v.length === 0) { return "[]"; }
+      return "[\n" + node.v.map(function (x) { return pad2 + prettyNode(x, ind + 1); }).join(",\n") + "\n" + pad + "]";
+    case "obj": {
+      const keys = Array.from(node.v.keys());
+      if (keys.length === 0) { return "{}"; }
+      return "{\n" + keys.map(function (k) {
+        return pad2 + JSON.stringify(k) + ": " + prettyNode(node.v.get(k), ind + 1);
+      }).join(",\n") + "\n" + pad + "}";
+    }
+    default: return String(node);
+  }
+}
+
+/* ============================================================================
+ * Attachments outside the body digest (2026-09-22).
+ *
+ * `ledger`, `witness`, `anchor` and `attestation_signature` are the issuer's
+ * statements about the body, attached after the digest exists. Editing any of
+ * them leaves the body digest PASS untouched, so this page must never print
+ * them beside that PASS as if they had been checked. The same rules as the
+ * Python verifier (arcaeon_receipt/core.py, _check_witness and
+ * _check_attestation_signature):
+ *   claimed        the issuer says so; nothing here can check it offline
+ *   could not look checkable in principle, but the receipt carries no key
+ *   inconsistent / mismatch
+ *                  the attachment contradicts the receipt itself: determined,
+ *                  so the batch verdict is FAIL
+ * ==========================================================================*/
+
+// Python's json.dumps(obj, sort_keys=True, ensure_ascii=False) with its
+// DEFAULT separators (", " and ": "), which is the recipe arcaeon_ledger's
+// WitnessStore uses for a pin's `self` digest. Same string/number rules as
+// json-c14n v1, so it reuses those helpers and leaves the C14N block alone.
+function pyDefaultDumps(node) {
+  switch (node.t) {
+    case "null": return "null";
+    case "bool": return node.v ? "true" : "false";
+    case "str": return encodeC14NString(node.v);
+    case "num": return node.kind === "int" ? formatC14NInt(node.raw) : formatC14NFloat(node.raw);
+    case "arr": return "[" + node.v.map(pyDefaultDumps).join(", ") + "]";
+    case "obj": {
+      const keys = Array.from(node.v.keys()).sort(compareByCodepoint);
+      return "{" + keys.map(function (k) {
+        return encodeC14NString(k) + ": " + pyDefaultDumps(node.v.get(k));
+      }).join(", ") + "}";
+    }
+    default: throw new C14NError("unknown node type " + node.t);
+  }
+}
+
+function sameValue(a, b) {
+  if (a.t === "num" && b.t === "num") {
+    if (a.raw === b.raw) { return true; }
+    try { return Number(a.raw) === Number(b.raw); } catch (e) { return false; }
+  }
+  try { return canonicalizeC14N(a) === canonicalizeC14N(b); } catch (e) { return false; }
+}
+
+async function checkWitness(receiptRoot) {
+  const witness = getField(receiptRoot, "witness");
+  if (witness === null) { return { verdict: "absent", problems: [] }; }
+  if (witness.t !== "obj") { return { verdict: "inconsistent", problems: ["the witness block is not an object"] }; }
+  const hasAny = ["kind", "pin", "rows", "chain"].some(function (k) { return witness.v.has(k); });
+  if (asString(getField(witness, "status")) === "skipped" && !hasAny) {
+    return { verdict: "absent", problems: [] };
+  }
+  const ledgerNode = getField(receiptRoot, "ledger");
+  const ledger = ledgerNode && ledgerNode.t === "obj" ? ledgerNode : null;
+  const problems = [];
+  ["rows", "chain", "namespace"].forEach(function (k) {
+    const w = getField(witness, k), l = ledger ? getField(ledger, k) : null;
+    if (w !== null && l !== null && !sameValue(w, l)) {
+      problems.push("witness." + k + " (" + prettyNode(w, 0) + ") disagrees with ledger." + k +
+        " (" + prettyNode(l, 0) + ")");
+    }
+  });
+  let pinSelf = "not_present";
+  const pin = getField(witness, "pin");
+  if (pin !== null) {
+    if (pin.t !== "obj") {
+      problems.push("witness.pin is not an object");
+    } else {
+      ["rows", "chain", "namespace"].forEach(function (k) {
+        const pv = getField(pin, k), wv = getField(witness, k);
+        if (pv !== null && wv !== null && !sameValue(pv, wv)) {
+          problems.push("witness.pin." + k + " (" + prettyNode(pv, 0) + ") disagrees with witness." + k +
+            " (" + prettyNode(wv, 0) + ")");
+        }
+      });
+      if (pin.v.has("self") && pin.v.has("prev")) {
+        const m = new Map();
+        pin.v.forEach(function (v, k) { if (k !== "prev" && k !== "self") { m.set(k, v); } });
+        let text = null;
+        try { text = pyDefaultDumps({ t: "obj", v: m }); } catch (e) { text = null; }
+        // A lone surrogate is legal JSON, and Python hashes it with
+        // surrogatepass; TextEncoder cannot reproduce those bytes, so say
+        // "not recomputed here" rather than accuse the pin.
+        if (text === null || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:^|[^\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(text)) {
+          pinSelf = "not_recomputed";
+        } else {
+          const hex = await sha256Hex(new TextEncoder().encode(text));
+          if (hex.slice(0, 32) === asString(getField(pin, "self"))) {
+            pinSelf = "checked";
+          } else {
+            pinSelf = "mismatch";
+            problems.push("witness.pin.self does not recompute: the pin was edited after it was recorded");
+          }
+        }
+      }
+    }
+  }
+  return { verdict: problems.length ? "inconsistent" : "claimed", problems: problems, pinSelf: pinSelf };
+}
+
+function checkAttestationSignature(receiptRoot, claimedDigest) {
+  const sig = getField(receiptRoot, "attestation_signature");
+  if (sig === null) { return { verdict: "absent", problems: [] }; }
+  if (sig.t !== "obj") { return { verdict: "mismatch", problems: ["attestation_signature is not an object"] }; }
+  const problems = [];
+  const over = getField(sig, "signed_over");
+  if (over !== null && asString(over) !== "body_digest") {
+    problems.push("signed_over is " + prettyNode(over, 0) + ", not \"body_digest\"");
+  }
+  const bd = getField(sig, "body_digest");
+  if (bd === null || asString(bd) === null || asString(bd) !== claimedDigest) {
+    problems.push("the signature says it was made over a different body digest (" +
+      (bd === null ? "none" : prettyNode(bd, 0)) + ") than this receipt carries");
+  }
+  return { verdict: problems.length ? "mismatch" : "could_not_look", problems: problems };
+}
+// CROSSCHECK-END
+
+function asArrayNode(node) { return node && node.t === "arr" ? node.v : null; }
+
+function nodeAsStringList(node) {
+  const arr = asArrayNode(node);
+  if (!arr) { return []; }
+  return arr.map(function (item) { return item.t === "str" ? item.v : prettyNode(item, 0); });
+}
+
+function buildBodyNode(receiptNode) {
+  if (receiptNode.t !== "obj") { throw new C14NError("receipt must be a JSON object"); }
+  const map = new Map();
+  BODY_FIELDS.forEach(function (k) {
+    map.set(k, receiptNode.v.has(k) ? receiptNode.v.get(k) : { t: "null", v: null });
+  });
+  return { t: "obj", v: map };
+}
+
+async function sha256Hex(bytes) {
+  if (!(window.crypto && window.crypto.subtle)) {
+    throw new Error("WebCrypto (crypto.subtle) is not available in this browser/context.");
+  }
+  const buf = await window.crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(buf)).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+}
+
+// ---- duplicate keys (outside the C14N block on purpose) ----
+// The parser above keeps the LAST value for a repeated key, the same choice as
+// Python's json.loads, so the canonicalizer is unchanged. But a file that says
+// "kind" twice reads one way to that parser and another to a human or a
+// first-wins parser, and no verdict can cover both readings. This scanner runs
+// over text the strict parser has ALREADY accepted, so it only has to track
+// strings and nesting. Keys are compared after JSON unescaping, so "\u006bind"
+// and "kind" are the same key.
+function DuplicateKeyError(key) {
+  this.name = "DuplicateKeyError";
+  this.key = key;
+  this.message = "duplicate key " + JSON.stringify(key) +
+    ": the file reads differently to a first-wins and a last-wins parser";
+}
+DuplicateKeyError.prototype = Object.create(Error.prototype);
+
+function findDuplicateKey(text) {
+  const stack = []; // a Set of seen keys per open object, null per open array
+  const n = text.length;
+  let i = 0;
+  while (i < n) {
+    const c = text[i];
+    if (c === '"') {
+      let j = i + 1;
+      while (j < n && text[j] !== '"') { j += (text[j] === "\\") ? 2 : 1; }
+      const raw = text.slice(i, j + 1);
+      i = j + 1;
+      const top = stack.length ? stack[stack.length - 1] : null;
+      if (top) {
+        let k = i;
+        while (k < n && (text[k] === " " || text[k] === "\t" || text[k] === "\n" || text[k] === "\r")) { k++; }
+        if (text[k] === ":") {
+          let key;
+          try { key = JSON.parse(raw); } catch (e) { key = raw; }
+          if (top.has(key)) { return key; }
+          top.add(key);
+        }
+      }
+      continue;
+    }
+    if (c === "{") { stack.push(new Set()); }
+    else if (c === "[") { stack.push(null); }
+    else if (c === "}" || c === "]") { stack.pop(); }
+    i++;
+  }
+  return null;
+}
+
+// sourceText, when given, is the text receiptNode was parsed from; a duplicate
+// key anywhere in it is refused (DuplicateKeyError) before any digest is made.
+async function computeBodyDigest(receiptNode, sourceText) {
+  if (typeof sourceText === "string") {
+    const dup = findDuplicateKey(sourceText);
+    if (dup !== null) { throw new DuplicateKeyError(dup); }
+  }
+  const bodyNode = buildBodyNode(receiptNode);
+  const canonical = canonicalizeC14N(bodyNode);
+  const bytes = new TextEncoder().encode(canonical);
+  const hex = await sha256Hex(bytes);
+  return { canonical, digest: "sha256:json-c14n:v1:" + hex };
+}
+
+// ---- rendering ----
+
+const el = {};
+["receipt-input", "dropzone", "file-input", "choose-file-btn", "verify-btn", "clear-btn",
+ "error", "results", "verdict-body", "verdict-body-reason", "digest-claimed", "digest-computed",
+ "cap-text",
+ "section-batch", "batch-count", "batch-summary", "batch-counts", "batch-table",
+ "section-scope", "scope-proves", "scope-not-proves", "scope-method",
+ "section-checks", "checks-table",
+ "section-subject", "subject-pre",
+ "section-ledger", "ledger-fields",
+ "section-witness", "witness-notice", "witness-fields", "witness-link-wrap",
+ "section-anchor", "anchor-fields", "anchor-body",
+ "section-attsig", "attsig-verdict", "attsig-reason", "attsig-fields"].forEach(function (id) {
+  el[id] = document.getElementById(id);
+});
+
+function showError(msg) {
+  el.error.textContent = msg;
+  el.error.style.display = "block";
+}
+function clearError() {
+  el.error.textContent = "";
+  el.error.style.display = "none";
+}
+function setHidden(node, hidden) { node.hidden = hidden; }
+function clearChildren(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
+
+function renderVerdictTag(container, kind, label) {
+  clearChildren(container);
+  const tag = document.createElement("span");
+  tag.className = "tag " + kind;
+  tag.textContent = label;
+  container.appendChild(tag);
+}
+
+function renderScope(receiptRoot) {
+  const scope = getField(receiptRoot, "scope");
+  const proves = nodeAsStringList(getField(scope, "proves"));
+  const notProves = nodeAsStringList(getField(scope, "does_not_prove"));
+  clearChildren(el["scope-proves"]);
+  clearChildren(el["scope-not-proves"]);
+  proves.forEach(function (s) {
+    const li = document.createElement("li"); li.textContent = s; el["scope-proves"].appendChild(li);
+  });
+  notProves.forEach(function (s) {
+    const li = document.createElement("li"); li.textContent = s; el["scope-not-proves"].appendChild(li);
+  });
+  const method = asString(getField(scope, "method"));
+  el["scope-method"].textContent = method ? ("Method: " + method) : "";
+  setHidden(el["section-scope"], false);
+}
+
+function renderChecks(receiptRoot) {
+  const checksArr = asArrayNode(getField(receiptRoot, "checks"));
+  const table = el["checks-table"];
+  clearChildren(table);
+  if (!checksArr || checksArr.length === 0) {
+    setHidden(el["section-checks"], false);
+    const p = document.createElement("caption");
+    p.style.textAlign = "left";
+    p.style.color = "var(--muted)";
+    p.textContent = "No checks on this receipt.";
+    table.appendChild(p);
+    return;
+  }
+  const allObjects = checksArr.every(function (c) { return c.t === "obj"; });
+  const thead = document.createElement("thead");
+  const trh = document.createElement("tr");
+  let columns;
+  if (allObjects) {
+    const cols = new Set();
+    checksArr.forEach(function (c) { Array.from(c.v.keys()).forEach(function (k) { cols.add(k); }); });
+    columns = Array.from(cols.values());
+  } else {
+    columns = ["value"];
+  }
+  columns.forEach(function (c) {
+    const th = document.createElement("th"); th.textContent = c; trh.appendChild(th);
+  });
+  thead.appendChild(trh);
+  table.appendChild(thead);
+  const tbody = document.createElement("tbody");
+  checksArr.forEach(function (c) {
+    const tr = document.createElement("tr");
+    columns.forEach(function (col) {
+      const td = document.createElement("td");
+      let cellNode = null;
+      if (allObjects) {
+        cellNode = c.v.has(col) ? c.v.get(col) : null;
+      } else if (col === "value") {
+        cellNode = c;
+      }
+      td.textContent = cellNode ? prettyNode(cellNode, 0) : "";
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  setHidden(el["section-checks"], false);
+}
+
+function renderSubject(receiptRoot) {
+  const subject = getField(receiptRoot, "subject");
+  if (subject === null) { setHidden(el["section-subject"], true); return; }
+  el["subject-pre"].textContent = prettyNode(subject, 0);
+  setHidden(el["section-subject"], false);
+}
+
+function fieldRow(dl, label, value) {
+  const dt = document.createElement("dt"); dt.textContent = label;
+  const dd = document.createElement("dd"); dd.className = "mono"; dd.textContent = value;
+  dl.appendChild(dt); dl.appendChild(dd);
+}
+
+function renderLedger(receiptRoot) {
+  const ledger = getField(receiptRoot, "ledger");
+  if (ledger === null) { setHidden(el["section-ledger"], true); return; }
+  const dl = el["ledger-fields"];
+  clearChildren(dl);
+  ["path", "namespace", "rows", "chain", "algorithm"].forEach(function (k) {
+    const v = getField(ledger, k);
+    if (v !== null) { fieldRow(dl, k, prettyNode(v, 0)); }
+  });
+  setHidden(el["section-ledger"], false);
+}
+
+function renderAttestationSignature(receiptRoot, check) {
+  const sig = getField(receiptRoot, "attestation_signature");
+  if (sig === null) { setHidden(el["section-attsig"], true); return; }
+  if (check.verdict === "mismatch") {
+    renderVerdictTag(el["attsig-verdict"], "fail", "BROKEN");
+    el["attsig-reason"].textContent = "This signature does not belong to this receipt: " +
+      check.problems.join("; ") + ".";
+  } else {
+    renderVerdictTag(el["attsig-verdict"], "warn", "COULD NOT LOOK");
+    el["attsig-reason"].textContent = "The signature value was NOT checked. The receipt carries no " +
+      "public key and names no signature scheme this page can run, so nobody holding only the " +
+      "receipt can check it. It sits outside the body digest: editing it does not change the VERIFIED " +
+      "above. Check it against the auditor's published key yourself.";
+  }
+  const dl = el["attsig-fields"];
+  clearChildren(dl);
+  if (sig.t === "obj") {
+    ["algorithm", "signed_over", "body_digest", "value"].forEach(function (k) {
+      const v = getField(sig, k);
+      if (v !== null) { fieldRow(dl, k + " (claimed)", prettyNode(v, 0)); }
+    });
+  }
+  setHidden(el["section-attsig"], false);
+}
+
+function renderWitness(receiptRoot, check) {
+  const witness = getField(receiptRoot, "witness");
+  if (witness === null) { setHidden(el["section-witness"], true); return; }
+  const kind = asString(getField(witness, "kind"));
+  const notice = el["witness-notice"];
+  clearChildren(notice);
+  if (check && check.verdict === "inconsistent") {
+    const bad = document.createElement("div");
+    bad.className = "notice strong";
+    bad.textContent = "BROKEN: this witness block contradicts the receipt it is attached to (" +
+      check.problems.join("; ") + "). It was edited after issue, or it belongs to another receipt.";
+    notice.appendChild(bad);
+  } else if (check && check.verdict === "claimed") {
+    const c = document.createElement("div");
+    c.className = "notice";
+    c.textContent = "CLAIMED, not checked: every field below is the issuer's statement. The witness " +
+      "block sits outside the body digest, so it can be edited without changing the VERIFIED above, and " +
+      "this page did not contact any witness." +
+      (check.pinSelf === "checked" ? " What was checked: its rows and chain agree with the ledger " +
+        "block, and its pin still hashes to its own self-digest." : "");
+    notice.appendChild(c);
+  }
+  if (kind === "local-file") {
+    const box = document.createElement("div");
+    box.className = "notice strong";
+    box.textContent = "This witness pin is a local file controlled by the same party who " +
+      "issued the receipt. It is self-controlled and proves nothing to a stranger -- it exists " +
+      "so the shape is exercised end to end, not as independent evidence.";
+    notice.appendChild(box);
+  } else if (kind === "hosted") {
+    const status = asString(getField(witness, "status"));
+    if (status === "pin_failed") {
+      const box = document.createElement("div");
+      box.className = "notice strong";
+      box.textContent = "The hosted pin did not land (status: pin_failed). This receipt is " +
+        "effectively unwitnessed.";
+      notice.appendChild(box);
+    } else if (status === "pin_refused") {
+      // 2026-09-19: the issuer refused to ask for a pin because its own ledger
+      // did not verify. Worse than pin_failed for the reader, and it must not
+      // fall through to the ordinary "hosted" notice below.
+      const box = document.createElement("div");
+      box.className = "notice strong";
+      box.textContent = "No pin was requested (status: pin_refused): the issuer's own ledger did " +
+        "not verify when this receipt was made. This receipt is unwitnessed, and the ledger " +
+        "behind it was damaged at the time.";
+      notice.appendChild(box);
+    } else if (status !== "pinned") {
+      // Any status this page does not know is NOT treated as a good pin.
+      const box = document.createElement("div");
+      box.className = "notice strong";
+      box.textContent = "Unrecognised witness status (" + (status || "none") + "). Do not treat " +
+        "this receipt as witnessed.";
+      notice.appendChild(box);
+    } else {
+      const box = document.createElement("div");
+      box.className = "notice";
+      box.textContent = "The receipt says the ledger head was pinned to a hosted witness (public " +
+        "commits). That is its claim, not something this page checked: a self-controlled pin " +
+        "relabelled as hosted looks exactly like this. Use the link below to ask the witness " +
+        "yourself -- this page will not fetch it for you.";
+      notice.appendChild(box);
+    }
+  }
+  const dl = el["witness-fields"];
+  clearChildren(dl);
+  ["kind", "independence", "status", "url", "namespace", "rows", "chain", "path"].forEach(function (k) {
+    const v = getField(witness, k);
+    if (v !== null) { fieldRow(dl, k + " (claimed)", prettyNode(v, 0)); }
+  });
+  const linkWrap = el["witness-link-wrap"];
+  clearChildren(linkWrap);
+  if (kind === "hosted") {
+    const url = asString(getField(witness, "url"));
+    const ns = asString(getField(witness, "namespace"));
+    const rows = getField(witness, "rows");
+    const chain = getField(witness, "chain");
+    if (url && ns !== null && rows !== null && chain !== null) {
+      const rowsStr = rows.t === "num" ? rows.raw : prettyNode(rows, 0);
+      const chainStr = chain.t === "str" ? chain.v : prettyNode(chain, 0);
+      const href = url.replace(/\/$/, "") + "/api/verify?ns=" + encodeURIComponent(ns) +
+        "&rows=" + encodeURIComponent(rowsStr) + "&chain=" + encodeURIComponent(chainStr);
+      const p = document.createElement("p");
+      p.innerHTML = "";
+      const a = document.createElement("a");
+      a.href = href; a.textContent = href; a.target = "_blank"; a.rel = "noopener noreferrer";
+      p.appendChild(document.createTextNode("Independent check: "));
+      p.appendChild(a);
+      linkWrap.appendChild(p);
+    }
+  }
+  setHidden(el["section-witness"], false);
+}
+
+function base64ToBlob(b64, mime) {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) { bytes[i] = binary.charCodeAt(i); }
+  return new Blob([bytes], { type: mime });
+}
+
+function renderAnchor(receiptRoot, bodyDigestString) {
+  const anchor = getField(receiptRoot, "anchor");
+  if (anchor === null) { setHidden(el["section-anchor"], true); return; }
+  const kind = asString(getField(anchor, "kind"));
+  const status = asString(getField(anchor, "status"));
+  const dl = el["anchor-fields"];
+  clearChildren(dl);
+  ["kind", "status", "note", "reason", "stamped_sha256"].forEach(function (k) {
+    const v = getField(anchor, k);
+    if (v !== null) { fieldRow(dl, k, prettyNode(v, 0)); }
+  });
+  const body = el["anchor-body"];
+  clearChildren(body);
+  if (status !== null && status !== "skipped") {
+    const claim = document.createElement("div");
+    claim.className = "notice";
+    claim.textContent = "CLAIMED, not checked: the status above is the receipt's own statement and " +
+      "sits outside the body digest. Only running ots verify (below) checks the anchor.";
+    body.appendChild(claim);
+  }
+  const otsB64 = asString(getField(anchor, "ots_b64"));
+  if (kind === "opentimestamps" && otsB64) {
+    const notice = document.createElement("div");
+    notice.className = "notice";
+    notice.textContent = "OpenTimestamps proofs are not verified in this browser -- there is " +
+      "no ots client here. Download both files into the same folder and run ots verify " +
+      "locally (pip install opentimestamps-client).";
+    body.appendChild(notice);
+
+    const anchorText = bodyDigestString + "\n";
+    const anchorBlob = new Blob([anchorText], { type: "text/plain" });
+    const otsBlob = base64ToBlob(otsB64, "application/octet-stream");
+    const anchorUrl = URL.createObjectURL(anchorBlob);
+    const otsUrl = URL.createObjectURL(otsBlob);
+
+    const row = document.createElement("div");
+    row.className = "row";
+    const a1 = document.createElement("a"); a1.className = "btn"; a1.href = anchorUrl;
+    a1.download = "receipt.anchor"; a1.textContent = "Download receipt.anchor";
+    const a2 = document.createElement("a"); a2.className = "btn"; a2.href = otsUrl;
+    a2.download = "receipt.anchor.ots"; a2.textContent = "Download receipt.anchor.ots";
+    row.appendChild(a1); row.appendChild(a2);
+    body.appendChild(row);
+
+    const pre = document.createElement("pre");
+    pre.textContent = "ots verify receipt.anchor.ots";
+    body.appendChild(pre);
+  } else if (status === "skipped") {
+    const notice = document.createElement("div");
+    notice.className = "notice";
+    notice.textContent = "No anchor was requested for this receipt.";
+    body.appendChild(notice);
+  } else if (status === "not_stamped") {
+    const notice = document.createElement("div");
+    notice.className = "notice";
+    notice.textContent = "This receipt was never successfully stamped (see the reason above); " +
+      "there is no OpenTimestamps proof to verify.";
+    body.appendChild(notice);
+  }
+  setHidden(el["section-anchor"], false);
+}
+
+function hideSingleSections() {
+  setHidden(el.results, true);
+  [el["section-scope"], el["section-checks"], el["section-subject"], el["section-ledger"],
+   el["section-witness"], el["section-anchor"], el["section-attsig"]].forEach(function (s) { setHidden(s, true); });
+}
+
+async function runVerify(text) {
+  clearError();
+  setHidden(el["section-batch"], true);
+  hideSingleSections();
+
+  let root;
+  try {
+    root = parseC14NValue(text);
+  } catch (e) {
+    showError("Could not parse this as JSON: " + e.message);
+    return;
+  }
+  if (root.t !== "obj") {
+    showError("A receipt must be a JSON object at the top level.");
+    return;
+  }
+
+  const claimed = asString(getField(root, "body_digest"));
+
+  let computed = null;
+  let computeError = null;
+  try {
+    computed = await computeBodyDigest(root, text);
+  } catch (e) {
+    computeError = e;
+  }
+
+  setHidden(el.results, false);
+  el["digest-claimed"].textContent = claimed || "(missing)";
+
+  if (computeError) {
+    el["digest-computed"].textContent = "(could not compute)";
+    // Same split as the batch view (verifyOneText) and verify-any: a duplicate
+    // key is determined (ambiguous by construction), so BROKEN; any other
+    // refusal means the canonicalizer never produced a digest to compare, so
+    // this page could not look. BROKEN is kept for a digest that does not match.
+    if (computeError && computeError.name === "DuplicateKeyError") {
+      renderVerdictTag(el["verdict-body"], "fail", "BROKEN");
+      el["verdict-body-reason"].textContent = computeError.message;
+    } else {
+      renderVerdictTag(el["verdict-body"], "warn", "COULD NOT LOOK");
+      el["verdict-body-reason"].textContent = "Could not canonicalize this receipt: " + computeError.message +
+        ". No digest was computed, so this says nothing either way about the receipt.";
+    }
+  } else {
+    el["digest-computed"].textContent = computed.digest;
+    if (!claimed) {
+      renderVerdictTag(el["verdict-body"], "fail", "BROKEN");
+      el["verdict-body-reason"].textContent = "This receipt has no body_digest field.";
+    } else if (claimed === computed.digest) {
+      renderVerdictTag(el["verdict-body"], "pass", "VERIFIED");
+      el["verdict-body-reason"].textContent = "The seven body fields hash to exactly the digest carried on the receipt.";
+    } else {
+      renderVerdictTag(el["verdict-body"], "fail", "BROKEN");
+      el["verdict-body-reason"].textContent = "Body digest mismatch: a body field was altered after issue, " +
+        "or this receipt was built with a different canonicalization recipe than json-c14n v1.";
+    }
+  }
+
+  const wCheck = await checkWitness(root);
+  const sCheck = checkAttestationSignature(root, claimed);
+  if (!computeError && claimed && computed && claimed === computed.digest &&
+      (wCheck.verdict === "inconsistent" || sCheck.verdict === "mismatch")) {
+    el["verdict-body-reason"].textContent += " But an attachment outside the body contradicts this " +
+      "receipt (" + (wCheck.verdict === "inconsistent" ? "witness block" : "attestation signature") +
+      "): see below. As a whole, this receipt is BROKEN.";
+  }
+
+  renderScope(root);
+  renderChecks(root);
+  renderSubject(root);
+  renderLedger(root);
+  renderWitness(root, wCheck);
+  renderAnchor(root, claimed || (computed ? computed.digest : ""));
+  renderAttestationSignature(root, sCheck);
+}
+
+/* ============================================================================
+ * Batch: a whole class of receipts in one drop.
+ *
+ * The same three verdicts the CLI's `verify --batch` uses, and the same
+ * published cap, refused rather than truncated: showing 20 rows for 21 files
+ * hands back something that looks like a finished answer for a class that was
+ * never fully checked. The canonicalizer above is untouched -- every row goes
+ * through the identical computeBodyDigest() the single-receipt view uses.
+ *
+ * What the page cannot do, it does not claim: the browser has no ledger file,
+ * so VERIFIED here is a body-digest verdict and the panel says so in its own copy.
+ * ==========================================================================*/
+
+const BATCH_CAP = 20;
+el["cap-text"].textContent = String(BATCH_CAP);
+
+let batchTexts = {};
+
+function readFileText(file) {
+  return new Promise(function (resolve) {
+    const reader = new FileReader();
+    reader.onload = function () { resolve({ name: file.name, text: String(reader.result) }); };
+    reader.onerror = function () {
+      resolve({ name: file.name, text: null, readError: String((reader.error && reader.error.message) || "the file could not be read") });
+    };
+    reader.readAsText(file);
+  });
+}
+
+async function verifyOneText(name, text, readError) {
+  const row = { name: name, verdict: "COULD NOT LOOK", reason: "", claimed: "", computed: "" };
+  if (text === null || text === undefined) {
+    row.reason = "file could not be read: " + (readError || "unknown reason");
+    return row;
+  }
+  let root;
+  try {
+    root = parseC14NValue(text);
+  } catch (e) {
+    row.reason = "not readable JSON: " + e.message;
+    return row;
+  }
+  if (root.t !== "obj") {
+    row.reason = "not a JSON object: a receipt is an object at the top level";
+    return row;
+  }
+  const claimed = asString(getField(root, "body_digest"));
+  row.claimed = claimed || "";
+  let computed;
+  try {
+    computed = await computeBodyDigest(root, text);
+  } catch (e) {
+    if (e && e.name === "DuplicateKeyError") {
+      // Determined, not COULD NOT LOOK: ambiguous by construction.
+      row.verdict = "BROKEN";
+      row.reason = e.message;
+      return row;
+    }
+    row.reason = "could not canonicalize this receipt: " + e.message;
+    return row;
+  }
+  row.computed = computed.digest;
+  if (!claimed) {
+    row.verdict = "BROKEN";
+    row.reason = "this receipt has no body_digest field";
+    return row;
+  }
+  if (claimed === computed.digest) {
+    const wCheck = await checkWitness(root);
+    if (wCheck.verdict === "inconsistent") {
+      row.verdict = "BROKEN";
+      row.reason = "witness block is inconsistent: " + wCheck.problems.join("; ");
+      return row;
+    }
+    const sCheck = checkAttestationSignature(root, claimed);
+    if (sCheck.verdict === "mismatch") {
+      row.verdict = "BROKEN";
+      row.reason = "attestation signature does not belong to this receipt: " + sCheck.problems.join("; ");
+      return row;
+    }
+    row.verdict = "VERIFIED";
+    const subj = getField(root, "subject");
+    const kind = asString(getField(root, "kind"));
+    const who = subj ? (asString(getField(subj, "trainee")) || asString(getField(subj, "document")) || "") : "";
+    const bits = [kind || "", who].filter(function (s) { return s; });
+    if (wCheck.verdict === "claimed") { bits.push("witness: claimed, not checked"); }
+    if (sCheck.verdict === "could_not_look") { bits.push("attestation signature: could not look"); }
+    row.reason = bits.join(" / ");
+    return row;
+  }
+  row.verdict = "BROKEN";
+  row.reason = "body digest mismatch: a body field was altered after issue";
+  return row;
+}
+
+function verdictTagClass(verdict) {
+  if (verdict === "VERIFIED") { return "pass"; }
+  if (verdict === "BROKEN") { return "fail"; }
+  return "warn";
+}
+
+function renderBatch(rows) {
+  const counts = { "VERIFIED": 0, "BROKEN": 0, "COULD NOT LOOK": 0 };
+  rows.forEach(function (r) { counts[r.verdict] += 1; });
+
+  el["batch-count"].textContent = String(rows.length);
+  el["batch-summary"].textContent = rows.length + " receipt" + (rows.length === 1 ? "" : "s") +
+    ": " + counts["VERIFIED"] + " VERIFIED, " + counts["BROKEN"] + " BROKEN, " +
+    counts["COULD NOT LOOK"] + " COULD NOT LOOK";
+
+  clearChildren(el["batch-counts"]);
+  [["pass", counts["VERIFIED"] + " VERIFIED"], ["fail", counts["BROKEN"] + " BROKEN"],
+   ["warn", counts["COULD NOT LOOK"] + " COULD NOT LOOK"]].forEach(function (pair) {
+    const tag = document.createElement("span");
+    tag.className = "tag " + pair[0];
+    tag.textContent = pair[1];
+    el["batch-counts"].appendChild(tag);
+  });
+
+  const table = el["batch-table"];
+  clearChildren(table);
+  const thead = document.createElement("thead");
+  const hr = document.createElement("tr");
+  ["File", "Verdict", "Detail", ""].forEach(function (h) {
+    const th = document.createElement("th");
+    th.textContent = h;
+    hr.appendChild(th);
+  });
+  thead.appendChild(hr);
+  table.appendChild(thead);
+
+  const tbody = document.createElement("tbody");
+  rows.forEach(function (r) {
+    const tr = document.createElement("tr");
+
+    const tdName = document.createElement("td");
+    tdName.className = "mono";
+    tdName.textContent = r.name;
+    tr.appendChild(tdName);
+
+    const tdVerdict = document.createElement("td");
+    const tag = document.createElement("span");
+    tag.className = "tag " + verdictTagClass(r.verdict);
+    tag.textContent = r.verdict;
+    tdVerdict.appendChild(tag);
+    tr.appendChild(tdVerdict);
+
+    const tdReason = document.createElement("td");
+    tdReason.textContent = r.reason;
+    tr.appendChild(tdReason);
+
+    const tdOpen = document.createElement("td");
+    if (batchTexts[r.name] !== undefined && batchTexts[r.name] !== null) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "linkish";
+      btn.textContent = "open";
+      btn.addEventListener("click", function () {
+        el["receipt-input"].value = batchTexts[r.name];
+        runVerify(batchTexts[r.name]);
+      });
+      tdOpen.appendChild(btn);
+    }
+    tr.appendChild(tdOpen);
+
+    tbody.appendChild(tr);
+  });
+  table.appendChild(tbody);
+  setHidden(el["section-batch"], false);
+}
+
+async function runBatch(files) {
+  clearError();
+  hideSingleSections();
+  setHidden(el["section-batch"], true);
+
+  if (files.length > BATCH_CAP) {
+    showError("Refusing this batch: " + files.length + " receipts, cap is " +
+      BATCH_CAP + " per pass. Nothing was verified. Split the batch into runs of " +
+      BATCH_CAP + " or fewer -- a partial pass reported as a finished one is the " +
+      "failure this refusal exists to prevent.");
+    return;
+  }
+
+  const loaded = [];
+  for (let i = 0; i < files.length; i += 1) {
+    loaded.push(await readFileText(files[i]));
+  }
+  batchTexts = {};
+  loaded.forEach(function (f) { batchTexts[f.name] = f.text; });
+
+  const rows = [];
+  for (let i = 0; i < loaded.length; i += 1) {
+    rows.push(await verifyOneText(loaded[i].name, loaded[i].text, loaded[i].readError));
+  }
+  renderBatch(rows);
+}
+
+function handleDroppedFiles(fileList) {
+  if (!fileList || fileList.length === 0) { return; }
+  if (fileList.length === 1) {
+    const reader = new FileReader();
+    reader.onload = function () {
+      el["receipt-input"].value = String(reader.result);
+      runVerify(el["receipt-input"].value);
+    };
+    reader.readAsText(fileList[0]);
+    return;
+  }
+  runBatch(Array.prototype.slice.call(fileList));
+}
+
+el["verify-btn"].addEventListener("click", function () {
+  runVerify(el["receipt-input"].value);
+});
+el["clear-btn"].addEventListener("click", function () {
+  el["receipt-input"].value = "";
+  clearError();
+  batchTexts = {};
+  setHidden(el["section-batch"], true);
+  setHidden(el.results, true);
+});
+el["choose-file-btn"].addEventListener("click", function () { el["file-input"].click(); });
+el["file-input"].addEventListener("change", function () {
+  handleDroppedFiles(el["file-input"].files);
+});
+
+["dragover", "dragenter"].forEach(function (evt) {
+  document.addEventListener(evt, function (e) {
+    e.preventDefault();
+    el["dropzone"].classList.add("drag");
+  });
+});
+["dragleave", "drop"].forEach(function (evt) {
+  document.addEventListener(evt, function (e) {
+    if (evt === "drop") { e.preventDefault(); }
+    el["dropzone"].classList.remove("drag");
+  });
+});
+document.addEventListener("drop", function (e) {
+  e.preventDefault();
+  handleDroppedFiles(e.dataTransfer && e.dataTransfer.files);
+});
+</script>
+</body>
+</html>

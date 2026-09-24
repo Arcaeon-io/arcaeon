@@ -1,0 +1,28 @@
+{
+  "snapshot": "registry_2026-09-02T2142Z.jsonl",
+  "sha256": "4990529da87c02f3f783b84bbead3ab15d43ddb642d1311989776c34a648dbe2",
+  "fetched_at": "2026-09-02T2142Z",
+  "rows_total": 88636,
+  "rows_is_latest": 26500,
+  "distinct_names": 26500,
+  "partial": false,
+  "gradability_latest": {
+    "ungradable:remote-only": 5544,
+    "gradable:repo": 20288,
+    "gradable:package-only": 611,
+    "ungradable:no-source-no-remote": 57
+  },
+  "package_registries_latest": {
+    "(none)": 13856,
+    "npm": 8063,
+    "oci": 838,
+    "pypi": 3515,
+    "mcpb": 602,
+    "nuget": 105,
+    "cargo": 38
+  },
+  "status_latest": {
+    "active": 26197,
+    "deprecated": 303
+  }
+}

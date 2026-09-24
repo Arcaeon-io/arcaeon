@@ -1,0 +1,41 @@
+{
+  "schema_version": "1.0.0",
+  "name": "https://arcaeon.io/adapter",
+  "version": "v0.2.0",
+  "authors": ["Arcaeon"],
+  "description": "A stdio proxy that sits between an MCP client and an MCP server, forwards JSON-RPC byte for byte, and writes one chained row per tools/call. The record is written at the wire, in a separate OS process, by something the agent is not consulted about and cannot skip. It sees the seam it is wrapping, and nothing else.",
+  "created_at": "2026-09-23T04:36:13Z",
+  "skills": [
+    {
+      "id": 1205,
+      "name": "devops_mlops/monitoring_alerting"
+    }
+  ],
+  "locators": [
+    {
+      "type": "source_code",
+      "urls": ["https://github.com/dan8433-user/ledger/tree/main/adapter"]
+    },
+    {
+      "type": "package",
+      "urls": ["https://pypi.org/project/arcaeon-adapter/"]
+    }
+  ],
+  "modules": [
+    {
+      "id": 202,
+      "name": "integration/mcp",
+      "data": {
+        "name": "arcaeon-adapter",
+        "description": "MCP stdio proxy that logs the tool-call seam to the ledger without the agent's cooperation",
+        "connections": [
+          {
+            "type": "stdio",
+            "command": "python",
+            "args": ["-m", "arcaeon_adapter", "--ledger", "seam.log.jsonl", "--", "<your mcp server command...>"]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arcaeon-once"
+# one patch above the old line: PyPI last 0.2.3
+version = "0.2.4"
+description = "Compatibility shim: arcaeon-once is now part of arcaeon (arcaeon.record.once). Installs arcaeon; goes away with arcaeon 1.0.0."
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Arcaeon" }]
+dependencies = ["arcaeon>=0.9,<1"]
+
+[project.scripts]
+arcaeon-once = "arcaeon_once:_script_arcaeon_once"
+
+[project.urls]
+Homepage = "https://arcaeon.io"
+
+[tool.setuptools]
+packages = ["arcaeon_once"]

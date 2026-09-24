@@ -1,0 +1,124 @@
+{
+ "receipt_version": "arcaeon-receipt/0.1",
+ "kind": "ballot",
+ "issued_at": "2026-09-05T20:12:30Z",
+ "subject": {
+  "trainee": "r. kowalski",
+  "scenario": "call_taking.gen43_cold_car_burglary",
+  "grader": "call_taking.grader"
+ },
+ "checks": [
+  {
+   "ballot": {
+    "score": 95,
+    "verdict": "STRONG",
+    "dimensions": [
+     {
+      "key": "call_type",
+      "name": "CALL TYPE NAMED / JUSTIFIED",
+      "score": 1.0,
+      "weight": 0.28,
+      "label": "hit",
+      "detail": "classification named and supported by the facts"
+     },
+     {
+      "key": "priority",
+      "name": "PRIORITY NAMED / JUSTIFIED",
+      "score": 0.8,
+      "weight": 0.24,
+      "label": "hit",
+      "detail": "urgency stated; tie it to the facts that make it hot"
+     },
+     {
+      "key": "key_facts",
+      "name": "KEY FACTS CAPTURED",
+      "score": 1.0,
+      "weight": 0.36,
+      "label": "hit",
+      "detail": "10 of 10 key facts present"
+     },
+     {
+      "key": "soundness",
+      "name": "CLASSIFICATION SOUNDNESS",
+      "score": 1.0,
+      "weight": 0.12,
+      "label": "hit",
+      "detail": "no unsupported classification detected"
+     }
+    ],
+    "coaching": [
+     "Clean comment — call type, priority, and the key facts are all present and consistent. What a comment like this has not been tested against yet is a caller who gives you the facts out of order and changes one of them halfway through. Run a difficult-caller scenario before you call this settled."
+    ],
+    "facts": {
+     "matched": [
+      "halsted",
+      "garage",
+      "window",
+      "laptop",
+      "wallet",
+      "cold",
+      "suspect",
+      "gone",
+      "photos",
+      "report"
+     ],
+     "missing": []
+    },
+    "model_comments": "Cold burglary at RP's residence on Halsted. Garage entered, window forced on RP's sedan; laptop and wallet taken from the back seat. Suspect(s) gone on arrival. RP has photos of the damage and wants a report for insurance.",
+    "meta": {
+     "family": "crime",
+     "keyCount": 10,
+     "hitCount": 10,
+     "ratio": 1.0,
+     "source": "heuristic",
+     "version": "grader-1.0.0-heuristic"
+    }
+   },
+   "ballot_digest": "sha256:json-c14n:v1:9fe4946c90c69638f898c5de1424d0060192a4541e3d6ebbd302671daf24e2e3",
+   "trainee": "r. kowalski",
+   "scenario": "call_taking.gen43_cold_car_burglary",
+   "grader": "call_taking.grader",
+   "timestamp": "2026-09-05T20:12:30Z"
+  }
+ ],
+ "scope": {
+  "proves": [
+   "the score and the ballot are unaltered since the timestamp"
+  ],
+  "does_not_prove": [
+   "the score is correct",
+   "the sim was not attempted before"
+  ],
+  "method": "sha256 digest of the canonical JSON ballot object (score, verdict, and whatever fields the grading engine produced), bound to a stated timestamp inside the receipt body; hash-chained in arcaeon-ledger, one row per ballot."
+ },
+ "extra": {},
+ "body_digest": "sha256:json-c14n:v1:711b9a39b16fc9c0921e31f4dc59e2b87c1df295e602418672f08725e0846348",
+ "ledger": {
+  "path": "ledger.jsonl",
+  "namespace": "ballot",
+  "rows": 4,
+  "chain": "73db19a68d143468e9842cd989a9345c",
+  "algorithm": "truncated_sha256_128 hash chain (arcaeon-ledger)"
+ },
+ "witness": {
+  "kind": "local-file",
+  "independence": "none (self-controlled file)",
+  "path": "examples\\ballots\\ledger.jsonl.witness.jsonl",
+  "namespace": "ballot",
+  "rows": 4,
+  "chain": "73db19a68d143468e9842cd989a9345c",
+  "pin": {
+   "namespace": "ballot",
+   "rows": 4,
+   "chain": "73db19a68d143468e9842cd989a9345c",
+   "as_of": "2026-09-12T17:21:54Z",
+   "received_at": "2026-09-12T17:21:54Z",
+   "prev": "b43389ef610d8e340049df7bed18e787",
+   "self": "ddcc8341b5d30718a5389c8934f48a74"
+  },
+  "status": "pinned"
+ },
+ "anchor": {
+  "status": "skipped"
+ }
+}

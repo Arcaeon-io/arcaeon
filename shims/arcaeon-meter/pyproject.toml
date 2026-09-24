@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arcaeon-meter"
+# one patch above the old line: PyPI last 0.1.7
+version = "0.1.8"
+description = "Compatibility shim: arcaeon-meter is now part of arcaeon (arcaeon.save.meter). Installs arcaeon; goes away with arcaeon 1.0.0."
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Arcaeon" }]
+dependencies = ["arcaeon>=0.9,<1"]
+
+[project.scripts]
+arcaeon-meter = "arcaeon_meter:_script_arcaeon_meter"
+
+[project.urls]
+Homepage = "https://arcaeon.io"
+
+[tool.setuptools]
+packages = ["arcaeon_meter"]

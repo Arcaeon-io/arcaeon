@@ -1,0 +1,49 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.arcaeon/adapter",
+  "title": "Arcaeon Adapter",
+  "description": "MCP stdio proxy that logs the tool-call seam to the ledger without the agent's cooperation",
+  "version": "0.2.0",
+  "websiteUrl": "https://arcaeon.io/proves",
+  "repository": {
+    "url": "https://github.com/dan8433-user/ledger",
+    "source": "github",
+    "subfolder": "adapter"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "arcaeon-adapter",
+      "version": "0.2.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "named",
+          "name": "--ledger",
+          "description": "Seam ledger file (required). Keep it separate from any ledger the wrapped server writes: one file, one writer.",
+          "isRequired": true,
+          "format": "filepath",
+          "default": "seam.log.jsonl"
+        },
+        {
+          "type": "positional",
+          "valueHint": "separator",
+          "description": "Ends the adapter's own options; everything after it is the wrapped server's command.",
+          "isRequired": true,
+          "value": "--"
+        },
+        {
+          "type": "positional",
+          "valueHint": "wrapped_server_command",
+          "description": "The MCP server command to wrap, followed by its arguments, e.g. python -m arcaeon_ledger.mcp_server --log agent.log.jsonl",
+          "isRequired": true,
+          "isRepeated": true,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

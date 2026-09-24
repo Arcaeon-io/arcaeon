@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arcaeon"
+version = "0.1.4"
+description = "Arcaeon's tools on one MCP connector: tamper-evident agent ledger, MCP-server source checker, hosted witness. Free to install."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Arcaeon" }]
+keywords = ["mcp", "model-context-protocol", "agents", "audit", "tamper-evident", "provenance", "security"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Topic :: Security",
+  "Topic :: Software Development :: Libraries",
+]
+
+# The connector's whole job is to be ONE install, so the packages it bundles are
+# real dependencies, not vendored copies — a vendored fork of a tamper-evidence
+# library is a second implementation that can drift from the one people audit.
+#
+# requires-python is 3.10 (mcp-vet's floor) even though arcaeon-ledger runs on
+# 3.9: a bundle's floor is the highest floor on the shelf, and claiming 3.9 here
+# would install and then fail at import.
+#
+# mcp: was ">=1.0", which was false at its own floor and is now ">=2.0.0,<3".
+# Checked by unzipping the wheels rather than by reading release notes:
+#   mcp 1.0.0   - no `mcp/server/fastmcp/`, no `Client` export
+#   mcp 1.29.1  - has `mcp/server/fastmcp/`, still no `Client` export
+#   mcp 2.0.0   - has `mcp/server/mcpserver`, has `Client`, fastmcp REMOVED
+# server.py's try/except calls its second branch "SDK 1.x", but that branch
+# imports FastMCP, which does not exist in 1.0.0 -- so the declared floor named
+# a version the code cannot start on. And every test here imports
+# `from mcp import Client`, which no 1.x ships, so 1.x support was never once
+# executed. A floor is a promise about what runs; this one was untested in the
+# range it claimed and wrong at its edge. >=2.0.0 is the range the code is
+# actually exercised on (and the one arcaeon-ledger-mcp requires outright, so
+# this is also what makes the three first-party packages co-installable at a
+# single resolved version). <3 because the 1.x -> 2.x break above is the
+# evidence that this SDK removes API across a major.
+# Policy: projects/online_business/PIN_POLICY_2026-09-05.md.
+dependencies = [
+  "mcp>=2.0.0,<3",
+  "arcaeon-ledger>=0.7.0",
+  "arcaeon-mcp-vet>=0.0.8",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+arcaeon-mcp = "arcaeon_connector.__main__:main"
+# `uvx arcaeon` (what an MCP-registry client runs for a pypi package) needs a
+# console script named after the package — 0.1.2 shipped only arcaeon-mcp.
+arcaeon = "arcaeon_connector.__main__:main"
+
+[project.urls]
+Homepage = "https://arcaeon.io"
+Offers = "https://arcaeon.io/.well-known/offers.json"
+
+[tool.setuptools]
+# Flat layout with the test modules beside the package: without an explicit list
+# the backend guesses, and guesses wrong (it would try to ship test_*.py).
+packages = ["arcaeon_connector"]

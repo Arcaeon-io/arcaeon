@@ -1,0 +1,63 @@
+{
+  "per_answer": [
+    {
+      "score": 84,
+      "verdict": "EXCELLENT",
+      "dimensions": [
+        {"key": "directness", "name": "Answered the question", "score": 0.86, "weight": 0.32,
+         "detail": "Opened with a concrete reason for wanting the seat rather than a resume recitation."},
+        {"key": "structure", "name": "Structure (real incident)", "score": 0.78, "weight": 0.26,
+         "detail": "No incident required for an intro question; delivery still had a clear shape."},
+        {"key": "communication", "name": "Communication", "score": 0.88, "weight": 0.352,
+         "detail": "Even pacing, no filler, finished inside the time."},
+        {"key": "tieback", "name": "Tie-back to the job", "score": 0.80, "weight": 0.20,
+         "detail": "Linked a night-shift retail background to shift tolerance, briefly."}
+      ],
+      "coaching": ["Name one dispatch-specific skill the retail years already built; the tie-back is true but general."],
+      "worked": ["Concrete, unrehearsed-sounding reason for wanting the job."],
+      "fix": ["Name one dispatch-specific skill the retail years already built."],
+      "meta": {"source": "llm:gemini-2.5-flash", "id": "ob-intro", "slot": "intro"}
+    },
+    {
+      "score": 79,
+      "verdict": "GOOD",
+      "dimensions": [
+        {"key": "directness", "name": "Answered the question", "score": 0.82, "weight": 0.32,
+         "detail": "Answered the conflict question with a real incident, not a hypothetical."},
+        {"key": "structure", "name": "Structure (real incident)", "score": 0.80, "weight": 0.416,
+         "detail": "Situation and action were clear; the result arrived late and compressed."},
+        {"key": "communication", "name": "Communication", "score": 0.76, "weight": 0.22,
+         "detail": "Composed, though the middle third sped up under the clock."},
+        {"key": "tieback", "name": "Tie-back to the job", "score": 0.78, "weight": 0.32,
+         "detail": "Parallel to coordinating with a field unit was stated but not developed."}
+      ],
+      "coaching": ["Land the result before the timer: state the outcome in one sentence, then stop."],
+      "worked": ["Chose a real conflict with a genuine cost, and did not make themselves the hero of it."],
+      "fix": ["Land the result before the timer."],
+      "meta": {"source": "llm:gemini-2.5-flash", "id": "ob-conflict", "slot": "behavioral"}
+    }
+  ],
+  "overall": {
+    "score": 82,
+    "verdict": "EXCELLENT",
+    "summary": "Strong, capable answers across both questions. Structure holds; the close needs room.",
+    "band_label": "EXCELLENT",
+    "band_range": "80-89%",
+    "worked": ["Concrete, unrehearsed-sounding reason for wanting the job.",
+               "Chose a real conflict with a genuine cost, and did not make themselves the hero of it."],
+    "fix": ["Name one dispatch-specific skill the retail years already built.",
+            "Land the result before the timer."]
+  },
+  "judge_declaration": {
+    "falsifier_type": "evaluative",
+    "judge_identity": "gemini-2.5-flash-002",
+    "judge_requested": "gemini-2.5-flash",
+    "rubric_identity": "ascenvo.vcs.oral_board.grade_board",
+    "rubric_version": "2026-08-15",
+    "board_identity": "ob-intro+ob-conflict",
+    "baseline_identity": "the four SME rubric dimensions (directness/structure/communication/tieback) + each question's wants/hard_on",
+    "baseline_date": "2026-06-25",
+    "judge_inputs_scope": "this question's text + its trait/wants/hard_on rubric data + this one answer's text ONLY; NOT the other answers on the board, NOT prior attempts, NOT a model answer",
+    "graded_at": "2026-09-13T17:40:11Z"
+  }
+}

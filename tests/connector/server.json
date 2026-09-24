@@ -1,0 +1,27 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.arcaeon-io/arcaeon",
+  "description": "One MCP connector: tamper-evident agent ledger, MCP-server source checker, hosted witness.",
+  "version": "0.1.4",
+  "websiteUrl": "https://arcaeon.io",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "arcaeon",
+      "version": "0.1.4",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "ARCAEON_KEY",
+          "description": "Witness API key for the two paid tools (witness_pin, witness_renew). Free tools work without it.",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

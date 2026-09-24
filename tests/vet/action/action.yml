@@ -1,0 +1,120 @@
+# mcp-vet as a GitHub Action.
+#
+# Scope on purpose: this action does NOT check out your code. The caller does
+# that (`actions/checkout` first), because an action that checks out on your
+# behalf has to be told which ref, which submodules, which token -- and gets it
+# wrong for exactly the repos that care. Everything here operates on the files
+# already in the workspace.
+#
+# It is also non-interactive end to end: no prompts, no `gh auth`, no token, and
+# nothing that reads the actor or the event payload. That is what makes the same
+# action work for a human's pull request and for a bot-triggered push, which is
+# the case that matters here -- an agent that opens a PR should be graded by the
+# same gate a person is, and a gate that quietly needs a human is not a gate.
+name: "mcp-vet grade"
+description: >-
+  Statically grade MCP server source with mcp-vet: a re-testable grade artifact
+  that names its own blind spots. Fails the job on high-severity findings.
+author: "Arcaeon"
+
+branding:
+  icon: "shield"
+  color: "purple"
+
+inputs:
+  path:
+    description: "File or directory to grade. A directory is walked for *.py."
+    required: false
+    default: "."
+  warn-only:
+    description: >-
+      "true" reports findings without failing the job. Use it for the first run
+      on an existing repo, then turn it off -- a permanent warn-only is a
+      dashboard, not a gate.
+    required: false
+    default: "false"
+  output:
+    description: "Where to write the grade JSON artifact."
+    required: false
+    default: "mcp-vet-grade.json"
+  summary:
+    description: '"false" to skip writing the job summary.'
+    required: false
+    default: "true"
+  python-version:
+    description: "Python for the scan. mcp-vet needs >= 3.10."
+    required: false
+    default: "3.11"
+  version:
+    description: >-
+      What to pip install. The PyPI project is "arcaeon-mcp-vet" (the console
+      script it installs is "mcp-vet" -- that is what this action runs). Pin
+      it ("arcaeon-mcp-vet==0.0.15") if you want the grade to be reproducible
+      across reruns -- an unpinned scanner changes its answers when it
+      improves, which is correct behavior and still a surprise in CI.
+    required: false
+    default: "arcaeon-mcp-vet==0.0.15"
+  local-package:
+    description: >-
+      Path to a checkout of mcp-vet to install instead of the PyPI release.
+      Used to test the action against unreleased code (and by mcp-vet's own CI).
+    required: false
+    default: ""
+
+outputs:
+  verdict:
+    description: "Worst verdict across every graded file."
+    value: ${{ steps.grade.outputs.verdict }}
+  grade-path:
+    description: "Path to the grade JSON artifact."
+    value: ${{ steps.grade.outputs.grade-path }}
+  files-graded:
+    description: "How many files were graded."
+    value: ${{ steps.grade.outputs.files-graded }}
+  findings-count:
+    description: "Total findings across all files."
+    value: ${{ steps.grade.outputs.findings-count }}
+  high-severity-count:
+    description: "High-severity findings. Nonzero fails unless warn-only."
+    value: ${{ steps.grade.outputs.high-severity-count }}
+  blind-spots-count:
+    description: "How many gaps the grade declares about itself."
+    value: ${{ steps.grade.outputs.blind-spots-count }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install mcp-vet
+      shell: bash
+      # Inputs arrive as env vars, never interpolated into the script body.
+      # `${{ inputs.version }}` pasted straight into a shell line is a command
+      # injection in an action whose whole subject is supply-chain hygiene.
+      env:
+        MCP_VET_SPEC: ${{ inputs.version }}
+        MCP_VET_LOCAL: ${{ inputs.local-package }}
+      run: |
+        set -euo pipefail
+        if [ -n "${MCP_VET_LOCAL}" ]; then
+          python -m pip install --disable-pip-version-check -q "${MCP_VET_LOCAL}"
+        else
+          python -m pip install --disable-pip-version-check -q "${MCP_VET_SPEC}"
+        fi
+        mcp-vet --help > /dev/null
+
+    - name: Grade
+      id: grade
+      shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_WARN_ONLY: ${{ inputs.warn-only }}
+        INPUT_OUTPUT: ${{ inputs.output }}
+        INPUT_SUMMARY: ${{ inputs.summary }}
+      # All of the behavior lives in run_vet.py so it can be tested off GitHub;
+      # this step is a call, not logic. Exit 1 = high-severity findings,
+      # exit 2 = the scan could not run (which is never reported as a pass).
+      run: python "${GITHUB_ACTION_PATH}/run_vet.py"

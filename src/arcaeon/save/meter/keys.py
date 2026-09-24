@@ -1,0 +1,281 @@
+# SPDX-License-Identifier: MIT
+"""Key management for arcaeon_meter.
+
+Secrets are random (`secrets.token_urlsafe`), shown ONCE at creation, and
+stored only as sha256 hashes — the keys file never contains a plaintext
+secret, so leaking the file does not leak the keys. Revocation marks the
+entry (kept for audit/export) rather than deleting it.
+
+File shape (`keys.json`):
+
+    {"version": 1,
+     "keys": {"<sha256 hex>": {"plan": "free", "monthly_cap": 100,
+                               "label": "alice", "created": "...",
+                               "revoked": false}}}
+"""
+from __future__ import annotations
+
+import contextlib
+import json
+import os
+import secrets as _secrets
+import tempfile
+import time
+from pathlib import Path
+from typing import Optional
+
+from arcaeon.save.meter import KEY_PREFIX, Meter, key_hash, _now_iso
+
+
+def new_secret() -> str:
+    """A fresh random API key. ~192 bits of entropy, `am_` prefixed so keys
+    are recognizable in configs and distinguishable from key_ids."""
+    return KEY_PREFIX + _secrets.token_urlsafe(24)
+
+
+def _reject_constant(name: str):
+    """json.loads accepts the bare literals NaN / Infinity / -Infinity by
+    default. A cap is a count, none of those are counts, and a NaN cap
+    compares False against everything (i.e. unlimited). Refuse at parse."""
+    raise ValueError(f"keys file contains the non-JSON literal {name!r}")
+
+
+def load(path: "str | Path") -> dict:
+    p = Path(path)
+    try:
+        doc = json.loads(p.read_text(encoding="utf-8"),
+                         parse_constant=_reject_constant)
+    except FileNotFoundError:
+        # The one OSError that honestly means "empty roster": the file has
+        # not been created yet. Every OTHER OSError (PermissionError, a
+        # sharing violation from a scanner/backup holding the file, a
+        # mis-set ACL, IsADirectoryError, an NFS hiccup) used to fall into
+        # this same branch and read as an empty roster too — audit
+        # 2026-08-24, CRITICAL F1: add_key() racing a 2-second transient
+        # read-hold then "succeeded" by REPLACING the whole keys file with
+        # one key, and export() silently dropped every orphaned customer's
+        # accrued usage from the invoice (37 real billed calls, gone from
+        # the CSV with no warning anywhere). Transient unreadability must
+        # propagate: Meter.check() already maps OSError to a typed
+        # keys_unreadable denial, and add_key/revoke_key then fail loud
+        # instead of destroying state. F2 rides on the same line: the
+        # in-process cache used to memoize the empty-on-OSError result
+        # under a stat stamp that never changed, denying every customer
+        # until restart. F5 too: an existing-but-unreadable file no longer
+        # reports unknown_key ("key not in the keys file") for keys that
+        # are in the file.
+        return {"version": 1, "keys": {}}
+    except RecursionError:
+        # `[[[[...` nested past the parser's depth is a parse failure, but
+        # RecursionError is not a ValueError: it walked straight through
+        # `Meter.check()`'s keys_unreadable mapping and out of the ASGI
+        # middleware as a 500 (audit 2026-09-01). Same fault, same type.
+        raise ValueError(f"{p}: not an arcaeon_meter keys file "
+                         f"(nested too deep to parse)") from None
+    if not isinstance(doc, dict) or not isinstance(doc.get("keys"), dict):
+        raise ValueError(f"{p}: not an arcaeon_meter keys file")
+    return doc
+
+
+@contextlib.contextmanager
+def _locked(path: "str | Path", timeout: float = 10.0):
+    """Cross-process mutex over the WHOLE load-mutate-save cycle.
+
+    `save()` being atomic was never the issue — each write landed whole, and
+    the transaction around it still lost. `add_key`/`revoke_key` are
+    read-modify-write on one document, so a concurrent add rewrote the file
+    from a stale read and silently un-revoked a key the CLI had just reported
+    as revoked. A revocation that reports success and doesn't take is worse
+    than one that fails.
+    """
+    lock = Path(str(path) + ".lock")
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_RDWR)
+            break
+        except (FileExistsError, PermissionError):
+            # A stale lock from a killed process shouldn't wedge the file
+            # forever; past the deadline, break it rather than deadlock.
+            #
+            # On Windows, DeleteFile (os.unlink) is not atomic the way POSIX
+            # unlink is: a file mid-delete-pending sits in a state where a
+            # competing CreateFile (os.open) fails with ERROR_ACCESS_DENIED
+            # -- surfaced in Python as PermissionError, not FileExistsError
+            # -- even though no other handle actually holds the lock. The
+            # loser of the close()/unlink() race in the `finally` below can
+            # therefore see PermissionError instead of "lock held"; treat it
+            # the same way (retry), since it means exactly the same thing:
+            # someone else has (or just had) this lock.
+            #
+            # The deadline is enforced FIRST, on every iteration. It used to
+            # live below the stat() probe, and the stat-failure path skipped
+            # it (and the sleep) entirely -- but stat() failing is the COMMON
+            # case under contention: the holder unlinks the lock between our
+            # failed open and our stat. That path was an unbounded busy-spin
+            # with no timeout, which is exactly the shape of "flaky only when
+            # the machine is loaded."
+            if time.monotonic() > deadline:
+                raise TimeoutError(f"could not lock {path} within {timeout}s")
+            try:
+                if time.time() - lock.stat().st_mtime > timeout * 2:
+                    os.unlink(lock)
+                    continue
+            except OSError:
+                # Lock vanished (holder released it) or is delete-pending;
+                # fall through to the sleep and retry the open.
+                pass
+            time.sleep(0.01)
+    try:
+        yield
+    finally:
+        os.close(fd)
+        with contextlib.suppress(OSError):
+            os.unlink(lock)
+
+
+def save(path: "str | Path", doc: dict) -> None:
+    """Atomic write (temp file + fsync + os.replace) so neither a crash nor a
+    power loss mid-save leaves a half-written keys file.
+
+    On Windows `os.replace` fails with PermissionError while any reader holds
+    the target open, so the rename retries briefly — without it, revoking a
+    key while the server was serving crashed the CLI outright (README says
+    revocation takes effect in a running server; it has to survive one).
+    """
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=p.name, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(doc, fh, indent=2, ensure_ascii=False, allow_nan=False)
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+        # Bounded time-budget retry, not a fixed iteration count. The old
+        # loop (50 x 20 ms = 1.0 s flat) was empirically too tight on a
+        # loaded Windows box: besides our own readers, EXTERNAL scanners
+        # (Defender real-time scan, the search indexer) open freshly written
+        # .json files without FILE_SHARE_DELETE, and under load that hold can
+        # outlive a fixed 1 s -- the retry exhausted and PermissionError
+        # escaped into callers (the concurrency suite caught it as a flake).
+        # Exponential backoff under a 10 s ceiling rides out a scanner hold
+        # without busy-hammering the file; still bounded, still raises.
+        deadline = time.monotonic() + 10.0
+        delay = 0.01
+        while True:
+            try:
+                os.replace(tmp, str(p))
+                break
+            except PermissionError:
+                if time.monotonic() > deadline:
+                    raise
+                time.sleep(delay)
+                delay = min(delay * 2, 0.25)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def add_key(path: "str | Path", *, plan: str = "free",
+            monthly_cap: "int | None" = 100,
+            label: Optional[str] = None) -> "tuple[str, str]":
+    """Create a key; returns (secret, key_id). The secret exists only in
+    this return value — store it now or mint another.
+
+    `monthly_cap=None` means EXPLICIT unlimited (stored as null). To defer
+    the cap to a plan default passed to `Meter(plans=...)`, use
+    `monthly_cap="plan"` — the entry then carries no cap of its own.
+
+    Any other value must be a cap the meter will honor: None or a
+    non-negative int. `-5`, `100.0` and `True` used to be written verbatim
+    and reported as a successful mint, and every call on that key was then
+    denied `no_cap_configured` — a key dead on arrival, with the fault only
+    visible from the customer's side (audit 2026-09-01). Refused here instead,
+    before the file is touched.
+    """
+    if monthly_cap != "plan" and not Meter._valid_cap(monthly_cap):
+        raise ValueError(f"monthly_cap must be None (unlimited), a non-negative "
+                         f"int, or 'plan' (defer to the plan default), got "
+                         f"{monthly_cap!r}")
+    with _locked(path):
+        doc = load(path)
+        secret = new_secret()
+        h = key_hash(secret)
+        entry: dict = {"plan": plan, "created": _now_iso(), "revoked": False}
+        if monthly_cap != "plan":
+            entry["monthly_cap"] = monthly_cap
+        if label is not None:
+            entry["label"] = label
+        doc["keys"][h] = entry
+        save(path, doc)
+    return secret, h[:12]
+
+
+def _find(doc: dict, ident: str) -> str:
+    """Resolve a secret or a key_id prefix to the stored full hash."""
+    if not isinstance(ident, str):
+        raise KeyError(f"key id must be a string, got {type(ident).__name__}")
+    if ident.startswith(KEY_PREFIX):
+        try:
+            h = key_hash(ident)
+        except UnicodeEncodeError:
+            # Un-encodable text (a lone surrogate) cannot be any stored key.
+            # Raised raw, it walked past the CLI's `except KeyError` as a
+            # traceback.
+            raise KeyError("unknown key: the presented secret is not "
+                           "encodable text (lone surrogate)") from None
+        if h in doc["keys"]:
+            return h
+        raise KeyError(f"unknown key (id {h[:12]})")
+    if len(ident) < 6:
+        # "" matches the first key in the file; "a" matches whatever happens
+        # to start with a. An unset $KEY_ID in an ops script must not revoke
+        # a key at random.
+        raise KeyError(f"key id {ident!r} is too short to be unambiguous "
+                       f"(need at least 6 hex chars)")
+    matches = [h for h in doc["keys"] if h.startswith(ident)]
+    if not matches:
+        raise KeyError(f"no key with id {ident!r}")
+    if len(matches) > 1:
+        raise KeyError(f"key id {ident!r} is ambiguous ({len(matches)} matches)")
+    return matches[0]
+
+
+def revoke_key(path: "str | Path", ident: str) -> str:
+    """Revoke by secret or key_id; returns the key_id. Idempotent."""
+    with _locked(path):
+        doc = load(path)
+        h = _find(doc, ident)
+        doc["keys"][h]["revoked"] = True
+        doc["keys"][h]["revoked_at"] = _now_iso()
+        save(path, doc)
+    return h[:12]
+
+
+def list_keys(path: "str | Path") -> "list[dict]":
+    """All entries with their public key_ids — never secrets (none exist
+    at rest to leak).
+
+    `key_id` is the 12-hex display prefix; `key_hash` is the full sha256 that
+    counts and invoice rows are keyed on (two keys can share a prefix, so the
+    prefix is a label, not an identity).
+    """
+    doc = load(path)
+    out = []
+    for h, entry in sorted(doc["keys"].items()):
+        row = {"key_id": h[:12], "key_hash": h}
+        if isinstance(entry, dict):
+            row.update(entry)
+        else:
+            # A hand-edited entry that is not an object. `check()` denies it
+            # as unknown_key; `row.update("oops")` here raised a dict-update
+            # ValueError and took the whole listing down with it (audit
+            # 2026-09-01). Show it as what it is so it can be fixed.
+            row["malformed"] = True
+        out.append(row)
+    return out

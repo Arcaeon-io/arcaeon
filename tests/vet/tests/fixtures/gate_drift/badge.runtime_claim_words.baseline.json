@@ -1,0 +1,10 @@
+{
+  "executed successfully": true,
+  "launched via subprocess": true,
+  "no live evidence available": false,
+  "runtime confirmed by runner": true,
+  "static: no record write inferred from bytes (0/4 gates)": false,
+  "static: not inferred (grade carries no record_static)": false,
+  "static: record write inferred from bytes (3/4 gates)": false,
+  "the record was observed": true
+}

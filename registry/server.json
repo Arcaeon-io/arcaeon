@@ -1,0 +1,48 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.arcaeon/arcaeon",
+  "title": "Arcaeon",
+  "description": "A record of what an agent did that the agent cannot quietly rewrite, and a way for anyone to check.",
+  "version": "0.9.0",
+  "websiteUrl": "https://arcaeon.io",
+  "repository": {
+    "url": "https://github.com/PLACEHOLDER-no-public-repo-yet/arcaeon",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "arcaeon",
+      "version": "0.9.0",
+      "runtimeHint": "uvx",
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "--with",
+          "value": "mcp>=2.0.0,<3",
+          "description": "The MCP server needs the MCP Python SDK (the package's [mcp] extra); the base install has no dependencies."
+        }
+      ],
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp",
+          "description": "The verb that starts the MCP server on stdio."
+        }
+      ],
+      "environmentVariables": [
+        {
+          "name": "ARCAEON_KEY",
+          "description": "Witness API key for the two paid tools (witness_pin, witness_renew). Free tools work without it.",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

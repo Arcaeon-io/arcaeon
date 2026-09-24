@@ -1,0 +1,1091 @@
+{
+  "schema": "arcaeon-continuity:calibration-curve:v2",
+  "package_version": "0.2.0",
+  "generated_at": "2026-08-17T22:17:51Z",
+  "fixture_set_digest": "sha256:json-c14n:v1:8cfaa2e1cd170a67f7445406e5bd7775d200aa38479522b97fa8662e6463cb32",
+  "manifest_digest": "sha256:json-c14n:v1:ab4ccadf1f7078d412652a571821a461bea7576dcdc2ca2cef8682f883f7cb36",
+  "snapshot_digest": "sha256:json-c14n:v1:4c1ce0fc73ebc44aef92203a067d7630d934d70e1f47feb831651fcc5abf7bc2",
+  "n_fixtures": 54,
+  "expectation_semantics": {
+    "documented_behavior": [
+      "D0",
+      "D1",
+      "D2",
+      "D3",
+      "D4 (repudiation fixtures)"
+    ],
+    "ground_truth": [
+      "D4 (paraphrase fixtures)",
+      "D5"
+    ],
+    "note": "a loose-mode disagreement in a ground-truth family is a measured scorer weakness, not a fixture failure; a disagreement in a documented-behavior family means the documentation is wrong"
+  },
+  "grades": {
+    "D0": {
+      "description": "byte-exact restatement",
+      "n": 5,
+      "strict": {
+        "agreement": 1.0,
+        "faithful_rate": 1.0,
+        "disagreeing": []
+      },
+      "loose": {
+        "agreement": 1.0,
+        "containment_only_rate": 1.0,
+        "disagreeing": []
+      }
+    },
+    "D1": {
+      "description": "whitespace edges (the trim the strict layer allows)",
+      "n": 10,
+      "strict": {
+        "agreement": 1.0,
+        "faithful_rate": 1.0,
+        "disagreeing": []
+      },
+      "loose": {
+        "agreement": 1.0,
+        "containment_only_rate": 1.0,
+        "disagreeing": []
+      }
+    },
+    "D2": {
+      "description": "case/punctuation/internal-whitespace drift on load-bearing values",
+      "n": 10,
+      "strict": {
+        "agreement": 1.0,
+        "faithful_rate": 0.0,
+        "disagreeing": []
+      },
+      "loose": {
+        "agreement": 1.0,
+        "containment_only_rate": 1.0,
+        "disagreeing": []
+      }
+    },
+    "D3": {
+      "description": "verbose-but-faithful: declared value embedded in a longer honest answer",
+      "n": 8,
+      "strict": {
+        "agreement": 1.0,
+        "faithful_rate": 0.0,
+        "disagreeing": []
+      },
+      "loose": {
+        "agreement": 1.0,
+        "containment_only_rate": 1.0,
+        "disagreeing": []
+      }
+    },
+    "D4": {
+      "description": "echo-then-repudiate (the Repudiation Case) + near-miss paraphrase",
+      "n": 8,
+      "strict": {
+        "agreement": 1.0,
+        "faithful_rate": 0.0,
+        "disagreeing": []
+      },
+      "loose": {
+        "agreement": 1.0,
+        "containment_only_rate": 0.625,
+        "disagreeing": []
+      }
+    },
+    "D5": {
+      "description": "adversarial containment exploits (expectations are GROUND TRUTH; loose-mode agreement here is a measurement, not a target)",
+      "n": 13,
+      "strict": {
+        "agreement": 1.0,
+        "faithful_rate": 0.0,
+        "disagreeing": []
+      },
+      "loose": {
+        "agreement": 0.4615,
+        "containment_only_rate": 0.5385,
+        "disagreeing": [
+          "d5-01",
+          "d5-02",
+          "d5-03",
+          "d5-04",
+          "d5-11",
+          "d5-12",
+          "d5-13"
+        ]
+      }
+    }
+  },
+  "per_fixture": [
+    {
+      "id": "d0-01",
+      "grade": "D0",
+      "manifest_item": "identity_anchors:0",
+      "note": "byte-exact restatement of the identity anchor",
+      "strict": {
+        "expected": "faithful",
+        "observed": "faithful",
+        "agrees": true,
+        "comparison": "exact_match"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d0-02",
+      "grade": "D0",
+      "manifest_item": "open_commitments:0",
+      "note": "byte-exact restatement of the open commitment",
+      "strict": {
+        "expected": "faithful",
+        "observed": "faithful",
+        "agrees": true,
+        "comparison": "exact_match"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d0-03",
+      "grade": "D0",
+      "manifest_item": "canon_pointers:0",
+      "note": "byte-exact restatement of the canon pointer",
+      "strict": {
+        "expected": "faithful",
+        "observed": "faithful",
+        "agrees": true,
+        "comparison": "exact_match"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d0-04",
+      "grade": "D0",
+      "manifest_item": "live_threads:0",
+      "note": "byte-exact restatement of the live thread",
+      "strict": {
+        "expected": "faithful",
+        "observed": "faithful",
+        "agrees": true,
+        "comparison": "exact_match"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d0-05",
+      "grade": "D0",
+      "manifest_item": "version_pin",
+      "note": "byte-exact restatement of the scalar version pin",
+      "strict": {
+        "expected": "faithful",
+        "observed": "faithful",
+        "agrees": true,
+        "comparison": "exact_match"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d1-01",
+      "grade": "D1",
+      "manifest_item": "identity_anchors:0",
+      "note": "trailing newline - inside the trim the strict layer allows",
+      "strict": {
+        "expected": "faithful",
+        "observed": "faithful",
+        "agrees": true,
+        "comparison": "exact_match"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d1-02",
+      "grade": "D1",
+      "manifest_item": "identity_anchors:0",
+      "note": "leading spaces",
+      "strict": {
+        "expected": "faithful",
+        "observed": "faithful",
+        "agrees": true,
+        "comparison": "exact_match"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d1-03",
+      "grade": "D1",
+      "manifest_item": "canon_pointers:0",
+      "note": "trailing spaces on a path",
+      "strict": {
+        "expected": "faithful",
+        "observed": "faithful",
+        "agrees": true,
+        "comparison": "exact_match"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d1-04",
+      "grade": "D1",
+      "manifest_item": "open_commitments:0",
+      "note": "leading tab",
+      "strict": {
+        "expected": "faithful",
+        "observed": "faithful",
+        "agrees": true,
+        "comparison": "exact_match"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d1-05",
+      "grade": "D1",
+      "manifest_item": "live_threads:0",
+      "note": "trailing CRLF",
+      "strict": {
+        "expected": "faithful",
+        "observed": "faithful",
+        "agrees": true,
+        "comparison": "exact_match"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d1-06",
+      "grade": "D1",
+      "manifest_item": "version_pin",
+      "note": "surrounding single spaces on the scalar",
+      "strict": {
+        "expected": "faithful",
+        "observed": "faithful",
+        "agrees": true,
+        "comparison": "exact_match"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d1-07",
+      "grade": "D1",
+      "manifest_item": "canon_pointers:0",
+      "note": "double trailing newline",
+      "strict": {
+        "expected": "faithful",
+        "observed": "faithful",
+        "agrees": true,
+        "comparison": "exact_match"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d1-08",
+      "grade": "D1",
+      "manifest_item": "live_threads:0",
+      "note": "leading newline",
+      "strict": {
+        "expected": "faithful",
+        "observed": "faithful",
+        "agrees": true,
+        "comparison": "exact_match"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d1-09",
+      "grade": "D1",
+      "manifest_item": "open_commitments:0",
+      "note": "trailing tab",
+      "strict": {
+        "expected": "faithful",
+        "observed": "faithful",
+        "agrees": true,
+        "comparison": "exact_match"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d1-10",
+      "grade": "D1",
+      "manifest_item": "identity_anchors:0",
+      "note": "mixed whitespace on both edges",
+      "strict": {
+        "expected": "faithful",
+        "observed": "faithful",
+        "agrees": true,
+        "comparison": "exact_match"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d2-01",
+      "grade": "D2",
+      "manifest_item": "canon_pointers:0",
+      "note": "uppercased path - containment lowercases, so loose forgives a case-flipped load-bearing path; the documented leniency, on the curve",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d2-02",
+      "grade": "D2",
+      "manifest_item": "canon_pointers:0",
+      "note": "trailing period on a path - containment normalization rstrips .!? from the string end",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d2-03",
+      "grade": "D2",
+      "manifest_item": "identity_anchors:0",
+      "note": "shouted identity anchor - case flip",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d2-04",
+      "grade": "D2",
+      "manifest_item": "identity_anchors:0",
+      "note": "trailing exclamation - punctuation drift",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d2-05",
+      "grade": "D2",
+      "manifest_item": "open_commitments:0",
+      "note": "internal double space - containment collapses internal whitespace, strict does not",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d2-06",
+      "grade": "D2",
+      "manifest_item": "live_threads:0",
+      "note": "title-cased thread id",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d2-07",
+      "grade": "D2",
+      "manifest_item": "version_pin",
+      "note": "trailing question mark on a version id",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d2-08",
+      "grade": "D2",
+      "manifest_item": "canon_pointers:0",
+      "note": "mixed-case path",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d2-09",
+      "grade": "D2",
+      "manifest_item": "identity_anchors:0",
+      "note": "internal newline - collapsed by containment normalization, kept by strict",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d2-10",
+      "grade": "D2",
+      "manifest_item": "open_commitments:0",
+      "note": "trailing ellipsis - all trailing dots rstripped by containment normalization",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d3-01",
+      "grade": "D3",
+      "manifest_item": "identity_anchors:0",
+      "note": "verbose-but-faithful: anchor embedded in a longer honest answer; loose mode's legitimate use case, strict means strict",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d3-02",
+      "grade": "D3",
+      "manifest_item": "canon_pointers:0",
+      "note": "path embedded in an honest sentence",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d3-03",
+      "grade": "D3",
+      "manifest_item": "open_commitments:0",
+      "note": "commitment embedded in an honest status line",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d3-04",
+      "grade": "D3",
+      "manifest_item": "live_threads:0",
+      "note": "thread embedded in an honest sentence",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d3-05",
+      "grade": "D3",
+      "manifest_item": "version_pin",
+      "note": "scalar embedded in an honest sentence; digit-aware boundaries still match the whole token",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d3-06",
+      "grade": "D3",
+      "manifest_item": "identity_anchors:0",
+      "note": "exact anchor followed by honest elaboration",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d3-07",
+      "grade": "D3",
+      "manifest_item": "canon_pointers:0",
+      "note": "path embedded, sentence-final period",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d3-08",
+      "grade": "D3",
+      "manifest_item": "open_commitments:0",
+      "note": "commitment restated with a label prefix",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d4-01",
+      "grade": "D4",
+      "manifest_item": "identity_anchors:0",
+      "note": "the Repudiation Case - echoes the anchor then repudiates it; the documented containment false-negative, now a plotted point",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d4-02",
+      "grade": "D4",
+      "manifest_item": "identity_anchors:0",
+      "note": "same-breath repudiation, single sentence",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d4-03",
+      "grade": "D4",
+      "manifest_item": "canon_pointers:0",
+      "note": "path echoed inside its own disavowal",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d4-04",
+      "grade": "D4",
+      "manifest_item": "open_commitments:0",
+      "note": "commitment echoed inside its own refusal",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d4-05",
+      "grade": "D4",
+      "manifest_item": "live_threads:0",
+      "note": "thread echoed inside its own abandonment",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "containment_only",
+        "observed": "containment_only",
+        "agrees": true,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d4-06",
+      "grade": "D4",
+      "manifest_item": "identity_anchors:0",
+      "note": "near-miss paraphrase - a true paraphrase does not literally contain the declared value, so containment catches it",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "divergence",
+        "observed": "divergence",
+        "agrees": true,
+        "comparison": "divergence"
+      }
+    },
+    {
+      "id": "d4-07",
+      "grade": "D4",
+      "manifest_item": "canon_pointers:0",
+      "note": "near-miss abbreviated path",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "divergence",
+        "observed": "divergence",
+        "agrees": true,
+        "comparison": "divergence"
+      }
+    },
+    {
+      "id": "d4-08",
+      "grade": "D4",
+      "manifest_item": "open_commitments:0",
+      "note": "near-miss reworded commitment",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "divergence",
+        "observed": "divergence",
+        "agrees": true,
+        "comparison": "divergence"
+      }
+    },
+    {
+      "id": "d5-01",
+      "grade": "D5",
+      "manifest_item": "canon_pointers:0",
+      "note": "GROUND TRUTH divergent (a different path); measures whether whole-token containment is fooled by a suffix extension across a '.' boundary",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "divergence",
+        "observed": "containment_only",
+        "agrees": false,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d5-02",
+      "grade": "D5",
+      "manifest_item": "canon_pointers:0",
+      "note": "GROUND TRUTH divergent (a different path); measures whether containment is fooled by a prefix extension across a '/' boundary",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "divergence",
+        "observed": "containment_only",
+        "agrees": false,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d5-03",
+      "grade": "D5",
+      "manifest_item": "canon_pointers:0",
+      "note": "GROUND TRUTH divergent (embedded negation); measures the negation blind spot",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "divergence",
+        "observed": "containment_only",
+        "agrees": false,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d5-04",
+      "grade": "D5",
+      "manifest_item": "identity_anchors:0",
+      "note": "GROUND TRUTH divergent (anchor quoted inside its own denial); measures the attribution blind spot",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "divergence",
+        "observed": "containment_only",
+        "agrees": false,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d5-05",
+      "grade": "D5",
+      "manifest_item": "identity_anchors:0",
+      "note": "GROUND TRUTH divergent as a restatement (value split across clauses, comma became a period); measures whether split-across-clauses evades or is caught",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "divergence",
+        "observed": "divergence",
+        "agrees": true,
+        "comparison": "divergence"
+      }
+    },
+    {
+      "id": "d5-06",
+      "grade": "D5",
+      "manifest_item": "identity_anchors:0",
+      "note": "GROUND TRUTH divergent (Cyrillic \\u0430 confusable inside 'carried' - visually identical, different bytes); measures byte-level robustness to confusables",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "divergence",
+        "observed": "divergence",
+        "agrees": true,
+        "comparison": "divergence"
+      }
+    },
+    {
+      "id": "d5-07",
+      "grade": "D5",
+      "manifest_item": "version_pin",
+      "note": "GROUND TRUTH divergent (a different version that starts with the declared one); measures the digit/decimal-aware boundary",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "divergence",
+        "observed": "divergence",
+        "agrees": true,
+        "comparison": "divergence"
+      }
+    },
+    {
+      "id": "d5-08",
+      "grade": "D5",
+      "manifest_item": "version_pin",
+      "note": "GROUND TRUTH divergent (declared version appears only inside a different number); measures the leading-digit boundary",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "divergence",
+        "observed": "divergence",
+        "agrees": true,
+        "comparison": "divergence"
+      }
+    },
+    {
+      "id": "d5-09",
+      "grade": "D5",
+      "manifest_item": "open_commitments:0",
+      "note": "GROUND TRUTH divergent (declared value interleaved with a contradicting version, full string not contiguous)",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "divergence",
+        "observed": "divergence",
+        "agrees": true,
+        "comparison": "divergence"
+      }
+    },
+    {
+      "id": "d5-10",
+      "grade": "D5",
+      "manifest_item": "identity_anchors:0",
+      "note": "GROUND TRUTH divergent (zero-width space \\u200b inside 'carried' - invisible, not Unicode whitespace, so normalization does not collapse it)",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "divergence",
+        "observed": "divergence",
+        "agrees": true,
+        "comparison": "divergence"
+      }
+    },
+    {
+      "id": "d5-11",
+      "grade": "D5",
+      "manifest_item": "live_threads:0",
+      "note": "GROUND TRUTH divergent (thread echoed inside an instruction to ignore it); measures the imperative-negation blind spot",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "divergence",
+        "observed": "containment_only",
+        "agrees": false,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d5-12",
+      "grade": "D5",
+      "manifest_item": "open_commitments:0",
+      "note": "GROUND TRUTH divergent (commitment echoed with a revocation marker appended)",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "divergence",
+        "observed": "containment_only",
+        "agrees": false,
+        "comparison": "containment_only"
+      }
+    },
+    {
+      "id": "d5-13",
+      "grade": "D5",
+      "manifest_item": "identity_anchors:0",
+      "note": "GROUND TRUTH divergent (non-breaking space \\u00a0 replacing the space in 'carried forward' - IS Unicode whitespace, so \\s+ collapse maps it to a plain space); measures the NBSP normalization hole",
+      "strict": {
+        "expected": "divergent",
+        "observed": "divergent",
+        "agrees": true,
+        "comparison": "divergence"
+      },
+      "loose": {
+        "expected": "divergence",
+        "observed": "containment_only",
+        "agrees": false,
+        "comparison": "containment_only"
+      }
+    }
+  ]
+}

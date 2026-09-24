@@ -1,0 +1,108 @@
+{
+  "per_answer": [
+    {
+      "score": 92,
+      "verdict": "OUTSTANDING",
+      "dimensions": [
+        {"key": "directness", "name": "Answered the question", "score": 0.94, "weight": 0.32,
+         "detail": "Tighter than the last run: led straight into a specific, dispatch-tied reason for the job."},
+        {"key": "structure", "name": "Structure (real incident)", "score": 0.88, "weight": 0.26,
+         "detail": "Well-organized, no wandering."},
+        {"key": "communication", "name": "Communication", "score": 0.95, "weight": 0.352,
+         "detail": "Crisp, confident, no filler."},
+        {"key": "tieback", "name": "Tie-back to the job", "score": 0.90, "weight": 0.20,
+         "detail": "Named a specific transferable skill (calm phone manner from prior customer-service work) unlike the vaguer tie-back on the earlier attempt."}
+      ],
+      "coaching": ["Clear, tight self-introduction with a specific, job-relevant reason for applying — a real improvement on the tie-back."],
+      "worked": ["Clear, tight self-introduction with a specific, job-relevant reason for applying — a real improvement on the tie-back."],
+      "fix": [],
+      "meta": {"source": "llm:gemini-2.5-flash", "id": "ob-intro", "slot": "intro"}
+    },
+    {
+      "score": 90,
+      "verdict": "OUTSTANDING",
+      "dimensions": [
+        {"key": "directness", "name": "Answered the question", "score": 0.90, "weight": 0.32,
+         "detail": "Direct answer to the teamwork question with a real incident."},
+        {"key": "structure", "name": "Structure (real incident)", "score": 0.92, "weight": 0.416,
+         "detail": "Full STAR arc, cleaner than the earlier attempt's version of the same story."},
+        {"key": "communication", "name": "Communication", "score": 0.85, "weight": 0.22,
+         "detail": "Even pacing throughout."},
+        {"key": "tieback", "name": "Tie-back to the job", "score": 0.88, "weight": 0.32,
+         "detail": "Tied the resolution to coordinating with partner units on a live call."}
+      ],
+      "coaching": ["Same strong incident as before, told more efficiently this time."],
+      "worked": ["Same strong incident as before, told more efficiently this time."],
+      "fix": [],
+      "meta": {"source": "llm:gemini-2.5-flash", "id": "ob-teamwork", "slot": "behavioral"}
+    },
+    {
+      "score": 91,
+      "verdict": "OUTSTANDING",
+      "dimensions": [
+        {"key": "directness", "name": "Answered the question", "score": 0.93, "weight": 0.32,
+         "detail": "Named the same real mistake, owned plainly."},
+        {"key": "structure", "name": "Structure (real incident)", "score": 0.90, "weight": 0.416,
+         "detail": "Full arc: the error, the catch, the correction."},
+        {"key": "communication", "name": "Communication", "score": 0.88, "weight": 0.22,
+         "detail": "Steady, no defensiveness."},
+        {"key": "tieback", "name": "Tie-back to the job", "score": 0.92, "weight": 0.32,
+         "detail": "Sharper tie-back this time: named the specific double-check habit it produced."}
+      ],
+      "coaching": ["Owns the mistake plainly and now names the exact habit it produced — sharper than the last attempt."],
+      "worked": ["Owns the mistake plainly and now names the exact habit it produced — sharper than the last attempt."],
+      "fix": [],
+      "meta": {"source": "llm:gemini-2.5-flash", "id": "ob-mistake", "slot": "behavioral"}
+    },
+    {
+      "score": 89,
+      "verdict": "EXCELLENT",
+      "dimensions": [
+        {"key": "directness", "name": "Answered the question", "score": 0.90, "weight": 0.32,
+         "detail": "Direct, concrete handling of the panicking-caller scenario."},
+        {"key": "structure", "name": "Structure (real incident)", "score": 0.82, "weight": 0.26,
+         "detail": "Situational question; steps were clearly ordered."},
+        {"key": "communication", "name": "Communication", "score": 0.92, "weight": 0.352,
+         "detail": "Calm, plain language, well-paced."},
+        {"key": "tieback", "name": "Tie-back to the job", "score": 0.88, "weight": 0.32,
+         "detail": "Named the specific opening phrase this time, closing the gap flagged on the prior attempt."}
+      ],
+      "coaching": ["Named the specific opening phrase this time — the exact gap flagged on the earlier attempt is closed."],
+      "worked": ["Named the specific opening phrase this time — the exact gap flagged on the earlier attempt is closed."],
+      "fix": [],
+      "meta": {"source": "llm:gemini-2.5-flash", "id": "ob-close", "slot": "close"}
+    }
+  ],
+  "overall": {
+    "score": 91,
+    "verdict": "OUTSTANDING",
+    "summary": "Board passes. The answers landed on what was asked, with real stories and clear delivery — a candidate the panel can picture on the line. Tighten the weak spots and this is a seat.",
+    "band_label": "OUTSTANDING",
+    "band_range": "90-100%",
+    "band_also": "Outstanding",
+    "band_meaning": "Exceptional evidence. Highly specific past examples with real detail, deep job mastery, and no specialized training needed to begin.",
+    "worked": ["Clear, tight self-introduction with a specific, job-relevant reason for applying — a real improvement on the tie-back.",
+               "Same strong incident as before, told more efficiently this time.",
+               "Owns the mistake plainly and now names the exact habit it produced — sharper than the last attempt.",
+               "Named the specific opening phrase this time — the exact gap flagged on the earlier attempt is closed."],
+    "fix": [],
+    "strengths": ["Clear, tight self-introduction with a specific, job-relevant reason for applying — a real improvement on the tie-back.",
+                  "Same strong incident as before, told more efficiently this time.",
+                  "Owns the mistake plainly and now names the exact habit it produced — sharper than the last attempt.",
+                  "Named the specific opening phrase this time — the exact gap flagged on the earlier attempt is closed."],
+    "fixes": []
+  },
+  "judge_declaration": {
+    "falsifier_type": "evaluative",
+    "judge_identity": "gemini-2.5-flash-002",
+    "judge_requested": "gemini-2.5-flash",
+    "rubric_identity": "ascenvo.vcs.oral_board.grade_board",
+    "rubric_version": "2026-08-15",
+    "board_identity": "ob-intro+ob-teamwork+ob-mistake+ob-close",
+    "baseline_identity": "the four SME rubric dimensions (directness/structure/communication/tieback) + each question's wants/hard_on",
+    "baseline_provenance": "products/voice_call_sim/oralboard_judge.py (Daniel, dispatch-side SME) + data/oralboard_questions.js",
+    "baseline_date": "2026-06-25",
+    "judge_inputs_scope": "this question's text + its trait/wants/hard_on rubric data + this one answer's text ONLY; NOT the other answers on the board, NOT prior attempts, NOT a model answer",
+    "graded_at": "2026-09-11T16:40:00Z"
+  }
+}

@@ -1,0 +1,344 @@
+{
+  "snapshot": "registry_2026-09-02T2142Z.jsonl",
+  "snapshot_sha256": "4990529da87c02f3f783b84bbead3ab15d43ddb642d1311989776c34a648dbe2",
+  "mcp_vet_version": "0.0.16",
+  "plan": "bench/PLAN.md",
+  "servers_distinct_active": 26197,
+  "buckets": {
+    "ungradable:remote-only": 5509,
+    "gradable:repo": 20029,
+    "gradable:package-only": 605,
+    "ungradable:no-source-no-remote": 54
+  },
+  "frame_gradable_repo": 20029,
+  "sample_n": 100,
+  "seed": "int(sha256[:8], 16)",
+  "outcomes": {
+    "graded": 33,
+    "no-handler-found": 49,
+    "clone-failed": 18
+  },
+  "gate_distribution_graded": {
+    "0": 30,
+    "1": 2,
+    "2": 1
+  },
+  "gate_by_lang": {
+    "py": {
+      "0": 12,
+      "1": 1
+    },
+    "ts": {
+      "0": 20,
+      "2": 1,
+      "1": 1
+    }
+  },
+  "ours": [
+    {
+      "name": "ours:arcaeon-ledger",
+      "outcome": "graded",
+      "gate": 1,
+      "files": [
+        [
+          "test_agent_tools.py",
+          -1
+        ],
+        [
+          "test_integrity_regressions.py",
+          -1
+        ],
+        [
+          "adapter/test_observer.py",
+          -1
+        ],
+        [
+          "adapter/test_proxy.py",
+          -1
+        ],
+        [
+          "adapter/test_record_survives_hostile_content.py",
+          -1
+        ],
+        [
+          "arcaeon_ledger/mcp_server.py",
+          1
+        ],
+        [
+          "adapter/arcaeon_adapter/observer.py",
+          -1
+        ],
+        [
+          "adapter/arcaeon_adapter/proxy.py",
+          -1
+        ],
+        [
+          "adapter/arcaeon_adapter/selftest.py",
+          0
+        ],
+        [
+          "adapter/arcaeon_adapter/_echo_server.py",
+          0
+        ],
+        [
+          "adapter/arcaeon_adapter/__init__.py",
+          -1
+        ]
+      ]
+    },
+    {
+      "name": "ours:arcaeon-distill",
+      "outcome": "graded",
+      "gate": 0,
+      "files": [
+        [
+          "test_distill.py",
+          -1
+        ],
+        [
+          "arcaeon_distill/mcp_server.py",
+          0
+        ]
+      ]
+    },
+    {
+      "name": "ours:arcaeon-once",
+      "outcome": "graded",
+      "gate": 0,
+      "files": [
+        [
+          "test_mcp_server.py",
+          -1
+        ],
+        [
+          "arcaeon_once/mcp_server.py",
+          0
+        ]
+      ]
+    },
+    {
+      "name": "ours:arcaeon-continuity",
+      "outcome": "graded",
+      "gate": 0,
+      "files": [
+        [
+          "test_hardening.py",
+          -1
+        ],
+        [
+          "arcaeon_continuity/mcp_server.py",
+          0
+        ]
+      ]
+    },
+    {
+      "name": "ours:arcaeon_connector",
+      "outcome": "graded",
+      "gate": 0,
+      "files": [
+        [
+          "test_connector.py",
+          -1
+        ],
+        [
+          "arcaeon_connector/server.py",
+          0
+        ]
+      ]
+    }
+  ],
+  "no_handler_found": [
+    "io.github.elestirelbilinc-sketch/vap-e",
+    "io.github.mcp-dir/sefaz_sc_nfe-mcp",
+    "io.github.patrickbakowski/agentdilemma",
+    "io.github.KyaniteLabs/kinocut",
+    "io.github.mcp-dir/mpt_es_cnf-mcp",
+    "io.github.deriveit33z-ship-it/x402-apis",
+    "io.github.HO44-PROJECT/jmri-mcp",
+    "io.github.pipeworx-io/ibge-br",
+    "io.github.henriquepe/lousa",
+    "io.github.mrocker/social-data-mcp",
+    "io.salestouch/salestouch",
+    "io.github.codeledgerECF/codeledger",
+    "io.github.aimsise/color-engine-mcp",
+    "io.usefulapi/maptiler",
+    "io.github.ellmos-ai/ellmos-servercommander-mcp",
+    "io.github.YuliiaKovalova/dotnet-template-mcp",
+    "io.github.mrsingh86/trimtab-ais",
+    "io.github.JaviMaligno/vitamind",
+    "io.github.YGao2005/scholar-feed-mcp",
+    "io.github.frndchagas/coolify-mcp",
+    "io.github.pipeworx-io/disify",
+    "io.github.WYRE-AI/connectwise-automate-mcp",
+    "ua.com.mfoxa/catalog",
+    "io.github.Dave-London/pare-http",
+    "io.github.mcp-dir/pan-mcp",
+    "io.github.mcp-dir/buscador_google-mcp",
+    "app.pulltrader/seller-economics",
+    "io.github.rongchang726-png/vivarium",
+    "io.github.fabionfsc/nuzo-memory",
+    "io.github.Patrizzos/stylespeak",
+    "io.github.pipeworx-io/currencyformat",
+    "io.github.cyanheads/paleobiology-mcp-server",
+    "io.github.team-telnyx/telnyx",
+    "xyz.558686.gpt55/token-gateway",
+    "io.github.varvararatta/texttospeech_mcp",
+    "io.github.mcp-dir/notebooklm-mcp",
+    "io.github.sseshachala/agent-booster",
+    "io.tooloracle/accessoracle",
+    "io.github.saidutt46/domain-check",
+    "io.github.Servosity/pax8-mcp",
+    "io.github.pipeworx-io/postscript",
+    "com.agishub/timezone-toolkit",
+    "io.github.NabheetCloud/wa-chat-reader",
+    "com.dialfetch/dialfetch",
+    "io.github.cyanheads/gnomad-genetics-mcp-server",
+    "ai.trendsmcp/app-store",
+    "chat.mumo/mcp",
+    "io.github.pipeworx-io/timeapi-io",
+    "io.github.ictinnovations/ictcontact-mcp"
+  ],
+  "clone_failed": [
+    [
+      "com.dintak/dintak-mcp-gateway",
+      "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+    ],
+    [
+      "io.github.labacacia/banyan-memory",
+      "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+    ],
+    [
+      "app.wishpool/hungary-payments-mcp",
+      "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+    ],
+    [
+      "app.wishpool/tanzania-payments-mcp",
+      "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+    ],
+    [
+      "io.github.CSOAI-ORG/mcp-scorecard-mcp",
+      "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+    ],
+    [
+      "io.github.jobrayan/codmir",
+      "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+    ],
+    [
+      "io.github.MilnaOS/kilonova-mcp",
+      "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+    ],
+    [
+      "io.github.usy-pawel/agent-factory",
+      "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+    ],
+    [
+      "app.wishpool/poland-payments-mcp",
+      "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+    ],
+    [
+      "io.github.scizuixiangsis/tapd-mcp-server",
+      "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+    ],
+    [
+      "com.trip1/mcp",
+      "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+    ],
+    [
+      "io.github.tylerscomic-lab/cron-schedule-audit-mcp",
+      "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+    ],
+    [
+      "com.rqmtechnologies/studio",
+      "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+    ],
+    [
+      "com.renacerpsicologico/renacer-psicologico",
+      "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+    ],
+    [
+      "io.github.LouisVanh/tutoring",
+      "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+    ],
+    [
+      "io.github.jazib/homebase",
+      "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+    ],
+    [
+      "io.github.dalisecurity/fray",
+      "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+    ],
+    [
+      "com.citationsafe/verifier",
+      "fatal: could not read Username for 'https://github.com': terminal prompts disabled"
+    ]
+  ],
+  "schema": 1,
+  "exclusions": {
+    "headline_denominator": {
+      "n": 33,
+      "what": "sample repos where a handler file was found and the audit-record check applied"
+    },
+    "excluded_from_headline": [
+      {
+        "what": "ours",
+        "n": 5,
+        "why": "our own servers, graded with the same code, reported first and outside the sample"
+      },
+      {
+        "what": "no-handler-found",
+        "n": 49,
+        "why": "cloned, but no file with a handler marker the scanner knows; our blindness, not their fault"
+      },
+      {
+        "what": "clone-failed",
+        "n": 18,
+        "why": "private or deleted repository; nothing to read"
+      },
+      {
+        "what": "frame-not-sampled",
+        "n": 19929,
+        "why": "gradable:repo servers outside the seeded sample of 100"
+      },
+      {
+        "what": "gradable:package-only",
+        "n": 605,
+        "why": "a package but no repository URL; not graded in v1"
+      },
+      {
+        "what": "ungradable:remote-only",
+        "n": 5509,
+        "why": "a URL and nothing else; a source scanner cannot see it"
+      },
+      {
+        "what": "ungradable:no-source-no-remote",
+        "n": 54,
+        "why": "registry row with neither source nor remote"
+      }
+    ]
+  },
+  "battery_digest": "unrecorded:run-predates-schema-1",
+  "battery_digest_at_backfill": "c9ad2c092c0282fae6dca6a667809676f1d078fc9baa30a70008664bd15e1572",
+  "checks_run_by_lang": {
+    "py": [
+      "unsafe-exec",
+      "unsafe-deser",
+      "ssrf",
+      "path-traversal",
+      "zero-auth",
+      "secret-in-code",
+      "audit-record",
+      "unreceipted-allow"
+    ],
+    "ts": [
+      "audit-record"
+    ]
+  },
+  "no_handler_found_split": {
+    "unsupported-language": 0,
+    "monorepo-miss": 0,
+    "no-handler": 0,
+    "unclassified:pre-M20-row": 49
+  },
+  "no_handler_found_split_note": "rows graded before M20 carry no repo_markers/manifest_dirs/scanned_dirs, so the historical no-handler-found rows cannot be split; they are counted as unclassified and the three reasons are 0 until a re-run.",
+  "backfill_note": "schema 1 keys added 2026-09-02T2322Z by bench/summary_schema.py --backfill; no pre-existing key changed. battery_digest is unrecorded because the run predates the field; battery_digest_at_backfill is the working tree at backfill time, which is NOT the tree that graded."
+}

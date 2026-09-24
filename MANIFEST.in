@@ -1,0 +1,7 @@
+# The sdist is the package, not the repo: setuptools would otherwise pull in
+# tests/test*.py by default. The tests live in the repo, not the download.
+prune tests
+prune tools
+exclude conftest.py
+exclude MIGRATION.md
+prune registry

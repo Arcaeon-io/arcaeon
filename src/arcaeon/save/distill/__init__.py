@@ -1,0 +1,1057 @@
+"""arcaeon_distill — a deterministic tool-output distiller for AI agents.
+
+Tool calls come back huge: a 50k-token API dump, a 900-row query result, a
+search response nobody asked to read in full. `distill()` compacts it under a
+budget, **the same way every time** — same input, same budget, byte-identical
+output, every run, every machine. That determinism is not a nicety here, it
+is the entire engineering point (read "Why deterministic," below, before the
+feature list).
+
+    from arcaeon.save.distill import distill
+
+    result = distill(big_json_blob, budget=500)
+    result.content          # the compacted structure, keys kept, values capped
+    result.receipt          # a DropReceipt: prove what got cut, and by how much
+
+Three built-in strategies, picked automatically from the input's shape (or
+forced with `schema_hint`):
+
+  - **json**    dict/list input (or a str that parses as JSON). Every key of
+                a RETAINED value is kept — a dict/list element cut whole by
+                truncation takes its keys with it (see "list_truncated" /
+                "dict_truncated" below); long string values are truncated
+                with a "+N more chars" count; long list values keep a
+                head/tail slice with a "...+N more items" marker in place of
+                the middle; a wide dict (many keys — an id->status map, a
+                flat config) keeps a head/tail slice of KEYS the same way,
+                with a "__distilled_dropped_keys__" count marker.
+  - **tabular** list-of-dicts, list-of-lists, or CSV/TSV/markdown-table text.
+                Keeps the header, a head slice and a tail slice of rows, and
+                a dropped-row count in between.
+  - **text**    free text. Deterministic EXTRACTIVE sentence selection —
+                score by position (lead + conclusion weighted) and, if a
+                `query` is given, keyword overlap with it — not an LLM call.
+                Kept sentences are reassembled in their ORIGINAL order with a
+                gap marker where sentences were cut, so the surviving text
+                still reads as prose, not a scrambled highlight reel.
+
+Why deterministic (read this before anything else)
+----------------------------------------------------
+A July 2026 paper, "Token Reduction Is Not Cost Reduction" (arXiv 2607.12161),
+measured three token-reduction approaches against an unmodified Claude Code
+baseline and found the aggressive setup cut delivered tool-output tokens by
+38.4% while INCREASING billed cost by 6.8%. The mechanism: providers bill
+prompt-cache creates and reads, not raw token count, and a compressor whose
+output shifts from call to call — even for the *same* underlying tool result
+— invalidates the cached prefix and forces a full cache-write on every turn.
+Aggressive, non-deterministic pruning also changed agent trajectories:
+extra retrieval/diagnosis/testing turns that ate the local token savings, and
+on one benchmark subset, aggressive compression *reduced* successful task
+completion.
+
+So `distill()` is built around one hard constraint: **the same input at the
+same budget always produces byte-identical output.** No LLM on the hot path
+(nothing to be nondeterministic about), no wall-clock or random tie-breaking
+anywhere in the ranking or truncation logic, no dict-order dependence beyond
+what the input itself already fixes. This does not make distillation free —
+a shorter tool result is still a shorter prefix than the un-distilled one,
+which is its own cache consideration — but it makes distillation *cache-
+stable*: call it on the same tool output twice and the provider's cache sees
+the same bytes twice, not a new prefix to bill for.
+
+This library makes NO cost-savings claim. It is positioned on context-budget
+headroom and task reliability (fitting more real signal in the window, fewer
+truncation-driven failures) — read the non-proofs below and in the README
+before assuming "fewer tokens" means "cheaper."
+
+The honesty hook: the drop receipt
+-----------------------------------
+Deterministic extraction is not semantic understanding — it can drop the one
+line that mattered. That is exactly why every `distill()` call can produce a
+`DropReceipt`: a digest of the full input, a digest of the distilled output,
+and a manifest of exactly what got cut (by path/location, byte count, and a
+digest of the cut content) — so a receiving agent can look at the receipt,
+decide the drop looks load-bearing, and go re-fetch the original. A silent
+distiller loses data quietly; this one says out loud that it lost anything
+at all, and the receipt becomes tamper-evident once you `seal()` it onto a
+ledger (an unsealed receipt is a plain dict; `verify_receipt` checks its
+shape, not its provenance). "Distill, but keep the receipt."
+
+Non-proofs — read before the features
+--------------------------------------
+1. Does NOT guarantee cost reduction. See "Why deterministic," above — token
+   count and billed cost are only weakly correlated under prompt caching
+   (arXiv 2607.12161 measured Pearson r = 0.15). This library's claim is
+   context-budget headroom and reliability, never a dollar figure.
+2. Deterministic extraction is not semantic understanding. Position+keyword
+   sentence ranking, head/tail row slicing, and length-based value truncation
+   are mechanical rules. They will, sometimes, cut the one fact that mattered
+   — the drop receipt exists because that failure mode is real, not
+   hypothetical, and the honest fix is provable recovery, not a promise it
+   won't happen.
+3. Budget is best-effort, not a hard cap on pathological input. `distill()`
+   shrinks its internal caps across a bounded number of passes and stops;
+   deeply nested structures, single enormous atomic values (one 10MB string
+   with no natural cut point below the minimum floor), or degenerate inputs
+   can land over budget. It will never loop forever chasing an unreachable
+   target, and it will never re-run the shrink loop a different number of
+   times for the same input (determinism holds even when the budget isn't
+   hit) — but it does not promise the number never overshoots.
+
+Stdlib only. `arcaeon_ledger` is an optional dependency, imported only if you
+call `DropReceipt.seal()` to chain a receipt onto a tamper-evident ledger.
+MIT.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Optional
+
+__version__ = "0.1.7"
+__all__ = [
+    "distill", "estimate_tokens", "DistilledResult", "DropReceipt",
+    "verify_receipt", "SCHEMA",
+]
+
+SCHEMA = "arcaeon-distill:receipt:v1"
+
+# ---------------------------------------------------------------------------
+# digests — self-describing, compatible with arcaeon-ledger's format
+# (`sha256:<recipe>:<version>:<hex>`) so a receipt travels cleanly into an
+# arcaeon-ledger/arcaeon-compact chain, but arcaeon_distill never REQUIRES
+# arcaeon_ledger to be installed: it falls back to computing the identical
+# format itself.
+# ---------------------------------------------------------------------------
+
+# Both digests are the row format's; one copy, in arcaeon.record.row.
+from arcaeon.record.row import digest_bytes as _digest_bytes_raw  # noqa: E402
+from arcaeon.record.row import digest_json as _digest_json_c14n  # noqa: E402
+
+
+def _digest_value(v: Any) -> str:
+    """Digest ANY value with the same type rule arcaeon-compact freezes:
+    bytes -> raw-bytes of the bytes as-is; str -> raw-bytes of UTF-8;
+    anything else -> json-c14n of the canonicalized value."""
+    if isinstance(v, (bytes, bytearray)):
+        return _digest_bytes_raw(bytes(v))
+    if isinstance(v, str):
+        return _digest_bytes_raw(v.encode("utf-8"))
+    return _digest_json_c14n(v)
+
+
+#: The exact body this package's two digest recipes produce: sha256's
+#: `hexdigest()`, which is always 64 lowercase hex characters. Pinned as a
+#: character set rather than `int(_, 16)` because int() is a NUMBER parser, not
+#: a hex-string validator: it accepts `0x` prefixes, `+`/`-` signs, `_` digit
+#: separators, surrounding whitespace, and every Unicode decimal digit. Each of
+#: those made a forged digest "well-formed" while the failure note claimed to
+#: have checked that it was a self-describing digest.
+_HEX64 = re.compile(r"\A[0-9a-f]{64}\Z")
+
+
+def _well_formed(digest: Any) -> bool:
+    """Structural check on a self-describing digest string.
+
+    Structural ONLY: it proves the string has the shape this package emits,
+    never that the digest describes any particular content. `verify_receipt`
+    says so in its own `verified_scope`. But the shape check has to be real, or
+    the note it emits on failure describes a property nobody tested.
+    """
+    parts = digest.split(":") if isinstance(digest, str) else []
+    if len(parts) != 4 or not all(parts):
+        return False
+    algo, _recipe, _version, body = parts
+    return algo == "sha256" and bool(_HEX64.match(body))
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# ---------------------------------------------------------------------------
+# estimate_tokens — a cheap, documented heuristic. NOT a real tokenizer.
+# ---------------------------------------------------------------------------
+
+def estimate_tokens(data: Any) -> int:
+    """Approximate token count: ~1 token per 4 characters.
+
+    This is a heuristic, not a tokenizer call — no dependency, no model-
+    specific vocabulary, no encoding table. It will be wrong, sometimes by a
+    lot, on code, non-English text, and highly repetitive strings. Use it to
+    size a budget cheaply, never to predict a bill.
+    """
+    if data is None:
+        return 0
+    if isinstance(data, (dict, list)):
+        text = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    elif isinstance(data, (bytes, bytearray)):
+        text = bytes(data).decode("utf-8", errors="replace")
+    elif isinstance(data, str):
+        text = data
+    else:
+        text = str(data)
+    if not text:
+        return 0
+    return max(1, len(text) // 4)
+
+
+def _char_budget(token_budget: int) -> int:
+    """Convert a token budget to the char budget the strategies work in."""
+    return max(1, token_budget * 4)
+
+
+# ---------------------------------------------------------------------------
+# DropReceipt — the honesty hook
+# ---------------------------------------------------------------------------
+
+@dataclass
+class DropReceipt:
+    """What `distill()` cut, provably.
+
+    `drops` is a list of dicts, each:
+      {"kind": "string_truncated" | "list_truncated" | "dict_truncated"
+               | "rows_dropped" | "sentences_dropped",
+       "path": <str, best-effort location: a JSON-path-ish string,
+                a row range, or "text">,
+       "digest": <self-describing digest of the CUT content, so a holder of
+                  the original can prove a specific drop belongs to it>,
+       "dropped_bytes": <int>,
+       "dropped_count": <int, item/row/char count as appropriate>}
+
+    Each per-drop digest is of the DROPPED content only. The receipt ALSO
+    carries a one-way digest of the full input (`full.digest`) and of the
+    distilled output (`distilled.digest`); no content is ever carried
+    verbatim. These are hashes, not encryption: `full.digest` is a
+    confirmation oracle, so any low-entropy part of the input (a short code,
+    a boolean, a value from a known small set) is brute-forceable from the
+    receipt whether it was kept or cut. Ship a receipt freely when the
+    input's unknown parts are high-entropy; treat it as sensitively as the
+    input when they are not.
+    """
+    schema: str
+    strategy: str
+    budget_tokens: int
+    full: dict
+    distilled: dict
+    drops: list
+    truncated: bool
+    created_at: str = field(default_factory=_now_iso)
+
+    def to_dict(self) -> dict:
+        return {
+            "schema": self.schema,
+            "strategy": self.strategy,
+            "budget_tokens": self.budget_tokens,
+            "full": self.full,
+            "distilled": self.distilled,
+            "drops": self.drops,
+            "truncated": self.truncated,
+            "created_at": self.created_at,
+        }
+
+    def seal(self, ledger_path, *, distiller: str = "arcaeon-distill") -> dict:
+        """Chain this receipt onto an arcaeon-ledger log (optional dependency).
+
+        Raises ImportError with a clear message if arcaeon_ledger isn't
+        installed — this method is the ONLY place in the package that needs
+        it; distill() itself never requires it.
+        """
+        try:
+            from arcaeon.record.ledger import Ledger  # type: ignore
+        except ImportError as e:
+            raise ImportError(
+                "DropReceipt.seal() requires arcaeon-ledger "
+                "(pip install arcaeon-ledger) — distill() itself does not."
+            ) from e
+        row = self.to_dict()
+        row["kind"] = "distill_receipt"
+        row["distiller"] = distiller
+        # Stamp ts BEFORE append (mirrors arcaeon_compact's seal, H-int-1
+        # 2026-08-16): Ledger.append() copies its input and setdefault-stamps
+        # `ts` on the COPY, so an unstamped caller's row silently diverges from
+        # the stored/hashed row — an honest receipt then FAILS an independent
+        # recomputation of the published chain formula (false integrity
+        # failure, caller-side only). Pre-stamping makes append's setdefault a
+        # no-op, so the returned row is byte-identical to what was chained.
+        # Same "%Y-%m-%dT%H:%M:%SZ" format as arcaeon_ledger._now_iso().
+        row["ts"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        row["chain"] = Ledger(ledger_path).append(row)
+        return row
+
+
+def verify_receipt(receipt: "DropReceipt | dict") -> dict:
+    """Self-consistency check over a DropReceipt (or its dict / sealed row).
+
+    Checks: known schema, well-formed digests throughout, non-negative
+    counts, and that `truncated` agrees with whether `drops` is non-empty.
+    Does not (cannot, without the original content) re-derive the drops from
+    scratch — that would require holding the full input, which the receipt
+    deliberately never carries. Compare `full.digest` against a digest of
+    content you hold to confirm the receipt describes YOUR input.
+
+    Returns {"ok": bool, "verified_scope": <str>, "notes": [<str>, ...]}.
+
+    `verified_scope` names what the `ok` above is actually about, because a
+    bare `ok: True` reads as "this receipt is verified" and this function
+    cannot mean that:
+
+      * ``"structural_only"``  the receipt's SHAPE is self-consistent. Digests
+        were checked for well-formedness, never against content -- a receipt
+        whose digests are plausible fabrications passes here, by design and by
+        necessity. To check content, digest what you hold and compare it to
+        `full.digest` yourself.
+      * ``"unknown_schema"``   a schema this build does not know; nothing was
+        checked (`ok` is False so callers fail safe, but the note distinguishes
+        "could not check" from "found a fault").
+      * ``"malformed"``        required keys are missing or the wrong shape
+        (not an object where an object is required, `drops` not a list of
+        objects); nothing was checked.
+
+    This function never raises on a bad receipt (0.1.6). It is the thing a
+    caller points at an UNTRUSTED receipt -- a row read back from a file, a
+    receipt handed over by another agent -- and a verifier that died with an
+    AttributeError on ``{"full": "x"}`` instead of saying "malformed" had
+    turned a fail-safe into a crash.
+    """
+    notes: list = []
+    malformed = {"ok": False, "verified_scope": "malformed", "notes": notes}
+    if isinstance(receipt, DropReceipt):
+        row = receipt.to_dict()
+    elif isinstance(receipt, Mapping):
+        row = dict(receipt)
+    else:
+        notes.append(f"malformed receipt: expected an object, got "
+                     f"{type(receipt).__name__}")
+        return malformed
+    if row.get("schema") != SCHEMA:
+        notes.append(f"unknown schema {row.get('schema')!r} — cannot verify")
+        return {"ok": False, "verified_scope": "unknown_schema", "notes": notes}
+    try:
+        full, distilled, drops = row["full"], row["distilled"], row["drops"]
+        truncated = row["truncated"]
+    except KeyError as e:
+        notes.append(f"malformed receipt: missing {e}")
+        return malformed
+    for label, obj in (("full", full), ("distilled", distilled)):
+        if not isinstance(obj, dict):
+            notes.append(f"malformed receipt: {label} must be an object, got "
+                         f"{type(obj).__name__}")
+            return malformed
+    if not isinstance(drops, list) or not all(isinstance(dr, dict) for dr in drops):
+        notes.append("malformed receipt: drops must be a list of objects")
+        return malformed
+
+    ok = True
+    for label, d in [("full.digest", full.get("digest")),
+                      ("distilled.digest", distilled.get("digest"))] + \
+                     [(f"drops[{i}].digest", dr.get("digest"))
+                      for i, dr in enumerate(drops)]:
+        if not _well_formed(d):
+            ok = False
+            notes.append(f"{label} is not a well-formed self-describing digest")
+    # D-1 (verdict-field audit 2026-08-20, fixed 2026-08-24): the docstring
+    # above has always claimed "non-negative counts" are checked, but this
+    # loop only ever validated dropped_bytes — dropped_count, advertised in
+    # DropReceipt's own schema comment as part of every drop, was never
+    # examined: a receipt with dropped_count=-5, a string, or the key absent
+    # entirely still stamped "self-consistent". Booleans are explicitly
+    # rejected (isinstance(True, int) is True in Python; a count of `True`
+    # is a malformed receipt, not a count of one).
+    for label, n in [("full.bytes", full.get("bytes")),
+                      ("distilled.bytes", distilled.get("bytes"))] + \
+                     [(f"drops[{i}].dropped_bytes", dr.get("dropped_bytes"))
+                      for i, dr in enumerate(drops)] + \
+                     [(f"drops[{i}].dropped_count", dr.get("dropped_count"))
+                      for i, dr in enumerate(drops)]:
+        if not (isinstance(n, int) and not isinstance(n, bool) and n >= 0):
+            ok = False
+            notes.append(f"{label} must be a non-negative integer")
+    if bool(drops) != bool(truncated):
+        ok = False
+        notes.append(
+            f"truncated={truncated!r} disagrees with drops "
+            f"({'non-empty' if drops else 'empty'}) — receipt is inconsistent")
+    if ok:
+        notes.append("self-consistent")
+    # Say the limit out loud, in the object the caller reads. The docstring has
+    # always disclosed it; the RETURN VALUE did not, and `ok` is what gets
+    # branched on. A structural pass is not a content proof.
+    notes.append("scope=structural_only: shape and digest form only; this check "
+                 "does not re-derive the drops or bind any digest to content")
+    return {"ok": ok, "verified_scope": "structural_only", "notes": notes}
+
+
+def _receipt_full(full_value: Any) -> dict:
+    if isinstance(full_value, (bytes, bytearray)):
+        b = bytes(full_value)
+    elif isinstance(full_value, str):
+        b = full_value.encode("utf-8")
+    else:
+        b = json.dumps(full_value, sort_keys=True, separators=(",", ":"),
+                        ensure_ascii=False, allow_nan=False).encode("utf-8")
+    return {"digest": _digest_value(full_value), "bytes": len(b)}
+
+
+# ---------------------------------------------------------------------------
+# DistilledResult
+# ---------------------------------------------------------------------------
+
+@dataclass
+class DistilledResult:
+    content: Any
+    strategy: str
+    budget_tokens: int
+    est_tokens_before: int
+    est_tokens_after: int
+    truncated: bool
+    receipt: Optional[DropReceipt] = None
+
+    def __str__(self) -> str:
+        pct = (0 if self.est_tokens_before == 0 else
+               100 * (self.est_tokens_before - self.est_tokens_after) // self.est_tokens_before)
+        return (f"distilled via {self.strategy}: {self.est_tokens_before} -> "
+                f"{self.est_tokens_after} est. tokens (~{pct}% cut, budget "
+                f"{self.budget_tokens}, truncated={self.truncated})")
+
+
+# ---------------------------------------------------------------------------
+# JSON strategy
+# ---------------------------------------------------------------------------
+
+_DEFAULT_STR_CAP = 300
+_DEFAULT_LIST_CAP = 20
+_DEFAULT_DICT_CAP = 200
+_MIN_STR_CAP = 20
+_MIN_LIST_CAP = 2
+_MIN_DICT_CAP = 4
+_MAX_SHRINK_ITERS = 12
+
+# Sentinel key for the dict-breadth drop marker (M1, 2026-08-15). Chosen to
+# match the existing tabular-strategy precedent (`__distilled_dropped_rows__`)
+# rather than inventing a new naming convention. Collides only if the input
+# itself legitimately used this exact key, which is the same accepted
+# edge-case the tabular marker already carries.
+_DICT_DROP_MARKER_KEY = "__distilled_dropped_keys__"
+
+
+def _walk_json(obj: Any, str_cap: int, list_cap: int, dict_cap: int, path: str, drops: list) -> Any:
+    if isinstance(obj, dict):
+        if len(obj) > dict_cap:
+            items = list(obj.items())
+            head_n = (dict_cap + 1) // 2
+            tail_n = dict_cap - head_n
+            head = items[:head_n]
+            tail_start = len(items) - tail_n
+            tail = items[tail_start:] if tail_n else []
+            dropped_items = items[head_n:tail_start]
+            result = {k: _walk_json(v, str_cap, list_cap, dict_cap,
+                                     f"{path}.{k}" if path else str(k), drops)
+                      for k, v in head}
+            result[_DICT_DROP_MARKER_KEY] = len(dropped_items)
+            for k, v in tail:
+                result[k] = _walk_json(v, str_cap, list_cap, dict_cap,
+                                        f"{path}.{k}" if path else str(k), drops)
+            dropped_blob = dict(dropped_items)
+            drops.append({
+                "kind": "dict_truncated",
+                "path": path or "$",
+                "digest": _digest_json_c14n(dropped_blob),
+                "dropped_bytes": len(json.dumps(dropped_blob, ensure_ascii=False,
+                                                 separators=(",", ":")).encode("utf-8")),
+                "dropped_count": len(dropped_items),
+            })
+            return result
+        return {k: _walk_json(v, str_cap, list_cap, dict_cap,
+                               f"{path}.{k}" if path else str(k), drops)
+                for k, v in obj.items()}
+    if isinstance(obj, list):
+        if len(obj) > list_cap:
+            head_n = (list_cap + 1) // 2
+            tail_n = list_cap - head_n
+            head = [_walk_json(it, str_cap, list_cap, dict_cap, f"{path}[{i}]", drops)
+                    for i, it in enumerate(obj[:head_n])]
+            tail_start = len(obj) - tail_n
+            tail = [_walk_json(it, str_cap, list_cap, dict_cap, f"{path}[{tail_start + j}]", drops)
+                    for j, it in enumerate(obj[tail_start:])] if tail_n else []
+            dropped_slice = obj[head_n:tail_start]
+            marker = f"...+{len(dropped_slice)} more items"
+            drops.append({
+                "kind": "list_truncated",
+                "path": path or "$",
+                "digest": _digest_json_c14n(dropped_slice),
+                "dropped_bytes": len(json.dumps(dropped_slice, ensure_ascii=False,
+                                                 separators=(",", ":")).encode("utf-8")),
+                "dropped_count": len(dropped_slice),
+            })
+            return head + [marker] + tail
+        return [_walk_json(it, str_cap, list_cap, dict_cap, f"{path}[{i}]", drops)
+                for i, it in enumerate(obj)]
+    if isinstance(obj, str):
+        if len(obj) > str_cap:
+            cut = obj[str_cap:]
+            drops.append({
+                "kind": "string_truncated",
+                "path": path or "$",
+                "digest": _digest_bytes_raw(cut.encode("utf-8")),
+                "dropped_bytes": len(cut.encode("utf-8")),
+                "dropped_count": len(cut),
+            })
+            return obj[:str_cap] + f"...+{len(cut)} more chars"
+        return obj
+    return obj
+
+
+def _distill_json(parsed: Any, char_budget: int) -> tuple:
+    """Returns (content, drops, truncated). Shrinks caps deterministically
+    until under budget or the floor is reached; same input always walks the
+    same sequence of caps.
+
+    Shrinks `dict_cap` alongside `str_cap`/`list_cap` (M1, 2026-08-15): a
+    wide dict (many keys, e.g. an id->status map) has no cap at all in the
+    prior version, so it could land ~100x+ over budget with `truncated=False`
+    -- an honest flag (nothing WAS cut) that nonetheless misled a reader who
+    assumed json-strategy inputs stay near budget. A wide dict now truncates
+    the same way a long list does: head/tail keys kept, a
+    `__distilled_dropped_keys__` count marker in between, a `dict_truncated`
+    drop recorded.
+
+    Keeps the SMALLEST iteration seen, not just the last one (H-distill-2,
+    2026-08-16, found by property testing): with a budget small enough that
+    `char_budget` can never be reached, the loop drives `list_cap`/`dict_cap`
+    down to their floor (2 / 4) regardless of whether the container actually
+    needed cutting. A short list (e.g. 3 empty-list items, 12 chars total)
+    gets floor-capped to 2 anyway, inserting a `"...+1 more items"` marker
+    that is ITSELF longer than the one item it replaced -- content grows,
+    yet `truncated=True` is reported, which reads as "I shrank this" while
+    doing the opposite. Since every iteration is a legitimate candidate
+    output (all caps are internally consistent), returning the smallest one
+    seen is always at least as good as the naive last-iteration choice and
+    strictly better on this case; the deterministic cap sequence is
+    unchanged so this does not affect any case that already hits budget.
+    """
+    str_cap, list_cap, dict_cap = _DEFAULT_STR_CAP, _DEFAULT_LIST_CAP, _DEFAULT_DICT_CAP
+    content, drops = parsed, []
+    best = None  # (size, content, drops, truncated)
+    for _ in range(_MAX_SHRINK_ITERS):
+        drops = []
+        content = _walk_json(parsed, str_cap, list_cap, dict_cap, "", drops)
+        size = len(json.dumps(content, ensure_ascii=False, separators=(",", ":"),
+                              allow_nan=False))
+        if best is None or size < best[0]:
+            best = (size, content, drops, bool(drops))
+        if size <= char_budget or (str_cap <= _MIN_STR_CAP and list_cap <= _MIN_LIST_CAP
+                                    and dict_cap <= _MIN_DICT_CAP):
+            break
+        str_cap = max(_MIN_STR_CAP, str_cap // 2)
+        list_cap = max(_MIN_LIST_CAP, list_cap // 2)
+        dict_cap = max(_MIN_DICT_CAP, dict_cap // 2)
+    _, content, drops, truncated = best
+    return content, drops, truncated
+
+
+# ---------------------------------------------------------------------------
+# Tabular strategy
+# ---------------------------------------------------------------------------
+
+_DEFAULT_ROW_CAP = 40
+_MIN_ROW_CAP = 4
+
+
+def _is_row_list(data: Any) -> bool:
+    if not isinstance(data, list) or len(data) < 2:
+        return False
+    if all(isinstance(r, dict) for r in data):
+        return True
+    if all(isinstance(r, (list, tuple)) for r in data):
+        lens = {len(r) for r in data}
+        return len(lens) <= 2  # allow a header row of a different width
+    return False
+
+
+def _looks_tabular_text(s: str) -> bool:
+    lines = [ln for ln in s.strip("\n").split("\n") if ln.strip()]
+    if len(lines) < 3:
+        return False
+    for delim in ("\t", "|", ","):
+        counts = [ln.count(delim) for ln in lines]
+        if counts[0] > 0 and len(set(counts)) <= 2:
+            return True
+    return False
+
+
+def _distill_rows(rows: list, row_cap: int) -> tuple:
+    """rows: list of dict or list/tuple rows (uniform-ish). Returns
+    (kept_rows, dropped_row_count, dropped_digest, dropped_bytes)."""
+    if len(rows) <= row_cap:
+        return rows, 0, None, 0
+    head_n = (row_cap + 1) // 2
+    tail_n = row_cap - head_n
+    dropped = rows[head_n: len(rows) - tail_n] if tail_n else rows[head_n:]
+    kept = rows[:head_n] + (rows[len(rows) - tail_n:] if tail_n else [])
+    blob = json.dumps(dropped, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return kept, len(dropped), _digest_json_c14n(dropped), len(blob)
+
+
+def _distill_tabular_rows(data: list, char_budget: int) -> tuple:
+    row_cap = _DEFAULT_ROW_CAP
+    kept, drops = data, []
+    kept_out = kept  # guarantees a bound value if _MAX_SHRINK_ITERS were ever <= 0
+    for _ in range(_MAX_SHRINK_ITERS):
+        kept, n_dropped, digest, dbytes = _distill_rows(data, row_cap)
+        drops = []
+        if n_dropped:
+            head_n = (row_cap + 1) // 2
+            marker = {"__distilled_dropped_rows__": n_dropped} if isinstance(data[0], dict) \
+                else [f"...+{n_dropped} rows dropped..."]
+            kept_out = list(kept[:head_n]) + [marker] + list(kept[head_n:])
+            drops.append({
+                "kind": "rows_dropped", "path": "$",
+                "digest": digest, "dropped_bytes": dbytes, "dropped_count": n_dropped,
+            })
+        else:
+            kept_out = kept
+        size = len(json.dumps(kept_out, ensure_ascii=False, separators=(",", ":")))
+        if size <= char_budget or row_cap <= _MIN_ROW_CAP:
+            return kept_out, drops, bool(drops)
+        row_cap = max(_MIN_ROW_CAP, row_cap // 2)
+    return kept_out, drops, bool(drops)
+
+
+def _distill_tabular_text(s: str, char_budget: int) -> tuple:
+    # D-2 (verdict-field audit 2026-08-20, fixed 2026-08-24): strip("\n")
+    # silently DROPPED leading/trailing newlines from the returned text with
+    # no receipt row and truncated=False — unreceipted content loss in the
+    # package whose entire contract is that every dropped byte is receipted.
+    # Fix: don't drop them at all. Capture the newline affixes and restore
+    # them on every return path, so the only content that ever leaves the
+    # output is content carried in a drops[] row. The affixes count toward
+    # the budget check because they are part of the returned string.
+    lead = s[:len(s) - len(s.lstrip("\n"))]
+    trail = s[len(s.rstrip("\n")):] if s.strip("\n") else ""
+    lines = s.strip("\n").split("\n")
+    if not lines:
+        return s, [], False
+    header = lines[0]
+    # markdown table: keep a separator row (e.g. "---|---") right after header
+    body_start = 1
+    sep_line = None
+    if len(lines) > 1 and re.fullmatch(r"[\s|:-]+", lines[1]):
+        sep_line = lines[1]
+        body_start = 2
+    body = lines[body_start:]
+
+    row_cap = _DEFAULT_ROW_CAP
+    while True:
+        if len(body) <= row_cap:
+            kept_body, dropped = body, []
+        else:
+            head_n = (row_cap + 1) // 2
+            tail_n = row_cap - head_n
+            dropped = body[head_n: len(body) - tail_n] if tail_n else body[head_n:]
+            marker_line = f"...+{len(dropped)} rows dropped..."
+            kept_body = body[:head_n] + [marker_line] + (body[len(body) - tail_n:] if tail_n else [])
+        prefix = [header] + ([sep_line] if sep_line else [])
+        out = lead + "\n".join(prefix + kept_body) + trail
+        if len(out) <= char_budget or row_cap <= _MIN_ROW_CAP or not dropped:
+            drops = []
+            if dropped:
+                blob = "\n".join(dropped).encode("utf-8")
+                drops.append({
+                    "kind": "rows_dropped", "path": "$",
+                    "digest": _digest_bytes_raw(blob), "dropped_bytes": len(blob),
+                    "dropped_count": len(dropped),
+                })
+            return out, drops, bool(drops)
+        row_cap = max(_MIN_ROW_CAP, row_cap // 2)
+
+
+# ---------------------------------------------------------------------------
+# Free-text strategy — deterministic extractive selection, no LLM
+# ---------------------------------------------------------------------------
+
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
+_WORD = re.compile(r"[a-z0-9]+")
+
+
+def _split_sentences(text: str) -> list:
+    parts = [p.strip() for p in _SENTENCE_SPLIT.split(text.strip())]
+    return [p for p in parts if p]
+
+
+def _distill_text(text: str, char_budget: int, query: Optional[str]) -> tuple:
+    sentences = _split_sentences(text)
+    n = len(sentences)
+    if n == 0:
+        return text, [], False
+    if len(text) <= char_budget:
+        return text, [], False
+
+    query_words = set(_WORD.findall(query.lower())) if query else set()
+
+    def score(i: int, s: str) -> float:
+        # U-shaped position weight: MAX of closeness-to-start / closeness-to-
+        # end, so lead and conclusion sentences score high and the middle
+        # scores low (a min() here would invert this into favoring the
+        # middle — that was a bug caught by test_text_strategy_reassembles_
+        # in_original_order and is deliberately left documented, not silently
+        # fixed-and-forgotten).
+        pos = max(1.0 / (i + 1), 1.0 / (n - i))
+        overlap = len(query_words & set(_WORD.findall(s.lower()))) if query_words else 0
+        return pos + 2.0 * overlap
+
+    # deterministic ranking: score desc, tie-break by ascending index
+    ranked = sorted(range(n), key=lambda i: (-score(i, sentences[i]), i))
+
+    kept_idx = set()
+    used = 0
+    # marker overhead budgeted conservatively per gap; recomputed after selection
+    for i in ranked:
+        cost = len(sentences[i]) + 1
+        if used + cost > char_budget and kept_idx:
+            continue
+        kept_idx.add(i)
+        used += cost
+        if used >= char_budget:
+            break
+    if not kept_idx:
+        kept_idx = {ranked[0]}
+
+    pieces = []
+    dropped_runs = []
+    cur_run = []
+    prev = -2
+    for i in range(n):
+        if i in kept_idx:
+            if cur_run:
+                dropped_runs.append(cur_run)
+                cur_run = []
+            if prev != -2 and i != prev + 1:
+                pieces.append("[...]")
+            pieces.append(sentences[i])
+            prev = i
+        else:
+            cur_run.append(sentences[i])
+    if cur_run:
+        dropped_runs.append(cur_run)
+
+    out = " ".join(pieces)
+    dropped_sentences = [s for i, s in enumerate(sentences) if i not in kept_idx]
+    drops = []
+    if dropped_sentences:
+        blob = " ".join(dropped_sentences).encode("utf-8")
+        drops.append({
+            "kind": "sentences_dropped", "path": "text",
+            "digest": _digest_bytes_raw(blob), "dropped_bytes": len(blob),
+            "dropped_count": len(dropped_sentences),
+        })
+    return out, drops, bool(drops)
+
+
+# ---------------------------------------------------------------------------
+# distill() — the public entry point
+# ---------------------------------------------------------------------------
+
+_VALID_HINTS = {"json", "tabular", "text"}
+
+
+def _detect_strategy(tool_output: Any, schema_hint: Optional[str]) -> tuple:
+    """Returns (strategy_name, working_value). working_value is the parsed
+    form the chosen strategy operates on (e.g. a str parsed to dict for json
+    hint applied to a JSON string).
+
+    bytes/bytearray input (H-distill-1, 2026-08-16): the module docstring's
+    Args section and `_reject_undistillable` both document/admit raw bytes as
+    a valid top-level input -- `_digest_value` even has a dedicated bytes
+    branch -- but this function had no bytes case and fell through to the
+    generic TypeError, so `distill(b"...", budget=...)` always raised,
+    contradicting the documented contract on every call. Decode to str
+    up front (UTF-8, the only encoding this package can be deterministic
+    about) and let it flow through the existing str-detection logic so
+    schema_hint continues to behave identically for bytes and str input.
+    Non-UTF-8 bytes get a clear, typed error instead of a downstream
+    json.dumps TypeError from deep inside a strategy.
+    """
+    if isinstance(tool_output, (bytes, bytearray)):
+        try:
+            tool_output = bytes(tool_output).decode("utf-8")
+        except UnicodeDecodeError as e:
+            raise ValueError(
+                f"distill() cannot accept bytes that are not valid UTF-8 "
+                f"text ({e}); decode it yourself first") from e
+
+    if schema_hint is not None:
+        if schema_hint not in _VALID_HINTS:
+            raise ValueError(f"schema_hint must be one of {sorted(_VALID_HINTS)}, got {schema_hint!r}")
+        if schema_hint == "json" and isinstance(tool_output, str):
+            try:
+                return "json", json.loads(tool_output)
+            except ValueError:
+                raise ValueError("schema_hint='json' but tool_output is not valid JSON text")
+        return schema_hint, tool_output
+
+    if isinstance(tool_output, (dict, list)):
+        if isinstance(tool_output, list) and _is_row_list(tool_output):
+            return "tabular", tool_output
+        return "json", tool_output
+
+    if isinstance(tool_output, str):
+        stripped = tool_output.strip()
+        if stripped[:1] in "{[":
+            try:
+                parsed = json.loads(stripped)
+                if isinstance(parsed, list) and _is_row_list(parsed):
+                    return "tabular", parsed
+                return "json", parsed
+            except ValueError:
+                pass
+        if _looks_tabular_text(tool_output):
+            return "tabular", tool_output
+        return "text", tool_output
+
+    # Anything left is a type `_reject_undistillable` should already have
+    # refused; str() is NOT a safe fallback here (object.__repr__ carries a
+    # heap address). Fail loudly rather than emit a value that changes on the
+    # next run.
+    raise TypeError(
+        f"distill() cannot accept {type(tool_output).__name__}: no "
+        f"deterministic serialization. Convert to JSON-compatible types "
+        f"or str() it yourself.")
+
+
+# ---------------------------------------------------------------------------
+# Input admission — the determinism contract's front door
+# ---------------------------------------------------------------------------
+# The load-bearing public claim is byte-identical output for the same input,
+# every run, every machine, so the cache in front of this never busts. Three
+# input shapes broke that claim silently, and no threshold or code path
+# downstream can repair them, so they are refused here instead:
+#
+#   1. An arbitrary object fell through to `str(obj)`, and object.__repr__
+#      embeds a heap address. ASLR changes it on EVERY run, so that documented
+#      path violated the contract 100% of the time.
+#   2. A set/frozenset iterates in PYTHONHASHSEED order, so its str() differs
+#      across processes -- the textbook nondeterminism this package's own
+#      determinism guard names and cannot reach (its worker transport is JSON,
+#      and a set can't cross it).
+#   3. A non-str dict key is coerced to a string by json.dumps, so {1: "a"}
+#      and {"1": "a"} -- unequal inputs -- produce the SAME receipt digest.
+#      The receipt's whole job is proving which output it describes.
+#
+# NaN/Infinity are refused too: they are not JSON, and the package disagreed
+# with itself about them (receipt=True raised, receipt=False emitted invalid
+# JSON into an agent's context).
+
+_JSON_SCALARS = (str, int, float, bool)
+
+# Sentinel pushed onto the admission-walk stack to mark "all children of this
+# container have been queued; when THIS comes back off the stack, the
+# container's subtree is fully explored." Paired with `on_path` below, it
+# turns a flat "have we ever seen this id" set (which can never tell a true
+# cycle from a value referenced twice) into a real per-branch ancestor set.
+_EXIT_MARKER = object()
+
+
+def _reject_surrogates(s: str, at: str) -> None:
+    """Refuse a str that cannot be encoded as UTF-8 (a lone surrogate, e.g.
+    from `surrogateescape` decoding of undecodable subprocess bytes, or a
+    JSON text escape for U+D800). Such a string has no byte serialization
+    at all, so with receipt=True the digest step died deep inside `.encode()`
+    with a UnicodeEncodeError while receipt=False silently returned the
+    string -- the two switches disagreed about whether the input was
+    admissible (0.1.6). Refused once, at the door, naming the path.
+    """
+    if s.isascii():
+        return
+    try:
+        s.encode("utf-8")
+    except UnicodeEncodeError as e:
+        raise ValueError(
+            f"{at}: str contains a lone surrogate (U+{ord(s[e.start]):04X} at "
+            f"index {e.start}) and cannot be encoded as UTF-8, so it has no "
+            f"stable serialization; re-decode the source with "
+            f"errors='replace' first") from None
+
+
+def _reject_undistillable(value: Any, path: str = "input") -> None:
+    """Raise TypeError/ValueError on input with no deterministic serialization.
+
+    Checked once at the door rather than five levels down inside `json`, so
+    the failure names the offending path and says what to do about it.
+
+    Cycle vs. shared reference (H2, 2026-08-15): a prior version tracked one
+    global `seen` set of `id(v)` that was never popped, so ANY value visited
+    twice — including a legitimate shared reference like
+    `x = [1, 2, 3]; {"a": x, "b": x}`, which `json.dumps` handles fine — was
+    refused as "a reference cycle." That message was false: the input wasn't
+    cyclic, it was a DAG. The fix tracks two sets instead of one:
+      - `on_path`: ids of containers on the CURRENT DFS branch (real
+        ancestors). A hit here means `v` contains itself — an actual cycle.
+      - `cleared`: ids of containers already walked clean via SOME branch.
+        A hit here is a shared reference: safe, and skipped rather than
+        re-walked, so a value referenced N times isn't re-verified N times
+        (avoids exponential blowup on a diamond-shaped/heavily-shared DAG).
+    An id enters `on_path` when a container starts being processed and
+    leaves it via its `_EXIT_MARKER` popping back off the stack — i.e. only
+    once every descendant has been queued. Because the walk is iterative
+    (not recursive), that hand-off point has to be represented explicitly on
+    the stack rather than falling out of a function return.
+    """
+    stack = [(value, path)]
+    on_path: set = set()
+    cleared: set = set()
+    while stack:
+        v, at = stack.pop()
+        if v is _EXIT_MARKER:
+            on_path.discard(at)  # `at` holds the id for an exit frame
+            cleared.add(at)
+            continue
+        if isinstance(v, str):
+            _reject_surrogates(v, at)
+            continue
+        if v is None or isinstance(v, (bytes, bytearray, bool)):
+            continue
+        if isinstance(v, int):
+            continue
+        if isinstance(v, float):
+            if v != v or v in (float("inf"), float("-inf")):
+                raise ValueError(
+                    f"{at}: NaN/Infinity is not JSON and has no stable "
+                    f"serialization; use None or a string instead")
+            continue
+        if isinstance(v, (dict, list, tuple)):
+            vid = id(v)
+            if vid in on_path:
+                raise ValueError(f"{at}: input contains a reference cycle")
+            if vid in cleared:
+                continue  # already verified via another path -- shared ref
+            on_path.add(vid)
+            stack.append((_EXIT_MARKER, vid))
+            if isinstance(v, dict):
+                for k, sub in v.items():
+                    if not isinstance(k, str):
+                        raise TypeError(
+                            f"{at}: dict key {k!r} is {type(k).__name__}, not str. "
+                            f"json canonicalization coerces it to a string, so "
+                            f"{{1: x}} and {{'1': x}} would share one receipt "
+                            f"digest. Convert the keys first.")
+                    _reject_surrogates(k, f"{at} key {k!r}")
+                    stack.append((sub, f"{at}[{k!r}]"))
+            else:
+                for i, sub in enumerate(v):
+                    stack.append((sub, f"{at}[{i}]"))
+            continue
+        if isinstance(v, (set, frozenset)):
+            raise TypeError(
+                f"{at}: {type(v).__name__} iterates in PYTHONHASHSEED order, "
+                f"so its distilled output differs across processes. Pass "
+                f"sorted(...) instead.")
+        raise TypeError(
+            f"{at}: {type(v).__name__} has no deterministic serialization "
+            f"(its repr embeds a heap address, which changes every run). "
+            f"Convert to JSON-compatible types or str() it yourself.")
+
+
+def distill(tool_output: Any, *, budget: int = 2000,
+            schema_hint: Optional[str] = None,
+            query: Optional[str] = None,
+            receipt: bool = True) -> DistilledResult:
+    """Deterministically compact `tool_output` under `budget` (tokens, approx).
+
+    Args:
+        tool_output: a dict/list of JSON-compatible values (str keys only), a
+            str (JSON text, CSV/TSV/markdown table, or free text), or bytes.
+            Anything with no deterministic serialization — an arbitrary
+            object, a set, a non-str dict key, NaN/Infinity — is refused with
+            a typed error rather than distilled into output that changes on
+            the next run. See `_reject_undistillable`.
+        budget: approximate token budget (see `estimate_tokens` — heuristic,
+            not a real tokenizer). Converted internally to a char budget.
+        schema_hint: force "json" | "tabular" | "text" instead of
+            auto-detecting from the input's shape.
+        query: optional relevance string for the text strategy's sentence
+            ranking (keyword overlap). Ignored by the json/tabular strategies.
+        receipt: compute a DropReceipt (cheap stdlib hashing). Set False to
+            skip the extra digesting on a hot path that doesn't need it.
+
+    Returns a DistilledResult. Same (tool_output, budget, schema_hint, query)
+    always returns the same `.content`, byte-for-byte — that determinism is
+    the product; see the module docstring for why.
+    """
+    if budget <= 0:
+        raise ValueError("budget must be a positive integer (tokens)")
+    try:
+        return _distill_admitted(tool_output, budget, schema_hint, query, receipt)
+    except RecursionError:
+        # Nesting past what this process's stack can walk (json.loads, the
+        # JSON walker and json.dumps are all recursive). A raw RecursionError
+        # escaping a library that promises to refuse bad input "at the door"
+        # is a crash, not a refusal (0.1.6). The exact depth that trips this
+        # depends on sys.getrecursionlimit() and the caller's own stack.
+        raise ValueError(
+            "input nests deeper than this process can distill (it exhausted "
+            "the recursion limit); flatten it or raise sys.setrecursionlimit") from None
+
+
+def _distill_admitted(tool_output: Any, budget: int, schema_hint: Optional[str],
+                      query: Optional[str], receipt: bool) -> DistilledResult:
+    _reject_undistillable(tool_output)
+
+    strategy, working = _detect_strategy(tool_output, schema_hint)
+    if working is not tool_output:
+        # `working` was parsed out of JSON text. json.loads admits what the
+        # door refuses -- the NaN/Infinity tokens, and escapes that decode to
+        # lone surrogates -- so the parsed value gets the same admission
+        # check, and the same path-named refusal, as a Python object would
+        # (0.1.6). Skipped when they are the same object.
+        _reject_undistillable(working)
+    char_budget = _char_budget(budget)
+
+    if strategy == "json":
+        content, drops, truncated = _distill_json(working, char_budget)
+    elif strategy == "tabular":
+        if isinstance(working, str):
+            content, drops, truncated = _distill_tabular_text(working, char_budget)
+        elif not isinstance(working, (list, tuple)):
+            # list(a_dict) yields its KEYS: schema_hint="tabular" on a dict
+            # silently distilled the key names and threw away every value,
+            # with truncated=False, an empty drop list, and a receipt that
+            # verified ok. Total data loss, affirmatively certified.
+            raise TypeError(
+                f"schema_hint='tabular' needs a list of row dicts or table "
+                f"text, got {type(working).__name__}")
+        else:
+            content, drops, truncated = _distill_tabular_rows(list(working), char_budget)
+    elif strategy == "text":
+        content, drops, truncated = _distill_text(str(working), char_budget, query)
+    else:  # pragma: no cover — _detect_strategy only returns known names
+        raise AssertionError(f"unreachable strategy {strategy!r}")
+
+    est_before = estimate_tokens(tool_output)
+    est_after = estimate_tokens(content)
+
+    rcpt = None
+    if receipt:
+        rcpt = DropReceipt(
+            schema=SCHEMA,
+            strategy=strategy,
+            budget_tokens=budget,
+            full=_receipt_full(tool_output),
+            distilled=_receipt_full(content),
+            drops=drops,
+            truncated=truncated,
+        )
+
+    return DistilledResult(
+        content=content,
+        strategy=strategy,
+        budget_tokens=budget,
+        est_tokens_before=est_before,
+        est_tokens_after=est_after,
+        truncated=truncated,
+        receipt=rcpt,
+    )

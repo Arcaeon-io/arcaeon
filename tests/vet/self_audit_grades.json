@@ -1,0 +1,198 @@
+[
+  {
+    "tool": "mcp_vet",
+    "tool_version": "0.0.14",
+    "target": "projects/mcp_public_safety/server.py",
+    "source_sha256": "afef6cb008478c9ff39d2e7b10a1222d01f65b9081cce80a91c97fbe95c0183f",
+    "checks_run": [
+      "unsafe-exec",
+      "unsafe-deser",
+      "ssrf",
+      "path-traversal",
+      "zero-auth",
+      "secret-in-code",
+      "audit-record",
+      "unreceipted-allow"
+    ],
+    "findings": [],
+    "blind_spots": [
+      "exec/deser sinks reached through a DISPATCH TABLE or a non-constant getattr are not resolved: `T = {'run': os.system}; T['run'](cmd)` and `getattr(os, name)(cmd)` with `name` computed at runtime both walk past the call resolver (2026-09-01: getattr with a literal or literal-concatenated attribute IS resolved; the subscript/variable forms are not)",
+      "multi-hop taint: tool input handed to a local helper that does the read or the request is not traced. mcp_vet/server.py is the live example: path -> _read(path) -> read_text scores clean against our own checker",
+      "taint reaches a sink only as a bare parameter name: open('/data/' + name), open(f'{name}'), os.path.join(root, name) and container subscripts slip past",
+      "only decorator-registered handlers (@mcp.tool() / @mcp.resource()) are analyzed for tool-input flow; a handler registered imperatively (mcp.add_tool(fn)) is never entered at all",
+      "tool-input sources are the positional parameters only: keyword-only parameters, *args and **kwargs are not treated as tool input",
+      "the auth test for a network transport is a whole-file substring scan, so any file containing the letters 'auth' (the word 'author' in a docstring, say) silences it completely",
+      "the transport must be a literal string on the run() call: a transport read from the environment or splatted from a dict is invisible, and that is a common deployment shape",
+      "vendor test and publishable key prefixes (sk_test_, pk_test_, pk_live_) are never flagged: they are meant to be hardcoded or meant to be public, so flagging them is noise -- but a test key promoted to production without being renamed stays invisible",
+      "a credential assembled at runtime is never a single string constant, so nothing matches: two halves added together, a join, or a base64 decode all carry the key past the literal scan",
+      "the entropy heuristic also requires the literal to mix letters and digits and contain no whitespace, which is what keeps prose and fill-me-in placeholders quiet -- an all-alphabetic credential on a credential-shaped name slips past",
+      "an AWS secret access key has no prefix to fingerprint, so the bare 40-char shape only counts as the value of an aws-secret-shaped name; the same key bound to any other name is indistinguishable from base64 of anything",
+      "the MCP08 audit gates are evaluated per FILE, not per handler: a server that records one of its tool calls and silently drops the rest passes the presence gate on the strength of the one it does record",
+      "MCP08 is only asked of a file that BOTH registers a handler and serves (an entrypoint call or a __main__ guard). Handlers in one module with run() in another are never asked whether they keep a record at all",
+      "the tamper-evidence gate is a file-level smell: hash-chaining machinery anywhere in the module satisfies it, even when the chain covers something other than the call record",
+      "a call record behind an OPTIONAL import reads as present: the write is in the source, so the gates pass, but whether it actually runs is decided at install time by a dependency the static pass cannot see. mcp_vet's own MCP server is the live example -- its trail needs the [audit] extra, and it scores clean either way",
+      "FALSE RED: the presence gate sees only records written in this file or in a local helper it calls, so a per-call record emitted by middleware, an imported decorator, or the transport layer is invisible and a fully audited server is reported high",
+      "FALSE RED: the durability of a sink lives in configuration, not in source. A record shipped to syslog, journald, a write-once bucket or a managed collector reads as a plain rewritable log, so a genuinely append-only pipeline is reported medium",
+      "the gate must RETURN A DICT LITERAL directly to be read at all: a verdict built through a constructor or helper (return VerdictResult(allowed=True)) or assembled in a local variable first (v = {...}; return v) is invisible, even though the same bare-pass/receipted-block asymmetry exists at runtime",
+      "the allow and block verdicts must be DIRECT returns of the SAME function: a gate split across two functions or methods -- one that grants, a sibling that refuses and receipts the refusal -- is never compared, and that is a common shape for a real permission/cooldown gate",
+      "exec/deser sinks are resolved through IMPORTS (2026-09-01: from-import, module-alias, builtins., importlib.import_module all caught), but runtime REASSIGNMENT aliasing is not: `b = eval; b(x)` rebinds a name via dataflow, not an import statement, and walks past the resolver -- a determined author can still dodge, though the idiomatic accidental-looking forms are closed",
+      "static only: runtime behavior, prompt-injection text in tool descriptions, and toxic cross-tool flows are out of scope (that is what Snyk Agent Scan does)"
+    ],
+    "verdict": "no findings in checked classes",
+    "schema": 1
+  },
+  {
+    "tool": "mcp_vet",
+    "tool_version": "0.0.14",
+    "target": "projects/arcaeon_mcp/arcaeon_ledger_mcp/server.py",
+    "source_sha256": "91d77a8ab0a39ef85910b7acd88ec3f5bf7f2565ba1c50fcd9e8f4a1e5743128",
+    "checks_run": [
+      "unsafe-exec",
+      "unsafe-deser",
+      "ssrf",
+      "path-traversal",
+      "zero-auth",
+      "secret-in-code",
+      "audit-record",
+      "unreceipted-allow"
+    ],
+    "findings": [
+      {
+        "check": "audit-record",
+        "severity": "medium",
+        "file": "projects/arcaeon_mcp/arcaeon_ledger_mcp/server.py",
+        "line": 82,
+        "detail": "OWASP MCP08 audit trail: records a call at line 82 (ledger-style log.append()); gate 2 (completeness) unmet: the record is missing tool name, timestamp, args/input digest",
+        "gates": {
+          "presence": true,
+          "completeness": false,
+          "tamper_evidence": true,
+          "reconstructability": true
+        }
+      }
+    ],
+    "blind_spots": [
+      "exec/deser sinks reached through a DISPATCH TABLE or a non-constant getattr are not resolved: `T = {'run': os.system}; T['run'](cmd)` and `getattr(os, name)(cmd)` with `name` computed at runtime both walk past the call resolver (2026-09-01: getattr with a literal or literal-concatenated attribute IS resolved; the subscript/variable forms are not)",
+      "multi-hop taint: tool input handed to a local helper that does the read or the request is not traced. mcp_vet/server.py is the live example: path -> _read(path) -> read_text scores clean against our own checker",
+      "taint reaches a sink only as a bare parameter name: open('/data/' + name), open(f'{name}'), os.path.join(root, name) and container subscripts slip past",
+      "only decorator-registered handlers (@mcp.tool() / @mcp.resource()) are analyzed for tool-input flow; a handler registered imperatively (mcp.add_tool(fn)) is never entered at all",
+      "tool-input sources are the positional parameters only: keyword-only parameters, *args and **kwargs are not treated as tool input",
+      "the auth test for a network transport is a whole-file substring scan, so any file containing the letters 'auth' (the word 'author' in a docstring, say) silences it completely",
+      "the transport must be a literal string on the run() call: a transport read from the environment or splatted from a dict is invisible, and that is a common deployment shape",
+      "vendor test and publishable key prefixes (sk_test_, pk_test_, pk_live_) are never flagged: they are meant to be hardcoded or meant to be public, so flagging them is noise -- but a test key promoted to production without being renamed stays invisible",
+      "a credential assembled at runtime is never a single string constant, so nothing matches: two halves added together, a join, or a base64 decode all carry the key past the literal scan",
+      "the entropy heuristic also requires the literal to mix letters and digits and contain no whitespace, which is what keeps prose and fill-me-in placeholders quiet -- an all-alphabetic credential on a credential-shaped name slips past",
+      "an AWS secret access key has no prefix to fingerprint, so the bare 40-char shape only counts as the value of an aws-secret-shaped name; the same key bound to any other name is indistinguishable from base64 of anything",
+      "the MCP08 audit gates are evaluated per FILE, not per handler: a server that records one of its tool calls and silently drops the rest passes the presence gate on the strength of the one it does record",
+      "MCP08 is only asked of a file that BOTH registers a handler and serves (an entrypoint call or a __main__ guard). Handlers in one module with run() in another are never asked whether they keep a record at all",
+      "the tamper-evidence gate is a file-level smell: hash-chaining machinery anywhere in the module satisfies it, even when the chain covers something other than the call record",
+      "a call record behind an OPTIONAL import reads as present: the write is in the source, so the gates pass, but whether it actually runs is decided at install time by a dependency the static pass cannot see. mcp_vet's own MCP server is the live example -- its trail needs the [audit] extra, and it scores clean either way",
+      "FALSE RED: the presence gate sees only records written in this file or in a local helper it calls, so a per-call record emitted by middleware, an imported decorator, or the transport layer is invisible and a fully audited server is reported high",
+      "FALSE RED: the durability of a sink lives in configuration, not in source. A record shipped to syslog, journald, a write-once bucket or a managed collector reads as a plain rewritable log, so a genuinely append-only pipeline is reported medium",
+      "the gate must RETURN A DICT LITERAL directly to be read at all: a verdict built through a constructor or helper (return VerdictResult(allowed=True)) or assembled in a local variable first (v = {...}; return v) is invisible, even though the same bare-pass/receipted-block asymmetry exists at runtime",
+      "the allow and block verdicts must be DIRECT returns of the SAME function: a gate split across two functions or methods -- one that grants, a sibling that refuses and receipts the refusal -- is never compared, and that is a common shape for a real permission/cooldown gate",
+      "exec/deser sinks are resolved through IMPORTS (2026-09-01: from-import, module-alias, builtins., importlib.import_module all caught), but runtime REASSIGNMENT aliasing is not: `b = eval; b(x)` rebinds a name via dataflow, not an import statement, and walks past the resolver -- a determined author can still dodge, though the idiomatic accidental-looking forms are closed",
+      "static only: runtime behavior, prompt-injection text in tool descriptions, and toxic cross-tool flows are out of scope (that is what Snyk Agent Scan does)"
+    ],
+    "verdict": "medium-severity findings",
+    "schema": 1
+  },
+  {
+    "tool": "mcp_vet",
+    "tool_version": "0.0.14",
+    "target": "projects/mcp_vet/mcp_vet/server.py",
+    "source_sha256": "d5f2f71a92f55e42be664c26db9582690eca9511a42cb4e3555b13c4901fd9e4",
+    "checks_run": [
+      "unsafe-exec",
+      "unsafe-deser",
+      "ssrf",
+      "path-traversal",
+      "zero-auth",
+      "secret-in-code",
+      "audit-record",
+      "unreceipted-allow"
+    ],
+    "findings": [],
+    "blind_spots": [
+      "exec/deser sinks reached through a DISPATCH TABLE or a non-constant getattr are not resolved: `T = {'run': os.system}; T['run'](cmd)` and `getattr(os, name)(cmd)` with `name` computed at runtime both walk past the call resolver (2026-09-01: getattr with a literal or literal-concatenated attribute IS resolved; the subscript/variable forms are not)",
+      "multi-hop taint: tool input handed to a local helper that does the read or the request is not traced. mcp_vet/server.py is the live example: path -> _read(path) -> read_text scores clean against our own checker",
+      "taint reaches a sink only as a bare parameter name: open('/data/' + name), open(f'{name}'), os.path.join(root, name) and container subscripts slip past",
+      "only decorator-registered handlers (@mcp.tool() / @mcp.resource()) are analyzed for tool-input flow; a handler registered imperatively (mcp.add_tool(fn)) is never entered at all",
+      "tool-input sources are the positional parameters only: keyword-only parameters, *args and **kwargs are not treated as tool input",
+      "the auth test for a network transport is a whole-file substring scan, so any file containing the letters 'auth' (the word 'author' in a docstring, say) silences it completely",
+      "the transport must be a literal string on the run() call: a transport read from the environment or splatted from a dict is invisible, and that is a common deployment shape",
+      "vendor test and publishable key prefixes (sk_test_, pk_test_, pk_live_) are never flagged: they are meant to be hardcoded or meant to be public, so flagging them is noise -- but a test key promoted to production without being renamed stays invisible",
+      "a credential assembled at runtime is never a single string constant, so nothing matches: two halves added together, a join, or a base64 decode all carry the key past the literal scan",
+      "the entropy heuristic also requires the literal to mix letters and digits and contain no whitespace, which is what keeps prose and fill-me-in placeholders quiet -- an all-alphabetic credential on a credential-shaped name slips past",
+      "an AWS secret access key has no prefix to fingerprint, so the bare 40-char shape only counts as the value of an aws-secret-shaped name; the same key bound to any other name is indistinguishable from base64 of anything",
+      "the MCP08 audit gates are evaluated per FILE, not per handler: a server that records one of its tool calls and silently drops the rest passes the presence gate on the strength of the one it does record",
+      "MCP08 is only asked of a file that BOTH registers a handler and serves (an entrypoint call or a __main__ guard). Handlers in one module with run() in another are never asked whether they keep a record at all",
+      "the tamper-evidence gate is a file-level smell: hash-chaining machinery anywhere in the module satisfies it, even when the chain covers something other than the call record",
+      "a call record behind an OPTIONAL import reads as present: the write is in the source, so the gates pass, but whether it actually runs is decided at install time by a dependency the static pass cannot see. mcp_vet's own MCP server is the live example -- its trail needs the [audit] extra, and it scores clean either way",
+      "FALSE RED: the presence gate sees only records written in this file or in a local helper it calls, so a per-call record emitted by middleware, an imported decorator, or the transport layer is invisible and a fully audited server is reported high",
+      "FALSE RED: the durability of a sink lives in configuration, not in source. A record shipped to syslog, journald, a write-once bucket or a managed collector reads as a plain rewritable log, so a genuinely append-only pipeline is reported medium",
+      "the gate must RETURN A DICT LITERAL directly to be read at all: a verdict built through a constructor or helper (return VerdictResult(allowed=True)) or assembled in a local variable first (v = {...}; return v) is invisible, even though the same bare-pass/receipted-block asymmetry exists at runtime",
+      "the allow and block verdicts must be DIRECT returns of the SAME function: a gate split across two functions or methods -- one that grants, a sibling that refuses and receipts the refusal -- is never compared, and that is a common shape for a real permission/cooldown gate",
+      "exec/deser sinks are resolved through IMPORTS (2026-09-01: from-import, module-alias, builtins., importlib.import_module all caught), but runtime REASSIGNMENT aliasing is not: `b = eval; b(x)` rebinds a name via dataflow, not an import statement, and walks past the resolver -- a determined author can still dodge, though the idiomatic accidental-looking forms are closed",
+      "static only: runtime behavior, prompt-injection text in tool descriptions, and toxic cross-tool flows are out of scope (that is what Snyk Agent Scan does)"
+    ],
+    "verdict": "no findings in checked classes",
+    "schema": 1
+  },
+  {
+    "tool": "mcp_vet",
+    "tool_version": "0.0.14",
+    "target": "../arcaeon-distill/arcaeon_distill/mcp_server.py",
+    "source_sha256": "a0eecb7c0444158e8639bdc69c55a50bcb8cb7199475901221fcea0fe4a11b93",
+    "checks_run": [
+      "unsafe-exec",
+      "unsafe-deser",
+      "ssrf",
+      "path-traversal",
+      "zero-auth",
+      "secret-in-code",
+      "audit-record",
+      "unreceipted-allow"
+    ],
+    "findings": [
+      {
+        "check": "audit-record",
+        "severity": "high",
+        "file": "../arcaeon-distill/arcaeon_distill/mcp_server.py",
+        "line": 137,
+        "detail": "OWASP MCP08 audit trail: no call record on any tool-handling path (1 handler(s), first at line 137); gate 1 (presence) unmet: a tool call leaves nothing behind to reconstruct",
+        "gates": {
+          "presence": false,
+          "completeness": false,
+          "tamper_evidence": false,
+          "reconstructability": false
+        }
+      }
+    ],
+    "blind_spots": [
+      "exec/deser sinks reached through a DISPATCH TABLE or a non-constant getattr are not resolved: `T = {'run': os.system}; T['run'](cmd)` and `getattr(os, name)(cmd)` with `name` computed at runtime both walk past the call resolver (2026-09-01: getattr with a literal or literal-concatenated attribute IS resolved; the subscript/variable forms are not)",
+      "multi-hop taint: tool input handed to a local helper that does the read or the request is not traced. mcp_vet/server.py is the live example: path -> _read(path) -> read_text scores clean against our own checker",
+      "taint reaches a sink only as a bare parameter name: open('/data/' + name), open(f'{name}'), os.path.join(root, name) and container subscripts slip past",
+      "only decorator-registered handlers (@mcp.tool() / @mcp.resource()) are analyzed for tool-input flow; a handler registered imperatively (mcp.add_tool(fn)) is never entered at all",
+      "tool-input sources are the positional parameters only: keyword-only parameters, *args and **kwargs are not treated as tool input",
+      "the auth test for a network transport is a whole-file substring scan, so any file containing the letters 'auth' (the word 'author' in a docstring, say) silences it completely",
+      "the transport must be a literal string on the run() call: a transport read from the environment or splatted from a dict is invisible, and that is a common deployment shape",
+      "vendor test and publishable key prefixes (sk_test_, pk_test_, pk_live_) are never flagged: they are meant to be hardcoded or meant to be public, so flagging them is noise -- but a test key promoted to production without being renamed stays invisible",
+      "a credential assembled at runtime is never a single string constant, so nothing matches: two halves added together, a join, or a base64 decode all carry the key past the literal scan",
+      "the entropy heuristic also requires the literal to mix letters and digits and contain no whitespace, which is what keeps prose and fill-me-in placeholders quiet -- an all-alphabetic credential on a credential-shaped name slips past",
+      "an AWS secret access key has no prefix to fingerprint, so the bare 40-char shape only counts as the value of an aws-secret-shaped name; the same key bound to any other name is indistinguishable from base64 of anything",
+      "the MCP08 audit gates are evaluated per FILE, not per handler: a server that records one of its tool calls and silently drops the rest passes the presence gate on the strength of the one it does record",
+      "MCP08 is only asked of a file that BOTH registers a handler and serves (an entrypoint call or a __main__ guard). Handlers in one module with run() in another are never asked whether they keep a record at all",
+      "the tamper-evidence gate is a file-level smell: hash-chaining machinery anywhere in the module satisfies it, even when the chain covers something other than the call record",
+      "a call record behind an OPTIONAL import reads as present: the write is in the source, so the gates pass, but whether it actually runs is decided at install time by a dependency the static pass cannot see. mcp_vet's own MCP server is the live example -- its trail needs the [audit] extra, and it scores clean either way",
+      "FALSE RED: the presence gate sees only records written in this file or in a local helper it calls, so a per-call record emitted by middleware, an imported decorator, or the transport layer is invisible and a fully audited server is reported high",
+      "FALSE RED: the durability of a sink lives in configuration, not in source. A record shipped to syslog, journald, a write-once bucket or a managed collector reads as a plain rewritable log, so a genuinely append-only pipeline is reported medium",
+      "the gate must RETURN A DICT LITERAL directly to be read at all: a verdict built through a constructor or helper (return VerdictResult(allowed=True)) or assembled in a local variable first (v = {...}; return v) is invisible, even though the same bare-pass/receipted-block asymmetry exists at runtime",
+      "the allow and block verdicts must be DIRECT returns of the SAME function: a gate split across two functions or methods -- one that grants, a sibling that refuses and receipts the refusal -- is never compared, and that is a common shape for a real permission/cooldown gate",
+      "exec/deser sinks are resolved through IMPORTS (2026-09-01: from-import, module-alias, builtins., importlib.import_module all caught), but runtime REASSIGNMENT aliasing is not: `b = eval; b(x)` rebinds a name via dataflow, not an import statement, and walks past the resolver -- a determined author can still dodge, though the idiomatic accidental-looking forms are closed",
+      "static only: runtime behavior, prompt-injection text in tool descriptions, and toxic cross-tool flows are out of scope (that is what Snyk Agent Scan does)"
+    ],
+    "verdict": "high-severity findings",
+    "schema": 1
+  }
+]

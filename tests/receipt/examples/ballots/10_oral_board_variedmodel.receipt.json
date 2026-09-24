@@ -1,0 +1,301 @@
+{
+ "receipt_version": "arcaeon-receipt/0.1",
+ "kind": "ballot",
+ "issued_at": "2026-09-09T11:15:47Z",
+ "subject": {
+  "trainee": "l. fischer",
+  "scenario": "oral_board.set3",
+  "grader": "ascenvo.vcs.oral_board"
+ },
+ "checks": [
+  {
+   "ballot": {
+    "per_answer": [
+     {
+      "score": 74,
+      "verdict": "GOOD",
+      "dimensions": [
+       {
+        "key": "directness",
+        "name": "Answered the question",
+        "score": 0.75,
+        "weight": 0.32,
+        "detail": "Introduction answered the question but leaned generic on the \"why this job\" half."
+       },
+       {
+        "key": "structure",
+        "name": "Structure (real incident)",
+        "score": 0.7,
+        "weight": 0.26,
+        "detail": "Adequate organization, no wandering."
+       },
+       {
+        "key": "communication",
+        "name": "Communication",
+        "score": 0.78,
+        "weight": 0.352,
+        "detail": "Clear delivery, a little flat."
+       },
+       {
+        "key": "tieback",
+        "name": "Tie-back to the job",
+        "score": 0.68,
+        "weight": 0.2,
+        "detail": "Tie-back was present but generic (\"I like helping people\")."
+       }
+      ],
+      "coaching": [
+       "Name a specific reason THIS job over another service job — right now the tie-back would fit almost any position."
+      ],
+      "worked": [
+       "Clear, organized delivery with no rambling."
+      ],
+      "fix": [
+       "Name a specific reason THIS job over another service job — right now the tie-back would fit almost any position."
+      ],
+      "meta": {
+       "source": "llm:gemini-2.5-flash",
+       "id": "ob-intro",
+       "slot": "intro"
+      }
+     },
+     {
+      "score": 76,
+      "verdict": "GOOD",
+      "dimensions": [
+       {
+        "key": "directness",
+        "name": "Answered the question",
+        "score": 0.78,
+        "weight": 0.32,
+        "detail": "Answered with a real difficult-customer incident."
+       },
+       {
+        "key": "structure",
+        "name": "Structure (real incident)",
+        "score": 0.75,
+        "weight": 0.416,
+        "detail": "Clear situation and outcome, thinner on the middle (what they actually said/did)."
+       },
+       {
+        "key": "communication",
+        "name": "Communication",
+        "score": 0.8,
+        "weight": 0.22,
+        "detail": "Steady, composed telling."
+       },
+       {
+        "key": "tieback",
+        "name": "Tie-back to the job",
+        "score": 0.7,
+        "weight": 0.32,
+        "detail": "Tied to staying calm with an upset caller, stated rather than shown."
+       }
+      ],
+      "coaching": [
+       "Walk through what you actually SAID to de-escalate — the middle of the story is the part missing."
+      ],
+      "worked": [
+       "Real incident with a clear de-escalation outcome, not a personality claim."
+      ],
+      "fix": [
+       "Walk through what you actually SAID to de-escalate — the middle of the story is the part missing."
+      ],
+      "meta": {
+       "source": "llm:gemini-2.5-flash",
+       "id": "ob-difficult-customer",
+       "slot": "behavioral"
+      }
+     },
+     {
+      "score": 71,
+      "verdict": "GOOD",
+      "dimensions": [
+       {
+        "key": "directness",
+        "name": "Answered the question",
+        "score": 0.72,
+        "weight": 0.32,
+        "detail": "Addressed the teamwork question, though the incident ran short."
+       },
+       {
+        "key": "structure",
+        "name": "Structure (real incident)",
+        "score": 0.68,
+        "weight": 0.416,
+        "detail": "Beginning and end present; the middle (their specific contribution) was thin."
+       },
+       {
+        "key": "communication",
+        "name": "Communication",
+        "score": 0.75,
+        "weight": 0.22,
+        "detail": "Understandable, some hesitation."
+       },
+       {
+        "key": "tieback",
+        "name": "Tie-back to the job",
+        "score": 0.65,
+        "weight": 0.32,
+        "detail": "Tie-back was a single sentence at the end."
+       }
+      ],
+      "coaching": [
+       "Say specifically what YOU did in the team effort, not just 'we worked it out.'"
+      ],
+      "worked": [
+       "A real team situation, not a generality."
+      ],
+      "fix": [
+       "Say specifically what YOU did in the team effort, not just 'we worked it out.'"
+      ],
+      "meta": {
+       "source": "llm:gemini-2.5-flash",
+       "id": "ob-teamwork",
+       "slot": "behavioral"
+      }
+     },
+     {
+      "score": 78,
+      "verdict": "GOOD",
+      "dimensions": [
+       {
+        "key": "directness",
+        "name": "Answered the question",
+        "score": 0.8,
+        "weight": 0.32,
+        "detail": "Direct steps for handling a panicking caller."
+       },
+       {
+        "key": "structure",
+        "name": "Structure (real incident)",
+        "score": 0.72,
+        "weight": 0.26,
+        "detail": "Situational; steps were ordered, if generic."
+       },
+       {
+        "key": "communication",
+        "name": "Communication",
+        "score": 0.82,
+        "weight": 0.352,
+        "detail": "Calm, plain language throughout."
+       },
+       {
+        "key": "tieback",
+        "name": "Tie-back to the job",
+        "score": 0.7,
+        "weight": 0.32,
+        "detail": "Closing pitch was sincere but brief."
+       }
+      ],
+      "coaching": [
+       "The closing pitch landed but stayed brief — one more sentence on why YOU specifically would hire well here."
+      ],
+      "worked": [
+       "Showed the calm-anchor instinct: slow the caller, one question at a time."
+      ],
+      "fix": [
+       "The closing pitch landed but stayed brief — one more sentence on why YOU specifically would hire well here."
+      ],
+      "meta": {
+       "source": "llm:gemini-2.5-flash",
+       "id": "ob-close",
+       "slot": "close"
+      }
+     }
+    ],
+    "overall": {
+     "score": 75,
+     "verdict": "GOOD",
+     "summary": "Board passes. The answers landed on what was asked, with real stories and clear delivery — a candidate the panel can picture on the line. Tighten the weak spots and this is a seat.",
+     "band_label": "GOOD",
+     "band_range": "70-79%",
+     "band_also": "Good / Satisfactory",
+     "band_meaning": "Satisfies the basic minimum the question asks for. Answers are generic or baseline: they pass the threshold, and would need normal onboarding, supervision and guidance.",
+     "worked": [
+      "Clear, organized delivery with no rambling.",
+      "Real incident with a clear de-escalation outcome, not a personality claim.",
+      "A real team situation, not a generality.",
+      "Showed the calm-anchor instinct: slow the caller, one question at a time."
+     ],
+     "fix": [
+      "Name a specific reason THIS job over another service job — right now the tie-back would fit almost any position.",
+      "Walk through what you actually SAID to de-escalate — the middle of the story is the part missing.",
+      "Say specifically what YOU did in the team effort, not just 'we worked it out.'",
+      "The closing pitch landed but stayed brief — one more sentence on why YOU specifically would hire well here."
+     ],
+     "strengths": [
+      "Clear, organized delivery with no rambling.",
+      "Real incident with a clear de-escalation outcome, not a personality claim.",
+      "A real team situation, not a generality.",
+      "Showed the calm-anchor instinct: slow the caller, one question at a time."
+     ],
+     "fixes": [
+      "Name a specific reason THIS job over another service job — right now the tie-back would fit almost any position.",
+      "Walk through what you actually SAID to de-escalate — the middle of the story is the part missing.",
+      "Say specifically what YOU did in the team effort, not just 'we worked it out.'",
+      "The closing pitch landed but stayed brief — one more sentence on why YOU specifically would hire well here."
+     ]
+    },
+    "judge_declaration": {
+     "falsifier_type": "evaluative",
+     "judge_identity": "gemini-2.5-flash-002 + gemini-2.5-flash-003  (SERVED MODEL VARIED ACROSS ANSWERS ON THIS BOARD — not a single instrument)",
+     "judge_requested": "gemini-2.5-flash",
+     "rubric_identity": "ascenvo.vcs.oral_board.grade_board",
+     "rubric_version": "2026-08-15",
+     "board_identity": "ob-intro+ob-difficult-customer+ob-teamwork+ob-close",
+     "baseline_identity": "the four SME rubric dimensions (directness/structure/communication/tieback) + each question's wants/hard_on",
+     "baseline_provenance": "products/voice_call_sim/oralboard_judge.py (Daniel, dispatch-side SME) + data/oralboard_questions.js",
+     "baseline_date": "2026-06-25",
+     "judge_inputs_scope": "this question's text + its trait/wants/hard_on rubric data + this one answer's text ONLY; NOT the other answers on the board, NOT prior attempts, NOT a model answer",
+     "graded_at": "2026-09-09T11:15:47Z"
+    }
+   },
+   "ballot_digest": "sha256:json-c14n:v1:02f5d1aa9fab0173e4f7a499eca824899196395d29c35c32e85e1ee94e0c5119",
+   "trainee": "l. fischer",
+   "scenario": "oral_board.set3",
+   "grader": "ascenvo.vcs.oral_board",
+   "timestamp": "2026-09-09T11:15:47Z"
+  }
+ ],
+ "scope": {
+  "proves": [
+   "the score and the ballot are unaltered since the timestamp"
+  ],
+  "does_not_prove": [
+   "the score is correct",
+   "the sim was not attempted before"
+  ],
+  "method": "sha256 digest of the canonical JSON ballot object (score, verdict, and whatever fields the grading engine produced), bound to a stated timestamp inside the receipt body; hash-chained in arcaeon-ledger, one row per ballot."
+ },
+ "extra": {},
+ "body_digest": "sha256:json-c14n:v1:1461edc545fbfcd2154ba85fc61ec7e8e1d4ec7c21ae6c5a3dab635c0ef55c95",
+ "ledger": {
+  "path": "ledger.jsonl",
+  "namespace": "ballot",
+  "rows": 15,
+  "chain": "0da19231f40690fce0cbbe2dfc7a083f",
+  "algorithm": "truncated_sha256_128 hash chain (arcaeon-ledger)"
+ },
+ "witness": {
+  "kind": "local-file",
+  "independence": "none (self-controlled file)",
+  "path": "ledger.jsonl.witness.jsonl",
+  "namespace": "ballot",
+  "rows": 15,
+  "chain": "0da19231f40690fce0cbbe2dfc7a083f",
+  "pin": {
+   "namespace": "ballot",
+   "rows": 15,
+   "chain": "0da19231f40690fce0cbbe2dfc7a083f",
+   "as_of": "2026-09-13T23:09:59Z",
+   "received_at": "2026-09-13T23:09:59Z",
+   "prev": "092663845162f51e5249dc69db11e519",
+   "self": "ba9e9c2b6409cdd75a1ec21fbafe96d5"
+  },
+  "status": "pinned"
+ },
+ "anchor": {
+  "status": "skipped"
+ }
+}

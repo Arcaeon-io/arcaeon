@@ -1,0 +1,129 @@
+{
+ "receipt_version": "arcaeon-receipt/0.1",
+ "kind": "ballot",
+ "issued_at": "2026-09-09T23:58:02Z",
+ "subject": {
+  "trainee": "a. dubois",
+  "scenario": "call_taking.gen79_noise_late_music",
+  "grader": "call_taking.grader"
+ },
+ "checks": [
+  {
+   "ballot": {
+    "score": 64,
+    "verdict": "THIN",
+    "dimensions": [
+     {
+      "key": "call_type",
+      "name": "CALL TYPE NAMED / JUSTIFIED",
+      "score": 0.0,
+      "weight": 0.28,
+      "label": "miss",
+      "detail": "no call type named or justified"
+     },
+     {
+      "key": "priority",
+      "name": "PRIORITY NAMED / JUSTIFIED",
+      "score": 0.8,
+      "weight": 0.24,
+      "label": "hit",
+      "detail": "urgency stated; tie it to the facts that make it hot"
+     },
+     {
+      "key": "key_facts",
+      "name": "KEY FACTS CAPTURED",
+      "score": 0.9,
+      "weight": 0.36,
+      "label": "hit",
+      "detail": "9 of 10 key facts present — missing: noise only"
+     },
+     {
+      "key": "soundness",
+      "name": "CLASSIFICATION SOUNDNESS",
+      "score": 1.0,
+      "weight": 0.12,
+      "label": "hit",
+      "detail": "no unsupported classification detected"
+     }
+    ],
+    "coaching": [
+     "Name the call. A reader should see what this is from the comment alone. Say the call type, or write the facts that make it that type.",
+     "Missing key facts the call required: noise only.",
+     "Comment quoted the reporting party as \"the neighbors won't turn it down 🙄\" — keep incident comments free of emoji; describe the tone in words instead (e.g. \"RP frustrated, repeat caller\").",
+     "Model comment for comparison: noise complaint, loud music with heavy bass from 2210 Hollis Lane (gray two-story) around midnight, reported by neighbor Sra. Peña two doors east. Screened as noise only, no fighting, a few people on the porch, calm. Low-priority noise call. Caller advised an officer will ask them to turn it down (not an arrest) and that response waits behind emergencies, no time committed. Caller given honest expectations and told the complaint is logged."
+    ],
+    "facts": {
+     "matched": [
+      "loud music",
+      "Hollis",
+      "2210",
+      "midnight",
+      "low priority",
+      "no fighting",
+      "turn it down",
+      "logged",
+      "Sra. Peña"
+     ],
+     "missing": [
+      "noise only"
+     ]
+    },
+    "model_comments": "noise complaint, loud music with heavy bass from 2210 Hollis Lane (gray two-story) around midnight, reported by neighbor Sra. Peña two doors east. Screened as noise only, no fighting, a few people on the porch, calm. Low-priority noise call. Caller advised an officer will ask them to turn it down (not an arrest) and that response waits behind emergencies, no time committed. Caller given honest expectations and told the complaint is logged.",
+    "raw_comment_excerpt": "RP at 2210 Hollis reports loud music going since midnight, low priority, no fighting reported. RP (Sra. Peña) says the neighbors won't turn it down 🙄. Turn it down requested, logged for follow-up.",
+    "meta": {
+     "family": "incident",
+     "keyCount": 10,
+     "hitCount": 9,
+     "ratio": 0.9,
+     "source": "heuristic",
+     "version": "grader-1.0.0-heuristic"
+    }
+   },
+   "ballot_digest": "sha256:json-c14n:v1:a388fec377887a2ccc3a65132ea2e79deeff744194afbbcebb69bc6707d34c55",
+   "trainee": "a. dubois",
+   "scenario": "call_taking.gen79_noise_late_music",
+   "grader": "call_taking.grader",
+   "timestamp": "2026-09-09T23:58:02Z"
+  }
+ ],
+ "scope": {
+  "proves": [
+   "the score and the ballot are unaltered since the timestamp"
+  ],
+  "does_not_prove": [
+   "the score is correct",
+   "the sim was not attempted before"
+  ],
+  "method": "sha256 digest of the canonical JSON ballot object (score, verdict, and whatever fields the grading engine produced), bound to a stated timestamp inside the receipt body; hash-chained in arcaeon-ledger, one row per ballot."
+ },
+ "extra": {},
+ "body_digest": "sha256:json-c14n:v1:4233a8b9111376912d3383d58756d894e851acfaeafe85d47fc1cbfbfbf8b6cb",
+ "ledger": {
+  "path": "ledger.jsonl",
+  "namespace": "ballot",
+  "rows": 6,
+  "chain": "02fbe19328d5f97f1cdaf017965dedff",
+  "algorithm": "truncated_sha256_128 hash chain (arcaeon-ledger)"
+ },
+ "witness": {
+  "kind": "local-file",
+  "independence": "none (self-controlled file)",
+  "path": "examples\\ballots\\ledger.jsonl.witness.jsonl",
+  "namespace": "ballot",
+  "rows": 6,
+  "chain": "02fbe19328d5f97f1cdaf017965dedff",
+  "pin": {
+   "namespace": "ballot",
+   "rows": 6,
+   "chain": "02fbe19328d5f97f1cdaf017965dedff",
+   "as_of": "2026-09-12T17:22:01Z",
+   "received_at": "2026-09-12T17:22:01Z",
+   "prev": "8da9f79d523ff0f53bb961db9557dcb0",
+   "self": "fb44bc36de86b2672826e4b08a42dccd"
+  },
+  "status": "pinned"
+ },
+ "anchor": {
+  "status": "skipped"
+ }
+}

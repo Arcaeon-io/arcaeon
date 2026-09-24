@@ -1,0 +1,26 @@
+BALLOT RECEIPT  (arcaeon-receipt)
+Issued (UTC): 2026-09-05T20:12:30Z
+
+WHAT THIS RECEIPT PROVES
+  - the score and the ballot are unaltered since the timestamp
+WHAT THIS RECEIPT DOES NOT PROVE
+  - the score is correct
+  - the sim was not attempted before
+
+Method: sha256 digest of the canonical JSON ballot object (score, verdict, and whatever fields the grading engine produced), bound to a stated timestamp inside the receipt body; hash-chained in arcaeon-ledger, one row per ballot.
+
+SUBJECT
+  trainee: r. kowalski
+  scenario: call_taking.gen43_cold_car_burglary
+  grader: call_taking.grader
+
+RESULTS (1 check)
+  r. kowalski  call_taking.gen43_cold_car_burglary  score=95 STRONG  grader=call_taking.grader  at 2026-09-05T20:12:30Z
+
+INTEGRITY
+  body digest: sha256:json-c14n:v1:711b9a39b16fc9c0921e31f4dc59e2b87c1df295e602418672f08725e0846348
+  ledger: namespace=ballot rows=4 chain=73db19a68d143468e9842cd989a9345c
+  witness: local-file (none (self-controlled file))
+  anchor: none status=skipped
+
+To verify: recompute the body digest from the JSON receipt's body fields (canonical JSON, sha256), compare to body_digest; if an OpenTimestamps proof is attached, write the body_digest plus a newline to a file, save the proof beside it, and run `ots verify`. No contact with the issuer is required.

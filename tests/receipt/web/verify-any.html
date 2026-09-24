@@ -1,0 +1,294 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Universal Receipt Checker</title>
+<meta name="description" content="Paste or drop an agent receipt from any vendor. The page says VERIFIED, BROKEN, or COULD NOT LOOK, and whether anyone else has ever checked it. Everything runs in your browser; nothing is uploaded.">
+<style>
+  :root {
+    color-scheme: dark light;
+    --bg: #0b0c0e; --panel: #141619; --panel-2: #191c1f; --border: #2a2d31;
+    --text: #e6e8eb; --muted: #9aa0a6; --accent: #6ee7b7; --accent-strong: #34d399;
+    --fail: #f87171; --warn: #fbbf24; --link: #8ab4f8; --mono-bg: #0f1113; --mono-border: #2f3338;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #f6f7f8; --panel: #ffffff; --panel-2: #f0f1f3; --border: #dcdfe3;
+      --text: #1b1d1f; --muted: #5b6066; --accent: #0a7d4c; --accent-strong: #056238;
+      --fail: #b3261e; --warn: #8a5a00; --link: #1a56b0; --mono-bg: #f0f1f3; --mono-border: #d7dade;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+  main { max-width: 880px; margin: 0 auto; padding: 32px 16px 80px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .subtitle { color: var(--muted); font-size: 13.5px; margin: 0 0 24px; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  section.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 18px 20px; margin-bottom: 16px; }
+  code, pre, textarea, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; }
+  textarea { width: 100%; background: var(--mono-bg); color: var(--text); border: 1px solid var(--mono-border); border-radius: 6px; padding: 12px 14px; resize: vertical; }
+  #input { min-height: 180px; }
+  #key, #tskey { min-height: 60px; }
+  .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+  label { font-size: 13px; color: var(--muted); }
+  select, button { font: inherit; font-size: 13.5px; padding: 7px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); }
+  button { font-weight: 600; cursor: pointer; }
+  button.primary { background: var(--accent-strong); border-color: var(--accent-strong); color: #06120c; }
+  input[type=file] { display: none; }
+  #dropzone { border: 1px dashed var(--border); border-radius: 8px; padding: 10px 14px; color: var(--muted); font-size: 13px; margin-top: 10px; }
+  #dropzone.drag { border-color: var(--accent); color: var(--text); }
+  .tag { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; white-space: nowrap; }
+  .tag.v { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent-strong); border: 1px solid var(--accent-strong); }
+  .tag.b { background: color-mix(in srgb, var(--fail) 18%, transparent); color: var(--fail); border: 1px solid var(--fail); }
+  .tag.c { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); border: 1px solid var(--warn); }
+  .tag.n { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
+  .verdict { display: flex; align-items: center; gap: 10px; font-size: 15px; font-weight: 700; flex-wrap: wrap; }
+  .reason { color: var(--muted); font-size: 13.5px; margin-top: 6px; overflow-wrap: anywhere; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { border-bottom: 1px solid var(--border); text-align: left; padding: 6px 8px; vertical-align: top; overflow-wrap: anywhere; }
+  th { color: var(--muted); font-weight: 600; }
+  .table-wrap { overflow-x: auto; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  .fine { color: var(--muted); font-size: 13px; }
+  footer { color: var(--muted); font-size: 12px; margin-top: 40px; text-align: center; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Universal Receipt Checker</h1>
+  <p class="subtitle">
+    One page for an agent receipt from any vendor. It gives one of three answers for your run:
+    VERIFIED, BROKEN, or COULD NOT LOOK. It also tells you whether anyone else has ever checked
+    the receipt, and today the honest answer is BLIND: nobody has. Everything runs in this page.
+    Nothing is uploaded, and nothing is fetched.
+  </p>
+
+  <section class="panel">
+    <h2>Receipt</h2>
+    <textarea id="input" spellcheck="false" placeholder="Paste a receipt: JSON, or a COSE_Sign1 as hex or base64. Or drop a file anywhere on this page."></textarea>
+    <div id="dropzone">Drop one receipt file here (JSON, or a binary .cbor / .cose SCITT statement), or
+      <button id="choose" type="button">choose a file</button>
+      <input type="file" id="file">
+      <span id="file-name" class="mono"></span>
+    </div>
+    <div class="row">
+      <label for="format">Format</label>
+      <select id="format">
+        <option value="auto">Detect it (recommended)</option>
+        <option value="arcaeon-receipt">Arcaeon receipt</option>
+        <option value="agent-receipts">Agent Receipts (W3C VC)</option>
+        <option value="scitt">SCITT Signed Statement</option>
+        <option value="scitt-receipt">SCITT Receipt (RFC 9942)</option>
+      </select>
+    </div>
+    <details style="margin-top:12px;">
+      <summary>Optional: the signer's public key, and a payload or original file</summary>
+      <div style="margin-top:10px;">
+        <label for="key">Public key: a JWK, a PEM public key, a did:key, or 64 hex characters (Ed25519)</label>
+        <textarea id="key" spellcheck="false"></textarea>
+        <div class="row">
+          <label for="extra-kind">Extra file is</label>
+          <select id="extra-kind">
+            <option value="preimage">the original file a hash-envelope statement is about</option>
+            <option value="detached">the detached payload of a SCITT statement</option>
+          </select>
+          <button id="choose-extra" type="button">choose it</button>
+          <input type="file" id="extra">
+          <span id="extra-name" class="mono"></span>
+        </div>
+      </div>
+    </details>
+    <details style="margin-top:12px;">
+      <summary>Optional: for a SCITT transparency receipt, the service's key and the statement</summary>
+      <div style="margin-top:10px;">
+        <label for="tskey">Transparency service public key (the key that signs its tree heads): a JWK or a PEM public key</label>
+        <textarea id="tskey" spellcheck="false"></textarea>
+        <div class="row">
+          <label>Signed statement the receipt claims to include (only for a receipt given on its own)</label>
+          <button id="choose-stmt" type="button">choose it</button>
+          <input type="file" id="stmt">
+          <span id="stmt-name" class="mono"></span>
+        </div>
+        <p class="fine">A receipt is checked by recomputing the Merkle root from the statement and the proof path
+          (RFC 9162), then checking the service's signature over that root (RFC 9942). The log entry is taken to
+          be the statement with its unprotected header emptied (RFC 9943 s6.3); a service that logs something
+          else will not verify here.</p>
+      </div>
+    </details>
+    <div class="row">
+      <button id="check" class="primary" type="button">Check it</button>
+      <button id="clear" type="button">Clear</button>
+    </div>
+  </section>
+
+  <section id="out" class="panel" hidden>
+    <h2>Your run</h2>
+    <div class="verdict"><span id="run-tag"></span><span id="run-format"></span></div>
+    <div class="reason" id="run-reason"></div>
+    <div class="reason" id="run-count"></div>
+    <div class="table-wrap" style="margin-top:12px;"><table id="claims"></table></div>
+    <h2 style="margin-top:18px;">The record</h2>
+    <div class="verdict"><span class="tag n" id="record-tag">BLIND</span></div>
+    <div class="reason">No check of this receipt is published anywhere this page knows about, and this
+      page does not publish yours. Your run above is yours alone: it is not a record that anyone
+      checked, and a receipt nobody has checked is not a clean one.</div>
+  </section>
+
+  <section class="panel">
+    <details>
+      <summary>What each answer means, and what this page cannot see</summary>
+      <div class="fine" style="margin-top:10px;">
+        <p><strong>VERIFIED</strong>: every core check for this format ran here and passed. It says the
+          receipt was not altered and was signed by the key named. It does not say the receipt is true,
+          or who holds that key.</p>
+        <p><strong>BROKEN</strong>: a check ran and failed. The receipt was altered, is malformed for its
+          own format, or does not verify under the key given.</p>
+        <p><strong>COULD NOT LOOK</strong>: the page could not run the check. The format was not recognized,
+          or was ambiguous, or the key or payload was not available, or the algorithm does not run in a
+          browser. It is never folded into either of the other two.</p>
+        <p><strong>COULD NOT LOOK</strong> in grey, on a single row: that claim is out of reach for this
+          page by construction, and the row says why. A grey row never decides your run's answer; only
+          the core checks do.</p>
+        <p><strong>BLIND</strong>, on the record: nobody has published a check of this receipt. That is a
+          state of the record over time, not a result of your run, and a VERIFIED run does not change it.</p>
+        <p>Formats read today: Arcaeon receipts (body digest, plus the same attachment checks as
+          verify-receipt.html: a witness block that contradicts the ledger block, its own pin or the pin's
+          self digest is BROKEN, and so is an attestation signature made over another digest; the witness,
+          ledger and anchor are otherwise the issuer's claims, CLAIMED and not looked at), Agent Receipts (schema and Ed25519 proof),
+          SCITT Signed Statements (RFC 9943 headers, hash envelope digest, and the COSE signature for
+          ES256, ES384, ES512, EdDSA, PS256 to PS512, RS256 to RS512), and SCITT transparency receipts
+          (RFC 9942) for the one registered data structure, RFC9162_SHA256: the inclusion proof is walked
+          from the statement's own leaf to a root, and the service's signature is checked over that root
+          with the key you supply. A receipt on its own, or attached to its statement, both work. Other
+          data structures (such as the CCF ledger profile), consistency proofs, and a receipt with no
+          service key are COULD NOT LOOK. Signet receipts are recognized and answered COULD NOT LOOK,
+          because Signet publishes no schema for them. Certificate chains, who a transparency service
+          key belongs to, Agent Receipts chains, and RFC 3161 timestamps are grey COULD NOT LOOK rows.</p>
+        <p>The failure cases this page is tested against are published with it:
+          <code>tests/fixtures/universal/README.md</code>. A checker that only ships happy paths cannot
+          be told apart from one that always says yes.</p>
+      </div>
+    </details>
+  </section>
+
+  <footer>arcaeon-receipt / verify-any.html: static, offline, no upload</footer>
+</main>
+
+<script src="universal/core.js"></script>
+<script src="universal/jcs.js"></script>
+<script src="universal/cbor.js"></script>
+<script src="universal/sigs.js"></script>
+<script src="universal/c14n_pinned.js"></script>
+<script src="universal/crosscheck_pinned.js"></script>
+<script src="universal/fmt_arcaeon.js"></script>
+<script src="universal/fmt_agent_receipts.js"></script>
+<script src="universal/fmt_scitt.js"></script>
+<script src="universal/fmt_scitt_receipt.js"></script>
+<script src="universal/detect.js"></script>
+<script>
+"use strict";
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var fileBytes = null, extraBytes = null, stmtBytes = null;
+  var TAG = { "VERIFIED": "v", "BROKEN": "b", "COULD NOT LOOK": "c", "NOT LOOKED": "n" };
+  // One word for "did not look" (vocabulary pass 2026-09-23): a non-core row
+  // the page cannot reach prints COULD NOT LOOK, kept grey so it still reads
+  // as coverage, not as the run's answer.
+  var SAY = { "NOT LOOKED": "COULD NOT LOOK" };
+
+  function tag(text) {
+    var s = document.createElement("span");
+    s.className = "tag " + (TAG[text] || "n");
+    s.textContent = SAY[text] || text;
+    return s;
+  }
+  function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
+
+  function render(res) {
+    clear($("run-tag")); $("run-tag").appendChild(tag(res.verdict));
+    $("run-format").textContent = res.format ? UC.FORMATS[res.format] : "format not recognized";
+    $("run-reason").textContent = res.reason || "";
+    var looked = res.claims.filter(function (c) { return c.result === UC.VERIFIED || c.result === UC.BROKEN; }).length;
+    $("run-count").textContent = res.claims.length
+      ? (looked + " of " + res.claims.length + " claims checked in this browser, just now, by you.")
+      : "No claim was checked.";
+    var t = $("claims"); clear(t);
+    if (res.claims.length) {
+      var hr = document.createElement("tr");
+      ["Claim", "Result", "Why"].forEach(function (h) { var th = document.createElement("th"); th.textContent = h; hr.appendChild(th); });
+      t.appendChild(hr);
+      res.claims.forEach(function (c) {
+        var tr = document.createElement("tr");
+        var a = document.createElement("td"); a.textContent = c.name; tr.appendChild(a);
+        var b = document.createElement("td"); b.appendChild(tag(c.result)); tr.appendChild(b);
+        var d = document.createElement("td"); d.textContent = c.detail; tr.appendChild(d);
+        t.appendChild(tr);
+      });
+    }
+    $("out").hidden = false;
+  }
+
+  async function check() {
+    var input = fileBytes ? { bytes: fileBytes } : { text: $("input").value };
+    var opts = { claimedFormat: $("format").value, publicKey: $("key").value, receiptKey: $("tskey").value };
+    if (stmtBytes) { opts.statement = stmtBytes; }
+    if (extraBytes) {
+      if ($("extra-kind").value === "detached") { opts.detachedPayload = extraBytes; } else { opts.preimage = extraBytes; }
+    }
+    var res;
+    try { res = await UC.verifyAny(input, opts); }
+    catch (e) { res = UC.couldNotLook(null, "the checker stopped: " + (e && e.message ? e.message : String(e))); }
+    render(res);
+  }
+
+  function readBytes(file, cb) {
+    var r = new FileReader();
+    r.onload = function () { cb(new Uint8Array(r.result)); };
+    r.readAsArrayBuffer(file);
+  }
+  function takeFile(file) {
+    if (!file) { return; }
+    readBytes(file, function (b) {
+      fileBytes = b;
+      $("file-name").textContent = file.name + " (" + b.length + " bytes; the text box is ignored while a file is loaded)";
+      check();
+    });
+  }
+
+  $("check").addEventListener("click", check);
+  $("input").addEventListener("input", function () { fileBytes = null; $("file-name").textContent = ""; });
+  $("clear").addEventListener("click", function () {
+    $("input").value = ""; $("key").value = ""; $("tskey").value = ""; fileBytes = null; extraBytes = null; stmtBytes = null;
+    $("file-name").textContent = ""; $("extra-name").textContent = ""; $("stmt-name").textContent = ""; $("out").hidden = true;
+  });
+  $("choose").addEventListener("click", function () { $("file").click(); });
+  $("file").addEventListener("change", function () { takeFile($("file").files[0]); });
+  $("choose-extra").addEventListener("click", function () { $("extra").click(); });
+  $("extra").addEventListener("change", function () {
+    var f = $("extra").files[0];
+    if (!f) { return; }
+    readBytes(f, function (b) { extraBytes = b; $("extra-name").textContent = f.name + " (" + b.length + " bytes)"; });
+  });
+  $("choose-stmt").addEventListener("click", function () { $("stmt").click(); });
+  $("stmt").addEventListener("change", function () {
+    var f = $("stmt").files[0];
+    if (!f) { return; }
+    readBytes(f, function (b) { stmtBytes = b; $("stmt-name").textContent = f.name + " (" + b.length + " bytes)"; });
+  });
+  ["dragover", "dragenter"].forEach(function (evt) {
+    document.addEventListener(evt, function (e) { e.preventDefault(); $("dropzone").classList.add("drag"); });
+  });
+  ["dragleave", "drop"].forEach(function (evt) {
+    document.addEventListener(evt, function () { $("dropzone").classList.remove("drag"); });
+  });
+  document.addEventListener("drop", function (e) {
+    e.preventDefault();
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    takeFile(f);
+  });
+})();
+</script>
+</body>
+</html>

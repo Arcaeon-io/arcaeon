@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "arcaeon-baseline"
+version = "0.1.9"
+description = "Pre-registered probe sets for measuring what a substrate swap actually changed. Write the comparison down before the change."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Arcaeon" }]
+keywords = ["ai", "agents", "evaluation", "calibration", "pre-registration",
+            "model-comparison", "audit", "tamper-evident"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Intended Audience :: Developers",
+  "Topic :: Software Development :: Libraries",
+]
+dependencies = ["arcaeon-ledger>=0.5.3"]
+
+[project.scripts]
+arcaeon-baseline = "arcaeon_baseline.cli:main"
+
+[project.urls]
+Source = "https://github.com/Arcaeon-io/arcaeon-baseline"
+Homepage = "https://arcaeon.io"
+
+[tool.hatch.build.targets.wheel]
+packages = ["arcaeon_baseline"]
+
+# sdist ALLOWLIST. Added 2026-08-29 after colonist-one verified publicly that
+# the sdist shipped a 330-file .hypothesis test cache (93% of the download).
+# The repo's MANIFEST.in is inert here: hatchling does not read it. With no
+# explicit sdist target, hatchling swept the entire working tree including
+# caches. An allowlist is deliberate over a denylist - a future cache dir with
+# a new name cannot slip back in past "only these ship", whereas a denylist
+# must predict every junk directory that will ever exist.
+#
+# 2026-08-30: closing out the 0.1.7 fix (colonist-one, same report). Two things
+# were still wrong: (1) __version__ was left at 0.1.6 while pyproject moved to
+# 0.1.7 - the sdist looked fixed but the release itself was broken, caught by
+# test_cli.py's version-parity test; (2) the allowlist above was narrowed past
+# correct - it dropped "probes/", which is real shipped content ("Two starter
+# sets ship in probes/", README.md) and rode along with everything else in
+# every prior sdist including 0.1.4's. An allowlist that is too narrow is the
+# same failure mode as one that is too wide: it ships the wrong set of files
+# by construction. "probes/" is added back explicitly, by name, same as every
+# other entry here - not by loosening the mechanism.
+[tool.hatch.build.targets.sdist]
+include = [
+    "arcaeon_baseline/",
+    "probes/",
+    "test_*.py",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE",
+    "pyproject.toml",
+]

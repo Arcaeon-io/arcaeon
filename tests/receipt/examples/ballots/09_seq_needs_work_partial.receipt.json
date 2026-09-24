@@ -1,0 +1,151 @@
+{
+ "receipt_version": "arcaeon-receipt/0.1",
+ "kind": "ballot",
+ "issued_at": "2026-09-11T08:12:37Z",
+ "subject": {
+  "trainee": "d. okafor",
+  "scenario": "call_taking.gen61_traffic_stop_backup.sequence",
+  "grader": "call_taking.seq_scorer"
+ },
+ "checks": [
+  {
+   "ballot": {
+    "seq_pct": 45,
+    "seq_verdict": "NEEDS_WORK",
+    "seq_verdict_label": "NEEDS WORK",
+    "seq_overridden": false,
+    "fatal_inversions": [],
+    "fatal_omissions": [],
+    "step_results": [
+     {
+      "step_id": "describe_vehicle",
+      "label": "Get a full vehicle description",
+      "required": true,
+      "fatal": false,
+      "weight": 0.25,
+      "status": "HIT",
+      "hit": true,
+      "hit_pos": 0,
+      "hit_beat_id": "c1",
+      "hit_grade": "best",
+      "omission_consequence": "Without make, color, and a plate or partial plate, the responding unit is looking for 'a car' in a parking lot full of cars.",
+      "sop_citation": "Call-Taking SOP 5.1 — vehicle description elements.",
+      "authored_by_veteran": "23-year call-taker, retired 2021."
+     },
+     {
+      "step_id": "get_direction_of_travel",
+      "label": "Establish direction of travel",
+      "required": true,
+      "fatal": false,
+      "weight": 0.2,
+      "status": "MISS",
+      "hit": false,
+      "hit_pos": -1,
+      "hit_beat_id": null,
+      "hit_grade": null,
+      "omission_consequence": "A unit rolling in with no direction of travel is guessing which way to point the spotlight.",
+      "sop_citation": "Call-Taking SOP 5.2 — direction of travel.",
+      "authored_by_veteran": "23-year call-taker, retired 2021."
+     },
+     {
+      "step_id": "check_occupants",
+      "label": "Confirm number and description of occupants",
+      "required": true,
+      "fatal": false,
+      "weight": 0.2,
+      "status": "HIT",
+      "hit": true,
+      "hit_pos": 1,
+      "hit_beat_id": "c2",
+      "hit_grade": "acceptable",
+      "omission_consequence": "Units need to know how many people to expect before they're standing at the window.",
+      "sop_citation": "Call-Taking SOP 5.3 — occupant count and description.",
+      "authored_by_veteran": "23-year call-taker, retired 2021."
+     },
+     {
+      "step_id": "officer_safety_note",
+      "label": "Flag anything unusual for officer safety",
+      "required": false,
+      "fatal": false,
+      "weight": 0.15,
+      "status": "SKIPPED_OK",
+      "hit": false,
+      "hit_pos": -1,
+      "hit_beat_id": null,
+      "hit_grade": null,
+      "omission_consequence": "This step only triggers when the caller mentions something officers should know before contact; nothing here was missed by skipping it.",
+      "sop_citation": "Call-Taking SOP 5.4 — officer safety flags (conditional).",
+      "authored_by_veteran": "23-year call-taker, retired 2021."
+     },
+     {
+      "step_id": "confirm_callback_number",
+      "label": "Confirm a working callback number",
+      "required": true,
+      "fatal": false,
+      "weight": 0.2,
+      "status": "MISS",
+      "hit": false,
+      "hit_pos": -1,
+      "hit_beat_id": null,
+      "hit_grade": null,
+      "omission_consequence": "If the unit needs more information after dispatch and the caller isn't reachable, the call stalls right when it needed a second look.",
+      "sop_citation": "Call-Taking SOP 5.5 — callback confirmation.",
+      "authored_by_veteran": "23-year call-taker, retired 2021."
+     }
+    ],
+    "beat_path": [
+     "c1",
+     "c2",
+     "c3",
+     "c5"
+    ],
+    "reflection_prompt": "You cleared the vehicle description and had eyes on the occupants, but never got a direction of travel or a callback number. If units miss the vehicle on the first pass, what do you have left to redirect them with?"
+   },
+   "ballot_digest": "sha256:json-c14n:v1:68b3759b206528eec2c1f639d68bc75277290bf96f19ae7082deafd3129c5fe5",
+   "trainee": "d. okafor",
+   "scenario": "call_taking.gen61_traffic_stop_backup.sequence",
+   "grader": "call_taking.seq_scorer",
+   "timestamp": "2026-09-11T08:12:37Z"
+  }
+ ],
+ "scope": {
+  "proves": [
+   "the score and the ballot are unaltered since the timestamp"
+  ],
+  "does_not_prove": [
+   "the score is correct",
+   "the sim was not attempted before"
+  ],
+  "method": "sha256 digest of the canonical JSON ballot object (score, verdict, and whatever fields the grading engine produced), bound to a stated timestamp inside the receipt body; hash-chained in arcaeon-ledger, one row per ballot."
+ },
+ "extra": {},
+ "body_digest": "sha256:json-c14n:v1:1bf7ace903b9a51eb168142d5935a0ea2ce4458bc40ccf4f5fd3ab067a4e2ca8",
+ "ledger": {
+  "path": "ledger.jsonl",
+  "namespace": "ballot",
+  "rows": 9,
+  "chain": "cc1ef9a42c5cf1c8d927e9b940b4d152",
+  "algorithm": "truncated_sha256_128 hash chain (arcaeon-ledger)"
+ },
+ "witness": {
+  "kind": "local-file",
+  "independence": "none (self-controlled file)",
+  "path": "ledger.jsonl.witness.jsonl",
+  "namespace": "ballot",
+  "rows": 9,
+  "chain": "cc1ef9a42c5cf1c8d927e9b940b4d152",
+  "pin": {
+   "namespace": "ballot",
+   "rows": 9,
+   "chain": "cc1ef9a42c5cf1c8d927e9b940b4d152",
+   "as_of": "2026-09-13T04:16:06Z",
+   "received_at": "2026-09-13T04:16:06Z",
+   "prev": "7c33f49d03faaa146eebd376901654ad",
+   "self": "6fea6015fc5c29914e47f107b4441ee5"
+  },
+  "status": "pinned"
+ },
+ "anchor": {
+  "status": "skipped"
+ }
+}

@@ -1,0 +1,30 @@
+{
+  "score": 95,
+  "verdict": "STRONG",
+  "dimensions": [
+    {"key": "call_type", "name": "CALL TYPE NAMED / JUSTIFIED", "score": 1.0, "weight": 0.28,
+     "label": "hit", "detail": "classification named and supported by the facts"},
+    {"key": "priority", "name": "PRIORITY NAMED / JUSTIFIED", "score": 0.8, "weight": 0.24,
+     "label": "hit", "detail": "urgency stated; tie it to the facts that make it hot"},
+    {"key": "key_facts", "name": "KEY FACTS CAPTURED", "score": 1.0, "weight": 0.36,
+     "label": "hit", "detail": "10 of 10 key facts present"},
+    {"key": "soundness", "name": "CLASSIFICATION SOUNDNESS", "score": 1.0, "weight": 0.12,
+     "label": "hit", "detail": "no unsupported classification detected"}
+  ],
+  "coaching": [
+    "Clean comment — call type, priority, and the key facts are all present and consistent. What a comment like this has not been tested against yet is a caller who gives you the facts out of order and changes one of them halfway through. Run a difficult-caller scenario before you call this settled."
+  ],
+  "facts": {
+    "matched": ["halsted", "garage", "window", "laptop", "wallet", "cold", "suspect", "gone", "photos", "report"],
+    "missing": []
+  },
+  "model_comments": "Cold burglary at RP's residence on Halsted. Garage entered, window forced on RP's sedan; laptop and wallet taken from the back seat. Suspect(s) gone on arrival. RP has photos of the damage and wants a report for insurance.",
+  "meta": {
+    "family": "crime",
+    "keyCount": 10,
+    "hitCount": 10,
+    "ratio": 1.0,
+    "source": "heuristic",
+    "version": "grader-1.0.0-heuristic"
+  }
+}

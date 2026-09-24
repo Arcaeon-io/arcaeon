@@ -1,0 +1,3 @@
+{"namespace": "ballot-anchored", "rows": 1, "chain": "c95348f0f2e2a93aac08cc2170cc3fb8", "as_of": "2026-09-13T13:19:17Z", "received_at": "2026-09-13T13:19:17Z", "prev": "witness-genesis", "self": "0a38769aaef9179e76f2bfb1d9f17f47"}
+{"namespace": "ballot-anchored", "rows": 2, "chain": "d7d2a38461f72db835ea175b679933e4", "as_of": "2026-09-13T23:10:42Z", "received_at": "2026-09-13T23:10:42Z", "prev": "0a38769aaef9179e76f2bfb1d9f17f47", "self": "09aadfd512317f3b9203c7be74187881"}
+{"namespace": "ballot-anchored", "rows": 3, "chain": "285fdbd43373daf35d78bdc02b444589", "as_of": "2026-09-13T23:11:08Z", "received_at": "2026-09-13T23:11:08Z", "prev": "09aadfd512317f3b9203c7be74187881", "self": "7d58f480f1f561e1eeb16cdf07799ddf"}

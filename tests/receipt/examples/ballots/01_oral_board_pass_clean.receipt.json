@@ -1,0 +1,301 @@
+{
+ "receipt_version": "arcaeon-receipt/0.1",
+ "kind": "ballot",
+ "issued_at": "2026-09-06T14:22:03Z",
+ "subject": {
+  "trainee": "j. alvarez",
+  "scenario": "oral_board.set1",
+  "grader": "ascenvo.vcs.oral_board"
+ },
+ "checks": [
+  {
+   "ballot": {
+    "per_answer": [
+     {
+      "score": 88,
+      "verdict": "EXCELLENT",
+      "dimensions": [
+       {
+        "key": "directness",
+        "name": "Answered the question",
+        "score": 0.9,
+        "weight": 0.32,
+        "detail": "Introduction stayed on point and led straight into a real reason for wanting the job."
+       },
+       {
+        "key": "structure",
+        "name": "Structure (real incident)",
+        "score": 0.82,
+        "weight": 0.26,
+        "detail": "No incident required for an intro question; delivery still had a clear beginning-middle-end shape."
+       },
+       {
+        "key": "communication",
+        "name": "Communication",
+        "score": 0.92,
+        "weight": 0.352,
+        "detail": "Clear, concise, well-organized. No rambling."
+       },
+       {
+        "key": "tieback",
+        "name": "Tie-back to the job",
+        "score": 0.8,
+        "weight": 0.2,
+        "detail": "Connected background to call-taking, though the link was brief."
+       }
+      ],
+      "coaching": [
+       "Stronger tie-back would help: name one specific dispatch skill your background already gave you.",
+       "Clear, concise self-introduction that led with a genuine reason for wanting the job."
+      ],
+      "worked": [
+       "Clear, concise self-introduction that led with a genuine reason for wanting the job."
+      ],
+      "fix": [
+       "Stronger tie-back would help: name one specific dispatch skill your background already gave you."
+      ],
+      "meta": {
+       "source": "llm:gemini-2.5-flash",
+       "id": "ob-intro",
+       "slot": "intro"
+      }
+     },
+     {
+      "score": 85,
+      "verdict": "EXCELLENT",
+      "dimensions": [
+       {
+        "key": "directness",
+        "name": "Answered the question",
+        "score": 0.85,
+        "weight": 0.32,
+        "detail": "Answered the teamwork question directly with a real project, not a generality."
+       },
+       {
+        "key": "structure",
+        "name": "Structure (real incident)",
+        "score": 0.88,
+        "weight": 0.416,
+        "detail": "Clean STAR shape: a specific shift-coverage conflict, what they did, and the resolution."
+       },
+       {
+        "key": "communication",
+        "name": "Communication",
+        "score": 0.8,
+        "weight": 0.22,
+        "detail": "Organized and composed, some minor pacing issues."
+       },
+       {
+        "key": "tieback",
+        "name": "Tie-back to the job",
+        "score": 0.82,
+        "weight": 0.32,
+        "detail": "Tied the story back to coordinating with partner units on a call, a solid parallel."
+       }
+      ],
+      "coaching": [
+       "Slow down slightly in the middle third; the pacing quickened right as the resolution landed.",
+       "Specific, well-shaped incident with a clean resolution and a real teamwork parallel."
+      ],
+      "worked": [
+       "Specific, well-shaped incident with a clean resolution and a real teamwork parallel."
+      ],
+      "fix": [
+       "Slow down slightly in the middle third; the pacing quickened right as the resolution landed."
+      ],
+      "meta": {
+       "source": "llm:gemini-2.5-flash",
+       "id": "ob-teamwork",
+       "slot": "behavioral"
+      }
+     },
+     {
+      "score": 90,
+      "verdict": "OUTSTANDING",
+      "dimensions": [
+       {
+        "key": "directness",
+        "name": "Answered the question",
+        "score": 0.92,
+        "weight": 0.32,
+        "detail": "Named a real, modest mistake with no blame-shifting."
+       },
+       {
+        "key": "structure",
+        "name": "Structure (real incident)",
+        "score": 0.9,
+        "weight": 0.416,
+        "detail": "Full arc: the error, the moment it was caught, and the corrective action taken."
+       },
+       {
+        "key": "communication",
+        "name": "Communication",
+        "score": 0.88,
+        "weight": 0.22,
+        "detail": "Steady tone throughout, including the uncomfortable part."
+       },
+       {
+        "key": "tieback",
+        "name": "Tie-back to the job",
+        "score": 0.9,
+        "weight": 0.32,
+        "detail": "Explicitly connected the lesson to double-checking addresses on a live call."
+       }
+      ],
+      "coaching": [
+       "Owned a real mistake plainly, showed the correction, and tied the lesson directly to call-taking accuracy."
+      ],
+      "worked": [
+       "Owned a real mistake plainly, showed the correction, and tied the lesson directly to call-taking accuracy.",
+       "No fake-humble dodge and no excuse-making."
+      ],
+      "fix": [],
+      "meta": {
+       "source": "llm:gemini-2.5-flash",
+       "id": "ob-mistake",
+       "slot": "behavioral"
+      }
+     },
+     {
+      "score": 86,
+      "verdict": "EXCELLENT",
+      "dimensions": [
+       {
+        "key": "directness",
+        "name": "Answered the question",
+        "score": 0.88,
+        "weight": 0.32,
+        "detail": "Directly addressed how to handle a panicking caller."
+       },
+       {
+        "key": "structure",
+        "name": "Structure (real incident)",
+        "score": 0.8,
+        "weight": 0.26,
+        "detail": "Situational question; no incident required, walked through concrete steps instead."
+       },
+       {
+        "key": "communication",
+        "name": "Communication",
+        "score": 0.9,
+        "weight": 0.352,
+        "detail": "Calm, simple language mirroring the technique being described."
+       },
+       {
+        "key": "tieback",
+        "name": "Tie-back to the job",
+        "score": 0.85,
+        "weight": 0.32,
+        "detail": "Closed with a short, sincere reason to hire, no bragging."
+       }
+      ],
+      "coaching": [
+       "Name the specific de-escalation phrase you'd open with; right now the steps stay slightly abstract.",
+       "Showed the anchor instinct clearly: stay calm, slow the caller down, one thing at a time."
+      ],
+      "worked": [
+       "Showed the anchor instinct clearly: stay calm, slow the caller down, one thing at a time."
+      ],
+      "fix": [
+       "Name the specific de-escalation phrase you'd open with; right now the steps stay slightly abstract."
+      ],
+      "meta": {
+       "source": "llm:gemini-2.5-flash",
+       "id": "ob-close",
+       "slot": "close"
+      }
+     }
+    ],
+    "overall": {
+     "score": 87,
+     "verdict": "EXCELLENT",
+     "summary": "Strong, highly capable answers with clear competence across the core categories. Short of top-tier mastery or the comprehensive detail an outstanding answer carries.",
+     "band_label": "EXCELLENT",
+     "band_range": "80-89%",
+     "band_also": "Excellent / Very Good",
+     "band_meaning": "Strong, highly capable answers with clear competence across the core categories. Short of top-tier mastery or the comprehensive detail an outstanding answer carries.",
+     "worked": [
+      "Clear, concise self-introduction that led with a genuine reason for wanting the job.",
+      "Specific, well-shaped incident with a clean resolution and a real teamwork parallel.",
+      "Owned a real mistake plainly, showed the correction, and tied the lesson directly to call-taking accuracy.",
+      "Showed the anchor instinct clearly: stay calm, slow the caller down, one thing at a time."
+     ],
+     "fix": [
+      "Stronger tie-back would help: name one specific dispatch skill your background already gave you.",
+      "Slow down slightly in the middle third; the pacing quickened right as the resolution landed.",
+      "Name the specific de-escalation phrase you'd open with; right now the steps stay slightly abstract."
+     ],
+     "strengths": [
+      "Clear, concise self-introduction that led with a genuine reason for wanting the job.",
+      "Specific, well-shaped incident with a clean resolution and a real teamwork parallel.",
+      "Owned a real mistake plainly, showed the correction, and tied the lesson directly to call-taking accuracy.",
+      "Showed the anchor instinct clearly: stay calm, slow the caller down, one thing at a time."
+     ],
+     "fixes": [
+      "Stronger tie-back would help: name one specific dispatch skill your background already gave you.",
+      "Slow down slightly in the middle third; the pacing quickened right as the resolution landed.",
+      "Name the specific de-escalation phrase you'd open with; right now the steps stay slightly abstract."
+     ]
+    },
+    "judge_declaration": {
+     "falsifier_type": "evaluative",
+     "judge_identity": "gemini-2.5-flash-002",
+     "judge_requested": "gemini-2.5-flash",
+     "rubric_identity": "ascenvo.vcs.oral_board.grade_board",
+     "rubric_version": "2026-08-15",
+     "board_identity": "ob-intro+ob-teamwork+ob-mistake+ob-close",
+     "baseline_identity": "the four SME rubric dimensions (directness/structure/communication/tieback) + each question's wants/hard_on",
+     "baseline_provenance": "products/voice_call_sim/oralboard_judge.py (Daniel, dispatch-side SME) + data/oralboard_questions.js",
+     "baseline_date": "2026-06-25",
+     "judge_inputs_scope": "this question's text + its trait/wants/hard_on rubric data + this one answer's text ONLY; NOT the other answers on the board, NOT prior attempts, NOT a model answer",
+     "graded_at": "2026-09-06T14:22:03Z"
+    }
+   },
+   "ballot_digest": "sha256:json-c14n:v1:6863f661e8a4c1f7076642f36bb8d54dabac68c70833a366fc10b081aa33e7be",
+   "trainee": "j. alvarez",
+   "scenario": "oral_board.set1",
+   "grader": "ascenvo.vcs.oral_board",
+   "timestamp": "2026-09-06T14:22:03Z"
+  }
+ ],
+ "scope": {
+  "proves": [
+   "the score and the ballot are unaltered since the timestamp"
+  ],
+  "does_not_prove": [
+   "the score is correct",
+   "the sim was not attempted before"
+  ],
+  "method": "sha256 digest of the canonical JSON ballot object (score, verdict, and whatever fields the grading engine produced), bound to a stated timestamp inside the receipt body; hash-chained in arcaeon-ledger, one row per ballot."
+ },
+ "extra": {},
+ "body_digest": "sha256:json-c14n:v1:daa2b4bbf9b7f0c43eb492fbfcbb9545c65eddc197dd4c46f3c0e16320051b0c",
+ "ledger": {
+  "path": "ledger.jsonl",
+  "namespace": "ballot",
+  "rows": 12,
+  "chain": "e22c53a719d4ebc8850c52be5ec48f33",
+  "algorithm": "truncated_sha256_128 hash chain (arcaeon-ledger)"
+ },
+ "witness": {
+  "kind": "local-file",
+  "independence": "none (self-controlled file)",
+  "path": "ledger.jsonl.witness.jsonl",
+  "namespace": "ballot",
+  "rows": 12,
+  "chain": "e22c53a719d4ebc8850c52be5ec48f33",
+  "pin": {
+   "namespace": "ballot",
+   "rows": 12,
+   "chain": "e22c53a719d4ebc8850c52be5ec48f33",
+   "as_of": "2026-09-13T23:09:58Z",
+   "received_at": "2026-09-13T23:09:58Z",
+   "prev": "8de213e3a1a61c58aed8a2e974b62bdd",
+   "self": "c6c8ac71e6e68a7e9235998fba09a220"
+  },
+  "status": "pinned"
+ },
+ "anchor": {
+  "status": "skipped"
+ }
+}

@@ -1,0 +1,14 @@
+- id: arcaeon-receipt-diff
+  name: arcaeon receipt (staged diff)
+  description: >-
+    Mints a best-effort arcaeon-ledger receipt over the staged diff before
+    each commit (hooks/receipt_diff.py). Never blocks a commit on its own --
+    it warns to stderr and exits 0 even when the mint itself fails. See this
+    repo's README.md, "Pre-commit hook: receipt the staged diff", for exactly
+    what the receipt proves, what it does not, and what `--no-verify` does to
+    that guarantee.
+  entry: python hooks/receipt_diff.py
+  language: system
+  pass_filenames: false
+  always_run: true
+  stages: [pre-commit]

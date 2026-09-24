@@ -1,0 +1,30 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "arcaeon-once"
+version = "0.2.3"
+description = "Executed-once receipts for non-idempotent agent side effects. Refuses silent double-fires, flags crash-window uncertainty honestly."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Arcaeon" }]
+keywords = ["ai", "agents", "idempotency", "mcp", "audit", "tamper-evident", "hash-chain", "reliability"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Intended Audience :: Developers",
+  "Topic :: Software Development :: Libraries",
+]
+dependencies = ["arcaeon-ledger>=0.5.7"]
+
+[project.scripts]
+arcaeon-once = "arcaeon_once.cli:main"
+
+[project.urls]
+Source = "https://github.com/Arcaeon-io/arcaeon-once"
+Homepage = "https://arcaeon.io"
+
+[tool.hatch.build.targets.wheel]
+packages = ["arcaeon_once"]

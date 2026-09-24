@@ -1,0 +1,4 @@
+prune .cleanverify
+prune __pycache__
+prune dist
+exclude publish_retry.ps1

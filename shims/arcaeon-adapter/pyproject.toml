@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arcaeon-adapter"
+# one patch above the old line: PyPI last 0.2.0
+version = "0.2.1"
+description = "Compatibility shim: arcaeon-adapter is now part of arcaeon (arcaeon.record.adapter). Installs arcaeon; goes away with arcaeon 1.0.0."
+requires-python = ">=3.10"
+license = "MIT"
+authors = [{ name = "Arcaeon" }]
+dependencies = ["arcaeon>=0.9,<1"]
+
+[project.scripts]
+arcaeon-adapter = "arcaeon_adapter:_script_arcaeon_adapter"
+arcaeon-adapter-selftest = "arcaeon_adapter:_script_arcaeon_adapter_selftest"
+
+[project.urls]
+Homepage = "https://arcaeon.io"
+
+[tool.setuptools]
+packages = ["arcaeon_adapter"]

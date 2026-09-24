@@ -1,0 +1,67 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arcaeon"
+version = "0.9.0"
+description = "A record of what an agent did that the agent cannot quietly rewrite, and a way for anyone who doubts it to check."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Arcaeon" }]
+keywords = ["ai", "agents", "mcp", "audit", "tamper-evident", "provenance", "hash-chain", "ledger"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Security",
+  "Topic :: Software Development :: Libraries",
+]
+# ZERO runtime dependencies. Everything heavy is an extra, and a test
+# (tests/test_import_weight.py) fails if importing arcaeon.record.adapter
+# pulls in mcp, tree_sitter or cryptography.
+dependencies = []
+
+[project.optional-dependencies]
+# the MCP connector server (`arcaeon mcp`) and vet's MCP-facing parts.
+# <3: the 1.x -> 2.x break removed API across a major (connector pyproject, 0.1.4).
+mcp = ["mcp>=2.0.0,<3"]
+# vet's TypeScript checks
+ts = ["tree-sitter>=0.26.0,<0.27", "tree-sitter-typescript>=0.23.2,<0.24"]
+# signed vet receipts and receipt signature checks
+sign = ["cryptography>=46.0.7,<47"]
+all = [
+  "mcp>=2.0.0,<3",
+  "tree-sitter>=0.26.0,<0.27",
+  "tree-sitter-typescript>=0.23.2,<0.24",
+  "cryptography>=46.0.7,<47",
+]
+
+[project.scripts]
+arcaeon = "arcaeon.cli:main"
+
+[project.urls]
+Homepage = "https://arcaeon.io"
+Offers = "https://arcaeon.io/.well-known/offers.json"
+
+[dependency-groups]
+# not an extra: the tools the test suite runs on (PIN_POLICY_2026-09-05 floors)
+dev = ["pytest>=7", "hypothesis>=6", "pyyaml>=6"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"arcaeon.remote" = ["offers.json"]
+"arcaeon.prove.continuity" = ["calibration_fixtures.jsonl"]
+"arcaeon.prove.baseline" = ["probes/*.jsonl"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

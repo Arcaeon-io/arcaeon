@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Authorship Receipt recorder</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f6f5f2;
+    --panel: #ffffff;
+    --ink: #1b1b1b;
+    --muted: #5a5a5a;
+    --line: #d8d5cf;
+    --accent: #2f5d50;
+    --warn-bg: #fff6e5;
+    --warn-line: #d9b969;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181a;
+      --panel: #202225;
+      --ink: #eceae5;
+      --muted: #a2a099;
+      --line: #3a3c3f;
+      --accent: #7fbfa8;
+      --warn-bg: #2a2413;
+      --warn-line: #8a6d2a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    margin: 0;
+    padding: 24px;
+  }
+  main {
+    max-width: 860px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 1.35rem; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 20px; font-size: 0.92rem; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px;
+    margin-bottom: 16px;
+  }
+  .notice {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+    font-size: 0.9rem;
+    line-height: 1.45;
+  }
+  .notice strong { display: block; margin-bottom: 4px; }
+  label {
+    display: block;
+    font-size: 0.82rem;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  input[type=text] {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ink);
+    font-size: 0.95rem;
+    margin-bottom: 12px;
+  }
+  textarea {
+    width: 100%;
+    min-height: 340px;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--ink);
+    font-size: 1rem;
+    line-height: 1.5;
+    resize: vertical;
+    font-family: inherit;
+  }
+  .row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin-top: 14px;
+  }
+  button {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 9px 16px;
+    font-size: 0.92rem;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 10px;
+    margin-top: 4px;
+    font-size: 0.85rem;
+  }
+  .stat { color: var(--muted); }
+  .stat b { display: block; color: var(--ink); font-size: 1.05rem; }
+  .hash {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.78rem;
+    word-break: break-all;
+    color: var(--muted);
+    margin-top: 10px;
+  }
+  .status { font-size: 0.85rem; color: var(--muted); min-height: 1.2em; }
+  a.export-link { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Authorship Receipt recorder</h1>
+  <p class="sub">Records the edit stream for one writing session, entirely in this browser tab.</p>
+
+  <div class="notice">
+    <strong>What this page does and does not do.</strong>
+    This page never sends anything anywhere. Nothing here touches the network; there is no
+    server, no analytics, no sync. Everything stays in this tab until you export it yourself.
+    Exporting produces a file that records when text was typed, pasted, deleted, or left idle,
+    and folds each event into a running hash as it happens. It does not prove a human typed
+    the words: software can emit the same events. It is process evidence, not a humanity test,
+    and it says nothing about whether pasted text was written by the author or by a model.
+  </div>
+
+  <div class="panel">
+    <label for="doc-title">Document title</label>
+    <input type="text" id="doc-title" placeholder="Untitled" autocomplete="off">
+    <label for="author-name">Author</label>
+    <input type="text" id="author-name" placeholder="Your name" autocomplete="off">
+    <label for="body">Text</label>
+    <textarea id="body" placeholder="Start writing here. Typing, pasting, and deleting are all recorded."></textarea>
+
+    <div class="row">
+      <button id="export-btn" type="button">Export session</button>
+      <span class="status" id="status"></span>
+    </div>
+
+    <div class="stats">
+      <div class="stat">Events<b id="stat-events">0</b></div>
+      <div class="stat">Typed chars<b id="stat-typed">0</b></div>
+      <div class="stat">Pasted chars<b id="stat-pasted">0</b></div>
+      <div class="stat">Paste events<b id="stat-paste-events">0</b></div>
+      <div class="stat">Deleted chars<b id="stat-deleted">0</b></div>
+      <div class="stat">Idle gaps<b id="stat-idle">0</b></div>
+    </div>
+    <div class="hash" id="rolling-hash">rolling hash: genesis</div>
+  </div>
+
+  <a class="export-link" id="export-link"></a>
+</main>
+
+<script>
+(function () {
+  "use strict";
+
+  // FOLD-START
+  function canonicalJSON(value) {
+    if (value === null || typeof value !== "object") {
+      return JSON.stringify(value);
+    }
+    if (Array.isArray(value)) {
+      return "[" + value.map(canonicalJSON).join(",") + "]";
+    }
+    var keys = Object.keys(value).sort();
+    return "{" + keys.map(function (k) {
+      return JSON.stringify(k) + ":" + canonicalJSON(value[k]);
+    }).join(",") + "}";
+  }
+
+  async function sha256Hex(text) {
+    var bytes = new TextEncoder().encode(text);
+    var buf = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(buf)).map(function (b) {
+      return b.toString(16).padStart(2, "0");
+    }).join("");
+  }
+
+  // Same fold as authorship._fold on the Python side: sha256 over
+  // (prev + canonical JSON of the event, keys sorted, no spaces), starting
+  // from the literal string "genesis". The event schema here only ever
+  // holds ASCII-safe fields (seq, op, n, ts, span_digest), so Python's
+  // default ensure_ascii escaping and this plain-UTF-8 canonicalization
+  // produce identical bytes; there is nothing here for that flag to change.
+  async function foldEvent(prev, event) {
+    return sha256Hex(prev + canonicalJSON(event));
+  }
+  // FOLD-END
+
+  async function spanDigest(text) {
+    var bytes = new TextEncoder().encode(text);
+    var buf = await crypto.subtle.digest("SHA-256", bytes);
+    var hex = Array.from(new Uint8Array(buf)).map(function (b) {
+      return b.toString(16).padStart(2, "0");
+    }).join("");
+    return "sha256:raw-bytes:v1:" + hex;
+  }
+
+  function toIsoUtc(date) {
+    return date.toISOString().slice(0, 19) + "Z";
+  }
+
+  function diffChange(oldStr, newStr) {
+    var maxStart = Math.min(oldStr.length, newStr.length);
+    var start = 0;
+    while (start < maxStart && oldStr[start] === newStr[start]) start++;
+    var oldEnd = oldStr.length, newEnd = newStr.length;
+    while (oldEnd > start && newEnd > start && oldStr[oldEnd - 1] === newStr[newEnd - 1]) {
+      oldEnd--; newEnd--;
+    }
+    return { removed: oldStr.slice(start, oldEnd), inserted: newStr.slice(start, newEnd) };
+  }
+
+  var textarea = document.getElementById("body");
+  var titleInput = document.getElementById("doc-title");
+  var authorInput = document.getElementById("author-name");
+  var exportBtn = document.getElementById("export-btn");
+  var exportLink = document.getElementById("export-link");
+  var statusEl = document.getElementById("status");
+  var hashEl = document.getElementById("rolling-hash");
+
+  var IDLE_GAP_MS = 60000;
+
+  var events = [];
+  var seq = 0;
+  var rolling = "genesis";
+  var prevValue = "";
+  var lastEventTime = Date.now();
+  var startedAt = toIsoUtc(new Date());
+
+  var typedChars = 0, pastedChars = 0, pasteEvents = 0, deletedChars = 0, idleGaps = 0;
+
+  function updateStats() {
+    document.getElementById("stat-events").textContent = String(events.length);
+    document.getElementById("stat-typed").textContent = String(typedChars);
+    document.getElementById("stat-pasted").textContent = String(pastedChars);
+    document.getElementById("stat-paste-events").textContent = String(pasteEvents);
+    document.getElementById("stat-deleted").textContent = String(deletedChars);
+    document.getElementById("stat-idle").textContent = String(idleGaps);
+    hashEl.textContent = "rolling hash: " + rolling;
+  }
+
+  async function recordEvent(op, n, ts, span) {
+    seq += 1;
+    var ev = { seq: seq, op: op, n: n, ts: ts };
+    if (span !== null && span !== undefined) {
+      ev.span_digest = await spanDigest(span);
+    }
+    rolling = await foldEvent(rolling, ev);
+    events.push(ev);
+    if (op === "type") typedChars += n;
+    else if (op === "paste") { pastedChars += n; pasteEvents += 1; }
+    else if (op === "delete") deletedChars += n;
+    else if (op === "idle") idleGaps += 1;
+    updateStats();
+  }
+
+  textarea.addEventListener("input", async function (e) {
+    var newValue = textarea.value;
+    var now = new Date();
+    var nowIso = toIsoUtc(now);
+    var elapsedMs = now.getTime() - lastEventTime;
+
+    if (elapsedMs > IDLE_GAP_MS) {
+      await recordEvent("idle", Math.round(elapsedMs / 1000), nowIso, null);
+    }
+
+    var inputType = e.inputType || "";
+    var op;
+    if (inputType.indexOf("delete") === 0) op = "delete";
+    else if (inputType === "insertFromPaste" || inputType === "insertFromPasteAsQuotation" ||
+             inputType === "insertFromDrop") op = "paste";
+    else op = "type";
+
+    if (op === "delete") {
+      var removedN = Math.max(0, prevValue.length - newValue.length);
+      await recordEvent("delete", removedN, nowIso, null);
+    } else {
+      var span = e.data;
+      if (span === null || span === undefined || span === "") {
+        if (inputType === "insertLineBreak" || inputType === "insertParagraph") {
+          span = "\n";
+        } else {
+          span = diffChange(prevValue, newValue).inserted;
+        }
+      }
+      if (span.length > 0) {
+        await recordEvent(op, span.length, nowIso, span);
+      }
+    }
+
+    prevValue = newValue;
+    lastEventTime = now.getTime();
+  });
+
+  function download(filename, text) {
+    var url = "data:application/json;charset=utf-8," + encodeURIComponent(text);
+    exportLink.setAttribute("href", url);
+    exportLink.setAttribute("download", filename);
+    exportLink.click();
+  }
+
+  exportBtn.addEventListener("click", function () {
+    var payload = {
+      author: authorInput.value || "",
+      document: titleInput.value || "",
+      started_at: startedAt,
+      events: events,
+      final_text: textarea.value,
+      rolling_hash: rolling
+    };
+    var name = (titleInput.value || "session").trim().replace(/[^a-z0-9\-_]+/gi, "_") ||
+      "session";
+    download(name + ".authorship-export.json", JSON.stringify(payload, null, 1));
+    statusEl.textContent = "Exported " + events.length + " events at " + toIsoUtc(new Date()) +
+      ". Nothing was sent anywhere; the file went straight to your downloads.";
+  });
+
+  updateStats();
+})();
+</script>
+</body>
+</html>

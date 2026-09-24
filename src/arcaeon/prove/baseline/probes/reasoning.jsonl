@@ -1,0 +1,15 @@
+{"id": "r01", "prompt": "A train travels 60 miles in 1.5 hours at a constant speed. What is its average speed in miles per hour? Answer with just the number.", "scoring": {"type": "numeric_tolerance", "answer": 40, "tolerance": 0.5}}
+{"id": "r02", "prompt": "What is the sum of all integers from 1 to 10, inclusive? Answer with just the number.", "scoring": {"type": "numeric_tolerance", "answer": 55, "tolerance": 0}}
+{"id": "r03", "prompt": "What is the capital of France? Answer with just the city name.", "scoring": {"type": "exact_match", "answer": "Paris"}}
+{"id": "r04", "prompt": "Continue the sequence: 2, 4, 8, 16, __. What is the next number? Answer with just the number.", "scoring": {"type": "numeric_tolerance", "answer": 32, "tolerance": 0}}
+{"id": "r05", "prompt": "If x + 5 = 12, what is x? Answer with just the number.", "scoring": {"type": "numeric_tolerance", "answer": 7, "tolerance": 0}}
+{"id": "r06", "prompt": "How many letters are in the word \"elephant\"? Answer with just the number.", "scoring": {"type": "numeric_tolerance", "answer": 8, "tolerance": 0}}
+{"id": "r07", "prompt": "Spell the word \"cat\" backwards. Answer with just the resulting word, no spaces.", "scoring": {"type": "exact_match", "answer": "tac"}}
+{"id": "r08", "prompt": "What is 15% of 200? Answer with just the number.", "scoring": {"type": "numeric_tolerance", "answer": 30, "tolerance": 0.5}}
+{"id": "r09", "prompt": "What day of the week comes immediately after Wednesday? Answer with just the day name.", "scoring": {"type": "exact_match", "answer": "Thursday"}}
+{"id": "r10", "prompt": "What is the boiling point of water at sea level in degrees Fahrenheit? Answer with just the number.", "scoring": {"type": "numeric_tolerance", "answer": 212, "tolerance": 1}}
+{"id": "r11", "prompt": "How many sides does a hexagon have? Answer with just the number.", "scoring": {"type": "numeric_tolerance", "answer": 6, "tolerance": 0}}
+{"id": "r12", "prompt": "A dozen eggs cost $3.60. What does one egg cost, in dollars? Answer with just the number.", "scoring": {"type": "numeric_tolerance", "answer": 0.30, "tolerance": 0.01}}
+{"id": "r13", "prompt": "What is the opposite of the word \"hot\"? Answer with just one word.", "scoring": {"type": "exact_match", "answer": "cold"}}
+{"id": "r14", "prompt": "What is the square root of 144? Answer with just the number.", "scoring": {"type": "numeric_tolerance", "answer": 12, "tolerance": 0}}
+{"id": "r15", "prompt": "What is the 3rd letter of the English alphabet, in uppercase? Answer with just the letter.", "scoring": {"type": "exact_match", "answer": "C"}}

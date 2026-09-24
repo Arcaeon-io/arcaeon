@@ -1,0 +1,32 @@
+{
+  "score": 38,
+  "verdict": "WEAK",
+  "dimensions": [
+    {"key": "call_type", "name": "CALL TYPE NAMED / JUSTIFIED", "score": 0.0, "weight": 0.28,
+     "label": "miss", "detail": "no call type named or justified"},
+    {"key": "priority", "name": "PRIORITY NAMED / JUSTIFIED", "score": 0.8, "weight": 0.24,
+     "label": "hit", "detail": "urgency stated; tie it to the facts that make it hot"},
+    {"key": "key_facts", "name": "KEY FACTS CAPTURED", "score": 0.182, "weight": 0.36,
+     "label": "miss", "detail": "2 of 11 key facts present — missing: crisis, suicidal, alone, library, Cedar, rapport, accepted help, on the line"},
+    {"key": "soundness", "name": "CLASSIFICATION SOUNDNESS", "score": 1.0, "weight": 0.12,
+     "label": "hit", "detail": "no unsupported classification detected"}
+  ],
+  "coaching": [
+    "Name the crisis and the risk. A reader should see what the person is doing or threatening, whether weapons are involved, and who else is present, because that is what decides who responds and how.",
+    "Missing key facts the call required: crisis, suicidal, alone, library, Cedar, rapport, and 3 more.",
+    "Model comment for comparison: Caller is an adult in crisis who made a suicidal statement, exhausted and ambivalent about being on the phone. Built rapport first and kept the caller on the line; was honest rather than making any promise of a guaranteed outcome, which the caller responded to. Caller is alone in their vehicle in the parking lot behind the old library on Cedar. Through gentle, caring questions the caller disclosed the location and accepted help framed as someone to come sit with them. Responders en route; call-taker staying on the line the entire time at the caller's request. Treat with care and dignity; do not approach in a way that makes the caller feel cornered."
+  ],
+  "facts": {
+    "matched": ["vehicle", "en route"],
+    "missing": ["crisis", "suicidal", "alone", "library", "Cedar", "rapport", "accepted help", "on the line", "stay on"]
+  },
+  "model_comments": "Caller is an adult in crisis who made a suicidal statement, exhausted and ambivalent about being on the phone. Built rapport first and kept the caller on the line; was honest rather than making any promise of a guaranteed outcome, which the caller responded to. Caller is alone in their vehicle in the parking lot behind the old library on Cedar. Through gentle, caring questions the caller disclosed the location and accepted help framed as someone to come sit with them. Responders en route; call-taker staying on the line the entire time at the caller's request. Treat with care and dignity; do not approach in a way that makes the caller feel cornered.",
+  "meta": {
+    "family": "crisis",
+    "keyCount": 11,
+    "hitCount": 2,
+    "ratio": 0.182,
+    "source": "heuristic",
+    "version": "grader-1.0.0-heuristic"
+  }
+}

@@ -1,0 +1,143 @@
+{
+ "receipt_version": "arcaeon-receipt/0.1",
+ "kind": "ballot",
+ "issued_at": "2026-09-10T15:21:09Z",
+ "subject": {
+  "trainee": "s. omar",
+  "scenario": "call_taking.hero01_welfare_weapon.sequence",
+  "grader": "call_taking.seq_scorer"
+ },
+ "checks": [
+  {
+   "ballot": {
+    "seq_pct": 55,
+    "seq_verdict": "RETRAIN",
+    "seq_verdict_label": "RETRAIN",
+    "seq_overridden": true,
+    "fatal_inversions": [],
+    "fatal_omissions": [
+     {
+      "step_id": "closing_sweep",
+      "label": "Run the closing safety sweep",
+      "omission_consequence": "Skip the sweep and the weapon never surfaces. The officers walk up to what they think is a quiet welfare check and it is actually a possible armed domestic.",
+      "sop_citation": "Call-Taking SOP 9.4 — mandatory closing safety sweep."
+     }
+    ],
+    "step_results": [
+     {
+      "step_id": "loc_first",
+      "label": "Verify the location first",
+      "required": true,
+      "fatal": true,
+      "weight": 0.3,
+      "status": "HIT",
+      "hit": true,
+      "hit_pos": 0,
+      "hit_beat_id": "b1",
+      "hit_grade": "best",
+      "omission_consequence": "If the line drops before the address is verified, there's a frightened caller and nowhere to send a unit. Location is the one thing that can't be reconstructed after the call ends.",
+      "sop_citation": "Call-Taking SOP 4.2 — location before all else.",
+      "authored_by_veteran": "23-year call-taker, retired 2021."
+     },
+     {
+      "step_id": "open_before_closed",
+      "label": "Open the funnel before you close it",
+      "required": true,
+      "fatal": false,
+      "weight": 0.25,
+      "status": "HIT",
+      "hit": true,
+      "hit_pos": 1,
+      "hit_beat_id": "b2",
+      "hit_grade": "acceptable",
+      "omission_consequence": "Lead with a closed or leading question and you only ever learn the one thing you thought to ask. The open question is how the overnight disturbance nobody mentioned gets found.",
+      "sop_citation": "Call-Taking SOP 6.1 — open-ended intake.",
+      "authored_by_veteran": "23-year call-taker, retired 2021."
+     },
+     {
+      "step_id": "closing_sweep",
+      "label": "Run the closing safety sweep",
+      "required": true,
+      "fatal": true,
+      "weight": 0.35,
+      "status": "FATAL_MISS",
+      "hit": false,
+      "hit_pos": -1,
+      "hit_beat_id": null,
+      "hit_grade": null,
+      "omission_consequence": "Skip the sweep and the weapon never surfaces. The officers walk up to what they think is a quiet welfare check and it is actually a possible armed domestic.",
+      "sop_citation": "Call-Taking SOP 9.4 — mandatory closing safety sweep.",
+      "authored_by_veteran": "23-year call-taker, retired 2021."
+     },
+     {
+      "step_id": "upgrade_caller_safety",
+      "label": "Re-prioritize caller safety after the upgrade",
+      "required": false,
+      "fatal": false,
+      "weight": 0.1,
+      "status": "SKIPPED_OK",
+      "hit": false,
+      "hit_pos": -1,
+      "hit_beat_id": null,
+      "hit_grade": null,
+      "omission_consequence": "Once it's a weapons call, the caller's safety is the new top of the call. Letting them wander outside or talking them out of what they heard undoes the sweep you just ran.",
+      "sop_citation": "Call-Taking SOP 9.5 — caller safety after upgrade.",
+      "authored_by_veteran": "23-year call-taker, retired 2021."
+     }
+    ],
+    "beat_path": [
+     "b1",
+     "b2",
+     "b3",
+     "b6"
+    ],
+    "reflection_prompt": "You just took a call that started as a welfare check and ended as a possible armed domestic. Which single question changed the whole call — and what happens to the responding officers if you skip it?"
+   },
+   "ballot_digest": "sha256:json-c14n:v1:988b554ebdfc0d3afc1e6c18f34b30a37921052a18a63c40f25eaac9b027e9f0",
+   "trainee": "s. omar",
+   "scenario": "call_taking.hero01_welfare_weapon.sequence",
+   "grader": "call_taking.seq_scorer",
+   "timestamp": "2026-09-10T15:21:09Z"
+  }
+ ],
+ "scope": {
+  "proves": [
+   "the score and the ballot are unaltered since the timestamp"
+  ],
+  "does_not_prove": [
+   "the score is correct",
+   "the sim was not attempted before"
+  ],
+  "method": "sha256 digest of the canonical JSON ballot object (score, verdict, and whatever fields the grading engine produced), bound to a stated timestamp inside the receipt body; hash-chained in arcaeon-ledger, one row per ballot."
+ },
+ "extra": {},
+ "body_digest": "sha256:json-c14n:v1:003fdb6d3ead34d2516dba4fa657b9cdf92d109d9e6c5a88f04ac17b03134cdb",
+ "ledger": {
+  "path": "ledger.jsonl",
+  "namespace": "ballot",
+  "rows": 8,
+  "chain": "7f8b2df14172586350cd2b2f260cf5ab",
+  "algorithm": "truncated_sha256_128 hash chain (arcaeon-ledger)"
+ },
+ "witness": {
+  "kind": "local-file",
+  "independence": "none (self-controlled file)",
+  "path": "examples\\ballots\\ledger.jsonl.witness.jsonl",
+  "namespace": "ballot",
+  "rows": 8,
+  "chain": "7f8b2df14172586350cd2b2f260cf5ab",
+  "pin": {
+   "namespace": "ballot",
+   "rows": 8,
+   "chain": "7f8b2df14172586350cd2b2f260cf5ab",
+   "as_of": "2026-09-12T17:22:21Z",
+   "received_at": "2026-09-12T17:22:21Z",
+   "prev": "991e6390e0ec57307f9d46a08ee768f6",
+   "self": "7c33f49d03faaa146eebd376901654ad"
+  },
+  "status": "pinned"
+ },
+ "anchor": {
+  "status": "skipped"
+ }
+}

@@ -1,0 +1,28 @@
+[
+  {
+    "check": "audit-record",
+    "severity": "medium",
+    "file": "projects/arcaeon_mcp/arcaeon_ledger_mcp/server.py",
+    "line": 82,
+    "detail": "OWASP MCP08 audit trail: records a call at line 82 (ledger-style log.append()); gate 2 (completeness) unmet: the record is missing tool name, timestamp, args/input digest",
+    "gates": {
+      "presence": true,
+      "completeness": false,
+      "tamper_evidence": true,
+      "reconstructability": true
+    }
+  },
+  {
+    "check": "audit-record",
+    "severity": "high",
+    "file": "../arcaeon-distill/arcaeon_distill/mcp_server.py",
+    "line": 137,
+    "detail": "OWASP MCP08 audit trail: no call record on any tool-handling path (1 handler(s), first at line 137); gate 1 (presence) unmet: a tool call leaves nothing behind to reconstruct",
+    "gates": {
+      "presence": false,
+      "completeness": false,
+      "tamper_evidence": false,
+      "reconstructability": false
+    }
+  }
+]

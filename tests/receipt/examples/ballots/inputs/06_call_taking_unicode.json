@@ -1,0 +1,34 @@
+{
+  "score": 64,
+  "verdict": "THIN",
+  "dimensions": [
+    {"key": "call_type", "name": "CALL TYPE NAMED / JUSTIFIED", "score": 0.0, "weight": 0.28,
+     "label": "miss", "detail": "no call type named or justified"},
+    {"key": "priority", "name": "PRIORITY NAMED / JUSTIFIED", "score": 0.8, "weight": 0.24,
+     "label": "hit", "detail": "urgency stated; tie it to the facts that make it hot"},
+    {"key": "key_facts", "name": "KEY FACTS CAPTURED", "score": 0.9, "weight": 0.36,
+     "label": "hit", "detail": "9 of 10 key facts present — missing: noise only"},
+    {"key": "soundness", "name": "CLASSIFICATION SOUNDNESS", "score": 1.0, "weight": 0.12,
+     "label": "hit", "detail": "no unsupported classification detected"}
+  ],
+  "coaching": [
+    "Name the call. A reader should see what this is from the comment alone. Say the call type, or write the facts that make it that type.",
+    "Missing key facts the call required: noise only.",
+    "Comment quoted the reporting party as \"the neighbors won't turn it down 🙄\" — keep incident comments free of emoji; describe the tone in words instead (e.g. \"RP frustrated, repeat caller\").",
+    "Model comment for comparison: noise complaint, loud music with heavy bass from 2210 Hollis Lane (gray two-story) around midnight, reported by neighbor Sra. Peña two doors east. Screened as noise only, no fighting, a few people on the porch, calm. Low-priority noise call. Caller advised an officer will ask them to turn it down (not an arrest) and that response waits behind emergencies, no time committed. Caller given honest expectations and told the complaint is logged."
+  ],
+  "facts": {
+    "matched": ["loud music", "Hollis", "2210", "midnight", "low priority", "no fighting", "turn it down", "logged", "Sra. Peña"],
+    "missing": ["noise only"]
+  },
+  "model_comments": "noise complaint, loud music with heavy bass from 2210 Hollis Lane (gray two-story) around midnight, reported by neighbor Sra. Peña two doors east. Screened as noise only, no fighting, a few people on the porch, calm. Low-priority noise call. Caller advised an officer will ask them to turn it down (not an arrest) and that response waits behind emergencies, no time committed. Caller given honest expectations and told the complaint is logged.",
+  "raw_comment_excerpt": "RP at 2210 Hollis reports loud music going since midnight, low priority, no fighting reported. RP (Sra. Peña) says the neighbors won't turn it down 🙄. Turn it down requested, logged for follow-up.",
+  "meta": {
+    "family": "incident",
+    "keyCount": 10,
+    "hitCount": 9,
+    "ratio": 0.9,
+    "source": "heuristic",
+    "version": "grader-1.0.0-heuristic"
+  }
+}

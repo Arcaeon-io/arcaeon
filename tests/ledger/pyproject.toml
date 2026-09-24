@@ -1,0 +1,47 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "arcaeon-ledger"
+version = "0.8.0"
+description = "Tamper-evident, hash-chained action log for AI agents. Prove what your agent did."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Arcaeon" }]
+keywords = ["ai", "agents", "mcp", "audit", "tamper-evident", "provenance", "hash-chain"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Intended Audience :: Developers",
+  "Topic :: Software Development :: Libraries",
+]
+dependencies = []
+
+[project.optional-dependencies]
+# Floors match the family (continuity/connector/mcp_vet): tested here at
+# pytest 9.1.1 / hypothesis 6.165.9. PIN_POLICY_2026-09-05.md.
+dev = ["pytest>=7", "hypothesis>=6"]
+
+[project.scripts]
+arcaeon-ledger = "arcaeon_ledger.cli:main"
+
+[project.urls]
+Homepage = "https://arcaeon.io"
+Documentation = "https://arcaeon.io/ledger.md"
+Changelog = "https://github.com/dan8433-user/ledger/blob/main/CHANGELOG.md"
+Source = "https://github.com/dan8433-user/ledger"
+Issues = "https://github.com/dan8433-user/ledger/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["arcaeon_ledger"]
+
+# adapter/ is a SEPARATE package (arcaeon-adapter) that shares this repo on
+# purpose. The wheel never picked it up, but the sdist swept in all 15 of its
+# files including its own pyproject.toml — a nested project file inside a
+# source distribution confuses build frontends and makes the tarball claim to
+# contain something it does not install. Found 2026-08-19 by listing the built
+# artefacts instead of trusting that the wheel config covered both targets.
+[tool.hatch.build.targets.sdist]
+exclude = ["adapter", "dist", "mcp-publisher.exe", ".hypothesis", "__pycache__", "RELEASE_*.md"]

@@ -1,0 +1,11 @@
+trainee,ballot_path,scenario,grader
+j. alvarez,inputs/01_oral_board_pass_clean.json,oral_board.set1,ascenvo.vcs.oral_board
+m. chen,inputs/02_oral_board_fail_partial.json,oral_board.set2,ascenvo.vcs.oral_board
+r. kowalski,inputs/04_call_taking_strong.json,call_taking.gen43_cold_car_burglary,call_taking.grader
+t. nguyen,inputs/05_call_taking_weak.json,call_taking.gen90_suicidal_caller,call_taking.grader
+a. dubois,inputs/06_call_taking_unicode.json,call_taking.gen79_noise_late_music,call_taking.grader
+k. patel,inputs/07_seq_strong.json,call_taking.hero01_welfare_weapon.sequence,call_taking.seq_scorer
+s. omar,inputs/08_seq_retrain_fatal.json,call_taking.hero01_welfare_weapon.sequence,call_taking.seq_scorer
+d. okafor,inputs/09_seq_needs_work_partial.json,call_taking.gen61_traffic_stop_backup.sequence,call_taking.seq_scorer
+l. fischer,inputs/10_oral_board_variedmodel.json,oral_board.set3,ascenvo.vcs.oral_board
+p. lindqvist,inputs/11_branded_academy_cohort.json,oral_board.set1,ascenvo.vcs.oral_board

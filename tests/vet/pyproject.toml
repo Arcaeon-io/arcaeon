@@ -1,0 +1,100 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arcaeon-mcp-vet"
+version = "0.0.17"
+description = "An open, re-testable static checker for MCP server source. Not a vetting authority."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Arcaeon" }]
+keywords = ["mcp", "model-context-protocol", "security", "static-analysis", "audit"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Topic :: Security",
+  "Topic :: Software Development :: Quality Assurance",
+]
+
+# Deliberately empty. The scanner core is stdlib-only (ast, hashlib, json):
+# a security checker that drags in a dependency tree is a supply-chain surface
+# of its own, and the whole pitch here is a grade a skeptic can re-run cheaply.
+dependencies = []
+
+[project.optional-dependencies]
+# Only needed to RUN mcp_vet as an MCP server (`mcp-vet serve`). Scanning and
+# grading never touch it.
+#
+# Was ">=1.0". Raised to ">=2.0.0,<3" on the wheel evidence, not on release
+# notes: mcp 1.0.0 ships neither `mcp/server/fastmcp/` nor a `Client` export,
+# so server.py's fallback branch -- the one commented "SDK 1.x" -- cannot even
+# import at the floor the extra named. fastmcp appears later in 1.x (present in
+# 1.29.1) and is REMOVED in 2.0.0, which is also the first version with
+# `mcp.server.mcpserver` and `mcp.Client`. test_audit_ledger.py imports
+# `from mcp import Client`, so no 1.x has ever run this extra's tests. <3
+# because that 1.x -> 2.x removal is the proof this SDK drops API across a
+# major. Matching the constraint in arcaeon (connector) and arcaeon-ledger-mcp
+# is what lets the three be resolved together.
+# Policy: projects/online_business/PIN_POLICY_2026-09-05.md.
+mcp = ["mcp>=2.0.0,<3"]
+# TypeScript/JavaScript front end (audit-record only, 0.0.16). Without it a
+# .ts/.js file grades as "unparseable — 0 checks ran", never as clean.
+# Floors raised to the tested/installed versions (this repo's own suite is
+# green at 0.26.0 / 0.23.2 today; "it imports" at the old floor was never
+# evidence it ran). Ceilings added per PIN_POLICY_2026-09-05.md's third-party
+# rule: tree-sitter is 0.x, and its own GitHub release notes name a real
+# removal in almost every recent minor -- 0.23.0 dropped Parser.set_language()
+# (this module's only supported form since is Parser(language), which is what
+# ts_checks.py already calls), 0.25.0 moved Query's methods onto QueryCursor,
+# 0.26.0 dropped Language.query()/Language.version. This module uses neither
+# Query/QueryCursor nor Language.query()/.version today, so the ceiling costs
+# nothing now and is the fence against the next minor doing the same again.
+ts = ["tree-sitter>=0.26.0,<0.27", "tree-sitter-typescript>=0.23.2,<0.24"]
+# The MCP server's own tamper-evident call record (OWASP MCP08). An extra, not a
+# dependency, and the split is deliberate: the scanner core stays stdlib-only,
+# and the audit trail is a property of RUNNING mcp_vet as a server, not of
+# grading a file. Without it `mcp-vet serve` still runs and says the record is
+# OFF on stderr, in its instructions, and in every mcp_vet_audit_verify reply.
+audit = ["arcaeon-ledger>=0.7"]
+# Ed25519 signatures over a grade artifact (`mcp_vet.receipts`). An extra for
+# the same reason `audit` is one: the scanner core stays stdlib-only, and
+# Python's stdlib has no Ed25519, so signing is the one thing here that
+# genuinely cannot be done without a dependency. Either backend satisfies it —
+# `cryptography` is the default because it is already in most trees; pynacl is
+# accepted so a caller who has it does not install a second crypto stack.
+# Without one, `sign_grade()` RAISES rather than returning an unsigned object
+# that looks like a receipt.
+# Floor raised from a bare >=41 (never proven to run -- "it imports" is not
+# evidence, PIN_POLICY_2026-09-05.md) to 46.0.7, the version this repo's own
+# receipts suite is actually green on. Ceiling <47 matches the reasoning
+# already applied to the same dependency in arcaeon-verified-snapshot:
+# cryptography bumps its major on a schedule and removes deprecated API when
+# it does, so an unpinned build today would install 50.0.1, four majors past
+# anything tested here. The two repos' ranges intersect (46.0.7 .. 47), so
+# nothing here breaks co-installation. pynacl is left floor-only: it has no
+# stated history of removing this module's two symbols (SigningKey,
+# VerifyKey), and PIN_POLICY's cap rule is "a claim backed by the package's
+# own history," not a default.
+receipts = ["cryptography>=46.0.7,<47"]
+receipts-pynacl = ["pynacl>=1.5"]
+# pyyaml: test_action.py parses action.yml to prove the published GitHub
+# Action and the CLI cannot drift apart. It is a TEST dependency only --
+# nothing under mcp_vet/ imports yaml. CI caught this on 2026-09-06:
+# collection died with ModuleNotFoundError before a single test ran.
+dev = ["pytest>=7", "pyyaml>=6"]
+
+[project.scripts]
+mcp-vet = "mcp_vet.__main__:main"
+
+[project.urls]
+Changelog = "https://github.com/arcaeon/mcp-vet/blob/main/CHANGELOG.md"
+
+[tool.setuptools]
+# Flat layout with test modules beside the package: without an explicit list the
+# backend has to guess, and guesses wrong (it would try to ship test_*.py).
+packages = ["mcp_vet"]

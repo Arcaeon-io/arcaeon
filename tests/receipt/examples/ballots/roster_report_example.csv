@@ -1,0 +1,27 @@
+# report,arcaeon-receipt roster report
+# source,examples/ballots/
+# ledger,"(each receipt's own, read beside it)"
+# issuer,(mixed) Westbrook Regional Training Academy; 11 receipts carry none
+# cohort,(mixed) WRTA-2026-OB-14; 11 receipts carry none
+# generated_at,2026-09-13T23:54:10Z
+# receipts_counted,12
+# verified,12
+# failed,0
+# undetermined,0
+# verification_passes,1 pass of at most 20 (12); every receipt was verified
+# scope_proves,the score and the ballot are unaltered since the timestamp
+# scope_does_not_prove,the score is correct; the sim was not attempted before
+
+file,receipt_id,issuer,cohort,trainee,scenario,score,issued_at,verdict,ledger,anchor,reason
+01_oral_board_pass_clean.anchored.receipt.json,sha256:json-c14n:v1:ceb5696457599e5ce39b63051797120f7cc0ab9cf373b74aac78cac27577dea0,,,j. alvarez,oral_board.set1,87,2026-09-13T23:11:07Z,ok,consistent,pending-calendar,
+01_oral_board_pass_clean.receipt.json,sha256:json-c14n:v1:daa2b4bbf9b7f0c43eb492fbfcbb9545c65eddc197dd4c46f3c0e16320051b0c,,,j. alvarez,oral_board.set1,87,2026-09-06T14:22:03Z,ok,consistent,,
+02_oral_board_fail_partial.receipt.json,sha256:json-c14n:v1:999b7cfaa7464489f695cbb9f1874a1271426af8e148030eedf75462dbd6a7aa,,,m. chen,oral_board.set2,23,2026-09-07T09:05:11Z,ok,consistent,,
+03_oral_board_reattempt.receipt.json,sha256:json-c14n:v1:528b5a88519e4465d573c20c30eb0200242afcfb00805dfcc5bf2a27acab9ce6,,,j. alvarez,oral_board.set1,91,2026-09-11T16:40:00Z,ok,consistent,,
+04_call_taking_strong.receipt.json,sha256:json-c14n:v1:711b9a39b16fc9c0921e31f4dc59e2b87c1df295e602418672f08725e0846348,,,r. kowalski,call_taking.gen43_cold_car_burglary,95,2026-09-05T20:12:30Z,ok,consistent,,
+05_call_taking_weak.receipt.json,sha256:json-c14n:v1:4aa04c2a8c36023b2e7a031eae93d86bff8c0e23f188f60c6a91b27dce51a127,,,t. nguyen,call_taking.gen90_suicidal_caller,38,2026-09-08T02:47:19Z,ok,consistent,,
+06_call_taking_unicode.receipt.json,sha256:json-c14n:v1:4233a8b9111376912d3383d58756d894e851acfaeafe85d47fc1cbfbfbf8b6cb,,,a. dubois,call_taking.gen79_noise_late_music,64,2026-09-09T23:58:02Z,ok,consistent,,
+07_seq_strong.receipt.json,sha256:json-c14n:v1:4e6b60090ec3be41f1898e51732546fc27c755ff2c98d32baf6fd0a3ba5988f7,,,k. patel,call_taking.hero01_welfare_weapon.sequence,100,2026-09-10T13:03:44Z,ok,consistent,,
+08_seq_retrain_fatal.receipt.json,sha256:json-c14n:v1:003fdb6d3ead34d2516dba4fa657b9cdf92d109d9e6c5a88f04ac17b03134cdb,,,s. omar,call_taking.hero01_welfare_weapon.sequence,55,2026-09-10T15:21:09Z,ok,consistent,,
+09_seq_needs_work_partial.receipt.json,sha256:json-c14n:v1:1bf7ace903b9a51eb168142d5935a0ea2ce4458bc40ccf4f5fd3ab067a4e2ca8,,,d. okafor,call_taking.gen61_traffic_stop_backup.sequence,45,2026-09-11T08:12:37Z,ok,consistent,,
+10_oral_board_variedmodel.receipt.json,sha256:json-c14n:v1:1461edc545fbfcd2154ba85fc61ec7e8e1d4ec7c21ae6c5a3dab635c0ef55c95,,,l. fischer,oral_board.set3,75,2026-09-09T11:15:47Z,ok,consistent,,
+11_branded_academy_cohort.receipt.json,sha256:json-c14n:v1:61d6afd2d0bbaf05d9044f520072ed3a144626bc9432b1a5faa991a774f3a3e8,Westbrook Regional Training Academy,WRTA-2026-OB-14,p. lindqvist,oral_board.set1,82,2026-09-13T17:41:02Z,ok,consistent,,

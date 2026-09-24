@@ -1,0 +1,10 @@
+[
+ {"citation": "347 U.S. 483", "normalized_citations": ["347 U.S. 483"], "start_index": 41, "end_index": 53, "status": 200, "error_message": "",
+  "clusters": [{"id": 105221, "case_name": "Brown v. Board of Education", "absolute_url": "/opinion/105221/brown-v-board-of-education/"}]},
+ {"citation": "410 U.S. 113", "normalized_citations": ["410 U.S. 113"], "start_index": 120, "end_index": 132, "status": 200, "error_message": "",
+  "clusters": [{"id": 108713, "case_name": "Roe v. Wade", "absolute_url": "/opinion/108713/roe-v-wade/"}]},
+ {"citation": "999 F.3d 1234", "normalized_citations": ["999 F.3d 1234"], "start_index": 210, "end_index": 223, "status": 404,
+  "error_message": "Citation not found in CourtListener", "clusters": []},
+ {"citation": "12 Fak. 34", "normalized_citations": [], "start_index": 300, "end_index": 310, "status": 400,
+  "error_message": "Invalid reporter", "clusters": []}
+]

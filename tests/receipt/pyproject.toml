@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "arcaeon-receipt"
+version = "0.2.0"
+description = "One receipt, five buyers: hash-chained, witnessed, timestamp-anchored receipts for what an AI checked, called, was approved to do, watched being typed, or graded."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Arcaeon" }]
+keywords = ["ai", "receipt", "citation", "courtlistener", "x402", "approval", "authorship", "tamper-evident", "opentimestamps"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Legal Industry",
+]
+dependencies = ["arcaeon-ledger>=0.7.5"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+# `call_proxy --tape` imports the tape writer from arcaeon-adapter lazily; without
+# it the proxy still forwards and receipts, and /_arcaeon/health says the tape is off.
+# 0.2.0 is the first adapter release that carries arcaeon_adapter.tape.
+tape = ["arcaeon-adapter>=0.2.0"]
+
+[project.scripts]
+arcaeon-receipt = "arcaeon_receipt.cli:main"
+
+[project.urls]
+Homepage = "https://arcaeon.io"
+# No Source URL: github.com/Arcaeon-io/arcaeon-receipt returned 404 on
+# 2026-09-23 and this repo has no remote. Add it back on the release after
+# the repo is public; PyPI metadata is permanent per version.
+Verifier = "https://arcaeon.io/verify-receipt"
+
+[tool.hatch.build.targets.wheel]
+packages = ["arcaeon_receipt"]
+
+# The example receipts and witness sidecars are tracked but match .gitignore
+# (*.receipt.json, *.witness.jsonl), and hatch's sdist honours .gitignore, so
+# without `artifacts` the sdist shipped examples/ballots/ without its receipts
+# and the README's `verify --batch examples/ballots/*.receipt.json` found none.
+# RELEASE_*.md are internal notes (local paths); PyPI files are permanent.
+[tool.hatch.build.targets.sdist]
+artifacts = ["examples/**/*.receipt.json", "examples/**/*.witness.jsonl"]
+exclude = ["RELEASE_*.md", "dist/"]

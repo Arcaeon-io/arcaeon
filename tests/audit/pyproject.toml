@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "arcaeon-audit"
+version = "0.1.8"
+description = "Tamper-evident, audit-ready logs for AI agents — ISO 42001 / SOC 2 / EU AI Act evidence. Prove what your agent did."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "Arcaeon" }]
+keywords = ["ai", "agent", "audit", "audit-log", "tamper-evident", "provenance",
+            "eu-ai-act", "article-12", "compliance", "hash-chain", "observability"]
+dependencies = ["arcaeon-ledger>=0.5.9"]
+
+[project.optional-dependencies]
+# Floors match the family (continuity/connector/mcp_vet): tested here at
+# pytest 9.1.1 / hypothesis 6.165.9. PIN_POLICY_2026-09-05.md.
+dev = ["pytest>=7", "hypothesis>=6"]
+
+[project.urls]
+Homepage = "https://arcaeon.io"
+Source = "https://github.com/Arcaeon-io/arcaeon-audit"
+
+[project.scripts]
+arcaeon-audit = "arcaeon_audit.cli:main"
+
+[tool.setuptools]
+packages = ["arcaeon_audit"]

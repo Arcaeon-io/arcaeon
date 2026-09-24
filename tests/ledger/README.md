@@ -1,0 +1,512 @@
+# arcaeon-ledger
+
+<!-- mcp-name: io.arcaeon/ledger -->
+
+[![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/dan8433-user/ledger)
+
+**Observability tools show you what your agent did. `arcaeon-ledger` lets you _prove_ it.**
+
+Every record is hash-chained to the one before it. Edit a row, delete one, or
+reorder history, and every later link breaks — `verify` names the exact line.
+You own the record, and you can prove it wasn't altered. Zero dependencies, one
+JSONL file, two verbs.
+
+```
+pip install arcaeon-ledger      # then:  from arcaeon_ledger import Ledger
+```
+
+```python
+from arcaeon_ledger import Ledger
+
+log = Ledger("agent.log.jsonl")
+log.append({"tool": "web.search", "query": "weather in LA", "result_ok": True})
+log.append({"tool": "payment", "amount": "49.00", "currency": "USD"})
+
+log.verify()          # VerifyResult(ok=True, rows=2, chained=2, ...)
+```
+
+Tampering is caught, not hoped against:
+
+```python
+# someone edits row 2's amount in the file by hand...
+log.verify()          # VerifyResult(ok=False, first_break="line 2: chain mismatch")
+```
+
+CLI (wire it into CI or a pre-ship gate — a tampered log exits nonzero, and a
+log that could only be *partially* vouched for no longer exits like a fully
+verified one):
+
+```
+python -m arcaeon_ledger.cli append agent.log.jsonl '{"tool":"search","ok":true}'
+python -m arcaeon_ledger.cli verify agent.log.jsonl
+python -m arcaeon_ledger.cli verify --strict agent.log.jsonl
+```
+
+`verify` exit codes (0.5.7; the words since the 2026-09-23 vocabulary pass, the same three every Arcaeon checker prints — the JSON fields are unchanged):
+
+| exit | meaning |
+|------|---------|
+| `0`  | VERIFIED — every row checked, chain intact (`ok: true`) |
+| `1`  | BROKEN — a break was found (`ok: false`), or bad usage |
+| `3`  | COULD NOT LOOK at every row, so not VERIFIED (`ok: null` in every case): no break found, but unchained `prechain` rows were skipped unverified (`verified_scope: "bounded_prechain_skipped"`); or the only breaks are declared ones (`"bounded_declared_break"`); or the file has zero rows (`"empty"`). A fabricated "legacy" prepend lands here, never at 0. Pass `--strict` to make the first two a hard `1` instead. |
+
+A CI gate should treat only `0` as green:
+
+```sh
+python -m arcaeon_ledger.cli verify agent.log.jsonl
+case $? in
+  0) echo "VERIFIED" ;;
+  3) echo "COULD NOT LOOK at every row: prechain rows skipped — inspect, or use --strict" ; exit 1 ;;
+  *) echo "BROKEN" ; exit 1 ;;
+esac
+```
+
+## Prove *who* acted, not just the order
+
+A hash chain proves sequence integrity — it can't prove who wrote each entry or
+whether they were allowed to. Attach an `authority` block to bind the actor and
+their permission surface into the chained (tamper-evident) row:
+
+```python
+from arcaeon_ledger import Ledger, authority
+
+log = Ledger("agent.log.jsonl")
+log.append(
+    {"tool": "payment", "amount": "49.00"},
+    authority=authority(
+        "agent://billing-7",
+        capability_version="v3",              # what they were allowed to do
+        tool_schema={"name": "payment", "args": ["amount"]},  # hashed, not just named
+        time_source="ntp",                    # trust surface of the clock
+    ),
+)
+```
+
+Now the audit question sharpens from *"was this edited?"* to *"was this edited
+**and** was the writer authorized?"* — editing the principal, capability, or
+schema hash breaks the chain like any other tamper. This composes tamper-evidence
+with permission-replay. (Shipped in response to community feedback on launch.)
+
+## Why this exists
+
+The loudest unmet pain for agent builders in 2026 is the reliability/audit gap:
+an agent "completes" a task and the result is quietly wrong, and you can't
+reconstruct — or prove — what actually happened. Observability platforms trace
+runs; none give you a **tamper-evident, portable, ownable** record. Regulation
+is arriving too: the EU AI Act requires high-risk systems to technically allow
+automatic recording of events over their lifetime (Art. 12(1)) and requires
+providers and deployers to keep those logs, to the extent under their control,
+for at least six months (Art. 19(1), Art. 26(6)). The Act mandates recording
+and retention — tamper-evidence is not its word, it is ours: when someone asks
+whether a retained log is still the log, that question needs an answer stronger
+than trust. `arcaeon-ledger` is the smallest honest version: a cryptographically
+chained action log you drop in, own, and verify.
+
+## How the chain works
+
+`chain = sha256(prev_chain + json.dumps(row_without_chain, sort_keys=True, ensure_ascii=False))[:32]`
+
+Note the separators: the chain body uses Python's default `", "` / `": "`
+spacing, not the compact `json-c14n:v1` form the artefact digests use. A
+cross-language verifier has to reproduce that spacing exactly.
+
+The chain value is **`truncated_sha256_128`** — the first 32 hex chars (128 bits)
+of SHA-256, not the full digest. Named so nobody cites it as full SHA-256:
+128 bits is plenty for edit/accident detection, thinner if you want the chain
+itself to be expensive to grind after a rewrite (credit: atomic-raven's review).
+
+Each row commits to the entire history before it. The first row chains from a
+fixed `"genesis"` seed. Rows without a `chain` field are tolerated only before
+the first chained row (so you can adopt it on an existing log); an unchained row
+appearing *after* the chain begins is itself flagged. On a mismatch, verify
+keeps going from the claimed value so it counts later damage honestly instead of
+cascading one break into noise.
+
+## What it proves — and the five things it doesn't
+
+Being precise here is the product, not a disclaimer. A hash chain proves the
+recorded *content* of each row was not altered **in place** after writing:
+mid-file edit, delete, and reorder all break it and `verify` names the row.
+
+One word in that sentence changed in 0.5.8, and the reason is the kind of thing
+this section exists for. It used to say "the recorded **bytes**", which claims
+more than the chain does. The chain is computed over each row parsed back from the
+file, and the reader normalises byte sequences it cannot decode — so two different
+byte strings inside such a region read identically and produce the same verdict.
+What is protected is the meaning of every row, not the exact bytes of the file. If
+you need byte-level custody, hash the file itself alongside this.
+
+It does **not** by itself prove five other things:
+
+**1. Truncation.** Lop off the most recent rows and what remains verifies clean —
+no append-only chain catches this alone. Close it by publishing the head somewhere
+outside your own control, on a cadence:
+
+```python
+pin = log.head().as_pin()
+# -> "arcaeon-ledger head chain=9f3c… rows=204 as_of=2026-08-13T17:40:00Z"
+# post `pin` to a git commit / public comment / notarization anchor.
+# a reader compares a fresh head() against the last pin; a truncated or
+# re-minted history disagrees. the MAX gap between pins is your security
+# parameter, not the average — an attacker picks the gap.
+```
+
+`head()` carries the verify verdict (`head().ok`, `head().first_break`), and
+`as_pin()` **refuses** — `UnverifiedLedgerError`, a `ValueError` — over a log
+that does not verify, as does `publish_head()`. A pin is a published claim
+about a log at a height; over a broken chain it is a false one. `head()` itself
+never raises: it is a read, and a damaged log is exactly when a dashboard or a
+health check needs an answer rather than an exception. An empty or not-yet-
+created log still pins as genesis; so does a *bounded* verdict (`ok is None` —
+skipped prechain rows, or a break named with `declare_break()`), because
+refusing there would make an honestly-declared break permanently un-pinnable.
+
+**2. Truth.** The chain notarizes whatever was written — a tamper-evident record
+of a hallucination is still a hallucination with a checksum. To make a row speak
+about the world, hash a re-fetchable artefact (URL+bytes, a snapshot, tool stdout)
+and store that digest in the row, so a third party can re-get it and compare.
+
+**3. Authorship.** `authority()` (above) records who-claimed-what, but it is data
+in the row, not a signature — a rewriter who re-mints from genesis re-mints it too.
+External head-anchoring (#1) is the thing a re-minter cannot advance.
+
+**4. Fabricated-legacy-prepend.** Rows with no `chain` field are tolerated *before*
+the first chained row — that is deliberate, so you can adopt the chain on top of an
+existing log without rewriting its history. But skipped rows are *unverified* rows,
+and the verifier cannot tell real legacy history from a fabricated prepend. So
+(0.5.7) a non-strict verify that skipped any rows never mints a green: `ok` is
+`None` — "no break found, COULD NOT LOOK at every row" — falsy, with the scope in-band
+(`verified_scope: "bounded_prechain_skipped"`) and the count in `prechain`; the CLI
+exits `3`, not `0`. Only a scan that checked every row returns `ok=True`. If your
+log is chained from genesis and must have no legitimate legacy rows, pass
+`verify(strict=True)` / `--strict` — it treats any unchained row as a break, hard
+red. (An unchained row inserted *after* the chain begins is already flagged in
+every mode.)
+
+**5. Completeness.** This is the big one, and it is structural: the agent decides
+what to call `append` on. A tamper-evident log of the calls an agent *chose to
+report* is still self-report. Nothing inside this library can close that, because
+anything the agent invokes, the agent can decline to invoke.
+
+Close it by moving the pen out of the agent's reach — record at the seam instead,
+in a separate OS process the agent does not own, cannot skip, and cannot see:
+
+```
+pip install arcaeon-adapter
+
+python -m arcaeon_adapter --ledger seam.log.jsonl -- <your mcp server command...>
+```
+
+[`arcaeon-adapter`](https://github.com/dan8433-user/ledger/tree/main/adapter) is a
+stdio proxy that forwards JSON-RPC byte-for-byte between an MCP client and server,
+writing one hash-chained row per `tools/call` to its own ledger. Wrapping it around
+*this* library's own MCP server produced the number that makes the point: the
+server's own diary wrote **0 rows** while the seam log captured **5**. The gap
+between what a system reports about itself and what the seam observed is the
+thing worth measuring.
+
+Scoped honestly, the primitive is *"this file was not rewritten in place"* — small,
+true, and testable. The layers above (external anchoring via `head()`, artefact
+binding, signed authorship, seam recording) are how you extend it toward a full
+evidence claim.
+
+### verify() on missing or empty ledgers
+
+The two look like the same thing ("no data"), and `verify()` keeps them
+apart, on purpose:
+
+```python
+Ledger("never/written.jsonl").verify()
+# VerifyResult(ok=False, rows=0, first_break="unreadable: [Errno 2] No such file...")
+
+open("touched/empty.jsonl", "w").close()
+Ledger("touched/empty.jsonl").verify()
+# VerifyResult(ok=None, rows=0, chained=0, first_break=None, verified_scope="empty")
+```
+
+A path that was never created can't be vouched for — `ok=False`, "unreadable,"
+same as any other read failure. A path that exists and is genuinely empty has
+zero rows to tamper with, but zero rows checked is not a green either (since
+0.5.8): `ok=None, rows=0, verified_scope="empty"`, falsy, CLI exit 3. Automation
+that branches on `verify().ok` gets a red for the missing file and a
+not-a-pass for the empty one; read `first_break` and `verified_scope` to tell
+the two apart by name.
+
+### When the log was written out of band: declare the break, don't re-forge it
+
+Sooner or later something writes to your JSONL without going through `append()` —
+a script, an incident, a person with an editor. The chain breaks there and stays
+broken, because that is the true record. Your two obvious options are both bad:
+live with a permanent red that tells a reader nothing, or recompute the chain so
+the file goes green — which is forging it, and a chain you can silently re-forge
+is not evidence of anything.
+
+`declare_break` is the third option. It **appends** a row naming the break:
+
+```python
+from arcaeon_ledger import declare_break, verify_file
+
+declare_break("agent.log.jsonl", 25,
+              "Written out of band 2026-08-15 by a session hand-appending JSON "
+              "instead of calling append(). Content is true and preserved verbatim; "
+              "no chain value was ever computed for it, so none can honestly be supplied.")
+
+r = verify_file("agent.log.jsonl")
+r.ok               # None  — bounded, NOT True. Falsy.
+r.verified_scope   # "bounded_declared_break"
+r.breaks           # 0
+r.declared         # ["line 25: declared break (Written out of band 2026-08-15 ...)"]
+```
+
+The break stays a break, forever, in `declared`. What changes is that a known,
+explained break stops masquerading as an unexplained one — and the orphan's exact
+bytes are pinned by sha256, so editing that line afterwards turns the file red
+again. **It never returns `ok=True`.** Only a scan that checked every row does
+that, and an excused row was not checked. `verify(strict=True)` ignores
+declarations entirely.
+
+**What this does not do, said plainly: it is a record device, not a
+cryptographic one.** Anyone who can write the file can write a declaration, so it
+raises no bar at all against an attacker who already has write access. It defends
+against *forgetting*, not against tampering. It cannot tell an honest out-of-band
+append from a malicious one — `why` is an unverified human sentence. And it can
+only declare breaks `verify()` already found; it does nothing about breaks nobody
+noticed. Use it to keep an honest incident legible, never as a way to make a
+ledger green.
+
+## Bind what the agent actually read (artefact-binding)
+
+The chain proves a row wasn't edited. It does **not** prove the row was ever *true* —
+it will notarize a hallucination as faithfully as a fact. `bind_artefact` closes
+that gap for the cases where you can point at a re-fetchable source: hash the actual
+bytes the agent read and store that digest *in* the row, so a third party can
+re-get the source and compare.
+
+```python
+from arcaeon_ledger import Ledger, bind_artefact
+
+log = Ledger("agent.log.jsonl")
+art = bind_artefact("https://example.com/pricing")   # or bytes, a file path, or a dict
+log.append({"tool": "web.read", "url": "https://example.com/pricing", "artefact": art})
+# art -> {"subject": {"name": "...", "digest": {"sha256": "..."}},
+#         "recipe": "sha256:raw-bytes:v1",
+#         "digest": "sha256:raw-bytes:v1:<hex>", "bound_at": "...", "source_meta": {...}}
+```
+
+Digests are **self-describing** — never a bare hex hash. Each one is
+`sha256:<recipe>:<version>:<hex>`, carrying its own recipe so a stranger reproduces
+it from the string alone: `raw-bytes:v1` (opaque bytes as-read) or `json-c14n:v1`
+(a pinned, documented JSON canonicalization — sorted keys, compact, UTF-8). Recipes
+are frozen and versioned append-only, so old rows keep their recipe forever and a
+changed rule never makes history look tampered.
+
+Verify honestly:
+
+```python
+from arcaeon_ledger import verify_artefact
+
+verify_artefact(art)                    # recipe reproducible + string self-consistent
+verify_artefact(art, refetch=True)      # for a URL: re-fetch and compare
+# -> {"verdict": "live_match",          # <- THE answer; read this field
+#     "digest_ok": True, "reason": None,
+#     "refetch": "match" | "mismatch" | "unavailable" | "skipped", "notes": [...]}
+```
+
+**Read `verdict`, not just `digest_ok` (0.5.7).** `digest_ok` names only the
+*offline* leg — recipe reproducible, string self-consistent — and it stays `True`
+even when a live re-fetch disagrees. The top-level `verdict` tag mints the whole
+answer in one field: `"digest_consistent"` (offline leg passed, no live comparison
+made), `"live_match"`, `"live_mismatch"` (live content no longer matches —
+changed *or* tampered, indeterminate), `"live_unavailable"` (the requested live
+check could not run), or the typed failure reason itself when the offline leg
+fails. `if out["digest_ok"]` after `refetch=True` used to read green through a
+live mismatch; `out["verdict"] == "live_match"` cannot.
+
+**A label this build cannot reproduce is a typed failure, never a pass.** If the
+digest names an algorithm, recipe, or recipe *version* outside the supported
+registry, `verify_artefact` returns `digest_ok=False` with a machine-readable
+`reason` — one of `unknown_algorithm`, `unknown_recipe`, `unknown_recipe_version`,
+`malformed_digest`, `subject_digest_mismatch` — and never reaches the re-fetch
+stage, so an unverifiable recipe can't come back as `"match"`. A digest we cannot
+recompute is a digest we did not check, and "did not check" must not be reported as
+"verified." Old versions stay verifiable by staying listed in
+`SUPPORTED_RECIPE_VERSIONS` when a new one is minted, so the append-only recipe
+promise holds without the verifier waving through labels it has never shipped.
+
+**The honest boundary, stated loudly because it is the point:** a re-fetch
+`mismatch` means the content *changed or* was tampered — **indeterminate**. It is
+never reported as proof of tampering. The web mutates, 404s, paywalls, and
+personalizes; binding proves *"this is the digest of the bytes the agent said it
+read at time T,"* nothing stronger. For a neutral capture rather than your own
+fetch, route the source through a notarizing snapshot; for *existed-before-T*, anchor
+the digest externally. Each is a layer you add — stated, not implied.
+
+## The outside check: an external witness
+
+The chain can't catch truncation alone — lop off the most recent rows and what
+remains verifies clean (stated in "what it doesn't prove", above). The fix is a
+**witness**: a record-keeper outside your own control that holds your head
+`(rows, chain)` on a cadence. Once a witness has a pin from time T, a truncated
+log has *fewer rows* than the witness saw, and a rewritten one has a *different
+chain* at the witnessed row. Neither can hide.
+
+```python
+from arcaeon_ledger import Ledger, WitnessStore, publish_head, verify_against_witness
+
+log = Ledger("agent.log.jsonl")
+witness = WitnessStore("witness_pins.jsonl")   # ideally on a host you don't control
+
+publish_head(witness, "billing-agent", log)    # record the current head — do this on a cadence
+
+# later — did the log survive intact?
+v = verify_against_witness(witness, "billing-agent", log)
+v.verdict     # "consistent" | "truncated" | "rewritten" | "no_record" | "witness_broken" | "local_broken"
+bool(v)       # truthy ONLY on "consistent" — a missing pin is no_record, never a false ok
+
+# READ THE VERDICT WITH ITS QUALIFIERS, never the bare string alone:
+v.witness_self_integrity   # "verified" | "unestablished" | "broken"
+```
+
+**A bare `"consistent"` is not the whole answer.** The verdict also carries
+`witness_self_integrity`: whether the witness store could prove its *own* pin
+chain intact. A hosted client that only exposes `latest()` cannot self-verify,
+so its verdicts read `unestablished` — the comparison ran honestly, but a
+forged pin *served by that store* would compare clean. `verified` means the
+store's own chain was recomputed; `broken` means it failed. A consumer that
+branches on `v.verdict == "consistent"` without reading
+`witness_self_integrity` is trusting the store's honesty exactly as much as it
+would trust the log's — which is the arrangement a witness exists to replace.
+(Found in the 2026-08-23 pre-invite audit, C14; the field exists so "not
+checked" can never render as "checked and fine.")
+
+`WitnessStore` is the reference witness: one append-only JSONL file of pins. A
+hosted witness is a thin HTTP wrapper over exactly this object; run it locally
+and you have a complete, offline, zero-cost witness you fully control (with the
+obvious caveat that a witness you control is only as independent as its host).
+
+**What this proves, exactly.** A witness proves your log wasn't truncated or
+rewritten *only relative to what the witness saw, and only as recently as the
+last pin*. Rows appended after the last pin are unprotected until the next one —
+so **the MAX gap between pins is your real security parameter, not the average,
+because an attacker picks the gap.** And it says nothing about whether the logged
+content was *true* — that's artefact-binding's job (above); the witness only
+guards the history's shape.
+
+**What the witness holds.** Only fingerprints — `(namespace, rows, chain, time)` —
+never your log content. Password-nowhere by design: if the witness is breached,
+there is nothing sensitive to steal, only hashes useless without the original log.
+
+## Drop it into any MCP agent
+
+`arcaeon-ledger` ships a zero-dependency MCP server, so any MCP client (Claude Code,
+etc.) can give its agent tamper-evident logging with no code. Wire it in:
+
+```json
+{
+  "mcpServers": {
+    "ledger": {
+      "command": "python",
+      "args": ["-m", "arcaeon_ledger.mcp_server", "--log", "agent.log.jsonl"]
+    }
+  }
+}
+```
+
+The agent then has five tools. Two are **operator tools** over one file:
+`ledger_append(record)` to log an action (returns its chain hash) and
+`ledger_verify(strict?)` to prove the log is intact (or get the exact tampered
+line back). The verify verdict is three-valued, same as the library:
+`ok: true` = every row verified, `ok: null` = chain intact but unchained
+`prechain` rows were skipped unverified
+(`verified_scope: "bounded_prechain_skipped"` — not a green), `ok: false` =
+broken. Pass `strict: true` to make any unchained row a hard failure.
+
+Three are **agent tools** (0.7.0), for when the output is going to somebody —
+a principal who wants proof, or a peer deciding whether to trust you:
+
+| tool | for | returns |
+| --- | --- | --- |
+| `prove_my_conduct(namespace, events)` | log a batch of what you just did and hand your principal one hash | `{rows, head_hash, chain_verified}` |
+| `verify_peer_ledger(jsonl_text, strict?)` | judge another agent's exported log from its text alone | `{ok, rows, first_break, declared_breaks}` |
+| `declare_break(namespace, reason)` | your log broke — name it instead of re-minting a chain | `{declared_line, declared_breaks, ...}` |
+
+`prove_my_conduct` re-verifies after appending, so an agent whose ledger has
+been tampered with gets `chain_verified: false` rather than a head hash with a
+green attached. `verify_peer_ledger` returns `first_break` as an **integer line
+number** (or null) so a calling agent can point at the exact bad row — it never
+touches your ledger (the export is verified from a throwaway temp file, and the
+call itself lands one row in `<log>.calls.jsonl` like every other tool call), and
+an export with no parseable rows returns `ok: null` (`verified_scope: "empty"`),
+because a green for sending nothing is the cheapest possible forgery. `declare_break` refuses when nothing is broken, and
+never restores a green.
+
+Agent ledgers live one file per namespace under `--ns-dir` (default `ledgers/`
+beside `--log`). A namespace is a name, not a path: `[A-Za-z0-9._-]`, traversal
+refused rather than sanitized.
+
+MCP is JSON-RPC over stdio and this server speaks it directly — no SDK, no
+extra install.
+
+## Pre-commit hook: receipt the staged diff
+
+`.pre-commit-hooks.yaml` ships an `arcaeon-receipt-diff` hook a downstream repo
+can adopt as a source:
+
+```yaml
+# a downstream repo's .pre-commit-config.yaml
+- repo: https://github.com/dan8433-user/ledger
+  rev: v0.8.0
+  hooks:
+    - id: arcaeon-receipt-diff
+```
+
+Before each commit it runs `git diff --cached`, hashes the staged bytes
+(`bind_artefact`, `raw-bytes` recipe), and appends one row to
+`<repo>/.arcaeon/receipt_diff.ledger.jsonl` — a normal `arcaeon_ledger.Ledger`,
+so `arcaeon-ledger verify` reads it like any other chain. `hooks/receipt_diff.py`
+is self-contained (it puts this repo's root on `sys.path` itself, so nothing
+needs to be `pip install`ed first) and `language: system` in the hook
+definition, so it runs with whatever `python` is already on the caller's PATH.
+
+**What the row proves:** these exact bytes (the staged patch) existed, were
+hashed, and were appended to the chain, on this machine, at the recorded local
+time. **What it does not prove:** that the diff was reviewed by anyone; that
+it's the diff that ended up in the resulting commit (`--amend`, a
+merge-conflict resolution, or a hand-edited index can all diverge afterward);
+or that no commit was made with the hook bypassed.
+
+**What `--no-verify` does to the guarantee.** `--no-verify` skips this hook
+entirely — a bypassed commit mints nothing, by definition, and this hook
+cannot see what it never ran against. What it *can* do is refuse to let that
+silence look like a clean run: every row records the `git rev-parse HEAD` it
+saw (`extra.parent_head`), and the next run compares that against the current
+HEAD. Exactly one commit is expected to land between two hook runs (the one
+the previous staged diff was for); any more than that is commits that landed
+without this hook seeing them, almost always because of `--no-verify`. That
+count is written into the new row (`extra.gap`) and printed to stderr —
+`"N commit(s) since the last receipted diff"` — so a bypass is a labelled
+number on the next commit, never a quiet reset to clean. The same labelling
+covers adopting this hook onto a repo that already has un-receipted history:
+there is no prior row to be clean relative to, so it reads as a gap from
+commit one, not a fresh start.
+
+**The trade-off, stated plainly:** this hook never blocks a commit. A failed
+`git diff`, a failed digest, a failed ledger append are all caught, warned to
+stderr, and the commit proceeds anyway — because a hook that *can* block a
+commit is a hook people learn to route around with `--no-verify`, and a hook
+that's routinely bypassed proves nothing at all. The gap-detection above is
+what keeps that choice honest: refusing to block does not mean refusing to
+say so.
+
+## Status
+
+Core library, CLI, and a drop-in **MCP server**, all tested: the library
+against edit / delete / reorder tampering (`test_ledger.py`), the MCP server
+through tools/list → append → verify at the request handler including
+tamper detection, and the agent tools against namespace traversal,
+peer-export tampering by exact line, and declared breaks (`test_agent_tools.py`). Extracted from a hash-chained action ledger
+running in production. External anchoring ships via `head()` (publish the pin
+yourself) and the reference witness (`WitnessStore`, above); a hosted witness
+tier (retention, automatic pin cadence, compliance export) is the next layer.
+
+MIT.

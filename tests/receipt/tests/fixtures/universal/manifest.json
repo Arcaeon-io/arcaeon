@@ -1,0 +1,769 @@
+{
+  "generated_by": "tools/make_universal_fixtures.mjs",
+  "verdicts": [
+    "VERIFIED",
+    "BROKEN",
+    "COULD NOT LOOK"
+  ],
+  "cases": [
+    {
+      "id": "arc_valid",
+      "file": "arc_valid.json",
+      "format": "arcaeon-receipt",
+      "expect": "VERIFIED",
+      "why": "issued by the Python tool; the seven body fields hash to body_digest"
+    },
+    {
+      "id": "arc_tampered_payload",
+      "file": "arc_tampered_payload.json",
+      "format": "arcaeon-receipt",
+      "expect": "BROKEN",
+      "why": "a body field changed after issue"
+    },
+    {
+      "id": "arc_tampered_seal",
+      "file": "arc_tampered_seal.json",
+      "format": "arcaeon-receipt",
+      "expect": "BROKEN",
+      "why": "this format has no signature; its seal is body_digest, and one hex digit of it changed"
+    },
+    {
+      "id": "arc_missing_required",
+      "file": "arc_missing_required.json",
+      "format": "arcaeon-receipt",
+      "expect": "BROKEN",
+      "why": "body_digest removed (the required seal)"
+    },
+    {
+      "id": "arc_truncated",
+      "file": "arc_truncated.json",
+      "format": null,
+      "expect": "COULD NOT LOOK",
+      "why": "half the bytes: no longer JSON, so no format is recognized"
+    },
+    {
+      "id": "arc_wrong_format_claimed",
+      "file": "arc_valid.json",
+      "format": "arcaeon-receipt",
+      "claimedFormat": "scitt",
+      "expect": "COULD NOT LOOK",
+      "why": "the reader said SCITT; it reads as an Arcaeon receipt"
+    },
+    {
+      "id": "arc_duplicate_key",
+      "file": "arc_duplicate_key.json",
+      "format": "arcaeon-receipt",
+      "expect": "BROKEN",
+      "why": "a repeated key reads one way to a first-wins parser and another to a last-wins one"
+    },
+    {
+      "id": "arc_float_overflow",
+      "file": "arc_float_overflow.json",
+      "format": "arcaeon-receipt",
+      "expect": "COULD NOT LOOK",
+      "why": "json-c14n v1 cannot canonicalize a float that overflows; could not look, never a pass"
+    },
+    {
+      "id": "arc_wrong_key",
+      "file": "arc_valid.json",
+      "format": "arcaeon-receipt",
+      "publicKeyFile": "key_ed25519_test2.txt",
+      "expect": "VERIFIED",
+      "notARefusal": true,
+      "why": "NOT APPLICABLE by construction: this format carries no signature, so a supplied key is ignored; listed so the gap is visible, not hidden"
+    },
+    {
+      "id": "arc_witness_inconsistent",
+      "file": "arc_witness_inconsistent.json",
+      "format": "arcaeon-receipt",
+      "expect": "BROKEN",
+      "why": "the body digest matches, but the witness block and its pin were edited to another ledger head, so they contradict the ledger block"
+    },
+    {
+      "id": "arc_witness_pin_self_mismatch",
+      "file": "arc_witness_pin_self_mismatch.json",
+      "format": "arcaeon-receipt",
+      "expect": "BROKEN",
+      "why": "one field of the witness pin edited; only its own self digest, recomputed with the Python recipe, sees it"
+    },
+    {
+      "id": "arc_ledger_edited_witnessed",
+      "file": "arc_ledger_edited_witnessed.json",
+      "format": "arcaeon-receipt",
+      "expect": "BROKEN",
+      "why": "the ledger claim edited on a witnessed receipt: the witness block taken of the same head now disagrees with it"
+    },
+    {
+      "id": "arc_signature_mismatch",
+      "file": "arc_signature_mismatch.json",
+      "format": "arcaeon-receipt",
+      "expect": "BROKEN",
+      "why": "an attestation signature that names another body digest does not belong to this receipt"
+    },
+    {
+      "id": "arc_signature_value_unchecked",
+      "file": "arc_signature_value_unchecked.json",
+      "format": "arcaeon-receipt",
+      "expect": "VERIFIED",
+      "notARefusal": true,
+      "why": "NOT APPLICABLE by construction: the signature names this digest and its value is forged, but the format carries no key or scheme, so the value is COULD NOT LOOK on its own row and the body still verifies; listed so the gap is visible, not hidden"
+    },
+    {
+      "id": "ar_valid_didkey",
+      "file": "ar_valid_didkey.json",
+      "format": "agent-receipts",
+      "expect": "VERIFIED",
+      "why": "spec s4.1 example, signed with the RFC 8032 TEST 1 key, named by its did:key (vector 1)"
+    },
+    {
+      "id": "ar_valid_supplied_key",
+      "file": "ar_valid_didkey.json",
+      "format": "agent-receipts",
+      "publicKeyFile": "key_ed25519_test1.txt",
+      "expect": "VERIFIED",
+      "why": "the same receipt with the matching key supplied by the reader"
+    },
+    {
+      "id": "ar_spec_example_verbatim",
+      "file": "ar_spec_example_verbatim.json",
+      "format": "agent-receipts",
+      "expect": "COULD NOT LOOK",
+      "why": "the spec example exactly as published: did:agent cannot be resolved in a browser, so the signature is not looked at"
+    },
+    {
+      "id": "ar_tampered_payload",
+      "file": "ar_tampered_payload.json",
+      "format": "agent-receipts",
+      "expect": "BROKEN",
+      "why": "outcome.status changed from success to failure after signing"
+    },
+    {
+      "id": "ar_tampered_signature",
+      "file": "ar_tampered_signature.json",
+      "format": "agent-receipts",
+      "expect": "BROKEN",
+      "why": "one bit of the signature flipped"
+    },
+    {
+      "id": "ar_tampered_signature_padding_bits",
+      "file": "ar_tampered_signature_padding_bits.json",
+      "format": "agent-receipts",
+      "expect": "BROKEN",
+      "why": "only the unused low bits of the last base64url character changed (a lenient decoder yields the SAME signature bytes, so it would say VERIFIED over edited text)"
+    },
+    {
+      "id": "ar_missing_required",
+      "file": "ar_missing_required.json",
+      "format": "agent-receipts",
+      "expect": "BROKEN",
+      "why": "proof.proofPurpose removed; the schema requires all five proof fields"
+    },
+    {
+      "id": "ar_missing_required_nullable",
+      "file": "ar_missing_required_nullable.json",
+      "format": "agent-receipts",
+      "expect": "BROKEN",
+      "why": "chain.previous_receipt_hash removed; it is required even when null"
+    },
+    {
+      "id": "ar_wrong_key_named",
+      "file": "ar_wrong_key_named.json",
+      "format": "agent-receipts",
+      "expect": "BROKEN",
+      "why": "signed by TEST 1 but names the TEST 2 did:key (vector 2)"
+    },
+    {
+      "id": "ar_wrong_key_supplied",
+      "file": "ar_valid_didkey.json",
+      "format": "agent-receipts",
+      "publicKeyFile": "key_ed25519_test2.txt",
+      "expect": "BROKEN",
+      "why": "the reader supplies the TEST 2 key for a TEST 1 signature"
+    },
+    {
+      "id": "ar_truncated",
+      "file": "ar_truncated.json",
+      "format": null,
+      "expect": "COULD NOT LOOK",
+      "why": "60% of the bytes: not JSON, so no format is recognized (never BROKEN)"
+    },
+    {
+      "id": "ar_wrong_format_claimed",
+      "file": "ar_valid_didkey.json",
+      "format": "agent-receipts",
+      "claimedFormat": "scitt",
+      "expect": "COULD NOT LOOK",
+      "why": "the reader said SCITT; it reads as an Agent Receipt"
+    },
+    {
+      "id": "ar_duplicate_key",
+      "file": "ar_duplicate_key.json",
+      "format": "agent-receipts",
+      "expect": "BROKEN",
+      "why": "version given twice; I-JSON (RFC 8785 s3.1) forbids it"
+    },
+    {
+      "id": "scitt_valid_es256_x5chain",
+      "file": "scitt_valid_es256_x5chain.cbor",
+      "format": "scitt",
+      "expect": "VERIFIED",
+      "bytes": true,
+      "why": "RFC 9943 s6.1 shape (tag 18; alg ES256, content type, CWT iss+sub); key from the embedded x5chain leaf"
+    },
+    {
+      "id": "scitt_valid_hex_text",
+      "file": "scitt_valid_es256_x5chain.hex",
+      "format": "scitt",
+      "expect": "VERIFIED",
+      "why": "the same statement pasted as hex"
+    },
+    {
+      "id": "scitt_valid_base64_text",
+      "file": "scitt_valid_es256_x5chain.b64",
+      "format": "scitt",
+      "expect": "VERIFIED",
+      "why": "the same statement pasted as base64"
+    },
+    {
+      "id": "scitt_valid_supplied_jwk",
+      "file": "scitt_valid_es256_x5chain.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "publicKeyFile": "key_p256_rfc7515.jwk",
+      "expect": "VERIFIED",
+      "why": "the RFC 7515 A.3 public key supplied as a JWK"
+    },
+    {
+      "id": "scitt_tampered_payload",
+      "file": "scitt_tampered_payload.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "expect": "BROKEN",
+      "why": "one bit of the embedded payload flipped"
+    },
+    {
+      "id": "scitt_tampered_signature",
+      "file": "scitt_tampered_signature.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "expect": "BROKEN",
+      "why": "one bit of the signature flipped"
+    },
+    {
+      "id": "scitt_missing_cwt_claims",
+      "file": "scitt_missing_cwt_claims.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "expect": "BROKEN",
+      "why": "validly signed, but no CWT Claims (label 15), which RFC 9943 requires"
+    },
+    {
+      "id": "scitt_missing_sub",
+      "file": "scitt_missing_sub.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "expect": "BROKEN",
+      "why": "validly signed, CWT Claims present, but no sub (label 2)"
+    },
+    {
+      "id": "scitt_wrong_key_supplied",
+      "file": "scitt_valid_es256_x5chain.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "publicKeyFile": "key_p256_wrong.jwk",
+      "expect": "BROKEN",
+      "why": "the reader supplies a different P-256 key"
+    },
+    {
+      "id": "scitt_wrong_key_embedded",
+      "file": "scitt_wrong_key_embedded.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "expect": "BROKEN",
+      "why": "signed with the RFC 7515 key but carries a certificate for a different key"
+    },
+    {
+      "id": "scitt_truncated",
+      "file": "scitt_truncated.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "expect": "BROKEN",
+      "why": "half the bytes: the tag 18 prefix is recognized, and the CBOR runs out"
+    },
+    {
+      "id": "scitt_wrong_format_claimed",
+      "file": "scitt_valid_es256_x5chain.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "claimedFormat": "agent-receipts",
+      "expect": "COULD NOT LOOK",
+      "why": "the reader said Agent Receipts; it reads as SCITT"
+    },
+    {
+      "id": "scitt_trailing_bytes",
+      "file": "scitt_trailing_bytes.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "expect": "BROKEN",
+      "why": "one extra byte after the COSE_Sign1"
+    },
+    {
+      "id": "scitt_detached_with_payload",
+      "file": "scitt_detached.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "detachedPayloadFile": "scitt_detached_payload.bin",
+      "expect": "VERIFIED",
+      "why": "detached payload (nil, as in the RFC 9943 s6.1 example) with the payload supplied"
+    },
+    {
+      "id": "scitt_detached_without_payload",
+      "file": "scitt_detached.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "expect": "COULD NOT LOOK",
+      "why": "detached payload and none supplied: nothing to check the signature over"
+    },
+    {
+      "id": "scitt_detached_tampered_payload",
+      "file": "scitt_detached.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "detachedPayloadFile": "scitt_detached_payload_tampered.bin",
+      "expect": "BROKEN",
+      "why": "the supplied detached payload differs by one bit"
+    },
+    {
+      "id": "scitt_hash_envelope_with_preimage",
+      "file": "scitt_hash_envelope_eddsa.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "publicKeyFile": "key_ed25519_test1.txt",
+      "preimageFile": "scitt_hash_preimage.txt",
+      "expect": "VERIFIED",
+      "why": "RFC 9995 hash envelope, EdDSA, the preimage hashes to the signed payload"
+    },
+    {
+      "id": "scitt_hash_envelope_no_preimage",
+      "file": "scitt_hash_envelope_eddsa.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "publicKeyFile": "key_ed25519_test1.txt",
+      "expect": "VERIFIED",
+      "why": "signature verifies; the payload digest row is NOT LOOKED because no preimage was given"
+    },
+    {
+      "id": "scitt_hash_envelope_tampered_preimage",
+      "file": "scitt_hash_envelope_eddsa.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "publicKeyFile": "key_ed25519_test1.txt",
+      "preimageFile": "scitt_hash_preimage_tampered.txt",
+      "expect": "BROKEN",
+      "why": "the supplied file differs by one bit from what was hashed"
+    },
+    {
+      "id": "scitt_hash_envelope_wrong_key",
+      "file": "scitt_hash_envelope_eddsa.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "publicKeyFile": "key_ed25519_test2.txt",
+      "expect": "BROKEN",
+      "why": "the RFC 8032 TEST 2 key supplied for a TEST 1 signature"
+    },
+    {
+      "id": "scitt_hash_envelope_no_key",
+      "file": "scitt_hash_envelope_eddsa.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "expect": "COULD NOT LOOK",
+      "why": "no certificate in the statement and no key supplied"
+    },
+    {
+      "id": "scitt_hash_envelope_with_content_type",
+      "file": "scitt_hash_envelope_with_content_type.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "publicKeyFile": "key_ed25519_test1.txt",
+      "expect": "BROKEN",
+      "why": "validly signed, but a hash envelope must not carry content type (RFC 9995)"
+    },
+    {
+      "id": "scitt_hash_envelope_short_payload",
+      "file": "scitt_hash_envelope_short_payload.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "publicKeyFile": "key_ed25519_test1.txt",
+      "expect": "BROKEN",
+      "why": "validly signed, but the payload is 31 bytes where SHA-256 gives 32"
+    },
+    {
+      "id": "scitt_unsupported_alg",
+      "file": "scitt_unsupported_alg.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "publicKeyFile": "key_p256_rfc7515.jwk",
+      "expect": "COULD NOT LOOK",
+      "why": "alg -47 (ES256K) is not in WebCrypto; could not look, never BROKEN and never a pass"
+    },
+    {
+      "id": "scitt_receipt_valid",
+      "file": "scitt_receipt_valid.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "statementFile": "scitt_receipt_statement.cbor",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "VERIFIED",
+      "why": "RFC 9942 s5.2.1 shape (alg ES256, vds 1, vdp -1, detached root), tree size 7, leaf index 5; the root is recomputed from the statement's leaf and the service signature checks over it"
+    },
+    {
+      "id": "scitt_receipt_valid_attached_root",
+      "file": "scitt_receipt_attached_root.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "statementFile": "scitt_receipt_statement.cbor",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "VERIFIED",
+      "why": "the same receipt with the root attached (RFC 9942 s4.4 says SHOULD detach, so attached is allowed); the recomputed root equals it"
+    },
+    {
+      "id": "scitt_receipt_no_ts_key",
+      "file": "scitt_receipt_valid.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "statementFile": "scitt_receipt_statement.cbor",
+      "expect": "COULD NOT LOOK",
+      "why": "no transparency service key: the root is recomputed, but whether the service signed it was not looked at"
+    },
+    {
+      "id": "scitt_receipt_no_statement",
+      "file": "scitt_receipt_valid.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "COULD NOT LOOK",
+      "why": "a receipt alone names no entry; without the statement there is no leaf to start the path from"
+    },
+    {
+      "id": "scitt_receipt_wrong_ts_key",
+      "file": "scitt_receipt_valid.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "statementFile": "scitt_receipt_statement.cbor",
+      "receiptKeyFile": "key_p256_rfc7515.jwk",
+      "expect": "BROKEN",
+      "why": "the reader supplies a different P-256 key (the issuer's) as the service key"
+    },
+    {
+      "id": "scitt_receipt_tampered_path",
+      "file": "scitt_receipt_tampered_path.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "statementFile": "scitt_receipt_statement.cbor",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "BROKEN",
+      "why": "one bit of the second path hash flipped; the genuine signature no longer covers the recomputed root"
+    },
+    {
+      "id": "scitt_receipt_attached_root_tampered_path",
+      "file": "scitt_receipt_attached_root_tampered_path.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "statementFile": "scitt_receipt_statement.cbor",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "BROKEN",
+      "why": "the same tampered path with the genuine root attached: the signature over the attached root is valid, so only recomputing the root catches it"
+    },
+    {
+      "id": "scitt_receipt_wrong_leaf_index",
+      "file": "scitt_receipt_wrong_leaf_index.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "statementFile": "scitt_receipt_statement.cbor",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "BROKEN",
+      "why": "leaf index 5 changed to 4: the path is applied at the wrong leaf position"
+    },
+    {
+      "id": "scitt_receipt_attached_root_wrong_leaf",
+      "file": "scitt_receipt_attached_root.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "statementFile": "scitt_valid_es256_x5chain.cbor",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "BROKEN",
+      "why": "root attached, statement swapped: the leaf is another statement's, so the recomputed root is not the attached one (hash equality fails before any signature)"
+    },
+    {
+      "id": "scitt_receipt_other_statement",
+      "file": "scitt_receipt_valid.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "statementFile": "scitt_valid_es256_x5chain.cbor",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "BROKEN",
+      "why": "a genuine receipt checked against a different, validly signed statement: real evidence, about something else"
+    },
+    {
+      "id": "scitt_receipt_truncated_proof",
+      "file": "scitt_receipt_truncated_proof.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "statementFile": "scitt_receipt_statement.cbor",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "BROKEN",
+      "why": "last path hash dropped: RFC 9162 s2.1.3.2 ends with sn not 0, so the proof fails on its own shape"
+    },
+    {
+      "id": "scitt_receipt_truncated_proof_no_key",
+      "file": "scitt_receipt_truncated_proof.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "expect": "BROKEN",
+      "why": "the same short path with no statement and no key: a proof that does not fit its own tree is BROKEN before anything else is needed"
+    },
+    {
+      "id": "scitt_receipt_extra_path_hash",
+      "file": "scitt_receipt_extra_path_hash.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "statementFile": "scitt_receipt_statement.cbor",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "BROKEN",
+      "why": "one hash too many: sn reaches 0 with path left over (RFC 9162 s2.1.3.2 step 4a)"
+    },
+    {
+      "id": "scitt_receipt_index_past_size",
+      "file": "scitt_receipt_index_past_size.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "statementFile": "scitt_receipt_statement.cbor",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "BROKEN",
+      "why": "leaf index equals tree size (RFC 9942 s5.2: fail the proof verification)"
+    },
+    {
+      "id": "scitt_receipt_float_tree_size",
+      "file": "scitt_receipt_float_tree_size.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "statementFile": "scitt_receipt_statement.cbor",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "BROKEN",
+      "why": "tree size is the float 7.5; RFC 9942 s5.2 says uint"
+    },
+    {
+      "id": "scitt_receipt_float_tree_size_integral",
+      "file": "scitt_receipt_float_tree_size_integral.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "statementFile": "scitt_receipt_statement.cbor",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "BROKEN",
+      "why": "tree size is the float 7.0 (fb 40 1c 00..): the same number, but major type 7, not a uint (RFC 9942 s5.2)"
+    },
+    {
+      "id": "scitt_receipt_float_leaf_index",
+      "file": "scitt_receipt_float_leaf_index.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "statementFile": "scitt_receipt_statement.cbor",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "BROKEN",
+      "why": "leaf index is the float 5.0; RFC 9942 s5.2 says uint"
+    },
+    {
+      "id": "scitt_receipt_short_path_hash",
+      "file": "scitt_receipt_short_path_hash.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "statementFile": "scitt_receipt_statement.cbor",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "BROKEN",
+      "why": "a path hash of 31 bytes where SHA-256 gives 32"
+    },
+    {
+      "id": "scitt_receipt_truncated",
+      "file": "scitt_receipt_truncated.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "expect": "BROKEN",
+      "why": "half the receipt's bytes: tag 18 is seen but the headers cannot be read, so the detector cannot call it a receipt; the statement checker reports the CBOR running out"
+    },
+    {
+      "id": "scitt_receipt_unsupported_vds",
+      "file": "scitt_receipt_unsupported_vds.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "statementFile": "scitt_receipt_statement.cbor",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "COULD NOT LOOK",
+      "why": "vds 2 (the CCF ledger profile, an Internet-Draft, not in the IANA registry): could not look, never read as RFC 9162"
+    },
+    {
+      "id": "scitt_receipt_consistency_only",
+      "file": "scitt_receipt_consistency_only.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "statementFile": "scitt_receipt_statement.cbor",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "COULD NOT LOOK",
+      "why": "only a consistency proof (-2); this page checks inclusion, not consistency"
+    },
+    {
+      "id": "scitt_receipt_two_inclusion_proofs",
+      "file": "scitt_receipt_two_inclusion_proofs.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "statementFile": "scitt_receipt_statement.cbor",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "COULD NOT LOOK",
+      "why": "two inclusion proofs under one signature; this page checks receipts with exactly one"
+    },
+    {
+      "id": "scitt_receipt_unsupported_alg",
+      "file": "scitt_receipt_unsupported_alg.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "statementFile": "scitt_receipt_statement.cbor",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "COULD NOT LOOK",
+      "why": "tree head signed with alg -47 (ES256K), which WebCrypto does not run"
+    },
+    {
+      "id": "scitt_receipt_missing_alg",
+      "file": "scitt_receipt_missing_alg.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "statementFile": "scitt_receipt_statement.cbor",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "BROKEN",
+      "why": "no alg (label 1), which RFC 9942 s5.2.1 makes REQUIRED"
+    },
+    {
+      "id": "scitt_receipt_vds_without_vdp",
+      "file": "scitt_receipt_vds_without_vdp.cbor",
+      "bytes": true,
+      "format": null,
+      "statementFile": "scitt_receipt_statement.cbor",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "COULD NOT LOOK",
+      "why": "vds (395) but no proofs (396): one receipt marker without the other, so the detector calls it neither a receipt nor a statement"
+    },
+    {
+      "id": "scitt_receipt_wrong_format_claimed",
+      "file": "scitt_receipt_valid.cbor",
+      "bytes": true,
+      "format": "scitt-receipt",
+      "claimedFormat": "scitt",
+      "statementFile": "scitt_receipt_statement.cbor",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "COULD NOT LOOK",
+      "why": "the reader said Signed Statement; it reads as a receipt"
+    },
+    {
+      "id": "scitt_receipt_bare_statement_claimed",
+      "file": "scitt_receipt_statement.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "claimedFormat": "scitt-receipt",
+      "expect": "COULD NOT LOOK",
+      "why": "a bare Signed Statement the reader called a receipt: it carries no vds or vdp, so it is not one"
+    },
+    {
+      "id": "scitt_transparent_valid",
+      "file": "scitt_transparent_valid.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "VERIFIED",
+      "why": "RFC 9943 s7 Transparent Statement: the issuer signature (x5chain leaf) and the attached receipt both check; the entry drops the 394 header it now carries"
+    },
+    {
+      "id": "scitt_transparent_no_ts_key",
+      "file": "scitt_transparent_valid.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "expect": "COULD NOT LOOK",
+      "why": "the issuer signature checks, but with no service key the transparency it claims was not looked at"
+    },
+    {
+      "id": "scitt_transparent_wrong_ts_key",
+      "file": "scitt_transparent_valid.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "receiptKeyFile": "key_p256_rfc7515.jwk",
+      "expect": "BROKEN",
+      "why": "the wrong service key for its only receipt"
+    },
+    {
+      "id": "scitt_transparent_tampered_receipt",
+      "file": "scitt_transparent_tampered_receipt.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "BROKEN",
+      "why": "the attached receipt keeps its genuine signature, but one bit of its third path hash was flipped"
+    },
+    {
+      "id": "scitt_transparent_two_receipts_one_ours",
+      "file": "scitt_transparent_two_receipts.cbor",
+      "bytes": true,
+      "format": "scitt",
+      "receiptKeyFile": "key_p256_transparency_service.jwk",
+      "expect": "VERIFIED",
+      "why": "two receipts from two services; the second verifies under the supplied key (RFC 9943 s7.1: a Relying Party MAY verify a single acceptable receipt), the first is shown and not counted"
+    },
+    {
+      "id": "none_json_object",
+      "file": "none_json_object.json",
+      "format": null,
+      "expect": "COULD NOT LOOK",
+      "why": "valid JSON with none of the markers"
+    },
+    {
+      "id": "none_plain_text",
+      "file": "none_plain_text.txt",
+      "format": null,
+      "expect": "COULD NOT LOOK",
+      "why": "plain text"
+    },
+    {
+      "id": "none_empty",
+      "file": "none_empty.txt",
+      "format": null,
+      "expect": "COULD NOT LOOK",
+      "why": "empty input"
+    },
+    {
+      "id": "none_random_bytes",
+      "file": "none_random_bytes.bin",
+      "bytes": true,
+      "format": null,
+      "expect": "COULD NOT LOOK",
+      "why": "binary that is not tag 18"
+    },
+    {
+      "id": "none_untagged_cose",
+      "file": "none_untagged_cose.cbor",
+      "bytes": true,
+      "format": null,
+      "expect": "COULD NOT LOOK",
+      "why": "a COSE_Sign1 array without tag 18: RFC 9943 requires the tag, so the page does not guess"
+    },
+    {
+      "id": "none_ambiguous_markers",
+      "file": "none_ambiguous_markers.json",
+      "format": null,
+      "expect": "COULD NOT LOOK",
+      "why": "carries both the Arcaeon and the Agent Receipts markers; the page will not pick one"
+    },
+    {
+      "id": "signet_v1_shape",
+      "file": "signet_v1_shape.json",
+      "format": "signet",
+      "expect": "COULD NOT LOOK",
+      "why": "recognized as Signet; could not look: no published schema"
+    }
+  ]
+}

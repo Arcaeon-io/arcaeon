@@ -1,0 +1,102 @@
+{
+  "per_answer": [
+    {
+      "score": 54,
+      "verdict": "UNSATISFACTORY",
+      "dimensions": [
+        {"key": "directness", "name": "Answered the question", "score": 0.55, "weight": 0.32,
+         "detail": "Introduction drifted into a general life story before circling back to the job reason."},
+        {"key": "structure", "name": "Structure (real incident)", "score": 0.50, "weight": 0.26,
+         "detail": "No incident required for an intro; delivery lacked a clear organizing shape."},
+        {"key": "communication", "name": "Communication", "score": 0.65, "weight": 0.352,
+         "detail": "Understandable but ran long and lost the thread twice."},
+        {"key": "tieback", "name": "Tie-back to the job", "score": 0.40, "weight": 0.20,
+         "detail": "Reason for wanting the job stayed generic (\"I need a stable job\") rather than specific to dispatch."}
+      ],
+      "coaching": ["The reason for wanting this job needs to be specific to dispatch work, not just \"I need stable work.\"",
+                   "Trim the introduction to the parts that matter: who you are, and why this job."],
+      "worked": [],
+      "fix": ["The reason for wanting this job needs to be specific to dispatch work, not just \"I need stable work.\"",
+              "Trim the introduction to the parts that matter: who you are, and why this job."],
+      "meta": {"source": "llm:gemini-2.5-flash", "id": "ob-intro", "slot": "intro"}
+    },
+    {
+      "score": 0,
+      "verdict": "UNSATISFACTORY",
+      "dimensions": [
+        {"key": "directness", "name": "Answered the question", "score": 0.0, "weight": 0.32, "detail": ""},
+        {"key": "structure", "name": "Structure (real incident)", "score": 0.0, "weight": 0.416, "detail": ""},
+        {"key": "communication", "name": "Communication", "score": 0.0, "weight": 0.22, "detail": ""},
+        {"key": "tieback", "name": "Tie-back to the job", "score": 0.0, "weight": 0.32, "detail": ""}
+      ],
+      "coaching": ["No answer was given for this question — the panel can only grade what it hears."],
+      "worked": [],
+      "fix": ["No answer was given for this question — the panel can only grade what it hears."],
+      "meta": {"source": "blank", "id": "ob-priorities", "slot": "behavioral"}
+    },
+    {
+      "score": 38,
+      "verdict": "UNSATISFACTORY",
+      "dimensions": [
+        {"key": "directness", "name": "Answered the question", "score": 0.40, "weight": 0.32,
+         "detail": "Talked around a busy week rather than one specific stressful situation."},
+        {"key": "structure", "name": "Structure (real incident)", "score": 0.35, "weight": 0.416,
+         "detail": "No single incident emerged; stayed a vague generality (\"I'm good under pressure\")."},
+        {"key": "communication", "name": "Communication", "score": 0.55, "weight": 0.22,
+         "detail": "Delivery was calm but the content never landed on a real story."},
+        {"key": "tieback", "name": "Tie-back to the job", "score": 0.30, "weight": 0.32,
+         "detail": "No connection drawn to console stress; the answer stopped short of the job."}
+      ],
+      "coaching": ["This is the hardest question on the board and it needs a REAL, specific incident with a beginning, middle, and end — not a general claim.",
+                   "Connect whatever incident you pick back to staying composed on a high-stress call; right now nothing ties it to the job."],
+      "worked": [],
+      "fix": ["This is the hardest question on the board and it needs a REAL, specific incident with a beginning, middle, and end — not a general claim.",
+              "Connect whatever incident you pick back to staying composed on a high-stress call; right now nothing ties it to the job."],
+      "meta": {"source": "llm:gemini-2.5-flash", "id": "ob-stressful", "slot": "behavioral"}
+    },
+    {
+      "score": 0,
+      "verdict": "UNSATISFACTORY",
+      "dimensions": [
+        {"key": "directness", "name": "Answered the question", "score": 0.0, "weight": 0.32, "detail": ""},
+        {"key": "structure", "name": "Structure (real incident)", "score": 0.0, "weight": 0.26, "detail": ""},
+        {"key": "communication", "name": "Communication", "score": 0.0, "weight": 0.352, "detail": ""},
+        {"key": "tieback", "name": "Tie-back to the job", "score": 0.0, "weight": 0.32, "detail": ""}
+      ],
+      "coaching": ["No answer was given for this question — the panel can only grade what it hears."],
+      "worked": [],
+      "fix": ["No answer was given for this question — the panel can only grade what it hears."],
+      "meta": {"source": "blank", "id": "ob-close", "slot": "close"}
+    }
+  ],
+  "overall": {
+    "score": 23,
+    "verdict": "UNSATISFACTORY",
+    "summary": "Develop before the real board. The bones are here, but too many answers drifted off the question or stayed general. The panel needs you to answer what's asked, with a concrete story and a clear bridge to the dispatch job. Practice it out loud.",
+    "band_label": "UNSATISFACTORY",
+    "band_range": "below 70%",
+    "band_also": "Unsatisfactory (Fail)",
+    "band_meaning": "Falls below civil service standards. The answer did not address the prompt directly, lacked job-related detail, or did not demonstrate the core competencies.",
+    "worked": [],
+    "fix": ["The reason for wanting this job needs to be specific to dispatch work, not just \"I need stable work.\"",
+            "No answer was given for this question — the panel can only grade what it hears.",
+            "This is the hardest question on the board and it needs a REAL, specific incident with a beginning, middle, and end — not a general claim."],
+    "strengths": [],
+    "fixes": ["The reason for wanting this job needs to be specific to dispatch work, not just \"I need stable work.\"",
+              "No answer was given for this question — the panel can only grade what it hears.",
+              "This is the hardest question on the board and it needs a REAL, specific incident with a beginning, middle, and end — not a general claim."]
+  },
+  "judge_declaration": {
+    "falsifier_type": "evaluative",
+    "judge_identity": "gemini-2.5-flash-002",
+    "judge_requested": "gemini-2.5-flash",
+    "rubric_identity": "ascenvo.vcs.oral_board.grade_board",
+    "rubric_version": "2026-08-15",
+    "board_identity": "ob-intro+ob-priorities+ob-stressful+ob-close",
+    "baseline_identity": "the four SME rubric dimensions (directness/structure/communication/tieback) + each question's wants/hard_on",
+    "baseline_provenance": "products/voice_call_sim/oralboard_judge.py (Daniel, dispatch-side SME) + data/oralboard_questions.js",
+    "baseline_date": "2026-06-25",
+    "judge_inputs_scope": "this question's text + its trait/wants/hard_on rubric data + this one answer's text ONLY; NOT the other answers on the board, NOT prior attempts, NOT a model answer",
+    "graded_at": "2026-09-07T09:05:11Z"
+  }
+}

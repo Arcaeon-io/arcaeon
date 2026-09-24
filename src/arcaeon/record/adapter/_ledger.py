@@ -1,0 +1,261 @@
+# SPDX-License-Identifier: MIT
+"""Ledger binding — use `arcaeon-ledger` when it's importable, degrade honestly when it isn't.
+
+WHY this file exists at all: the adapter's whole value proposition is that the
+row it writes *proves itself*. That proof lives in `arcaeon-ledger` (hash chain,
+canonical-JSON digests, `verify`). So the right dependency is the real library,
+and this module's first job is simply to import it.
+
+Its second job is the interesting one. The adapter is meant to be wrapped around
+somebody else's MCP server by editing one line of config. That deployer may not
+have `arcaeon-ledger` installed, and the failure we must never ship is: the proxy
+refuses to start, and the customer's MCP server — which worked fine a minute ago —
+is now dead because of *our* audit sidecar. A logging layer that can take down
+the thing it logs is worse than no logging layer.
+
+So when the import fails we still write rows, in the ledger's own documented
+on-disk shape, with a small local implementation of the two frozen recipes:
+
+    chain     = sha256(prev_chain + json.dumps(row_without_chain,
+                                               ensure_ascii=False, sort_keys=True)
+                      ).hexdigest()[:32]          # 'genesis' seeds the chain
+    digest    = "sha256:json-c14n:v1:" + sha256(canonical.encode("utf-8")).hexdigest()
+    canonical = json.dumps(value, sort_keys=True, separators=(",", ":"),
+                           ensure_ascii=False, allow_nan=False)
+
+Both recipes are frozen specifications, not implementation details, which is the
+only reason a re-implementation is legitimate here: files written by the fallback
+are byte-compatible with files written by the library, and
+`arcaeon_ledger.verify_file` verifies them later on a machine that *does* have it
+installed. The selftest proves that claim against the library's own frozen golden
+vectors instead of asserting it.
+
+`backend()` reports which path is live, and the proxy stamps it into the
+`session_begin` row — a reviewer should never have to guess whether the chain in
+front of them came from the library or the fallback.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import threading
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from arcaeon.record.row import CHAIN_LEN as _CHAIN_LEN  # noqa: F401
+from arcaeon.record.row import GENESIS as _GENESIS
+from arcaeon.record.row import canon_json  # noqa: F401  (public name here since 0.1)
+from arcaeon.record.row import chain as _chain
+from arcaeon.record.row import digest_bytes as _row_digest_bytes
+from arcaeon.record.row import digest_json as _row_digest_json
+
+try:  # the real thing, always preferred
+    from arcaeon.record.ledger import Ledger as _RealLedger  # type: ignore
+    from arcaeon.record.ledger import __version__ as _LEDGER_VERSION  # type: ignore
+    from arcaeon.record.ledger import digest_json as _real_digest_json  # type: ignore
+    from arcaeon.record.ledger import verify_file as _real_verify_file  # type: ignore
+    _HAVE_LEDGER = True
+except Exception:  # pragma: no cover - exercised only on machines without it
+    _RealLedger = None
+    _LEDGER_VERSION = None
+    _real_digest_json = None
+    _real_verify_file = None
+    _HAVE_LEDGER = False
+
+
+def backend() -> str:
+    """Which ledger implementation is live, for stamping into `session_begin`."""
+    if _HAVE_LEDGER:
+        return f"arcaeon-ledger/{_LEDGER_VERSION}"
+    return "fallback-jsonl/1"
+
+
+# -- digests -----------------------------------------------------------------
+
+def digest_json(value: Any) -> str:
+    """Self-describing digest of a JSON value: `sha256:json-c14n:v1:<hex>`.
+
+    Self-describing is the point: the string carries its own algorithm, recipe
+    name and recipe version, so a stranger holding only the row can reconstruct
+    the computation. We never emit a bare hex hash.
+    """
+    if _HAVE_LEDGER:
+        return _real_digest_json(value)
+    return _row_digest_json(value)
+
+
+def digest_of_frame(raw: bytes) -> str:
+    """Digest an unparseable frame by its bytes, so it is still *named*.
+
+    Used nowhere on the happy path; kept because "we saw something here we could
+    not read" is more honest than a silent gap, if a future row wants to say it.
+    """
+    return _row_digest_bytes(raw)
+
+
+# -- the writer --------------------------------------------------------------
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+class _FallbackLedger:
+    """Minimal hash-chained JSONL appender, shape-identical to `arcaeon_ledger.Ledger`.
+
+    Deliberately NOT a reimplementation of the library's hardening — no
+    cross-process lock, no torn-line healing, no backwards tail scan past the
+    last line. It is the degraded path: single-writer, good enough to keep the
+    record flowing when the library is absent, and honestly labelled as such in
+    `session_begin` via `backend()`. If two processes share one seam log, install
+    `arcaeon-ledger`.
+    """
+
+    def __init__(self, path: str | Path):
+        self.path = Path(path)
+        self._lock = threading.Lock()
+        self._tail: str | None = None
+
+    def _last_chain(self) -> str:
+        if self._tail is not None:
+            return self._tail
+        last = _GENESIS
+        try:
+            with self.path.open("rb") as fh:
+                for raw in fh:
+                    raw = raw.strip()
+                    if not raw:
+                        continue
+                    try:
+                        obj = json.loads(raw.decode("utf-8", errors="replace"))
+                    except (ValueError, RecursionError):
+                        # RecursionError is NOT a ValueError: one deeply
+                        # nested line used to escape here, out of append(),
+                        # out of session_begin(), and kill the proxy before
+                        # the child spawned (2026-09-01 audit, adapter #1).
+                        continue
+                    if isinstance(obj, dict) and obj.get("chain"):
+                        last = obj["chain"]
+        except OSError:
+            pass
+        self._tail = last
+        return last
+
+    def append(self, record: dict[str, Any]) -> str:
+        obj = dict(record)
+        obj.setdefault("ts", _now_iso())
+        obj.pop("chain", None)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self._lock:
+            obj["chain"] = _chain(self._last_chain(), obj)
+            line = json.dumps(obj, ensure_ascii=False) + "\n"
+            with self.path.open("ab") as fh:
+                fh.write(line.encode("utf-8"))
+                fh.flush()
+                try:
+                    os.fsync(fh.fileno())
+                except OSError:
+                    pass
+            self._tail = obj["chain"]
+        return obj["chain"]
+
+
+def open_ledger(path: str | Path):
+    """The seam ledger. Real library when present, fallback when not."""
+    if _HAVE_LEDGER:
+        return _RealLedger(path)
+    return _FallbackLedger(path)
+
+
+# -- verification ------------------------------------------------------------
+
+class _FallbackVerify:
+    """The fields a caller reads off a verdict, three-valued like the library's.
+
+    `ok` is deliberately tri-state and MUST be read with `is True`:
+
+      * ``True``  + ``verified_scope="full"``  every row was walked, none broke
+      * ``None``  + ``verified_scope="empty"`` nothing was checked, so nothing is
+        claimed. Falsy on purpose. An empty seam log is this package's own
+        signature failure (proxy up, observer silent), and answering that with a
+        green is indistinguishable from "I checked everything and it was fine."
+      * ``False``                              a real fault; see `breaks`
+
+    `breaks` is the total count, not a flag. `first_break` alone teaches its
+    reader there is exactly one fault, which is how a second one goes
+    unlooked-for.
+    """
+
+    def __init__(self, ok, rows, first_break, breaks=0, verified_scope="full"):
+        self.ok = ok
+        self.rows = rows
+        self.first_break = first_break
+        self.breaks = breaks
+        self.verified_scope = verified_scope
+
+    def __bool__(self) -> bool:
+        return self.ok is True
+
+    def __repr__(self) -> str:  # pragma: no cover - diagnostics only
+        return (f"FallbackVerify(ok={self.ok!r}, rows={self.rows}, "
+                f"breaks={self.breaks}, verified_scope={self.verified_scope!r}, "
+                f"first_break={self.first_break!r})")
+
+
+def verify_seam_log(path: str | Path):
+    """Verify a seam log's chain. Returns something with `.ok` / `.first_break`.
+
+    Prefers `arcaeon_ledger.verify_file` — the hardened verifier with the
+    three-valued verdict (`ok=None` for a bounded scan is NOT a green). The
+    fallback below is two-valued and re-walks the same recipe; it exists so
+    `selftest` can still observe tampering being caught on a machine without the
+    library, and its `first_break` string is deliberately formatted identically
+    (`"line N: chain mismatch"`) so tests read the same either way.
+    """
+    if _HAVE_LEDGER:
+        return _real_verify_file(Path(path))
+    prev = _GENESIS
+    rows = 0
+    breaks = 0
+    first_break = None
+    try:
+        # errors="replace" (2026-09-01 audit finding #2): matches _last_chain and
+        # the real verifier — invalid UTF-8 bytes in a foreign seam log must yield
+        # a verdict (a mismatch break), not a UnicodeDecodeError crash.
+        raw_text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError as e:
+        return _FallbackVerify(False, 0, f"unreadable: {e}",
+                               verified_scope="unreadable")
+    for i, raw in enumerate(raw_text.split("\n"), start=1):
+        if not raw.strip():
+            continue
+        rows += 1
+        try:
+            obj = json.loads(raw)
+        except (ValueError, RecursionError):
+            breaks += 1
+            if first_break is None:
+                first_break = f"line {i}: unparseable"
+            continue
+        # non-dict guard (2026-09-01 audit finding #2): a JSON line like [1,2,3]
+        # parses fine but has no .get — treat as a break, mirroring the real
+        # verify_file, rather than crashing with AttributeError.
+        if not isinstance(obj, dict):
+            breaks += 1
+            if first_break is None:
+                first_break = f"line {i}: not a JSON object"
+            continue
+        claimed = obj.get("chain")
+        if _chain(prev, obj) != claimed:
+            breaks += 1
+            if first_break is None:
+                first_break = f"line {i}: chain mismatch"
+        prev = claimed or prev
+    if rows == 0:
+        # Nothing was walked, so nothing is asserted. ok=None is falsy on
+        # purpose and mirrors arcaeon_ledger.verify_file's "empty" scope: a
+        # scan that checked no rows has not earned a green.
+        return _FallbackVerify(None, 0, None, breaks=0, verified_scope="empty")
+    return _FallbackVerify(breaks == 0, rows, first_break, breaks=breaks,
+                           verified_scope="full")

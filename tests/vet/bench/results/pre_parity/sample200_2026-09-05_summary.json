@@ -1,0 +1,12 @@
+{
+  "snapshot": "registry_2026-09-02T2142Z.jsonl",
+  "snapshot_sha256": "4990529da87c02f3f783b84bbead3ab15d43ddb642d1311989776c34a648dbe2",
+  "seed": 20260905,
+  "sample_n": 200,
+  "frame_gradable_repo": 20029,
+  "servers_distinct_active": 26197,
+  "outcomes": {
+    "GRADED": 179,
+    "UNFETCHABLE": 21
+  }
+}

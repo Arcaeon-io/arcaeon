@@ -1,0 +1,10 @@
+[
+  "runtime confirmed by runner",
+  "the record was observed",
+  "launched via subprocess",
+  "executed successfully",
+  "static: not inferred (grade carries no record_static)",
+  "static: no record write inferred from bytes (0/4 gates)",
+  "no live evidence available",
+  "static: record write inferred from bytes (3/4 gates)"
+]

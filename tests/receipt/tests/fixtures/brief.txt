@@ -1,0 +1,88 @@
+UNITED STATES DISTRICT COURT
+FOR THE NORTHERN DISTRICT OF CALIFORNIA
+
+JANE DOE,
+                    Plaintiff,
+v.                                              Case No. 3:26-cv-04471-XYZ
+ACME LOGISTICS, INC.,
+                    Defendant.
+
+DEFENDANT'S MOTION FOR SUMMARY JUDGMENT
+
+INTRODUCTION
+
+Defendant Acme Logistics, Inc. respectfully moves this Court for summary
+judgment on all claims asserted by Plaintiff Jane Doe. The undisputed
+record establishes that no reasonable jury could find in Plaintiff's
+favor on any element of her claims. As the Supreme Court has long
+recognized, a constitutional right does not evaporate simply because a
+plaintiff alleges it was violated in a novel factual setting. See Brown
+v. Board of Education, 347 U.S. 483 (1954) (equal protection analysis
+turns on the actual effect of the challenged conduct, not its label).
+The same principle controls here.
+
+STATEMENT OF FACTS
+
+Plaintiff was employed by Defendant from March 2022 until her voluntary
+resignation in August 2025. During that period, Plaintiff received
+three performance reviews, each of which rated her work as "meets
+expectations" or higher. Plaintiff's claim that she was constructively
+discharged rests entirely on a single email exchange that, read in
+context, reflects ordinary workplace friction rather than actionable
+conduct.
+
+ARGUMENT
+
+I. THE CONSTRUCTIVE DISCHARGE CLAIM FAILS AS A MATTER OF LAW
+
+A plaintiff alleging constructive discharge must show that working
+conditions were so intolerable that a reasonable person would have felt
+compelled to resign. This standard protects a fundamental privacy and
+autonomy interest against pretextual employer conduct, much as the
+personal-autonomy line of cases has long done in other contexts. See
+Roe v. Wade, 410 U.S. 113 (1973) (recognizing that a decision so central
+to personal autonomy warrants heightened scrutiny of the state's
+asserted interest). Plaintiff has not identified conditions approaching
+that threshold. Courts routinely reject constructive-discharge claims
+premised on a single unpleasant exchange. Smith v. Nowhere, 999 F.3d
+1234 (9th Cir. 2021), is instructive on this point, holding that
+isolated friction, without more, cannot sustain the claim.
+
+II. PLAINTIFF'S RETALIATION CLAIM IS UNSUPPORTED BY THE RECORD
+
+To establish retaliation, Plaintiff must show a causal link between a
+protected activity and an adverse action. No such link exists here.
+Plaintiff filed no internal complaint before her resignation, and the
+timeline she offers does not support an inference of causation. See
+Anderson v. Liberty Lobby, Inc., 477 U.S. 242 (1986) (a mere scintilla
+of evidence is insufficient to defeat summary judgment); Celotex Corp.
+v. Catrett, 477 U.S. 317 (1986) (the nonmoving party must come forward
+with evidence sufficient to establish every element on which it bears
+the burden of proof). Plaintiff has done neither.
+
+Defendant is aware of two additional citations that require this
+Court's caution rather than its confidence. First, 12 Fak. 34 does not
+correspond to any recognized reporter and should be disregarded to the
+extent it appears in any filing associated with this matter. Second,
+88 Zzq. 12 does not correspond to any recognized reporter or reported
+decision and should likewise be disregarded.
+
+III. THE DAMAGES CLAIM IS SPECULATIVE
+
+Plaintiff's damages theory assumes a promotion she never received and a
+salary trajectory unsupported by any comparator evidence. Speculative
+damages cannot support a jury verdict. See Story Parchment Co. v.
+Paterson Parchment Paper Co., 282 U.S. 555 (1931) (damages must be
+proven with reasonable certainty, not left to speculation); Bigelow v.
+RKO Radio Pictures, Inc., 327 U.S. 251 (1946) (a wrongdoer's own conduct
+that creates uncertainty as to damages does not excuse the plaintiff
+from proving them with the precision reasonably available).
+
+CONCLUSION
+
+For the foregoing reasons, Defendant respectfully requests that the
+Court grant summary judgment in its favor on all claims.
+
+Dated: September 11, 2026                    Respectfully submitted,
+
+                                              /s/ Counsel for Defendant
