@@ -123,6 +123,42 @@ page: the verdict word on its first line, the timeline, what the rows show, the
 digests, the pins, and how to check it yourself) and each side's rows for this
 deal (`buyer.deal.jsonl`, `seller.deal.jsonl`).
 
+## `deal pack`: the evidence for a person
+
+    arcaeon deal pack ID --buyer B --seller S [--pins FILE] [--buyer-ns NS] [--seller-ns NS] [-o DIR]
+
+`pack` runs the same comparison as `dispute`, with the same pin options, and
+writes the result to a folder someone who never ran arcaeon can open.
+
+- The folder is `-o DIR`, or `DEAL-<ID>` in the current directory when `-o` is
+  left off. It is created if it is not there; if it is, the four files below
+  are written over and anything else in it is left alone.
+- `verdict.json` is the whole report, the same JSON `dispute --json` prints.
+- `timeline.md` opens with the verdict word on its own line, then the
+  timeline (time, party, step, row, step digest, and "existed by" when a pin
+  covers the row), what the rows show, any findings or could-not-looks, the
+  pins checked, what this does not prove, and the one `dispute` command that
+  reproduces the first line.
+- `buyer.deal.jsonl` and `seller.deal.jsonl` hold only this deal's rows from
+  each ledger. Their chain values link into the full ledgers, so a reader
+  checks them against the full ledgers, not alone. A ledger that could not be
+  read leaves its file empty.
+
+It prints two lines: the verdict summary (the same first line `dispute`
+prints) and `pack written to DIR`. The exit code is the verdict's: 0 MATCHED,
+1 MISSING or ALTERED, 3 COULD NOT LOOK, and the pack is written in every one
+of those cases, because a could-not-look is worth handing over too. Bad
+arguments exit 2 and write nothing. `pack` takes no `--json`, `--claim` or
+`--remote`; those belong to `dispute`.
+
+## Mandates at the tool seam
+
+A deal mandate says what the person allowed; `arcaeon proxy --mandate` can
+hold every tool call an agent makes against the same kind of mandate, record
+the ones that fall outside it, and, only if you turn it on, refuse them. The
+mandate shape, the record-only default and what the gate does not prove are
+in [MANDATE_GATE.md](MANDATE_GATE.md) (docs/MANDATE_GATE.md).
+
 ## Pins: bounding when a row existed
 
 Without a pin, both tapes rewritten in agreement still match each other. Pin
