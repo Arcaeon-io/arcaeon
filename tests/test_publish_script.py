@@ -1,4 +1,4 @@
-"""tools/publish.py: the dry run passes steps 1 to 6 for real (git state faked,
+"""tools/publish.py: the dry run passes steps 1 to 7 for real (git state faked,
 so the test runs on any branch with any working tree), the upload step never
 runs for real, and --upload without --i-mean-it exits 2 before anything runs.
 
@@ -45,11 +45,12 @@ def test_dry_run_steps_1_to_6_pass_and_upload_is_only_planned(publish, tmp_path,
     rc = publish.main(_args(tmp_path))
     out = capsys.readouterr().out
     assert rc == 0, out
-    for n in range(1, 7):
-        assert f"✓ {n}/7 " in out, out
+    for n in range(1, 8):
+        assert f"✓ {n}/8 " in out, out
     assert "✗" not in out
     assert FAKE_TIP in out
     assert "VERIFIED then BROKEN" in out
+    assert "release check from an empty house: A PASS, B " in out
     assert seen["upload"] is False
     assert sorted(seen["main"]) == sorted([f"arcaeon-{seen['version']}-py3-none-any.whl",
                                            f"arcaeon-{seen['version']}.tar.gz"])
@@ -63,9 +64,9 @@ def test_step1_stops_on_a_dirty_tree_or_the_wrong_branch(publish, tmp_path, monk
     monkeypatch.setattr(publish, "git_state", lambda: ("feature", FAKE_TIP, ""))
     assert publish.main(_args(tmp_path)) == 1
     out = capsys.readouterr().out
-    assert "✗ 1/7 git: tree not clean" in out
-    assert "✗ 1/7 git: on 'feature', not 'main'" in out
-    assert "2/7" not in out
+    assert "✗ 1/8 git: tree not clean" in out
+    assert "✗ 1/8 git: on 'feature', not 'main'" in out
+    assert "2/8" not in out
 
 
 def _no_subprocess(monkeypatch, publish):

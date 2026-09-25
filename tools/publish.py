@@ -1,8 +1,8 @@
 """The release runbook, as a script.
 
-    py tools/publish.py                       # dry run (the default): steps 1-6, then print the upload plan
+    py tools/publish.py                       # dry run (the default): steps 1-7, then print the upload plan
     py tools/publish.py --test-pypi           # dry run against the TestPyPI plan
-    py tools/publish.py --upload --i-mean-it  # steps 1-6, then upload (PyPI)
+    py tools/publish.py --upload --i-mean-it  # steps 1-7, then upload (PyPI)
 
 Each step prints one line, a check mark or the failure, and the script stops
 at the first failure (exit 1). A refused upload exits 2 before anything runs.
@@ -15,8 +15,15 @@ Steps:
   4. sdist + wheel into a clean dist/, each shim wheel into dist/shims/, twine check
   5. the main wheel in a fresh venv: selftest, version --short, the README's first
      run, VERIFIED then BROKEN exactly as the README states
-  6. scan the artifacts for "velouria", "Users/USER", "/home/", ".env"
-  7. upload order: main package, wait until PyPI serves it, the 13 shim wheels,
+  6. tools/release_check.py on the main wheel, from an EMPTY house: a temp
+     HOME/USERPROFILE/APPDATA/XDG_CONFIG_HOME, a new venv, an env built from
+     nothing. A: `arcaeon seal` with no key refuses. B: the CLI's reported seal
+     is checked against an independent read-back of the witness pin. C: a
+     namespace outside the key's prefix is refused (403) and reported as such.
+     Step 5 runs from this machine's home; step 6 is the one that can tell
+     "works here" from "works for a stranger" (kindred labs' three checks).
+  7. scan the artifacts for "velouria", "Users/USER", "/home/", ".env"
+  8. upload order: main package, wait until PyPI serves it, the 13 shim wheels,
      then the next steps that are not this script's job
 
 Credentials: read by NAME only (PYPI_TOKEN, or TESTPYPI_TOKEN with --test-pypi)
@@ -83,7 +90,7 @@ def _tail(p, n=6) -> str:
 
 
 def _say(ok: bool, n: int, text: str) -> None:
-    print(f"{OK if ok else BAD} {n}/7 {text}", flush=True)
+    print(f"{OK if ok else BAD} {n}/{TOTAL} {text}", flush=True)
 
 
 def _venv_bin(venv: Path, name: str) -> Path:
@@ -317,6 +324,31 @@ def step_venv(ctx) -> str:
             f"({len(readme_steps)} commands) VERIFIED then BROKEN")
 
 
+RC_LINE = re.compile(r"^(PASS|FAIL|STUBBED)\s+([ABC]) (.*)$")
+
+
+def step_release_check(ctx) -> str:
+    """tools/release_check.py against the main wheel. Its own environment is
+    built from nothing (see its docstring); this only runs it and reads its
+    three lines. STUBBED passes the step and is named in the line."""
+    wheel = next(x for x in ctx.main_artifacts if x.suffix == ".whl")
+    p = _run([sys.executable, ROOT / "tools" / "release_check.py", "--wheel", wheel,
+              "--version", ctx.version, "--env-file", ctx.env_file], cwd=ROOT, env=_clean_env())
+    found = {}
+    for line in (p.stdout or "").splitlines():
+        m = RC_LINE.match(line)
+        if m:
+            found[m.group(2)] = (m.group(1), m.group(3))
+    if p.returncode or sorted(found) != ["A", "B", "C"] or any(w == "FAIL" for w, _ in found.values()):
+        bad = [f"{k} {w}: {t}" for k, (w, t) in sorted(found.items()) if w != "PASS"]
+        raise StepFailed("release check (exit %s): %s" % (p.returncode, "; ".join(bad) or _tail(p)))
+    stubbed = [k for k, (w, _) in sorted(found.items()) if w == "STUBBED"]
+    note = (f"; {' and '.join(stubbed)} STUBBED (local stub witness, no test key by name)"
+            if stubbed else "")
+    return ("release check from an empty house: " + ", ".join(
+        f"{k} {found[k][0]}" for k in "ABC") + note)
+
+
 def _members(path: Path):
     if path.suffix == ".whl":
         with zipfile.ZipFile(path) as z:
@@ -406,7 +438,7 @@ def step_upload(ctx) -> str:
         *next_steps(ctx),
     ]
     if not ctx.upload:
-        print(f"{OK} 7/7 plan (dry run, nothing uploaded; {ctx.token_name} "
+        print(f"{OK} {TOTAL}/{TOTAL} plan (dry run, nothing uploaded; {ctx.token_name} "
               f"{'present' if ctx.token else 'NOT present'} by name):", flush=True)
         for line in plan:
             print("    " + line, flush=True)
@@ -430,13 +462,14 @@ def step_upload(ctx) -> str:
     p = _run([*base, *ctx.shim_wheels], env=env)
     if p.returncode:
         raise StepFailed(f"upload: shims to {where} failed: {_tail(p)}")
-    _say(True, 7, f"upload: arcaeon {ctx.version} then {len(ctx.shim_wheels)} shim wheels to {where}")
+    _say(True, TOTAL, f"upload: arcaeon {ctx.version} then {len(ctx.shim_wheels)} shim wheels to {where}")
     for line in next_steps(ctx):
         print("    " + line, flush=True)
     return ""
 
 
-STEPS = [step_git, step_versions, step_tests, step_build, step_venv, step_scan]
+STEPS = [step_git, step_versions, step_tests, step_build, step_venv, step_release_check, step_scan]
+TOTAL = len(STEPS) + 1  # the steps, then the upload (or its plan)
 
 
 # --- main -------------------------------------------------------------------------
@@ -448,7 +481,8 @@ class Ctx:
         self.upload = a.upload
         self.test_pypi = a.test_pypi
         self.token_name = "TESTPYPI_TOKEN" if a.test_pypi else "PYPI_TOKEN"
-        self.token = credential(self.token_name, Path(a.env_file))
+        self.env_file = Path(a.env_file)
+        self.token = credential(self.token_name, self.env_file)
         self.tip = self.version = ""
         self.main_artifacts, self.shim_wheels = [], []
 
@@ -494,7 +528,7 @@ def main(argv=None) -> int:
     try:
         step_upload(ctx)
     except StepFailed as e:
-        _say(False, 7, str(e))
+        _say(False, TOTAL, str(e))
         return 1
     return 0
 

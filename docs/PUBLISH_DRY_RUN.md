@@ -56,10 +56,15 @@ first failure (exit 1):
 5. Installs the wheel into a fresh venv and runs `arcaeon selftest`,
    `arcaeon version --short` and the README's first-run commands, checking
    VERIFIED then BROKEN exactly as the README shows.
-6. Scans every artifact for private names, home-directory paths and `.env`
+6. Runs `tools/release_check.py` on the main wheel, from an empty house (see
+   "The release check" below). Step 5's venv is new, but it runs from this
+   machine's home directory; that is how `arcaeon seal` passed for a year while
+   it only worked on one laptop. Step 6 is the one that cannot see the
+   maintainer's setup.
+7. Scans every artifact for private names, home-directory paths and `.env`
    (as a word, so `os.environ` does not count). One reviewed mention is
    allowlisted: vet's own comment describing the `.env`-shaped line it hunts.
-7. The upload order. A dry run prints it; `--upload` does it: the main package
+8. The upload order. A dry run prints it; `--upload` does it: the main package
    first, then it polls `pip download arcaeon==<version> --no-deps` for up to 5
    minutes until the index serves it, then the 13 shim wheels. Then it prints
    what is not its job: the MCP registry entry (`packageArguments: ["mcp"]`),
@@ -73,6 +78,59 @@ and the token is present by name: `PYPI_TOKEN`, or `TESTPYPI_TOKEN` with
 the twine subprocess's env as `TWINE_USERNAME=__token__` / `TWINE_PASSWORD`
 and never prints it. `--branch` lets a dry run rehearse on another branch;
 `--upload` only runs on `main`.
+
+## The release check
+
+`tools/release_check.py` is the three checks kindred labs proposed (Colony
+comment 43770a24 on the 0.9.1 release post), which we accepted publicly. It
+runs on its own too:
+
+```bash
+py tools/release_check.py                 # the wheel in dist/ for pyproject's version
+py tools/release_check.py --from-pypi     # arcaeon==<version> as PyPI serves it
+```
+
+It makes a temp directory with an empty `home`, points `HOME`, `USERPROFILE`,
+`APPDATA`, `LOCALAPPDATA`, `XDG_CONFIG_HOME` (and the other `XDG_*` dirs) at
+it, makes a new venv beside it, installs the wheel, and runs every command with
+an environment built from nothing: no inherited `ARCAEON_KEY`, `PYTHONPATH`,
+pip config or witness URL. It prints the names it did set. Then:
+
+- **A, empty house.** `arcaeon seal` with no key must exit non-zero with the
+  sentence `no ARCAEON_KEY is set, so nothing was sent`, report
+  `sealed: false`, write no ledger row, and send nothing: the CLI is pointed at
+  a local stub witness as a tripwire, and zero requests may reach it. The home
+  must hold zero files before and after.
+- **B, outcome vs read-back.** With a key, `arcaeon seal` on a one-file
+  fixture. The CLI's report is one line (exit, `sealed`, namespace, claimed
+  head). The read-back is a second line, gathered without the CLI: a direct
+  `GET /api/latest?ns=` on the witness, the sealed-scan ledger's head
+  recomputed from the file with the script's own copy of the chain rule, and
+  the ledger row's `artifact_digest` against the fixture's sha256. It passes
+  only if all of them agree. A CLI that prints a seal the witness never
+  recorded fails here (the tests plant exactly that).
+- **C, namespace fence.** `arcaeon seal --ns zz-release-check-outside-fence`
+  must get a 403 from the witness, and the CLI must say
+  `may not pin namespace` and report `sealed: false`. The witness must not
+  hold the head under that name afterwards. C runs before B, because the 403
+  names the key's prefix, and B then seals under
+  `<prefix>-release-check-<utc stamp>` (a fresh namespace each run).
+
+The key is read by name only: `ARCAEON_TEST_KEY` (or `--key-name`), from the
+environment or `.env` (`--env-file`), through publish.py's `credential()`, and
+it goes into the B and C subprocesses' env only. It should be a throwaway
+witness key with a narrow prefix. `ARCAEON_KEY` is not the default on purpose:
+the operator's own key is the wide-prefix key that made the old check pass,
+and a key allowed to pin everywhere cannot demonstrate C. **With no test key,
+B and C run against a stub witness the script starts on 127.0.0.1** (the same
+`/api/pin` and `/api/latest` contract and the same 403 sentence), and the
+lines say `STUBBED`. That proves the installed CLI's side of the protocol from
+an empty house; it does not prove the hosted witness. As of 2026-09-25 no
+`ARCAEON_TEST_KEY` exists, so the release check runs STUBBED.
+
+Output is one line per check, `PASS`, `FAIL` or `STUBBED` plus its evidence.
+Exit 1 on any FAIL (publish.py stops at step 6), 2 if the house could not be
+built, else 0. `--keep` leaves the temp house on disk for inspection.
 
 The checklist below is the same runbook by hand.
 
