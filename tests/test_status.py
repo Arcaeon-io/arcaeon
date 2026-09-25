@@ -106,3 +106,14 @@ def test_bad_flag_is_usage(home, capsys):
     assert status.main(["--frob"]) == 2
     assert status.main(["--help"]) == 0
     assert "usage: arcaeon status" in capsys.readouterr().out
+
+
+def test_journal_path_under_home_is_shown_with_a_tilde(monkeypatch, tmp_path, capsys):
+    from pathlib import Path
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.delenv("ARCAEON_HOME", raising=False)
+    monkeypatch.delenv("ARCAEON_KEY", raising=False)
+    assert status.main([]) == 0
+    first = capsys.readouterr().out.splitlines()[0]
+    assert first == "arcaeon status  (journal: ~/.arcaeon/activity.jsonl)"
+    assert str(tmp_path) not in first

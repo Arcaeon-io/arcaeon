@@ -165,7 +165,8 @@ usage: arcaeon proxy [-h] --ledger LEDGER [--server SERVER]
                      [--tape-namespace TAPE_NAMESPACE] [--pin-witness URL]
                      [--tape-pair TAPE_PAIR] [--http-forward URL]
                      [--listen HOST:PORT] [--upstream-timeout SECONDS]
-                     [--version]
+                     [--mandate PATH] [--mandate-enforce] [--policy FILE]
+                     [--access-names] [--version]
                      ...
 ```
 
@@ -706,7 +707,7 @@ usage: arcaeon status [--json]
 
 ```console
 $ arcaeon status
-arcaeon status  (journal: /home/you/.arcaeon/activity.jsonl)
+arcaeon status  (journal: ~/.arcaeon/activity.jsonl)
 last run per verb:
   verify     COULD NOT LOOK     2026-09-25T10:02:00Z
   log        OK                 2026-09-25T10:01:00Z

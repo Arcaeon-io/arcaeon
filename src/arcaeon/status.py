@@ -83,8 +83,17 @@ def status(argv: list[str] | None = None) -> dict:
     return s
 
 
+def _short(path: str) -> str:
+    """The journal path with the home directory shown as ~ (output gets pasted)."""
+    from pathlib import Path
+    try:
+        return "~/" + Path(path).relative_to(Path.home()).as_posix()
+    except (ValueError, RuntimeError, OSError):
+        return path
+
+
 def render(s: dict) -> str:
-    lines = [f"arcaeon status  (journal: {s['journal']['path']}"
+    lines = [f"arcaeon status  (journal: {_short(s['journal']['path'])}"
              + ("" if s["journal"]["enabled"] else ", OFF: ARCAEON_JOURNAL=0") + ")"]
     if not s["last_run"]:
         lines.append("no activity recorded yet")
