@@ -295,3 +295,24 @@ def test_every_reason_word_has_a_line_in_words_md(reason):
 
 def test_readme_links_words_md():
     assert "](docs/WORDS.md)" in README
+
+
+# --- README: honest limits -----------------------------------------------------------
+
+_NEGATIONS = ("not ", "never ", "no ", "nor ", "isn't ", "is not ")
+
+
+@pytest.mark.parametrize("phrase", ["tamper-proof", "independent witnesses",
+                                    "independent witness", "outside our control"])
+def test_readme_overclaims_appear_only_in_a_negation(phrase):
+    low = README.lower()
+    for m in re.finditer(re.escape(phrase), low):
+        before = low[max(0, m.start() - 40):m.start()]
+        assert any(n in before for n in _NEGATIONS), (phrase, README[m.start() - 40:m.end()])
+
+
+def test_readme_honest_limits_block():
+    limits = " ".join(_section(README, "Limits").split())
+    for must in ("Tamper-evident, not tamper-proof", "One witness, and we operate it",
+                 "a clock, not a party", "custody record"):
+        assert must in limits, must

@@ -190,6 +190,24 @@ code that moved.
 
 ## Limits
 
+The short version, before the detail:
+
+- **Tamper-evident, not tamper-proof.** Anyone who can write the file can
+  still change it. What they cannot do is change it without the check
+  noticing and naming the line.
+- **One witness, and we operate it.** The hosted witness at
+  witness.arcaeon.io is run by us, the people who make this package. A pin
+  there shows your head as it stood when we recorded it; it is not a second,
+  unrelated party vouching for you.
+- **The daily anchor is a clock, not a party.** The witness anchors its pin
+  store to a public timestamp once a day. That fixes when the pins existed.
+  It says nothing about whether they were right, and nobody behind it checked
+  them.
+- **Who ran the witness at the time of a pin is unknown to an outside
+  reader.** Today you take our word for who operated it when a given pin was
+  made. That stays true until we publish a custody record, and we have not
+  yet.
+
 What a hash chain proves: the rows were not changed in place after they were
 written. An edit, a deletion or a reorder in the middle breaks every later
 link, and `verify` names the first broken line.
