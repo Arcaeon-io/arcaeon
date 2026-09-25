@@ -55,6 +55,11 @@ src/arcaeon/remote/, cli._seal, cli._credits, or cli._pin's remote branch
 that changed: the script prints "BLOCKED paid path changed and not exercised:
 set ARCAEON_TEST_KEY (...)" and exits 1. If git cannot say what changed, that
 blocks too. No key is minted here; the fix is a real throwaway test key.
+
+First line out: the site's products.yaml `version` (for id arcaeon) against
+pyproject.toml. A mismatch is a WARN, a missing site checkout (looked for at
+ARCAEON_SITE_ROOT, then ../<any>/projects/arcaeon_site) a COULD NOT LOOK;
+neither changes the exit code.
 """
 from __future__ import annotations
 
@@ -669,6 +674,59 @@ def paid_path_gate(checks: list[Check], cwd: Path = ROOT) -> str | None:
     return f"BLOCKED {PAID_BLOCK} (since {how}: {shown})"
 
 
+# --- the site's version (a WARN, never a FAIL) -----------------------------------
+
+def site_root() -> Path | None:
+    """ARCAEON_SITE_ROOT, else a sibling checkout at ../<any>/projects/arcaeon_site."""
+    env = os.environ.get("ARCAEON_SITE_ROOT")
+    if env:
+        return Path(env)
+    found = sorted(ROOT.parent.glob("*/projects/arcaeon_site"))
+    return found[0] if found else None
+
+
+def products_yaml_version(text: str) -> str | None:
+    """`version:` of the `- id: arcaeon` entry under `products:`, read line by
+    line (this script stays stdlib-only; products.yaml is plain block YAML)."""
+    in_products = in_entry = False
+    for line in text.splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if not line.startswith((" ", "-")):
+            in_products, in_entry = line.startswith("products:"), False
+            continue
+        if not in_products:
+            continue
+        if line.startswith("- "):
+            in_entry = line[2:].strip() in ("id: arcaeon", "id: 'arcaeon'", 'id: "arcaeon"')
+            continue
+        m = re.match(r"^  version:\s*(.*?)\s*$", line)
+        if in_entry and m:
+            v = m.group(1).strip("'\"")
+            return v or None
+    return None
+
+
+def site_version_line(pyproject_version: str, root: Path | None = None) -> str:
+    """One line: OK, WARN (the site says another version) or COULD NOT LOOK."""
+    root = root if root is not None else site_root()
+    if root is None:
+        return ("COULD NOT LOOK site version: no site checkout (set ARCAEON_SITE_ROOT); "
+                "not a fail")
+    p = root / "products.yaml"
+    try:
+        text = p.read_text(encoding="utf-8")
+    except OSError as e:
+        return f"COULD NOT LOOK site version: no products.yaml at the site root ({e.strerror or e}); not a fail"
+    v = products_yaml_version(text)
+    if v is None:
+        return "COULD NOT LOOK site version: products.yaml has no `version` for id arcaeon; not a fail"
+    if v != pyproject_version:
+        return (f"WARN    site version: products.yaml says {v}, pyproject.toml says "
+                f"{pyproject_version}; sync the site before the release (not a fail)")
+    return f"OK      site version: products.yaml and pyproject.toml both say {v}"
+
+
 # --- main ------------------------------------------------------------------------
 
 def _pyproject_version() -> str:
@@ -697,6 +755,7 @@ def main(argv=None) -> int:
         pass
     a = parse(argv)
     version = a.version or _pyproject_version()
+    print(site_version_line(_pyproject_version()), flush=True)
     key = None if a.stub else _load_publish().credential(a.key_name, Path(a.env_file))
     stub = StubWitness().start()
     stubbed = not key

@@ -362,3 +362,60 @@ def test_publish_names_the_blocked_line(tmp_path):
     with pytest.raises(publish.StepFailed) as e:
         publish.step_release_check(Ctx)
     assert "set ARCAEON_TEST_KEY" in str(e.value)
+
+
+# --- B048: the site's products.yaml version is a WARN, never a FAIL ---------------
+
+PRODUCTS = """schema: arcaeon-products/v1
+site:
+  name: Arcaeon
+  version: 9.9.9
+products:
+- id: verified-snapshot
+  version: 0.1.9
+- id: arcaeon
+  name: arcaeon
+  version: {v}
+  status: shipped
+- id: cite
+  version: null
+"""
+
+
+def _site(tmp_path, v):
+    root = tmp_path / "site"
+    root.mkdir()
+    (root / "products.yaml").write_text(PRODUCTS.format(v=v), encoding="utf-8")
+    return root
+
+
+def test_site_version_reads_the_arcaeon_entry_only():
+    assert rc.products_yaml_version(PRODUCTS.format(v="0.9.1")) == "0.9.1"
+    assert rc.products_yaml_version(PRODUCTS.format(v="'0.9.2'")) == "0.9.2"
+    assert rc.products_yaml_version("products:\n- id: other\n  version: 1.0\n") is None
+
+
+def test_site_version_match_is_ok(tmp_path):
+    line = rc.site_version_line("0.9.1", _site(tmp_path, "0.9.1"))
+    assert line.startswith("OK ") and "both say 0.9.1" in line
+
+
+def test_site_version_mismatch_warns_not_fails(tmp_path):
+    line = rc.site_version_line("0.9.2", _site(tmp_path, "0.9.1"))
+    assert line.startswith("WARN ") and "products.yaml says 0.9.1" in line
+    assert "pyproject.toml says 0.9.2" in line and "FAIL" not in line
+
+
+def test_site_version_absent_is_could_not_look(tmp_path, monkeypatch):
+    assert rc.site_version_line("0.9.1", tmp_path / "nowhere").startswith("COULD NOT LOOK site version")
+    monkeypatch.setenv("ARCAEON_SITE_ROOT", str(tmp_path / "nowhere"))
+    assert rc.site_version_line("0.9.1").startswith("COULD NOT LOOK site version")
+    monkeypatch.setattr(rc, "site_root", lambda: None)
+    line = rc.site_version_line("0.9.1")
+    assert line.startswith("COULD NOT LOOK site version: no site checkout") and "not a fail" in line
+
+
+def test_site_version_line_does_not_trip_publish_step_parsing(tmp_path):
+    publish = _load("publish_for_site_version", ROOT / "tools" / "publish.py")
+    line = rc.site_version_line("0.9.2", _site(tmp_path, "0.9.1"))
+    assert publish.RC_LINE.match(line) is None
