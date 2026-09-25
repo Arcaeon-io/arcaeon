@@ -37,6 +37,10 @@ from pathlib import Path
 
 from arcaeon.save.meter import Meter, key_hash
 from arcaeon.save.meter.keys import add_key, revoke_key, new_secret
+import pytest  # for the slow mark below
+
+# over 30s in the full run (B046): `pytest -m "not slow"` skips this file
+pytestmark = pytest.mark.slow
 
 
 def _no_fsync(fn):

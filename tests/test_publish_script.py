@@ -33,6 +33,7 @@ def _args(tmp_path, *extra):
     return ["--dist", str(tmp_path / "dist"), "--env-file", str(tmp_path / "no.env"), *extra]
 
 
+@pytest.mark.slow   # ~80s: real builds and a real release check (B046)
 def test_dry_run_steps_1_to_6_pass_and_upload_is_only_planned(publish, tmp_path, monkeypatch, capsys):
     seen = {}
 

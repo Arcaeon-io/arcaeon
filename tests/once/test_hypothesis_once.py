@@ -66,6 +66,9 @@ from arcaeon.record.once import (
     complete, guard, rebuild_index, receipt,
 )
 
+# over 30s in the full run (B046): `pytest -m "not slow"` skips this file
+pytestmark = pytest.mark.slow
+
 # ---------------------------------------------------------------------------
 # strategies
 # ---------------------------------------------------------------------------

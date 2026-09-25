@@ -31,6 +31,10 @@ from hypothesis import strategies as st
 
 from arcaeon.save.meter import Allowance, Denied, Meter, key_hash, key_id_of
 from arcaeon.save.meter.keys import add_key, list_keys, load
+import pytest  # for the slow mark below
+
+# over 30s in the full run (B046): `pytest -m "not slow"` skips this file
+pytestmark = pytest.mark.slow
 
 # Checked-in default is CI-reasonable (60-100/property per the sibling repos'
 # convention). Bumped to 300-500 during development to hunt for shrinkable

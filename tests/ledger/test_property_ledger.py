@@ -37,6 +37,10 @@ import tempfile
 from pathlib import Path
 
 from arcaeon.record.ledger import Ledger, verify_file, chain_at, VerifyResult
+import pytest  # for the slow mark below
+
+# over 30s in the full run (B046): `pytest -m "not slow"` skips this file
+pytestmark = pytest.mark.slow
 
 
 def _no_fsync(fn):

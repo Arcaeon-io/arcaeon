@@ -47,6 +47,9 @@ from mcp import Client  # noqa: E402
 
 from arcaeon.prove.vet.server import SCAN_ROOT_ENV, build_server  # noqa: E402
 
+# over 30s in the full run (B046): `pytest -m "not slow"` skips this file
+pytestmark = pytest.mark.slow
+
 # --- vendored from arcaeon_ledger.adversarial (arcaeon-ledger >= 0.7.5) --------
 # Source of truth: arcaeon_ledger/adversarial.py in the arcaeon-ledger package
 # (`HOSTILE_STDIO_LINES`). Kept byte-identical; the drift test below enforces
