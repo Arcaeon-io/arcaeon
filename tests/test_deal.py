@@ -380,6 +380,62 @@ def test_12_import_deal_pulls_only_the_stdlib():
     assert json.loads(p.stdout.strip().splitlines()[-1]) == []
 
 
+# 14: could-not-look fields (0.9.x, additive) ----------------------------------------
+
+def test_14a_check_mandate_none_carries_the_fields():
+    from arcaeon.record.deal import check_mandate
+    mandate = {"merchant": "acme", "cap": "60.00", "currency": "USD"}
+    terms = {"seller": "acme", "currency": "USD", "total": "lots"}
+    inside, why = check_mandate(mandate, terms, "2026-09-24T15:00:00Z")
+    assert inside is None and why == "total or cap is not a readable amount"
+    assert (why.looked_for, why.where, why.reason_word) == ("total", "terms", "unreadable")
+    assert set(why.detail) == {"looked_for", "where", "reason_word", "reason"}
+    inside, why = check_mandate(mandate, dict(terms, total="19.00"), "yesterday-ish")
+    assert inside is None and why.looked_for == "commit time" and why.reason_word in V.REASON_WORDS
+    inside, why = check_mandate(dict(mandate, not_after="soon"), dict(terms, total="19.00"),
+                                "2026-09-24T15:00:00Z")
+    assert inside is None and why.looked_for == "not_after"
+    # a verdict that looked and answered is a plain string, as before
+    inside, why = check_mandate(mandate, dict(terms, total="19.00"), "2026-09-24T15:00:00Z")
+    assert inside is True and not hasattr(why, "reason_word")
+
+
+def _cnl_fields(r):
+    d = r.to_dict()
+    assert d["verdict"] == V.COULD_NOT_LOOK, d
+    assert d["reason_word"] in V.REASON_WORDS and d["looked_for"] and d["where"]
+    assert len(d["could_not_look_detail"]) == len(d["could_not_look"])
+    for det, why in zip(d["could_not_look_detail"], d["could_not_look"]):
+        assert set(det) == {"looked_for", "where", "reason_word", "reason"}
+        assert det["reason"] == why and det["reason_word"] in V.REASON_WORDS
+    json.dumps(d)
+    return d
+
+
+def test_14b_every_dispute_could_not_look_carries_the_fields(tmp_path):
+    b, s, _ = _honest(tmp_path)
+    d = _cnl_fields(dispute("d-t1", b, tmp_path / "gone.jsonl"))
+    assert d["reason_word"] == "missing" and d["looked_for"] == "seller tape"
+    # a deal id that is on neither tape: the name is carried verbatim
+    d = _cnl_fields(dispute("d-made-up", b, s))
+    assert d["reason_word"] == "name_not_found" and d["looked_for"] == "deal d-made-up"
+    assert d["reason"] == "neither tape holds a row for deal d-made-up"
+    # an unreadable pin
+    pin = tmp_path / "pin.json"
+    pin.write_text("{not json", encoding="utf-8")
+    r = dispute("d-t1", b, s, pin_path=pin)
+    d = _cnl_fields(r)
+    assert d["reason_word"] == "unreadable" and d["looked_for"] == "a witness pin"
+
+
+def test_14c_a_matched_dispute_carries_the_keys_as_none(tmp_path):
+    b, s, _ = _honest(tmp_path)
+    d = dispute("d-t1", b, s).to_dict()
+    assert d["verdict"] == V.MATCHED
+    assert d["looked_for"] is d["where"] is d["reason_word"] is None
+    assert d["could_not_look_detail"] == []
+
+
 # docs/DEAL.md ----------------------------------------------------------------------
 
 def _doc_steps():

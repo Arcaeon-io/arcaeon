@@ -77,7 +77,7 @@ from arcaeon.record.row import loads as _loads
 # and a fix there lands here too.
 from arcaeon.prove.reconcile import LIMITS as _RECONCILE_LIMITS
 from arcaeon.prove.reconcile import Finding, load_pins
-from arcaeon.prove.reconcile import _cannot_read, _check_pin, _Tape
+from arcaeon.prove.reconcile import _cannot_read, _check_pin, _Cnl, _detail, _Tape
 
 __all__ = ["STEPS", "PARTIES", "CLAIMS", "Deal", "DealReport", "Finding", "dispute",
            "pack", "check_mandate", "deal_rows", "LIMITS"]
@@ -129,11 +129,25 @@ def _amount(s: Any) -> Decimal | None:
     return d if d.is_finite() else None
 
 
+class _Why(str):
+    """A could-not-check reason: the same plain string check_mandate has always
+    returned, carrying `looked_for`, `where` and `reason_word` beside it
+    (additive, 0.9.x). `detail` is the four-key dict."""
+
+    def __new__(cls, reason: str, looked_for: str, where: str, reason_word: str):
+        obj = super().__new__(cls, reason)
+        obj.detail = _v.could_not_look(looked_for, where, reason_word, reason)
+        obj.looked_for, obj.where, obj.reason_word = looked_for, where, reason_word
+        return obj
+
+
 def check_mandate(mandate: dict, terms: dict, at: str) -> tuple[bool | None, str]:
     """Is a commit with these `terms`, made at `at`, inside `mandate`?
 
     (True, reason) inside; (False, reason) outside, naming the first rule it
-    breaks; (None, reason) when a field cannot be read to check."""
+    breaks; (None, reason) when a field cannot be read to check. On None the
+    reason is still a plain string and also carries `.looked_for`, `.where`
+    and `.reason_word` (one of arcaeon.verdict.REASON_WORDS)."""
     if terms.get("seller") != mandate.get("merchant"):
         return False, (f"seller {terms.get('seller')!r} is not the mandate's merchant "
                        f"{mandate.get('merchant')!r}")
@@ -142,15 +156,20 @@ def check_mandate(mandate: dict, terms: dict, at: str) -> tuple[bool | None, str
                        f"{mandate.get('currency')!r}")
     total, cap = _amount(terms.get("total")), _amount(mandate.get("cap"))
     if total is None or cap is None:
-        return None, "total or cap is not a readable amount"
+        return None, _Why("total or cap is not a readable amount",
+                          "cap" if total is not None else "total",
+                          "mandate" if total is not None else "terms", "unreadable")
     if total > cap:
         return False, f"total {terms.get('total')} is over the mandate's cap {mandate.get('cap')}"
     when = _parse_time(at)
     nb, na = _parse_time(mandate.get("not_before")), _parse_time(mandate.get("not_after"))
     if when is None:
-        return None, f"commit time {at!r} is not a readable time"
+        return None, _Why(f"commit time {at!r} is not a readable time", "commit time",
+                          "commit", "unreadable")
     if mandate.get("not_before") and nb is None or mandate.get("not_after") and na is None:
-        return None, "the mandate's window is not a readable time"
+        return None, _Why("the mandate's window is not a readable time",
+                          "not_before" if mandate.get("not_before") and nb is None
+                          else "not_after", "mandate", "unreadable")
     if nb and when < nb:
         return False, f"commit at {at} is before the mandate's not_before {mandate['not_before']}"
     if na and when > na:
@@ -259,7 +278,9 @@ class Deal:
             else:
                 body = self._mandate_body(cited, mandate)
                 if body is None:
-                    inside, why = None, "the mandate is sealed and its body was not disclosed"
+                    inside, why = None, _Why("the mandate is sealed and its body was not "
+                                             "disclosed", "the mandate body",
+                                             "the sealed mandate sidecar", "missing")
                 else:
                     inside, why = check_mandate(body, terms, ts)
             private.update(inside_mandate=inside, mandate_reason=why)
@@ -327,6 +348,13 @@ class DealReport:
     limits: list = field(default_factory=lambda: list(LIMITS))
     timeline: list = field(default_factory=list)
     position: list = field(default_factory=list)
+    # Additive (0.9.x), as on reconcile's Reconciliation: on COULD NOT LOOK,
+    # what was looked for, where, and why as one of arcaeon.verdict.REASON_WORDS;
+    # `could_not_look_detail` carries those keys for every `could_not_look` entry.
+    looked_for: str | None = None
+    where: str | None = None
+    reason_word: str | None = None
+    could_not_look_detail: list = field(default_factory=list)
 
     @property
     def exit_code(self) -> int:
@@ -353,7 +381,10 @@ class DealReport:
                 "could_not_look": list(self.could_not_look),
                 "pins_checked": list(self.pins_checked), "limits": list(self.limits),
                 "timeline": list(self.timeline), "position": list(self.position),
-                "exit_code": self.exit_code}
+                "exit_code": self.exit_code,
+                "looked_for": self.looked_for, "where": self.where,
+                "reason_word": self.reason_word,
+                "could_not_look_detail": [dict(d) for d in self.could_not_look_detail]}
 
 
 def _load_side(party: str, path: str | Path, deal_id: str, cnl: list,
@@ -362,38 +393,37 @@ def _load_side(party: str, path: str | Path, deal_id: str, cnl: list,
     and this deal's rows as (row number, row). Trouble goes into `cnl`."""
     label = f"{party} tape"
     t = _Tape(label=label, path=Path(path), side=party)
+
+    def refuse(reason, looked_for, word, where=None):
+        t.refuse(reason, looked_for, word, where)
+        cnl.append(_Cnl(reason, looked_for, where or str(t.path), word))
+        return t, []
+
     try:
         t.path.stat()
     except FileNotFoundError:
-        t.cnl = f"{label} not found: {t.path}"
+        return refuse(f"{label} not found: {t.path}", label, "missing")
     except OSError as e:
-        t.cnl = f"{label} unreadable: {e}"
-    if t.cnl is None and t.path.is_dir():
-        t.cnl = f"{label} is a directory, not a ledger: {t.path}"
-    if t.cnl:
-        cnl.append(t.cnl)
-        return t, []
+        return refuse(f"{label} unreadable: {e}", label, "unreadable")
+    if t.path.is_dir():
+        return refuse(f"{label} is a directory, not a ledger: {t.path}", label, "unreadable")
     try:
         lines = t.path.read_text(encoding="utf-8", errors="replace").split("\n")
     except OSError as e:
-        t.cnl = f"{label} unreadable: {e}"
-        cnl.append(t.cnl)
-        return t, []
-    t.cnl = _cannot_read(label, lines)
-    if t.cnl:
-        cnl.append(t.cnl)
-        return t, []
+        return refuse(f"{label} unreadable: {e}", label, "unreadable")
+    why = _cannot_read(label, lines)
+    if why:
+        m = re.search(r"line (\d+)", why)
+        return refuse(why, f"{label} line {m.group(1)}" if m else label, "unreadable")
     res = verify_file(t.path)
     if res.ok is False:
         t.broken = True
-        t.cnl = (f"{label} does not verify ({res.first_break or 'chain broken'}); "
-                 f"a tape edited after it was written cannot be read as a deal record")
-        cnl.append(t.cnl)
-        return t, []
+        return refuse(f"{label} does not verify ({res.first_break or 'chain broken'}); "
+                      f"a tape edited after it was written cannot be read as a deal record",
+                      "an intact chain", "unreadable")
     if res.ok is None and res.verified_scope not in ("empty", "bounded_prechain_skipped"):
-        t.cnl = f"{label} verifies only within scope ({res.verified_scope}): {res.declared}"
-        cnl.append(t.cnl)
-        return t, []
+        return refuse(f"{label} verifies only within scope ({res.verified_scope}): {res.declared}",
+                      "an intact chain", "bounded")
     mine = []
     for raw in lines:                       # counted exactly as chain_at / verify_file count
         raw = raw.strip()
@@ -410,15 +440,16 @@ def _load_side(party: str, path: str | Path, deal_id: str, cnl: list,
             continue
         n = len(t.rows)
         step = row["kind"][5:]
+        at = f"{t.path} row {n}"
         if step not in STEPS:
-            t.cnl = f"{label} row {n} is a deal row of unknown step {step!r}"
-        elif row.get("party") != party:
-            t.cnl = f"{label} row {n} is written as party {row.get('party')!r}, not {party}"
-        elif "chain" not in row:
-            t.cnl = f"{label} row {n} is a deal row with no chain (outside the verified chain)"
-        if t.cnl:
-            cnl.append(t.cnl)
-            return t, []
+            return refuse(f"{label} row {n} is a deal row of unknown step {step!r}",
+                          f"a deal step named {step!r}", "name_not_found", at)
+        if row.get("party") != party:
+            return refuse(f"{label} row {n} is written as party {row.get('party')!r}, not {party}",
+                          f"a {party} row", "unreadable", at)
+        if "chain" not in row:
+            return refuse(f"{label} row {n} is a deal row with no chain (outside the verified chain)",
+                          "chain", "name_not_found", at)
         mine.append((n, row))
     return t, mine
 
@@ -632,8 +663,11 @@ def dispute(deal_id: str, buyer: str | Path, seller: str | Path, *,
                         buyer_ns=buyer_ns, seller_ns=seller_ns)
     except Exception as e:  # the fence: an answer, not a crash
         why = f"deal dispute could not finish: {type(e).__name__} [internal_error]"
+        d = _v.could_not_look("a verdict", f"{buyer}, {seller}", "unreadable", why)
         return DealReport(verdict=_v.COULD_NOT_LOOK, deal=str(deal_id), reason=why,
-                          could_not_look=[why])
+                          could_not_look=[why], looked_for=d["looked_for"],
+                          where=d["where"], reason_word=d["reason_word"],
+                          could_not_look_detail=[d])
 
 
 def _dispute(deal_id, buyer, seller, *, pins, pin_path, buyer_ns, seller_ns) -> DealReport:
@@ -670,19 +704,25 @@ def _dispute(deal_id, buyer, seller, *, pins, pin_path, buyer_ns, seller_ns) -> 
                                         f"mandate_digest mismatch: the seller's commit (row {n}) "
                                         f"cites {md}, and no mandate row on the buyer tape "
                                         f"holds it", index_side="seller"))
+        both = f"{tapes['buyer'].path}, {tapes['seller'].path}"
         if not mine["buyer"] and not mine["seller"]:
-            cnl.append(f"neither tape holds a row for deal {deal_id}")
+            cnl.append(_Cnl(f"neither tape holds a row for deal {deal_id}",
+                            f"deal {deal_id}", both, "name_not_found"))
         elif not compared:
-            cnl.append(f"no step both sides record is on either tape for deal {deal_id}; "
-                       f"there was nothing to compare")
+            cnl.append(_Cnl(f"no step both sides record is on either tape for deal {deal_id}; "
+                            f"there was nothing to compare",
+                            f"a step both sides record for deal {deal_id}", both, "missing"))
 
     if pin_path is not None:
         try:
             pins = list(pins or []) + _load_pin_file(pin_path)
+        except FileNotFoundError as e:
+            cnl.append(_Cnl(f"pin unreadable: {e}", "a witness pin", str(pin_path), "missing"))
         except (OSError, ValueError) as e:
-            cnl.append(f"pin unreadable: {e}")
+            cnl.append(_Cnl(f"pin unreadable: {e}", "a witness pin", str(pin_path), "unreadable"))
         except RecursionError:
-            cnl.append("pin unreadable: nested deeper than the JSON reader goes [nesting_too_deep]")
+            cnl.append(_Cnl("pin unreadable: nested deeper than the JSON reader goes "
+                            "[nesting_too_deep]", "a witness pin", str(pin_path), "unreadable"))
     _check_pins(pins or [], tapes, {"buyer": buyer_ns, "seller": seller_ns},
                 findings, cnl, checked)
 
@@ -706,13 +746,16 @@ def _dispute(deal_id, buyer, seller, *, pins, pin_path, buyer_ns, seller_ns) -> 
     findings.sort(key=_key)
     r = DealReport(verdict=_v.MATCHED, deal=str(deal_id), matched=matched,
                    counts={p: len(mine[p]) for p in PARTIES}, findings=findings,
-                   could_not_look=cnl, pins_checked=checked, timeline=timeline,
-                   position=_position(by, timeline, checked))
+                   could_not_look=[str(c) for c in cnl], pins_checked=checked,
+                   timeline=timeline, position=_position(by, timeline, checked),
+                   could_not_look_detail=[_detail(c) for c in cnl])
     if findings:
         h = findings[0]
         r.verdict, r.at, r.side, r.reason = h.verdict, h.at, h.side, h.reason
     elif cnl:
-        r.verdict, r.reason = _v.COULD_NOT_LOOK, cnl[0]
+        r.verdict, r.reason = _v.COULD_NOT_LOOK, str(cnl[0])
+        d = r.could_not_look_detail[0]
+        r.looked_for, r.where, r.reason_word = d["looked_for"], d["where"], d["reason_word"]
     else:
         r.reason = f"{matched} compared steps on each tape, same digests"
     return r
