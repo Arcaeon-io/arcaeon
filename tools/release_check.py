@@ -586,7 +586,15 @@ def _git(*args, cwd: Path = ROOT) -> subprocess.CompletedProcess:
 def release_base(cwd: Path = ROOT) -> tuple[str | None, str]:
     """(commit, how) the diff is taken from: the newest tag reachable from HEAD,
     or, with no tags, the last commit that changed pyproject's `version =` line.
-    (None, reason) when git cannot say."""
+    (None, reason) when git cannot say. ARCAEON_RC_PAID_BASE=<rev> names the
+    base outright (the test of publish's dry run uses HEAD); the line the
+    script prints always says which base it used."""
+    override = os.environ.get("ARCAEON_RC_PAID_BASE")
+    if override:
+        p = _git("rev-parse", "--verify", "--quiet", override + "^{commit}", cwd=cwd)
+        if p.returncode or not p.stdout.strip():
+            return None, f"ARCAEON_RC_PAID_BASE={override} is not a commit here"
+        return p.stdout.strip(), f"{override} (ARCAEON_RC_PAID_BASE)"
     p = _git("describe", "--tags", "--abbrev=0", cwd=cwd)
     if p.returncode == 0 and p.stdout.strip():
         tag = p.stdout.strip()
@@ -655,6 +663,7 @@ def paid_path_gate(checks: list[Check], cwd: Path = ROOT) -> str | None:
     if changed is None:
         return f"BLOCKED {PAID_BLOCK} (COULD NOT LOOK at the diff: {how})"
     if not changed:
+        print(f"paid path unchanged since {how}: STUBBED does not block", flush=True)
         return None
     shown = ", ".join(changed[:6]) + (f" (+{len(changed) - 6} more)" if len(changed) > 6 else "")
     return f"BLOCKED {PAID_BLOCK} (since {how}: {shown})"

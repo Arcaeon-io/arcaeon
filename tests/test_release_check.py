@@ -245,7 +245,8 @@ def _git(repo, *args):
 
 
 @pytest.fixture()
-def repo(tmp_path):
+def repo(tmp_path, monkeypatch):
+    monkeypatch.delenv("ARCAEON_RC_PAID_BASE", raising=False)
     r = tmp_path / "repo"
     (r / "src" / "arcaeon" / "remote").mkdir(parents=True)
     (r / "pyproject.toml").write_text('[project]\nname = "x"\nversion = "0.1.0"\n', encoding="utf-8")
@@ -326,7 +327,18 @@ def test_a_real_key_run_or_a_fail_is_not_gated(repo):
     assert rc.paid_path_gate(passed, repo) is None
 
 
-def test_could_not_look_blocks(tmp_path):
+def test_an_explicit_base_overrides_and_is_named(repo, monkeypatch, capsys):
+    _edit(repo, "src/arcaeon/remote/witness.py", "X = 1", "X = 2")
+    monkeypatch.setenv("ARCAEON_RC_PAID_BASE", "HEAD")
+    assert rc.paid_path_changes(repo) == ([], "HEAD (ARCAEON_RC_PAID_BASE)")
+    assert rc.paid_path_gate(STUBBED, repo) is None
+    assert "paid path unchanged since HEAD (ARCAEON_RC_PAID_BASE)" in capsys.readouterr().out
+    monkeypatch.setenv("ARCAEON_RC_PAID_BASE", "no-such-rev")
+    assert "COULD NOT LOOK" in rc.paid_path_gate(STUBBED, repo)
+
+
+def test_could_not_look_blocks(tmp_path, monkeypatch):
+    monkeypatch.delenv("ARCAEON_RC_PAID_BASE", raising=False)
     line = rc.paid_path_gate(STUBBED, tmp_path)   # not a git repo
     assert line.startswith("BLOCKED paid path changed and not exercised: set ARCAEON_TEST_KEY")
     assert "COULD NOT LOOK" in line
