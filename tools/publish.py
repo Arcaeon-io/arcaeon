@@ -341,6 +341,7 @@ def step_release_check(ctx) -> str:
             found[m.group(2)] = (m.group(1), m.group(3))
     if p.returncode or sorted(found) != ["A", "B", "C"] or any(w == "FAIL" for w, _ in found.values()):
         bad = [f"{k} {w}: {t}" for k, (w, t) in sorted(found.items()) if w != "PASS"]
+        bad += [x for x in (p.stdout or "").splitlines() if x.startswith("BLOCKED ")]
         raise StepFailed("release check (exit %s): %s" % (p.returncode, "; ".join(bad) or _tail(p)))
     stubbed = [k for k, (w, _) in sorted(found.items()) if w == "STUBBED"]
     note = (f"; {' and '.join(stubbed)} STUBBED (local stub witness, no test key by name)"

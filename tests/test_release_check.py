@@ -209,3 +209,144 @@ def test_publish_step_reads_the_three_lines(tmp_path, stdout, code, ok):
         with pytest.raises(publish.StepFailed):
             publish.step_release_check(Ctx)
     assert seen["cmd"][1].endswith("release_check.py") and "--wheel" in seen["cmd"]
+
+
+# --- B041: STUBBED blocks when the paid path changed since the last release ------
+
+import subprocess  # noqa: E402
+
+CLI_V1 = '''def _pin(argv):
+    local = "witness half"
+    from arcaeon import remote
+    return remote.pin()
+
+
+def _seal(argv):
+    return 1
+
+
+def _credits(argv):
+    return 2
+
+
+def _pin_ns_from_key(fn):
+    return 3
+
+
+def _log(argv):
+    return 4
+'''
+
+
+def _git(repo, *args):
+    p = subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+    assert p.returncode == 0, p.stderr
+    return p.stdout.strip()
+
+
+@pytest.fixture()
+def repo(tmp_path):
+    r = tmp_path / "repo"
+    (r / "src" / "arcaeon" / "remote").mkdir(parents=True)
+    (r / "pyproject.toml").write_text('[project]\nname = "x"\nversion = "0.1.0"\n', encoding="utf-8")
+    (r / "src" / "arcaeon" / "cli.py").write_text(CLI_V1, encoding="utf-8")
+    (r / "src" / "arcaeon" / "remote" / "witness.py").write_text("X = 1\n", encoding="utf-8")
+    (r / "README.md").write_text("hi\n", encoding="utf-8")
+    _git(r, "init", "-q")
+    _git(r, "config", "user.email", "t@example.invalid")
+    _git(r, "config", "user.name", "t")
+    _git(r, "config", "core.autocrlf", "false")
+    _git(r, "add", "-A")
+    _git(r, "commit", "-q", "-m", "0.1.0: version bump")
+    return r
+
+
+def _edit(repo, rel, old, new, commit=True):
+    p = repo / rel
+    p.write_text(p.read_text(encoding="utf-8").replace(old, new), encoding="utf-8")
+    if commit:
+        _git(repo, "commit", "-q", "-am", f"edit {rel}")
+
+
+STUBBED = [rc.Check("A", "a", "PASS"), rc.Check("B", "b", "STUBBED"), rc.Check("C", "c", "STUBBED")]
+
+
+def test_untouched_diff_does_not_block(repo):
+    _edit(repo, "README.md", "hi", "hello")
+    _edit(repo, "src/arcaeon/cli.py", "return 4", "return 44")          # not paid
+    _edit(repo, "src/arcaeon/cli.py", 'local = "witness half"', 'local = "w"')  # _pin's local half
+    changed, how = rc.paid_path_changes(repo)
+    assert changed == [] and "version bump" in how and "no tags" in how
+    assert rc.paid_path_gate(STUBBED, repo) is None
+
+
+@pytest.mark.parametrize("rel,old,new,want", [
+    ("src/arcaeon/remote/witness.py", "X = 1", "X = 2", "src/arcaeon/remote/witness.py"),
+    ("src/arcaeon/cli.py", "return 1", "return 11", "cli._seal"),
+    ("src/arcaeon/cli.py", "return 2", "return 22", "cli._credits"),
+    ("src/arcaeon/cli.py", "return remote.pin()", "return remote.renew()", "cli._pin[remote]"),
+    ("src/arcaeon/cli.py", "return 3", "return 33", "cli._pin_ns_from_key"),
+])
+def test_touched_paid_path_blocks_a_stubbed_run(repo, rel, old, new, want):
+    _edit(repo, rel, old, new)
+    changed, _ = rc.paid_path_changes(repo)
+    assert changed == [want]
+    line = rc.paid_path_gate(STUBBED, repo)
+    assert line.startswith("BLOCKED paid path changed and not exercised: set ARCAEON_TEST_KEY")
+    assert want in line
+
+
+def test_uncommitted_and_new_remote_files_count(repo):
+    (repo / "src" / "arcaeon" / "remote" / "new.py").write_text("Y = 1\n", encoding="utf-8")
+    changed, _ = rc.paid_path_changes(repo)
+    assert changed == ["src/arcaeon/remote/new.py"]
+    (repo / "src" / "arcaeon" / "remote" / "new.py").unlink()
+    _edit(repo, "src/arcaeon/cli.py", "return 1", "return 11", commit=False)
+    assert rc.paid_path_changes(repo)[0] == ["cli._seal"]
+
+
+def test_the_base_is_the_last_tag_when_there_is_one(repo):
+    _edit(repo, "src/arcaeon/remote/witness.py", "X = 1", "X = 2")
+    _git(repo, "tag", "v0.1.1")
+    changed, how = rc.paid_path_changes(repo)
+    assert (changed, how) == ([], "tag v0.1.1")
+    _edit(repo, "src/arcaeon/cli.py", "return 2", "return 22")
+    assert rc.paid_path_changes(repo)[0] == ["cli._credits"]
+
+
+def test_the_base_moves_with_the_next_version_bump(repo):
+    _edit(repo, "src/arcaeon/remote/witness.py", "X = 1", "X = 2")
+    _edit(repo, "pyproject.toml", "0.1.0", "0.1.1")
+    assert rc.paid_path_changes(repo)[0] == []
+
+
+def test_a_real_key_run_or_a_fail_is_not_gated(repo):
+    _edit(repo, "src/arcaeon/remote/witness.py", "X = 1", "X = 2")
+    passed = [rc.Check("A", "a", "PASS"), rc.Check("B", "b", "PASS"), rc.Check("C", "c", "PASS")]
+    assert rc.paid_path_gate(passed, repo) is None
+
+
+def test_could_not_look_blocks(tmp_path):
+    line = rc.paid_path_gate(STUBBED, tmp_path)   # not a git repo
+    assert line.startswith("BLOCKED paid path changed and not exercised: set ARCAEON_TEST_KEY")
+    assert "COULD NOT LOOK" in line
+
+
+def test_publish_names_the_blocked_line(tmp_path):
+    publish = _load("publish_for_rc_block", ROOT / "tools" / "publish.py")
+
+    class P:
+        returncode, stderr = 1, ""
+        stdout = ("PASS    A x\nSTUBBED B y\nSTUBBED C w\n"
+                  "BLOCKED paid path changed and not exercised: set ARCAEON_TEST_KEY (since tag v1: cli._seal)\n")
+
+    publish._run = lambda cmd, **kw: P()
+
+    class Ctx:
+        version = "9.9.9"
+        env_file = tmp_path / "no.env"
+        main_artifacts = [tmp_path / "arcaeon-9.9.9-py3-none-any.whl"]
+
+    with pytest.raises(publish.StepFailed) as e:
+        publish.step_release_check(Ctx)
+    assert "set ARCAEON_TEST_KEY" in str(e.value)

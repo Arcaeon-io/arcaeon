@@ -47,6 +47,14 @@ Output: one line per check, PASS / FAIL / STUBBED plus its evidence (B's two
 facts on their own lines). Exit 1 on any FAIL, 2 if the house could not be
 built (venv or install failed), else 0. STUBBED is not a FAIL; it is a check
 that ran against the stub instead of the real witness, and says so.
+
+EXCEPT when the paid path changed. If the diff since the last release tag
+(or, with no tags, the last commit that bumped pyproject's version) touches
+src/arcaeon/remote/, cli._seal, cli._credits, or cli._pin's remote branch
+(with its helper _pin_ns_from_key), a STUBBED check has not exercised the code
+that changed: the script prints "BLOCKED paid path changed and not exercised:
+set ARCAEON_TEST_KEY (...)" and exits 1. If git cannot say what changed, that
+blocks too. No key is minted here; the fix is a real throwaway test key.
 """
 from __future__ import annotations
 
@@ -558,6 +566,100 @@ def render(checks: list[Check], key: str | None = None) -> str:
     return text.replace(key, "<key>") if key else text
 
 
+# --- the paid path: did it change since the last release? -------------------------
+
+#: What "the paid path" means for B041: everything under src/arcaeon/remote/,
+#: and these pieces of cli.py. `_pin` counts only from its remote branch on
+#: (the line that imports arcaeon.remote); its --witness half is local.
+PAID_DIR = "src/arcaeon/remote/"
+CLI_PATH = "src/arcaeon/cli.py"
+PAID_CLI_FUNCS = ("_seal", "_credits", "_pin_ns_from_key")
+PIN_REMOTE_MARK = "from arcaeon import remote"
+PAID_BLOCK = "paid path changed and not exercised: set ARCAEON_TEST_KEY"
+
+
+def _git(*args, cwd: Path = ROOT) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True,
+                          encoding="utf-8", errors="replace")
+
+
+def release_base(cwd: Path = ROOT) -> tuple[str | None, str]:
+    """(commit, how) the diff is taken from: the newest tag reachable from HEAD,
+    or, with no tags, the last commit that changed pyproject's `version =` line.
+    (None, reason) when git cannot say."""
+    p = _git("describe", "--tags", "--abbrev=0", cwd=cwd)
+    if p.returncode == 0 and p.stdout.strip():
+        tag = p.stdout.strip()
+        return _git("rev-list", "-n", "1", tag, cwd=cwd).stdout.strip() or None, f"tag {tag}"
+    p = _git("log", "-1", "--format=%H", "-G", r"^version\s*=", "--", "pyproject.toml", cwd=cwd)
+    if p.returncode == 0 and p.stdout.strip():
+        h = p.stdout.strip()
+        return h, f"version bump {h[:7]} (no tags)"
+    return None, ("git could not name a release tag or a version-bump commit"
+                  + (f": {p.stderr.strip()[:120]}" if p.stderr.strip() else ""))
+
+
+def paid_cli_segments(text: str) -> dict[str, str]:
+    """{name: source} of the paid pieces of a cli.py text. Missing = ''."""
+    import ast
+    out = {n: "" for n in (*PAID_CLI_FUNCS, "_pin[remote]")}
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return {n: "<unparseable cli.py>" for n in out}
+    lines = text.splitlines()
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        src = "\n".join(lines[node.lineno - 1:node.end_lineno])
+        if node.name in PAID_CLI_FUNCS:
+            out[node.name] = src
+        elif node.name == "_pin":
+            i = src.find(PIN_REMOTE_MARK)
+            out["_pin[remote]"] = src[i:] if i >= 0 else ""
+    return out
+
+
+def paid_path_changes(cwd: Path = ROOT) -> tuple[list[str] | None, str]:
+    """(what changed, base description). What changed is a list of paths and
+    cli pieces; None when git could not look. The diff runs from the base to
+    the working tree, so uncommitted edits count too."""
+    base, how = release_base(cwd)
+    if not base:
+        return None, how
+    p = _git("diff", "--name-only", base, "--", PAID_DIR, cwd=cwd)
+    if p.returncode:
+        return None, f"git diff failed: {p.stderr.strip()[:120]}"
+    changed = sorted(x for x in p.stdout.splitlines() if x.strip())
+    q = _git("ls-files", "--others", "--exclude-standard", "--", PAID_DIR, cwd=cwd)
+    changed += sorted(x for x in q.stdout.splitlines() if x.strip() and x not in changed)
+    old = _git("show", f"{base}:{CLI_PATH}", cwd=cwd)
+    old_text = old.stdout if old.returncode == 0 else ""
+    try:
+        new_text = (cwd / CLI_PATH).read_text(encoding="utf-8")
+    except OSError:
+        new_text = ""
+    norm = lambda s: s.replace("\r\n", "\n")  # noqa: E731  line endings are not a change
+    a, b = paid_cli_segments(norm(old_text)), paid_cli_segments(norm(new_text))
+    changed += [f"cli.{k}" for k in a if a[k] != b[k]]
+    return changed, how
+
+
+def paid_path_gate(checks: list[Check], cwd: Path = ROOT) -> str | None:
+    """The blocking line when B or C is STUBBED and the paid path changed since
+    the last release; None when nothing blocks. Could not look = blocks: a
+    stubbed check is only good enough when we know the paid path is as released."""
+    if not any(x.status == "STUBBED" for x in checks):
+        return None
+    changed, how = paid_path_changes(cwd)
+    if changed is None:
+        return f"BLOCKED {PAID_BLOCK} (COULD NOT LOOK at the diff: {how})"
+    if not changed:
+        return None
+    shown = ", ".join(changed[:6]) + (f" (+{len(changed) - 6} more)" if len(changed) > 6 else "")
+    return f"BLOCKED {PAID_BLOCK} (since {how}: {shown})"
+
+
 # --- main ------------------------------------------------------------------------
 
 def _pyproject_version() -> str:
@@ -617,7 +719,10 @@ def main(argv=None) -> int:
                   key=stub.key if stubbed else key, stubbed=stubbed, stub=stub)
         checks = run_checks(run)
         print(render(checks, key), flush=True)
-        return 1 if any(x.status == "FAIL" for x in checks) else 0
+        blocked = paid_path_gate(checks)
+        if blocked:
+            print(blocked, flush=True)
+        return 1 if blocked or any(x.status == "FAIL" for x in checks) else 0
     except SetupFailed as e:
         print(f"FAIL    setup: {e}", flush=True)
         return 2
