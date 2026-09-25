@@ -165,3 +165,39 @@ def test_a_bundle_exported_by_the_old_code_still_verifies_and_reads():
         assert verify_file(records).ok is True
         code, text = _run("verify", str(records))
         assert code == 0, text
+
+
+# --- could-not-look fields (0.9.x, additive) -----------------------------------
+
+CNL_EXPECT = {
+    "EMPTY_LOG": ("records", "empty"),
+    "UNVERIFIED_SCOPE": ("chain links for every record", "bounded"),
+    # exori's case in the audit: a namespace that does not exist on the witness
+    "WITNESS_CHECK_FAILED": ("a witness pin for namespace 'mistyped-namespace'", "name_not_found"),
+}
+
+
+@pytest.mark.parametrize("build,finding,word", PATHS, ids=[f for _, f, _ in PATHS])
+def test_every_could_not_look_carries_looked_for_where_reason_word(build, finding, word):
+    with tempfile.TemporaryDirectory() as d:
+        p, extra = build(d)
+        out = Path(d) / "bundle"
+        _run("export", str(p), str(out), *extra)
+        integ = json.loads((out / "integrity.json").read_text(encoding="utf-8"))
+        assert {"looked_for", "where", "reason_word"} <= set(integ)
+        if word != V.COULD_NOT_LOOK:
+            assert integ["looked_for"] is integ["where"] is integ["reason_word"] is None
+            return
+        looked_for, reason_word = CNL_EXPECT[finding]
+        assert integ["looked_for"] == looked_for
+        assert integ["reason_word"] == reason_word and reason_word in V.REASON_WORDS
+        assert integ["where"]
+
+
+def test_unrecognized_witness_verdict_carries_the_fields():
+    from arcaeon.prove.audit import _could_not_look_fields
+    got = _could_not_look_fields("UNRECOGNIZED_WITNESS_VERDICT:quantum_uncertain",
+                                 None, None, {"kind": "local_file"}, "ns")
+    assert got["reason_word"] == "unreadable" and got["where"] == "local_file"
+    assert _could_not_look_fields("PASS", None, None, {}, None) == {
+        "looked_for": None, "where": None, "reason_word": None}

@@ -561,6 +561,42 @@ def finding_of(integrity: dict) -> str:
     return integrity.get("verdict", "")
 
 
+def _could_not_look_fields(finding: str, vr: Any, wv: Any, witness_block: dict,
+                           namespace: str | None) -> dict:
+    """`looked_for`, `where`, `reason_word` for a finding whose word is COULD
+    NOT LOOK; all three None for any other finding.
+
+    A witness that holds no pin for the namespace asked about is
+    `name_not_found`: the namespace named may be one that does not exist (a
+    typo, a wrong case), and the refusal carries it verbatim so a made-up name
+    is visible inside the refusal instead of hiding behind it.
+    """
+    none = {"looked_for": None, "where": None, "reason_word": None}
+    if word_for_finding(finding) != COULD_NOT_LOOK:
+        return none
+    witness_where = str(witness_block.get("identifier") or witness_block.get("kind")
+                        or "the witness")
+    if finding == "EMPTY_LOG":
+        return {"looked_for": "records", "where": "records.jsonl", "reason_word": "empty"}
+    if finding == "UNVERIFIED_SCOPE":
+        scope = getattr(vr, "verified_scope", "") or "bounded"
+        return {"looked_for": "chain links for every record",
+                "where": f"records.jsonl (verified_scope={scope})",
+                "reason_word": "bounded"}
+    if finding == "WITNESS_CHECK_FAILED" and wv is not None:
+        if wv.verdict == "no_record":
+            return {"looked_for": f"a witness pin for namespace {namespace!r}",
+                    "where": witness_where, "reason_word": "name_not_found"}
+        if wv.verdict == "local_broken":
+            return {"looked_for": "an intact chain in the log", "where": "records.jsonl",
+                    "reason_word": "unreadable"}
+        return {"looked_for": "a witness pin file that verifies itself",
+                "where": witness_where, "reason_word": "unreadable"}
+    # UNRECOGNIZED_WITNESS_VERDICT:* or any finding this version does not know
+    return {"looked_for": "a witness verdict this version recognizes",
+            "where": witness_where, "reason_word": "unreadable"}
+
+
 def export_bundle(log_path: str | Path, out_dir: str | Path, *,
                   system_id: str = "", provider: str = "",
                   witness: Any = None,
@@ -744,6 +780,11 @@ def export_bundle(log_path: str | Path, out_dir: str | Path, *,
                  "verified_file": "records.jsonl",
                  "checked_at": _now_iso(),
                  "how_to_reverify": _reverify_recipe(witness_block, witness_namespace)}
+    # Additive (0.9.x): every COULD NOT LOOK says what it looked for, where, and
+    # why as one fixed word (arcaeon.verdict.REASON_WORDS). None on a finding
+    # that looked and answered.
+    integrity.update(_could_not_look_fields(verdict, vr, wv, witness_block,
+                                            witness_namespace))
 
     # ---- instrument defects: the checker's own account of its blind spots ----
     # OPTIONAL, author-supplied, and embedded VERBATIM. The convention (README:
