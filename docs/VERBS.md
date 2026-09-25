@@ -81,7 +81,7 @@ them verify it without me? Issues receipts (`cite`, `ballot`,
 **Usage**
 
 ```text
-usage: arcaeon-receipt [-h] [--version]
+usage: arcaeon receipt [-h] [--version]
                        {cite,ballot,verify,roster-report,archive,exhibit} ...
 ```
 
@@ -116,7 +116,7 @@ Subcommands: `receipt LEDGER KEY`, `reclaim LEDGER KEY`,
 **Usage**
 
 ```text
-(this verb's --help prints no usage: line; see the text below)
+usage: arcaeon once receipt|reclaim|rebuild-index <ledger> [key]
 ```
 
 `arcaeon once --help` prints the module's description, which starts:
@@ -148,20 +148,14 @@ unless you pass `--raw`.
 **Usage**
 
 ```text
-usage: python -m arcaeon.record.adapter.proxy [-h] --ledger LEDGER
-                                              [--server SERVER]
-                                              [--session SESSION] [--raw]
-                                              [--max-frame MAX_FRAME]
-                                              [--tape TAPE]
-                                              [--side {agent,tool}]
-                                              [--tape-namespace TAPE_NAMESPACE]
-                                              [--pin-witness URL]
-                                              [--tape-pair TAPE_PAIR]
-                                              [--http-forward URL]
-                                              [--listen HOST:PORT]
-                                              [--upstream-timeout SECONDS]
-                                              [--version]
-                                              ...
+usage: arcaeon proxy [-h] --ledger LEDGER [--server SERVER]
+                     [--session SESSION] [--raw] [--max-frame MAX_FRAME]
+                     [--tape TAPE] [--side {agent,tool}]
+                     [--tape-namespace TAPE_NAMESPACE] [--pin-witness URL]
+                     [--tape-pair TAPE_PAIR] [--http-forward URL]
+                     [--listen HOST:PORT] [--upstream-timeout SECONDS]
+                     [--version]
+                     ...
 ```
 
 Everything after `--` is the server command to wrap.
@@ -275,7 +269,7 @@ one bundle? Subcommands `verify`, `pin`, `export`.
 **Usage**
 
 ```text
-usage: arcaeon-audit [-h] [--version] {verify,pin,export} ...
+usage: arcaeon audit [-h] [--version] {verify,pin,export} ...
 ```
 
 **Exit codes:** 0 good. 1 a bad finding. 3 the check could not complete (for
@@ -347,7 +341,7 @@ UNSIGNED and why when they are not; `--sealed` is the paid path (see `seal`).
 **Usage**
 
 ```text
-usage: arcaeon vet badge [-h] [--receipt] [--sealed] [--ns NS] path
+usage: arcaeon badge [-h] [--receipt] [--sealed] [--ns NS] path
 ```
 
 **Exit codes:** as `vet`. A refused `--sealed` is 3 (4 under
@@ -425,7 +419,7 @@ set of probes? `register` scores the probe set now and records the result;
 **Usage**
 
 ```text
-usage: arcaeon-baseline [-h] [--version] {register,compare,selftest} ...
+usage: arcaeon baseline [-h] [--version] {register,compare,selftest} ...
 ```
 
 **Exit codes:** 0 the command ran. 1 `compare` refused: the probe set is not
@@ -548,7 +542,7 @@ Subcommands: `keys` (add, revoke, list; secrets are stored hashed), `usage`,
 **Usage**
 
 ```text
-usage: arcaeon-meter [-h] [--version] {keys,usage,export} ...
+usage: arcaeon meter [-h] [--version] {keys,usage,export} ...
 ```
 
 **Exit codes:** 0 done. 1 an unknown key or a refused value (a bad month, a
@@ -641,7 +635,7 @@ tool list and exits without starting a server.
 **Usage**
 
 ```text
-usage: arcaeon-mcp [-h] [--log LOG] [--ns-dir NS_DIR] [--tools]
+usage: arcaeon mcp [-h] [--log LOG] [--ns-dir NS_DIR] [--tools]
 ```
 
 **Exit codes:** 0 the server closed cleanly, or `--tools` printed. 2 the MCP
@@ -697,7 +691,7 @@ Answers: which version is installed, and where did each part come from?
 **Usage**
 
 ```text
-(this verb's --help prints no usage: line; see the text below)
+usage: arcaeon version [--short]
 ```
 
 `arcaeon version` takes no `--help`; it prints the report. `--short` prints
