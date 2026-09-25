@@ -68,3 +68,55 @@ def test_read_skips_junk_lines(home):
 
 def test_read_missing_file_is_empty(home):
     assert journal.read() == []
+
+
+# --- B012: privacy, off switch, unwritable home ------------------------------------
+
+def test_privacy_raw_target_and_basename_never_written(home, tmp_path):
+    secret_dir = tmp_path / "client-acme-private"
+    target = secret_dir / "payroll_ledger_q3.jsonl"
+    journal.append("verify", None, 0, str(target))
+    journal.append("pin", None, 3, target)
+    raw = (home / "activity.jsonl").read_text(encoding="utf-8")
+    for needle in (str(target), target.name, "payroll_ledger_q3", "client-acme-private",
+                   str(secret_dir)):
+        assert needle not in raw, needle
+    assert all(len(r["target"]) == 64 for r in _rows(home))
+
+
+@pytest.mark.parametrize("value", ["0", " 0 "])
+def test_off_switch_writes_nothing(home, monkeypatch, value):
+    monkeypatch.setenv("ARCAEON_JOURNAL", value)
+    assert journal.append("verify", None, 0, "a.jsonl") is False
+    assert not home.exists()
+
+
+def test_off_switch_through_the_cli_writes_nothing(home, tmp_path, monkeypatch, capsys):
+    from arcaeon import cli
+    monkeypatch.setenv("ARCAEON_JOURNAL", "0")
+    assert cli.main(["log", str(tmp_path / "a.jsonl"), '{"op": 1}']) == 0
+    capsys.readouterr()
+    assert not home.exists()
+
+
+def test_unwritable_home_append_returns_false_never_raises(tmp_path, monkeypatch):
+    blocker = tmp_path / "a_file_not_a_dir"
+    blocker.write_text("x", encoding="utf-8")
+    monkeypatch.setenv("ARCAEON_HOME", str(blocker / "sub"))
+    monkeypatch.delenv("ARCAEON_JOURNAL", raising=False)
+    assert journal.append("verify", None, 0, "a.jsonl") is False
+
+
+def test_unwritable_home_leaves_the_exit_code_unchanged(tmp_path, monkeypatch, capsys):
+    from arcaeon import cli
+    blocker = tmp_path / "a_file_not_a_dir"
+    blocker.write_text("x", encoding="utf-8")
+    monkeypatch.setenv("ARCAEON_HOME", str(blocker))
+    monkeypatch.delenv("ARCAEON_JOURNAL", raising=False)
+    p = tmp_path / "a.jsonl"
+    assert cli.main(["log", str(p), '{"op": 1}']) == 0
+    assert cli.main(["verify", str(p)]) == 0
+    assert cli.main(["verify", str(tmp_path / "missing.jsonl")]) == 3
+    assert cli.main(["log", str(p)]) == 2
+    out = capsys.readouterr()
+    assert "Traceback" not in out.err and "journal" not in out.err
