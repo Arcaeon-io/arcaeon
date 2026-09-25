@@ -617,3 +617,65 @@ def test_pin_ns_from_key_without_a_key_sends_nothing(tmp_path, monkeypatch, caps
     cli.main(["log", str(p), '{"op": "one"}'])
     assert cli.main(["pin", str(p), "--remote"]) == 1
     assert "ARCAEON_KEY" in capsys.readouterr().out
+
+
+# --- credits / stamp: a request that never completed is COULD NOT LOOK (B016) --------
+
+def _offline(*a, **k):
+    return 0, {"error": "witness unreachable: [Errno 11001] getaddrinfo failed"}
+
+
+def test_credits_offline_is_could_not_look_network(monkeypatch, capsys):
+    from arcaeon import remote
+    monkeypatch.setenv("ARCAEON_KEY", "k_test")
+    monkeypatch.setattr(remote, "_request", _offline)
+    assert cli.main(["credits"]) == 3
+    out = capsys.readouterr().out
+    assert out.startswith("COULD NOT LOOK (network): looked for your balance at ")
+    assert cli.main(["credits", "--json"]) == 3
+    j = json.loads(capsys.readouterr().out)
+    assert j["verdict"] == "COULD NOT LOOK" and j["reason_word"] == "network"
+    assert j["looked_for"] == "your balance" and j["where"].endswith("/api/balance")
+
+
+def test_credits_refusal_with_an_answer_stays_bad(monkeypatch, capsys):
+    from arcaeon import remote
+    monkeypatch.setenv("ARCAEON_KEY", "k_test")
+    monkeypatch.setattr(remote, "_request", lambda *a, **k: (401, {"error": "invalid key"}))
+    assert cli.main(["credits"]) == 1
+    capsys.readouterr()
+
+
+def test_stamp_offline_is_could_not_look_network(monkeypatch, tmp_path, capsys):
+    from arcaeon import remote
+    f = tmp_path / "doc.txt"
+    f.write_bytes(b"x")
+    monkeypatch.setattr(remote, "_request", _offline)
+    assert cli.main(["stamp", str(f)]) == 3
+    j = json.loads(capsys.readouterr().out)
+    assert j["verdict"] == "COULD NOT LOOK" and j["reason_word"] == "network"
+    assert j["where"].endswith("/api/stamp") and j["looked_for"]
+
+
+def test_stamp_refused_with_an_answer_stays_bad(monkeypatch, tmp_path, capsys):
+    from arcaeon import remote
+    f = tmp_path / "doc.txt"
+    f.write_bytes(b"x")
+    monkeypatch.setattr(remote, "_request", lambda *a, **k: (429, {"error": "over cap"}))
+    assert cli.main(["stamp", str(f)]) == 1
+    capsys.readouterr()
+
+
+def test_stamp_missing_file_is_could_not_look_missing(monkeypatch, tmp_path, capsys):
+    from arcaeon import remote
+    monkeypatch.setattr(remote, "_request", lambda *a, **k: pytest.fail("network used"))
+    missing = tmp_path / "nope.txt"
+    assert cli.main(["stamp", str(missing)]) == 3
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    assert j["verdict"] == "COULD NOT LOOK" and j["reason_word"] == "missing"
+    assert j["where"] == str(missing) and j["looked_for"] == "the file to stamp"
+    assert "nothing was sent" in cap.err
+    # a directory is unreadable, also 3, also nothing sent
+    assert cli.main(["stamp", str(tmp_path)]) == 3
+    assert json.loads(capsys.readouterr().out)["reason_word"] == "unreadable"

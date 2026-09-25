@@ -787,8 +787,25 @@ def _stamp(argv) -> int:
     try:
         data = p.read_bytes()
     except OSError as e:
-        return _usage(str(e))
+        # Nothing was stamped and nothing was found wrong: COULD NOT LOOK, the
+        # same answer `verify` gives a missing or unreadable file (was usage 2).
+        word = "missing" if not p.exists() else "unreadable"
+        if word == "missing":
+            why = "it does not exist"
+        else:
+            why = "it is a directory" if p.is_dir() else (e.strerror or type(e).__name__)
+        cnl = V.could_not_look("the file to stamp", argv[0], word, f"cannot read {argv[0]}: {why}")
+        print(json.dumps({"ok": False, "verdict": V.COULD_NOT_LOOK, **cnl}, indent=1))
+        print(f"{V.COULD_NOT_LOOK} ({word}): looked for the file to stamp at {argv[0]}: {why}; "
+              f"nothing was sent", file=sys.stderr)
+        return V.EXIT_COULD_NOT_LOOK
     out = remote.stamp(hashlib.sha256(data).hexdigest(), len(data))
+    if not out.get("ok") and out.get("status") == 0:
+        out = {**out, "verdict": V.COULD_NOT_LOOK,
+               **V.could_not_look("a stamp from the hosted witness", out.get("endpoint"),
+                                  "network", str(out.get("error") or "the request never completed"))}
+        print(json.dumps(out, indent=1))
+        return V.EXIT_COULD_NOT_LOOK
     print(json.dumps(out, indent=1))
     return V.EXIT_GOOD if out.get("ok") else V.EXIT_BAD
 
@@ -805,12 +822,23 @@ def _credits(argv) -> int:
         print(remote.BLANK_KEY_ERROR, file=sys.stderr)
         return V.EXIT_USAGE
     out = remote.balance()
+    never_completed = not out.get("ok") and out.get("status") == 0
+    if never_completed:
+        # The request never reached an answer: not a "no", a look that did not happen.
+        out = {**out, "verdict": V.COULD_NOT_LOOK,
+               **V.could_not_look("your balance", out.get("endpoint"), "network",
+                                  str(out.get("error") or "the request never completed"))}
     if "--json" in argv:
         print(json.dumps(out, indent=1))
     elif out.get("ok"):
         print(balance_sentence(out))
+    elif never_completed:
+        print(f"{V.COULD_NOT_LOOK} (network): looked for your balance at {out.get('endpoint')}: "
+              f"{out['reason']}")
     else:
         print(f"the witness did not answer with a balance: {out.get('error', out.get('status'))}")
+    if never_completed:
+        return V.EXIT_COULD_NOT_LOOK
     return V.EXIT_GOOD if out.get("ok") else V.EXIT_BAD
 
 

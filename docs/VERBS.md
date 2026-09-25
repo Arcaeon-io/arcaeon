@@ -587,8 +587,12 @@ a key, inside a free daily allowance.
 usage: arcaeon stamp <file>
 ```
 
-**Exit codes:** 0 stamped. 1 the witness said no or could not be reached (the
-answer is printed as data, never a crash). 2 bad usage or an unreadable file.
+**Exit codes:** 0 stamped. 1 the witness answered and said no (the answer is
+printed as data, never a crash). 2 bad usage. 3 COULD NOT LOOK: the request
+never completed (`reason_word` `network`), or the file is missing
+(`missing`) or unreadable (`unreadable`), the same answer `verify` gives a
+file it cannot read; nothing was stamped. A COULD NOT LOOK answer carries
+`looked_for`, `where` and `reason_word`.
 
 The example points at a witness that is not there, so it shows the failure
 shape without sending anything:
@@ -599,9 +603,16 @@ $ ARCAEON_WITNESS_URL=http://127.0.0.1:9 arcaeon stamp notes.txt
  "ok": false,
  "status": 0,
  "endpoint": "http://127.0.0.1:9/api/stamp",
- "error": "witness unreachable: ..."
+ "error": "witness unreachable: ...",
+ "verdict": "COULD NOT LOOK",
+ "looked_for": "a stamp from the hosted witness",
+ "where": "http://127.0.0.1:9/api/stamp",
+ "reason_word": "network",
+ "reason": "witness unreachable: ..."
 }
 ```
+
+(exit 3)
 
 ## `credits`
 
@@ -615,8 +626,9 @@ free pins used this month`; `--json` prints the witness's raw answer.
 usage: arcaeon credits [--json]
 ```
 
-**Exit codes:** 0 the balance printed. 1 the witness said no or could not be
-reached. 2 no `ARCAEON_KEY` set.
+**Exit codes:** 0 the balance printed. 1 the witness answered and said no.
+2 no `ARCAEON_KEY` set. 3 COULD NOT LOOK: the request never completed
+(`reason_word` `network`; `--json` carries `looked_for` and `where` too).
 
 ```console
 $ arcaeon credits
