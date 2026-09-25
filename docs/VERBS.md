@@ -122,7 +122,7 @@ usage: arcaeon once receipt|reclaim|rebuild-index <ledger> [key]
 ```
 
 `arcaeon once --help` prints the module's description, which starts:
-`arcaeon-once CLI -- inspect a key's receipt, reclaim one crashed key, or
+`arcaeon once -- inspect a key's receipt, reclaim one crashed key, or
 rebuild the concurrency index.`
 
 **Exit codes:** 0 the command ran (a receipt may still say `"state":
@@ -703,5 +703,5 @@ the package version alone.
 
 ```console
 $ arcaeon version --short
-0.9.0
+0.9.1
 ```

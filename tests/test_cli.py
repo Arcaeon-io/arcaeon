@@ -46,7 +46,7 @@ def test_help_via_python_dash_m():
     p = subprocess.run([sys.executable, "-m", "arcaeon", "--help"], capture_output=True,
                        text=True, env=env, timeout=120)
     assert p.returncode == 0, p.stderr
-    assert "reconcile" in p.stdout and "arcaeon 0.9.0" in p.stdout
+    assert "reconcile" in p.stdout and "arcaeon 0.9.1" in p.stdout
 
 
 def test_unknown_verb_is_usage_2(capsys):
@@ -84,10 +84,47 @@ def test_every_verb_usage_line_names_arcaeon_verb(verb, capsys, monkeypatch):
     assert usage[0][len(f"usage: arcaeon {verb}"):][:1] in ("", " "), (verb, usage[0])
 
 
+@pytest.mark.parametrize("verb", ALL_VERBS)
+def test_every_verb_version_names_arcaeon_verb(verb, capsys, monkeypatch):
+    """0.9.0: `arcaeon audit --version` printed "arcaeon-audit 0.1.8" (the moved
+    tool's own argparse version), and most verbs had no --version at all. 0.9.1:
+    every verb answers `arcaeon <verb> <arcaeon version>`, exit 0, touching
+    nothing (no server, no network, no subcommand run)."""
+    monkeypatch.delenv("ARCAEON_KEY", raising=False)
+    assert cli.main([verb, "--version"]) == 0
+    out = capsys.readouterr()
+    assert out.out.strip() == f"arcaeon {verb} 0.9.1", (verb, out.out[:200])
+    assert out.err == ""
+
+
+def test_version_flag_after_a_subcommand_and_dash_v(capsys):
+    assert cli.main(["audit", "verify", "--version"]) == 0
+    assert capsys.readouterr().out.strip() == "arcaeon audit 0.9.1"
+    assert cli.main(["meter", "-V"]) == 0
+    assert capsys.readouterr().out.strip() == "arcaeon meter 0.9.1"
+
+
+def test_version_after_double_dash_is_an_argument_not_the_flag(monkeypatch):
+    seen = []
+    monkeypatch.setitem(cli.HANDLERS, "log", lambda argv: seen.append(argv) or 0)
+    assert cli.main(["log", "--", "--version"]) == 0
+    assert seen == [["--", "--version"]]
+
+
+def test_once_help_is_in_the_arcaeon_form(capsys):
+    """0.9.0's `arcaeon once --help` opened "arcaeon-once CLI" and showed
+    `python -m arcaeon.record.once.cli` examples."""
+    assert cli.main(["once", "--help"]) == 0
+    out = capsys.readouterr().out
+    assert "arcaeon-once" not in out and "python -m" not in out
+    assert "arcaeon once -- inspect a key's receipt" in out
+    assert 'arcaeon once receipt ops.log.jsonl "refund:pi_123"' in out
+
+
 def test_version_verb_names_every_family(capsys):
     assert cli.main(["version"]) == 0
     out = capsys.readouterr().out
-    assert out.startswith("arcaeon 0.9.0")
+    assert out.startswith("arcaeon 0.9.1")
     for mod in cli.COMPONENTS:
         assert mod in out
     assert "import failed" not in out

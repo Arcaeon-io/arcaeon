@@ -1,9 +1,9 @@
-"""arcaeon-once CLI -- inspect a key's receipt, reclaim one crashed key, or
+"""arcaeon once -- inspect a key's receipt, reclaim one crashed key, or
 rebuild the concurrency index.
 
-    python -m arcaeon.record.once.cli receipt ops.log.jsonl "refund:pi_123"
-    python -m arcaeon.record.once.cli reclaim ops.log.jsonl "refund:pi_123"
-    python -m arcaeon.record.once.cli rebuild-index ops.log.jsonl
+    arcaeon once receipt ops.log.jsonl "refund:pi_123"
+    arcaeon once reclaim ops.log.jsonl "refund:pi_123"
+    arcaeon once rebuild-index ops.log.jsonl
 
 `reclaim` frees ONE crashed key for retry, and only after proving its
 recorded holder process is dead -- no quiesce needed, live claims are never
@@ -29,7 +29,7 @@ from arcaeon.record.once import (
 def main(argv: "list[str] | None" = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if len(argv) < 2 or argv[0] not in ("receipt", "reclaim", "rebuild-index"):
-        print((__doc__ or "usage: arcaeon-once receipt|reclaim|rebuild-index <ledger> [key]").strip())
+        print((__doc__ or "usage: arcaeon once receipt|reclaim|rebuild-index <ledger> [key]").strip())
         return 1
     cmd, path = argv[0], argv[1]
     if cmd == "receipt":

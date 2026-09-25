@@ -308,3 +308,66 @@ def test_cli_seal_without_ns_follows_the_keys_prefix(monkeypatch, tmp_path, caps
     assert rc == 0, out
     assert posted == ["mcp-vet-sealed-scans", "wk-abc-sealed-scans"]
     assert '"namespace": "wk-abc-sealed-scans"' in out
+
+
+def _stranger_witness(monkeypatch, prefix):
+    """A stubbed /api/pin shaped like the real one: 403 naming the key's
+    prefix for any namespace outside it, 201 inside it. Returns the list of
+    namespaces posted, in order."""
+    from arcaeon.remote import sealed_scan, witness
+    posted = []
+
+    def fake(url, body, key, timeout=20.0):
+        posted.append(body["namespace"])
+        if body["namespace"].startswith(prefix):
+            return 201, {"ok": True}
+        return 403, {"error": f'this key may only pin namespaces starting with "{prefix}"'}
+
+    monkeypatch.setattr(witness, "_http_post", fake)
+    sealed_scan._reset_prefix_cache()
+    monkeypatch.setattr(sealed_scan, "_prefix_cache", {})
+    return posted
+
+
+def test_cli_badge_sealed_without_ns_follows_the_keys_prefix(monkeypatch, tmp_path, capsys):
+    """0.9.1: `arcaeon badge --sealed` takes the same default as `seal`: no --ns,
+    a fake stranger's key, and the namespace comes from the prefix the stubbed
+    witness's 403 names. The 403 costs nothing; one retry, then exit 0."""
+    from arcaeon import cli
+    _no_signing_key(monkeypatch)
+    _mock_witness(monkeypatch, tmp_path)
+    posted = _stranger_witness(monkeypatch, "wk-5f3e9a-")
+    monkeypatch.setenv("ARCAEON_KEY", "wk_fake_stranger_key_0001")
+    _write(tmp_path, "server.py", _CLEAN)
+
+    rc = cli.main(["badge", str(tmp_path / "server.py"), "--sealed"])
+
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert posted == ["mcp-vet-sealed-scans", "wk-5f3e9a-sealed-scans"]
+    assert '"namespace": "wk-5f3e9a-sealed-scans"' in out
+
+
+def test_cli_seal_ns_override_is_one_request_and_never_rewritten(monkeypatch, tmp_path, capsys):
+    """--ns stays an override: posted exactly as given, once, no default tried
+    first, even though the key's prefix is learnable."""
+    from arcaeon import cli
+    _no_signing_key(monkeypatch)
+    _mock_witness(monkeypatch, tmp_path)
+    posted = _stranger_witness(monkeypatch, "wk-5f3e9a-")
+    monkeypatch.setenv("ARCAEON_KEY", "wk_fake_stranger_key_0002")
+    _write(tmp_path, "server.py", _CLEAN)
+
+    rc = cli.main(["seal", str(tmp_path / "server.py"), "--ns", "wk-5f3e9a-audits"])
+
+    out = capsys.readouterr().out
+    assert rc == 0, out
+    assert posted == ["wk-5f3e9a-audits"]
+    assert '"namespace": "wk-5f3e9a-audits"' in out
+
+
+def test_seal_help_states_the_namespace_default(capsys):
+    from arcaeon import cli
+    assert cli.main(["seal", "--help"]) == 0
+    out = capsys.readouterr().out
+    assert "Without --ns it tries" in out and "<prefix>-sealed-scans" in out

@@ -116,6 +116,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"arcaeon: unknown verb {verb!r}\n", file=sys.stderr)
         print(help_text(), file=sys.stderr)
         return V.EXIT_USAGE
+    if _asks_version(rest):
+        # One answer for every verb (0.9.1): the moved tools each had their own
+        # --version, and `arcaeon audit --version` printed "arcaeon-audit 0.1.8".
+        print(f"arcaeon {verb} {__version__}")
+        return V.EXIT_GOOD
     try:
         return handler(rest)
     except KeyboardInterrupt:
@@ -164,6 +169,13 @@ def _usage(msg: str) -> int:
 
 def _wants_help(argv) -> bool:
     return any(a in ("-h", "--help") for a in argv)
+
+
+def _asks_version(argv) -> bool:
+    """`--version` anywhere before a `--`, or `-V` alone. No verb takes either
+    as an option of its own, so neither can be a verb's argument by accident."""
+    head = argv[:argv.index("--")] if "--" in argv else argv
+    return "--version" in head or argv == ["-V"]
 
 
 # --- record --------------------------------------------------------------------
