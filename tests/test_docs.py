@@ -60,6 +60,14 @@ def test_every_verb_has_a_section_and_nothing_else():
     assert len(sections) == len(set(sections)), "a verb has two sections"
 
 
+def test_every_verb_in_help_text_has_a_heading():
+    listed = re.findall(r"^  ([a-z]+) +\S", cli.help_text(), re.M)
+    assert listed, "help_text() lists no verbs"
+    headings = set(re.findall(r"^## `([a-z]+)`\s*$", VERBS_MD, re.M))
+    missing = [v for v in listed if v not in headings]
+    assert not missing, f"verbs in `arcaeon --help` with no docs/VERBS.md heading: {missing}"
+
+
 def test_sections_follow_the_help_order():
     sections = re.findall(r"^## `([a-z]+)`\s*$", VERBS_MD, re.M)
     assert sections == list(cli.VERBS)
