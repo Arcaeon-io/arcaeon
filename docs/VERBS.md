@@ -599,12 +599,13 @@ $ ARCAEON_WITNESS_URL=http://127.0.0.1:9 arcaeon stamp notes.txt
 ## `credits`
 
 Answers: how many credits are left on my key? Reads `ARCAEON_KEY`. Looking
-never uses a credit.
+never uses a credit. Prints one sentence, such as `1000 credits left, 7 of 100
+free pins used this month`; `--json` prints the witness's raw answer.
 
 **Usage**
 
 ```text
-usage: arcaeon credits
+usage: arcaeon credits [--json]
 ```
 
 **Exit codes:** 0 the balance printed. 1 the witness said no or could not be
@@ -734,8 +735,11 @@ Answers: which version is installed, and where did each part come from?
 usage: arcaeon version [--short]
 ```
 
-`arcaeon version` takes no `--help`; it prints the report. `--short` prints
-the package version alone.
+`arcaeon version` prints the report: the package version, one line naming
+the optional extras installed (`mcp`, `ts`, `sign`) and whether `ARCAEON_KEY`
+is set (`key: set` or `key: not set`; never the key itself, since a version
+report gets pasted into bug reports), then each moved family's version.
+`--short` prints the package version alone.
 
 **Exit codes:** 0.
 

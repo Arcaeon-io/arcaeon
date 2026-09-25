@@ -735,16 +735,23 @@ def _stamp(argv) -> int:
 
 
 def _credits(argv) -> int:
-    if _wants_help(argv):
-        print("usage: arcaeon credits\nYour hosted-witness balance (reads ARCAEON_KEY; "
-              "looking never consumes a credit).")
-        return V.EXIT_GOOD
+    if _wants_help(argv) or any(a != "--json" for a in argv):
+        print("usage: arcaeon credits [--json]\nYour hosted-witness balance as one sentence "
+              "(reads ARCAEON_KEY; looking never consumes a credit). --json prints the "
+              "witness's raw answer.")
+        return V.EXIT_GOOD if _wants_help(argv) else V.EXIT_USAGE
     from arcaeon import remote
+    from arcaeon.status import balance_sentence
     if not remote.key():
         print(remote.BLANK_KEY_ERROR, file=sys.stderr)
         return V.EXIT_USAGE
     out = remote.balance()
-    print(json.dumps(out, indent=1))
+    if "--json" in argv:
+        print(json.dumps(out, indent=1))
+    elif out.get("ok"):
+        print(balance_sentence(out))
+    else:
+        print(f"the witness did not answer with a balance: {out.get('error', out.get('status'))}")
     return V.EXIT_GOOD if out.get("ok") else V.EXIT_BAD
 
 
@@ -841,6 +848,20 @@ COMPONENTS = {
 }
 
 
+#: extra name (pyproject optional-dependencies) -> the modules it installs
+_EXTRAS = {"mcp": ("mcp",), "ts": ("tree_sitter", "tree_sitter_typescript"),
+           "sign": ("cryptography",)}
+
+
+def _importable(mod: str) -> bool:
+    """Installed, without importing it (arcaeon stays light to load)."""
+    import importlib.util
+    try:
+        return importlib.util.find_spec(mod) is not None
+    except (ImportError, ValueError):
+        return False
+
+
 def _version(argv) -> int:
     import importlib
     if _wants_help(argv):
@@ -851,6 +872,10 @@ def _version(argv) -> int:
         print(__version__)
         return V.EXIT_GOOD
     print(f"arcaeon {__version__} (python {sys.version.split()[0]})")
+    from arcaeon import remote
+    extras = [name for name, mods in _EXTRAS.items() if all(_importable(m) for m in mods)]
+    # Whether a key is set, never the key: a version line gets pasted into bug reports.
+    print(f"  extras: {', '.join(extras) or 'none'}; key: {'set' if remote.key() else 'not set'}")
     for mod, old in COMPONENTS.items():
         try:
             m = importlib.import_module(mod)

@@ -271,7 +271,7 @@ def test_credits_with_a_key_reads_the_balance(monkeypatch, capsys):
         calls.append((method, url, key))
         return 200, {"balance": 1000}
     monkeypatch.setattr(remote, "_request", fake)
-    assert cli.main(["credits"]) == 0
+    assert cli.main(["credits", "--json"]) == 0
     assert calls == [("GET", remote.base_url() + "/api/balance", "k_test")]
     assert json.loads(capsys.readouterr().out)["balance"] == 1000
 
@@ -478,3 +478,55 @@ def test_log_stdin_not_json_is_bad(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(sys, "stdin", io.StringIO("not json"))
     assert cli.main(["log", str(p), "-"]) == 1
     capsys.readouterr()
+
+
+# --- credits as a sentence, version names extras and whether a key is set (B019) -----
+
+FAKE_KEY = "wk_FAKE_do_not_print_7f3a9c"
+
+
+def test_credits_human_sentence(monkeypatch, capsys):
+    from arcaeon import remote
+    monkeypatch.setenv("ARCAEON_KEY", FAKE_KEY)
+    monkeypatch.setattr(remote, "_request", lambda *a, **k: (200, {
+        "ok": True, "key_id": "abc", "credit_balance": 1000,
+        "free_tier": {"plan": "free", "month": "2026-09", "used": 7, "cap": 100}}))
+    assert cli.main(["credits"]) == 0
+    out = capsys.readouterr().out
+    assert out.strip() == "1000 credits left, 7 of 100 free pins used this month"
+    assert FAKE_KEY not in out
+
+
+def test_credits_human_json_is_the_raw_answer(monkeypatch, capsys):
+    from arcaeon import remote
+    monkeypatch.setenv("ARCAEON_KEY", FAKE_KEY)
+    monkeypatch.setattr(remote, "_request", lambda *a, **k: (200, {
+        "ok": True, "credit_balance": 3, "free_tier": {"used": 0, "cap": 100}}))
+    assert cli.main(["credits", "--json"]) == 0
+    raw = json.loads(capsys.readouterr().out)
+    assert raw["credit_balance"] == 3 and raw["free_tier"]["cap"] == 100
+    assert cli.main(["credits", "--frob"]) == 2
+    capsys.readouterr()
+
+
+def test_version_key_set_is_named_never_printed(monkeypatch, capsys):
+    monkeypatch.setenv("ARCAEON_KEY", FAKE_KEY)
+    assert cli.main(["version"]) == 0
+    out = capsys.readouterr()
+    assert FAKE_KEY not in out.out and FAKE_KEY not in out.err
+    assert "FAKE" not in out.out
+    line = next(ln for ln in out.out.splitlines() if "extras:" in ln)
+    assert line.strip().endswith("key: set")
+
+
+def test_version_key_not_set_and_extras_listed(monkeypatch, capsys):
+    monkeypatch.delenv("ARCAEON_KEY", raising=False)
+    assert cli.main(["version"]) == 0
+    out = capsys.readouterr().out
+    line = next(ln for ln in out.splitlines() if "extras:" in ln)
+    assert line.strip().endswith("key: not set")
+    import importlib.util
+    if importlib.util.find_spec("cryptography"):
+        assert "sign" in line
+    extras = line.split("extras:")[1].split(";")[0].strip()
+    assert extras == "none" or set(extras.split(", ")) <= {"mcp", "ts", "sign"}
