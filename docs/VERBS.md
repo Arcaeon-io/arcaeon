@@ -6,9 +6,8 @@ example with real output (long output is cut with `...`).
 
 The usage blocks are copied from `arcaeon <verb> --help` by
 `tools/sync_verbs_usage.py`, and `tests/test_docs.py` fails if one goes stale.
-A few verbs still print their old tool's name in the usage line
-(`arcaeon-receipt`, `mcp_vet`, `arcaeon-audit`, and so on). That is the moved
-code's own help text. Type `arcaeon <verb>`; the arguments are the same.
+Since 0.9.1 every usage line, subcommand help included, reads
+`arcaeon <verb>`; what you see in a block is what you type.
 
 The exit codes are one table for every verb (see the README): 0 good, 1 a bad
 finding, 2 bad usage, 3 COULD NOT LOOK. `--legacy-exit` returns the old tool's
@@ -578,7 +577,7 @@ bad cap). 2 bad usage.
 
 ```console
 $ arcaeon meter keys --help
-usage: arcaeon-meter keys [-h] {add,revoke,list} ...
+usage: arcaeon meter keys [-h] {add,revoke,list} ...
 ...
     add              mint a key; prints the secret ONCE
     revoke           revoke by key_id or secret
