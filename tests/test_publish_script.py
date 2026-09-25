@@ -24,6 +24,8 @@ def publish(monkeypatch, tmp_path):
     for name in ("PYPI_TOKEN", "TESTPYPI_TOKEN", "TWINE_USERNAME", "TWINE_PASSWORD"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(mod, "git_state", lambda: ("main", FAKE_TIP, ""))
+    # no test reaches PyPI: the plan's "already there?" lookup says no by default
+    monkeypatch.setattr(mod, "index_has", lambda name, version, test_pypi=False: False)
     return mod
 
 
@@ -42,6 +44,10 @@ def test_dry_run_steps_1_to_6_pass_and_upload_is_only_planned(publish, tmp_path,
         return ""
 
     monkeypatch.setattr(publish, "step_upload", fake_upload)
+    # B041: with no test key, B and C run STUBBED, which blocks once the paid
+    # path differs from the last release. This test is about publish's flow,
+    # not about what changed since the tag, so it names HEAD as the base.
+    monkeypatch.setenv("ARCAEON_RC_PAID_BASE", "HEAD")
     rc = publish.main(_args(tmp_path))
     out = capsys.readouterr().out
     assert rc == 0, out
@@ -164,3 +170,101 @@ def test_upload_order_and_token_only_in_subprocess_env(publish, tmp_path, monkey
     out = capsys.readouterr().out
     assert FAKE_TOKEN not in out
     assert "packageArguments" in out and "site.py build" in out
+
+
+# --- B050: the plan skips shims whose exact version the index already serves ---------
+
+def _plan_ctx(publish, tmp_path, monkeypatch, *extra):
+    dist = tmp_path / "dist"
+    a = publish.parse(_args(tmp_path, *extra))
+    ctx = publish.Ctx(a)
+    ctx.version = "0.9.2"
+    ctx.main_artifacts = [dist / "arcaeon-0.9.2-py3-none-any.whl", dist / "arcaeon-0.9.2.tar.gz"]
+    ctx.shim_wheels = [dist / "shims" / "arcaeon_ledger-0.8.2-py3-none-any.whl",
+                       dist / "shims" / "arcaeon_once-0.2.5-py3-none-any.whl",
+                       dist / "shims" / "mcp_vet-0.0.19-py3-none-any.whl"]
+    return ctx
+
+
+def test_wheel_name_version_normalizes_for_the_index(publish):
+    assert publish._wheel_name_version(Path("arcaeon_ledger-0.8.2-py3-none-any.whl")) ==         ("arcaeon-ledger", "0.8.2")
+
+
+def test_dry_run_plan_skips_shims_already_on_pypi(publish, tmp_path, monkeypatch, capsys):
+    asked = []
+
+    def has(name, version, test_pypi=False):
+        asked.append((name, version, test_pypi))
+        return {"arcaeon-ledger": True, "arcaeon-once": False, "mcp-vet": None}[name]
+
+    monkeypatch.setattr(publish, "index_has", has)
+    _no_subprocess(monkeypatch, publish)
+    publish.step_upload(_plan_ctx(publish, tmp_path, monkeypatch))
+    out = capsys.readouterr().out
+    assert asked == [("arcaeon-ledger", "0.8.2", False), ("arcaeon-once", "0.2.5", False),
+                     ("mcp-vet", "0.0.19", False)]
+    iii = next(x for x in out.splitlines() if "iii." in x)
+    assert "arcaeon_ledger-0.8.2" not in iii
+    assert "arcaeon_once-0.2.5" in iii and "mcp_vet-0.0.19" in iii and "(2 wheels)" in iii
+    assert "skipped, already on PyPI (exact version): arcaeon-ledger==0.8.2" in out
+    assert "COULD NOT LOOK on PyPI, kept in the upload: mcp-vet==0.0.19" in out
+
+
+def test_dry_run_plan_says_so_when_every_shim_is_already_there(publish, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(publish, "index_has", lambda n, v, t=False: True)
+    _no_subprocess(monkeypatch, publish)
+    publish.step_upload(_plan_ctx(publish, tmp_path, monkeypatch, "--test-pypi"))
+    out = capsys.readouterr().out
+    assert "iii. no shim upload: every shim's exact version is already on TestPyPI" in out
+    assert "twine upload" in out.split("iii.")[0]      # the main package is still planned
+
+
+def test_upload_sends_only_the_shims_not_already_there(publish, tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("PYPI_TOKEN", FAKE_TOKEN)
+    monkeypatch.setattr(publish, "index_has", lambda n, v, t=False: n == "arcaeon-ledger")
+    sent = []
+
+    class P:
+        returncode, stdout, stderr = 0, "", ""
+
+    monkeypatch.setattr(publish, "_run", lambda cmd, **kw: sent.append([str(c) for c in cmd]) or P())
+    ctx = _plan_ctx(publish, tmp_path, monkeypatch, "--upload", "--i-mean-it")
+    publish.step_upload(ctx)
+    shim_call = [c for c in sent if "twine" in c and any("shims" in x for x in c)]
+    assert len(shim_call) == 1
+    names = [Path(x).name for x in shim_call[0] if x.endswith(".whl")]
+    assert names == ["arcaeon_once-0.2.5-py3-none-any.whl", "mcp_vet-0.0.19-py3-none-any.whl"]
+    assert "1 skipped (already on PyPI)" in capsys.readouterr().out
+
+
+def test_index_has_reads_the_status_only(monkeypatch):
+    import urllib.error
+    spec = importlib.util.spec_from_file_location("publish_index_has", ROOT / "tools" / "publish.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    seen = []
+
+    class R:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def fake(req, timeout=0):
+        seen.append((req.full_url, req.get_method()))
+        if "missing" in req.full_url:
+            raise urllib.error.HTTPError(req.full_url, 404, "nf", {}, None)
+        if "down" in req.full_url:
+            raise urllib.error.URLError("offline")
+        return R()
+
+    monkeypatch.setattr(mod.urllib.request, "urlopen", fake)
+    assert mod.index_has("arcaeon-ledger", "0.8.1") is True
+    assert mod.index_has("missing", "1") is False
+    assert mod.index_has("down", "1") is None
+    assert mod.index_has("arcaeon-ledger", "0.8.1", test_pypi=True) is True
+    assert seen[0] == ("https://pypi.org/pypi/arcaeon-ledger/0.8.1/json", "GET")
+    assert seen[-1][0].startswith("https://test.pypi.org/pypi/")

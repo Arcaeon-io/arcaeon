@@ -23,8 +23,11 @@ Steps:
      Step 5 runs from this machine's home; step 6 is the one that can tell
      "works here" from "works for a stranger" (kindred labs' three checks).
   7. scan the artifacts for "velouria", "Users/USER", "/home/", ".env"
-  8. upload order: main package, wait until PyPI serves it, the 13 shim wheels,
-     then the next steps that are not this script's job
+  8. upload order: main package, wait until PyPI serves it, the shim wheels,
+     then the next steps that are not this script's job. A shim whose exact
+     version PyPI already serves is skipped (read-only GET of PyPI's JSON API
+     per shim), and the plan names it, so a release with unchanged shims is
+     still one command
 
 Credentials: read by NAME only (PYPI_TOKEN, or TESTPYPI_TOKEN with --test-pypi)
 from the environment or the repo's .env, placed as TWINE_USERNAME=__token__ /
@@ -44,6 +47,8 @@ import tarfile
 import tempfile
 import time
 import tomllib
+import urllib.error
+import urllib.request
 import zipfile
 from pathlib import Path
 
@@ -53,6 +58,9 @@ EXPECTED_SHIMS = 13
 PYPI_URL = "https://upload.pypi.org/legacy/"
 TESTPYPI_URL = "https://test.pypi.org/legacy/"
 TESTPYPI_SIMPLE = "https://test.pypi.org/simple/"
+#: read-only release lookups (GET, no credential): 200 = that exact version is there
+PYPI_JSON = "https://pypi.org/pypi/{name}/{version}/json"
+TESTPYPI_JSON = "https://test.pypi.org/pypi/{name}/{version}/json"
 POLL_SECONDS = 300
 POLL_EVERY = 15
 BS = chr(92)
@@ -423,19 +431,75 @@ def next_steps(ctx) -> list:
     ]
 
 
+def _wheel_name_version(wheel: Path) -> tuple[str, str]:
+    """`arcaeon_ledger-0.8.2-py3-none-any.whl` -> ("arcaeon-ledger", "0.8.2")."""
+    dist, version = wheel.name.split("-")[:2]
+    return re.sub(r"[-_.]+", "-", dist).lower(), version
+
+
+def index_has(name: str, version: str, test_pypi: bool = False):
+    """True when the index already serves this exact version, False on 404,
+    None when it could not look (network, 5xx). A read-only GET of the public
+    JSON API; nothing is sent but the URL. Tests replace this."""
+    url = (TESTPYPI_JSON if test_pypi else PYPI_JSON).format(name=name, version=version)
+    req = urllib.request.Request(url, headers={"Accept": "application/json",
+                                               "User-Agent": "arcaeon-publish-plan"})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            return r.status == 200
+    except urllib.error.HTTPError as e:
+        return False if e.code == 404 else None
+    except (urllib.error.URLError, OSError):
+        return None
+
+
+def shim_split(ctx):
+    """(upload, already, unknown): the shim wheels to upload, the ones whose
+    exact version the index already serves (an upload of those is refused, so
+    they are skipped), and the ones it could not look up (kept in the upload,
+    named in the plan)."""
+    upload, already, unknown = [], [], []
+    for w in ctx.shim_wheels:
+        name, version = _wheel_name_version(w)
+        has = index_has(name, version, ctx.test_pypi)
+        if has is True:
+            already.append(w)
+        else:
+            upload.append(w)
+            if has is None:
+                unknown.append(w)
+    return upload, already, unknown
+
+
+def _nv(ws) -> str:
+    return ", ".join("==".join(_wheel_name_version(w)) for w in ws)
+
+
 def step_upload(ctx) -> str:
     where = "TestPyPI" if ctx.test_pypi else "PyPI"
     url = TESTPYPI_URL if ctx.test_pypi else PYPI_URL
     main = [_show(x) for x in ctx.main_artifacts]
     pw = f'"${ctx.token_name}"'
+    shims, already, unknown = shim_split(ctx)
+    if shims:
+        shim_line = (f"  iii. TWINE_USERNAME=__token__ TWINE_PASSWORD={pw} py -m twine upload"
+                     f" --non-interactive --repository-url {url} "
+                     + " ".join(_show(w) for w in shims) + f" ({len(shims)} wheels)")
+    else:
+        shim_line = f"  iii. no shim upload: every shim's exact version is already on {where}"
+    skip_lines = []
+    if already:
+        skip_lines.append(f"       skipped, already on {where} (exact version): {_nv(already)}")
+    if unknown:
+        skip_lines.append(f"       COULD NOT LOOK on {where}, kept in the upload: {_nv(unknown)}")
     plan = [
         f"Order of upload to {where} ({url}):",
         f"  i.   TWINE_USERNAME=__token__ TWINE_PASSWORD={pw} py -m twine upload"
         f" --non-interactive --repository-url {url} " + " ".join(main),
         f"  ii.  wait until `pip download arcaeon=={ctx.version} --no-deps` succeeds from {where}"
         f" (every {POLL_EVERY}s, up to {POLL_SECONDS // 60} minutes)",
-        f"  iii. TWINE_USERNAME=__token__ TWINE_PASSWORD={pw} py -m twine upload"
-        f" --non-interactive --repository-url {url} {_show(ctx.dist / 'shims')}/*.whl ({len(ctx.shim_wheels)} wheels)",
+        shim_line,
+        *skip_lines,
         *next_steps(ctx),
     ]
     if not ctx.upload:
@@ -460,10 +524,12 @@ def step_upload(ctx) -> str:
                                  f"{POLL_SECONDS // 60} minutes; shims NOT uploaded")
             time.sleep(POLL_EVERY)
     print(f"  {where} serves arcaeon=={ctx.version}", flush=True)
-    p = _run([*base, *ctx.shim_wheels], env=env)
-    if p.returncode:
-        raise StepFailed(f"upload: shims to {where} failed: {_tail(p)}")
-    _say(True, TOTAL, f"upload: arcaeon {ctx.version} then {len(ctx.shim_wheels)} shim wheels to {where}")
+    if shims:
+        p = _run([*base, *shims], env=env)
+        if p.returncode:
+            raise StepFailed(f"upload: shims to {where} failed: {_tail(p)}")
+    skipped = f", {len(already)} skipped (already on {where})" if already else ""
+    _say(True, TOTAL, f"upload: arcaeon {ctx.version} then {len(shims)} shim wheels to {where}{skipped}")
     for line in next_steps(ctx):
         print("    " + line, flush=True)
     return ""
