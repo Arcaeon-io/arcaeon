@@ -17,7 +17,7 @@ mutation harness uses, kept identical so the two read as one family:
   4. Report by name. A check that stays green on its own defect is decoration in
      this environment, and the harness says so loudly.
 
-The five cases and why each one is load-bearing:
+The six cases and why each one is load-bearing:
 
   `passthrough_fidelity`   The P0 property. A client's bytes through the proxy must
                            equal its bytes without the proxy. Mutated by turning on
@@ -38,6 +38,12 @@ The five cases and why each one is load-bearing:
                            against vectors frozen when the recipe was frozen. Mutated
                            with a drifted canonicalizer (no key sort) to prove the
                            vectors discriminate rather than decorate.
+  `mandate_record_only`    `--mandate` in its default record-only mode: a call
+                           outside the mandate is still forwarded (bytes equal the
+                           unproxied run) AND leaves one `mandate_outside` row, and
+                           the first row pins the mandate file's sha256. Mutated by
+                           running without the gate (the row must vanish) and by
+                           changing one byte of the mandate (the pin must move).
 
 Exit code 0 = every check was observed catching its own defect. Anything else =
 at least one claimed guarantee is unverified in this environment. Do not trust
@@ -414,6 +420,64 @@ def case_digest_recipe_frozen() -> None:
           f"produces a different digest, so the vectors discriminate")
 
 
+# -- case 6: the mandate gate, record-only ------------------------------------
+
+#: The mandate case's mandate: `boom` is forbidden, everything else allowed.
+MANDATE = {"who": "selftest", "forbidden_acts": ["boom"]}
+
+
+def _find_outside(rows: list[dict]) -> list[dict]:
+    """THE check under test in case 6: the forwarded outside-mandate rows."""
+    return [r for r in rows if r.get("evt") == "mandate_outside"
+            and r.get("action") == "forwarded"]
+
+
+def case_mandate_record_only(d: Path) -> None:
+    mfile = d / "mandate.json"
+    mfile.write_text(json.dumps(MANDATE), encoding="utf-8")
+    ledger = d / "seam.mandate.jsonl"
+    direct = _run_direct()
+    out = _run_proxied(ledger, extra=["--mandate", str(mfile)])
+    _require(out == direct,
+             "record-only --mandate changed the bytes the client received: an "
+             "outside call must still be forwarded exactly")
+    rows = _rows(ledger)
+    outside = _find_outside(rows)
+    _require(len(outside) == 1 and outside[0].get("tool") == "boom"
+             and outside[0].get("rule") == "forbidden_acts",
+             f"the forbidden `boom` call must leave exactly one mandate_outside row; "
+             f"found {outside}")
+    begin = rows[0] if rows else {}
+    sha = hashlib.sha256(mfile.read_bytes()).hexdigest()
+    _require(begin.get("evt") == "session_begin"
+             and begin.get("mandate_file_sha256") == sha
+             and begin.get("mandate_mode") == "record-only",
+             "the session's first row must pin the mandate file's sha256 and say "
+             "record-only")
+    print("PASS mandate_record_only GREEN: forbidden `boom` forwarded byte-exact, "
+          "one mandate_outside row, first row pins the mandate sha256")
+
+    # RED 1: the same stream with the gate switched off. The row must vanish,
+    # and the check must notice, or it was never wired to the gate.
+    off = d / "seam.nomandate.jsonl"
+    _run_proxied(off)
+    _noop_guard("mandate/gate_off", len(outside), len(_find_outside(_rows(off))))
+    _require(not _find_outside(_rows(off)),
+             "no --mandate still produced a mandate_outside row: the check is not "
+             "testing the gate")
+    # RED 2: one byte of the mandate changed. The pin must move.
+    before = mfile.read_bytes()
+    mfile.write_bytes(before + b" ")
+    _noop_guard("mandate/one_byte", before, mfile.read_bytes())
+    moved = d / "seam.mandate2.jsonl"
+    _run_proxied(moved, extra=["--mandate", str(mfile)])
+    _require(_rows(moved)[0].get("mandate_file_sha256") != sha,
+             "a changed mandate file produced the same pin: the fingerprint is not "
+             "over the file's bytes")
+    print("PASS mandate_record_only RED on gate_off and one_byte: no gate, no row; "
+          "a changed mandate, a different pin")
+
+
 # -- runner ------------------------------------------------------------------
 
 def main(argv=None) -> int:
@@ -429,6 +493,7 @@ def main(argv=None) -> int:
             case_unanswered_call_logged(d, ledger)
             case_tamper_detected(d, ledger)
             case_digest_recipe_frozen()
+            case_mandate_record_only(d)
         except SelftestFailure as e:
             print(f"\nFAIL {e}", file=sys.stderr)
             return 1
