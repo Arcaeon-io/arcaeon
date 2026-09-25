@@ -41,13 +41,16 @@ pip install "arcaeon[mcp]"
 
 ## A 60-second first run
 
-Log two rows, check them, change one word of history, check again. These are
-POSIX shell lines (on Windows, use Git Bash or WSL, or adjust the quotes).
+Log two rows, check them, change one word of history, check again. The lines
+run as typed in PowerShell, cmd and a POSIX shell. `--field KEY=VALUE` builds
+the row for you, so there is no JSON to quote; that matters on Windows, where
+PowerShell 5.1 strips the inner double quotes from a JSON argument like
+`'{"tool": "search"}'` before `arcaeon` ever sees it.
 
 ```console
-$ arcaeon log agent.jsonl '{"tool": "search", "query": "weather"}'
+$ arcaeon log agent.jsonl --field tool=search --field query=weather
 <the new row's chain value>
-$ arcaeon log agent.jsonl '{"tool": "send_email", "to": "ops"}'
+$ arcaeon log agent.jsonl --field tool=send_email --field to=ops
 <the new row's chain value>
 $ arcaeon verify agent.jsonl
 {
