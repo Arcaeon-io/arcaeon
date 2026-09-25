@@ -29,15 +29,24 @@ chained row and prints the row's chain value.
 **Usage**
 
 ```text
-usage: arcaeon log <ledger.jsonl> '<json object>'
+usage: arcaeon log <ledger.jsonl> '<json object>' | - | --field KEY=VALUE ...
 ```
 
+The row comes one of three ways: a JSON object as one argument, `-` to read
+it from stdin, or `--field KEY=VALUE` (repeatable, value kept as a string;
+`--field KEY:=JSON` parses the value, so `n:=5` is the number 5). `--field`
+needs no JSON quoting, so the same line works in PowerShell, cmd and sh.
+Fields given with a JSON or stdin row are added over it.
+
 **Exit codes:** 0 the row was written. 1 the row was not JSON, or not a JSON
-object. 2 wrong number of arguments.
+object. 2 wrong number of arguments, or a `--field` that is not `KEY=VALUE`.
+3 the ledger's last line cannot be chained from (nothing was written).
 
 ```console
 $ arcaeon log agent.jsonl '{"tool": "search", "query": "weather"}'
 bf1e1b19380ce8062d9332cbf3af16fb
+$ arcaeon log agent.jsonl --field tool=search --field query=weather
+7546586e4171ae219677971ceb34c193
 ```
 
 ## `verify`

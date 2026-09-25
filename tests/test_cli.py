@@ -412,3 +412,69 @@ def test_journal_privacy_through_the_cli(jhome, tmp_path, capsys):
     raw = (jhome / "activity.jsonl").read_text(encoding="utf-8")
     for needle in (str(target), target.name, "secret_customer", "wire 5000", "acct 99"):
         assert needle not in raw, needle
+
+
+# --- log --field / log - (B018) -----------------------------------------------------
+
+def _ledger_rows(p):
+    return [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines() if x.strip()]
+
+
+def test_log_field_builds_the_row_without_json_quoting(tmp_path, capsys):
+    p = tmp_path / "a.jsonl"
+    assert cli.main(["log", str(p), "--field", "tool=search", "--field", "query=weather now",
+                     "--field=note=a=b"]) == 0
+    assert cli.main(["log", str(p), "--field", "n:=5", "--field", "ok:=true",
+                     "--field", "tags:=[1,2]", "--field", "s=5"]) == 0
+    assert cli.main(["verify", str(p)]) == 0
+    capsys.readouterr()
+    rows = _ledger_rows(p)
+    assert rows[0]["tool"] == "search" and rows[0]["query"] == "weather now"
+    assert rows[0]["note"] == "a=b"
+    assert rows[1]["n"] == 5 and rows[1]["ok"] is True and rows[1]["tags"] == [1, 2]
+    assert rows[1]["s"] == "5"
+
+
+def test_log_field_over_a_json_row(tmp_path, capsys):
+    p = tmp_path / "a.jsonl"
+    assert cli.main(["log", str(p), '{"op": "one", "x": 1}', "--field", "x=over"]) == 0
+    capsys.readouterr()
+    r = _ledger_rows(p)[0]
+    assert r["op"] == "one" and r["x"] == "over"
+
+
+@pytest.mark.parametrize("bad", [["--field"], ["--field", "novalue"], ["--field", "=v"],
+                                 ["--field", "n:=not json"], ["--frob"]])
+def test_log_field_bad_usage_writes_nothing(tmp_path, capsys, bad):
+    p = tmp_path / "a.jsonl"
+    assert cli.main(["log", str(p), *bad]) == 2
+    capsys.readouterr()
+    assert not p.exists()
+
+
+def test_log_stdin_reads_the_row(tmp_path, monkeypatch, capsys):
+    import io
+    p = tmp_path / "a.jsonl"
+    monkeypatch.setattr(sys, "stdin", io.StringIO('{"op": "from stdin"}\n'))
+    assert cli.main(["log", str(p), "-"]) == 0
+    monkeypatch.setattr(sys, "stdin", io.StringIO('{"op": "two"}'))
+    assert cli.main(["log", str(p), "-", "--field", "who=me"]) == 0
+    capsys.readouterr()
+    rows = _ledger_rows(p)
+    assert rows[0]["op"] == "from stdin" and rows[1] == {**rows[1], "op": "two", "who": "me"}
+
+
+def test_log_stdin_via_a_real_pipe(tmp_path):
+    p = tmp_path / "a.jsonl"
+    r = subprocess.run([sys.executable, "-m", "arcaeon", "log", str(p), "-"],
+                       input='{"op": "piped"}', capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr
+    assert _ledger_rows(p)[0]["op"] == "piped"
+
+
+def test_log_stdin_not_json_is_bad(tmp_path, monkeypatch, capsys):
+    import io
+    p = tmp_path / "a.jsonl"
+    monkeypatch.setattr(sys, "stdin", io.StringIO("not json"))
+    assert cli.main(["log", str(p), "-"]) == 1
+    capsys.readouterr()

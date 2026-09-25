@@ -214,23 +214,84 @@ def _asks_version(argv) -> bool:
 
 # --- record --------------------------------------------------------------------
 
+_LOG_USAGE = ("usage: arcaeon log <ledger.jsonl> '<json object>' | - | --field KEY=VALUE ...\n"
+              "The row is a JSON object: as one argument, read from stdin (-), or built\n"
+              "from --field KEY=VALUE (repeatable; the value is a string) and\n"
+              "--field KEY:=JSON (the value parsed as JSON: 5, true, null, [1,2]).\n"
+              "--field needs no JSON quoting, so it works the same in PowerShell, cmd\n"
+              "and sh. Fields are added over a JSON or stdin row when both are given.")
+
+
+def _log_row(argv) -> tuple[str | None, str | None, str | None]:
+    """(ledger, row as JSON text, usage error). Never touches the ledger."""
+    pos, fields, i = [], [], 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--field" or a.startswith("--field="):
+            if a == "--field":
+                if i + 1 >= len(argv):
+                    return None, None, "log: --field needs KEY=VALUE"
+                val, i = argv[i + 1], i + 2
+            else:
+                val, i = a[len("--field="):], i + 1
+            fields.append(val)
+            continue
+        if a.startswith("-") and a != "-":
+            return None, None, f"log: unknown option {a}"
+        pos.append(a)
+        i += 1
+    if not pos or len(pos) > 2 or (len(pos) == 1 and not fields):
+        return None, None, None
+    ledger, body = pos[0], (pos[1] if len(pos) == 2 else None)
+    if body == "-":
+        body = sys.stdin.read()
+    if not fields:
+        return ledger, body, None
+    row: dict = {}
+    if body is not None and body.strip():
+        try:
+            row = json.loads(body)
+        except ValueError as e:
+            return None, None, f"log: the row is not JSON ({e})"
+        if not isinstance(row, dict):
+            return None, None, "log: the row is not a JSON object"
+    for f in fields:
+        typed = ":=" in f and ("=" not in f or f.index(":=") < f.index("="))
+        k, sep, v = f.partition(":=") if typed else f.partition("=")
+        if not sep or not k:
+            return None, None, f"log: --field wants KEY=VALUE or KEY:=JSON, got {f!r}"
+        if typed:
+            try:
+                v = json.loads(v)
+            except ValueError as e:
+                return None, None, f"log: --field {k}:= is not JSON ({e})"
+        row[k] = v
+    return ledger, json.dumps(row, ensure_ascii=False), None
+
+
 def _log(argv) -> int:
-    if _wants_help(argv) or len(argv) != 2:
-        print("usage: arcaeon log <ledger.jsonl> '<json object>'")
-        return V.EXIT_GOOD if _wants_help(argv) else V.EXIT_USAGE
-    p = Path(argv[0])
+    if _wants_help(argv):
+        print(_LOG_USAGE)
+        return V.EXIT_GOOD
+    ledger, body, err = _log_row(argv)
+    if err:
+        return _usage(err)
+    if ledger is None:
+        print(_LOG_USAGE)
+        return V.EXIT_USAGE
+    p = Path(ledger)
     if p.is_dir():
-        return _usage(f"log: cannot append to {argv[0]}: it is a directory, not a ledger file")
+        return _usage(f"log: cannot append to {ledger}: it is a directory, not a ledger file")
     problem = _last_row_problem(p)
     if problem:
-        print(f"{V.COULD_NOT_LOOK}: refusing to append to {argv[0]}: {problem}; "
+        print(f"{V.COULD_NOT_LOOK}: refusing to append to {ledger}: {problem}; "
               f"nothing was written", file=sys.stderr)
         return V.EXIT_COULD_NOT_LOOK
     from arcaeon.record.ledger import cli
     try:
-        return _run(cli.main, ["append", argv[0], argv[1]])
+        return _run(cli.main, ["append", ledger, body])
     except OSError as e:
-        return _usage(f"log: cannot write {argv[0]}: {e.strerror or type(e).__name__}")
+        return _usage(f"log: cannot write {ledger}: {e.strerror or type(e).__name__}")
 
 
 def _last_row_problem(p: Path) -> str | None:
