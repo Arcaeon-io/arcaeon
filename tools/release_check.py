@@ -260,6 +260,11 @@ def house_env(house: House, extra: dict | None = None) -> dict:
         "TMP": str(house.tmp), "TEMP": str(house.tmp), "TMPDIR": str(house.tmp),
         "PYTHONIOENCODING": "utf-8", "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1",
         "PIP_DISABLE_PIP_VERSION_CHECK": "1", "PIP_NO_INPUT": "1", "PIP_CONFIG_FILE": os.devnull,
+        # The activity journal (arcaeon.journal) would write ~/.arcaeon/activity.jsonl
+        # into the house's empty home, and check A's empty-house test proves no
+        # file lands there. The journal is a local convenience, not part of what
+        # a release must do, so every command in the house runs with it off.
+        "ARCAEON_JOURNAL": "0",
     }
     if os.name == "nt":
         sysroot = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR") or "C:" + chr(92) + "Windows"
