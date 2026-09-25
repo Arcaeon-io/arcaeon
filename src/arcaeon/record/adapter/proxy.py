@@ -88,6 +88,8 @@ import sys
 import threading
 from pathlib import Path
 
+from arcaeon.record.row import file_pin
+
 from ._ledger import backend, open_ledger
 from ._version import IMPL, VERSION
 from .observer import DEFAULT_MAX_FRAME, FrameSplitter, SeamObserver
@@ -516,7 +518,8 @@ def run(command: list[str], ledger_path: str, *, server: str | None = None,
         stdin=None, stdout=None, tape_path: str | None = None,
         side: str = "agent", tape_namespace: str | None = None,
         pin_witness: str | None = None, tape_pair: str | None = None,
-        mandate_path: str | None = None, mandate_enforce: bool = False) -> int:
+        mandate_path: str | None = None, mandate_enforce: bool = False,
+        policy_paths: list | None = None) -> int:
     """Spawn `command`, proxy stdio through it, log the seam. Returns the child's exit code.
 
     With `tape_path`, also keep this side's call tape (see `tape.py`): `side="agent"`
@@ -531,6 +534,10 @@ def run(command: list[str], ledger_path: str, *, server: str | None = None,
     With `mandate_path`, every tools/call is checked against that mandate
     (`mandate_gate.py`, docs/MANDATE_GATE.md). Record-only unless
     `mandate_enforce`.
+
+    With `policy_paths` (system prompts, policy files), each file is pinned in
+    `session_begin` as path + byte count + sha256 (`row.file_pin`). Hashes
+    only: the contents never reach the ledger.
     """
     log = open_ledger(ledger_path)
     label = server or _server_label(command)
@@ -576,6 +583,7 @@ def run(command: list[str], ledger_path: str, *, server: str | None = None,
         # The mandate in force, pinned in the session's FIRST row: path, status,
         # sha256 of the file's bytes, and the deal lane's body digest.
         **(watch.gate.fingerprint() if watch else {}),
+        policy_pins=[file_pin(x) for x in policy_paths] if policy_paths else None,
     )
 
     if watch is not None and watch.enforce and not watch.gate.ok:
@@ -1024,6 +1032,10 @@ def main(argv: list[str] | None = None,
                          "gets a JSON-RPC error; the call never reaches the server). "
                          "OFF by default. A missing or unreadable mandate then "
                          "refuses to start (exit 3).")
+    ap.add_argument("--policy", action="append", default=None, metavar="FILE",
+                    help="pin this system-prompt or policy file in session_begin by "
+                         "sha256 (repeatable). Hashes only; the contents are never "
+                         "written to the ledger.")
     ap.add_argument("--version", action="version", version=IMPL)
     ap.add_argument("command", nargs=argparse.REMAINDER,
                     help="-- <server command...>")
@@ -1060,7 +1072,8 @@ def main(argv: list[str] | None = None,
                raw=args.raw, max_frame=args.max_frame, tape_path=args.tape,
                side=args.side, tape_namespace=args.tape_namespace,
                pin_witness=args.pin_witness, tape_pair=args.tape_pair,
-               mandate_path=args.mandate, mandate_enforce=args.mandate_enforce)
+               mandate_path=args.mandate, mandate_enforce=args.mandate_enforce,
+               policy_paths=args.policy)
 
 
 if __name__ == "__main__":

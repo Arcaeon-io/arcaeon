@@ -41,7 +41,8 @@ from typing import Any, Iterable
 
 __all__ = ["GENESIS", "CHAIN_LEN", "RESERVED_KEYS", "chain", "body_digest",
            "canon_json", "digest_json", "digest_bytes", "JSON_C14N_PREFIX",
-           "RAW_BYTES_PREFIX", "DuplicateKeyError", "loads", "loads_strict"]
+           "RAW_BYTES_PREFIX", "DuplicateKeyError", "loads", "loads_strict",
+           "file_pin"]
 
 GENESIS = "genesis"
 CHAIN_LEN = 32  # first N hex chars of the sha256; plenty for tamper-evidence
@@ -108,6 +109,29 @@ def digest_json(value: Any) -> str:
 def digest_bytes(data: bytes) -> str:
     """Self-describing digest of opaque bytes: `sha256:raw-bytes:v1:<hex>`."""
     return RAW_BYTES_PREFIX + hashlib.sha256(bytes(data)).hexdigest()
+
+
+def file_pin(path) -> dict:
+    """A file named by its hash, never its contents: {path, bytes, sha256,
+    digest} with digest in the raw-bytes form above. For pinning which system
+    prompt or policy file was in force (adapter `--policy`). A file that cannot
+    be read is pinned as {path, error, reason_word} so its absence is stated,
+    never silently dropped. Reads in 1 MiB blocks; holds no contents."""
+    from pathlib import Path
+    p = Path(path)
+    h = hashlib.sha256()
+    n = 0
+    try:
+        with p.open("rb") as fh:
+            for block in iter(lambda: fh.read(1 << 20), b""):
+                h.update(block)
+                n += len(block)
+    except FileNotFoundError:
+        return {"path": str(path), "error": "no such file", "reason_word": "missing"}
+    except OSError as e:
+        return {"path": str(path), "error": type(e).__name__, "reason_word": "unreadable"}
+    return {"path": str(path), "bytes": n, "sha256": h.hexdigest(),
+            "digest": RAW_BYTES_PREFIX + h.hexdigest()}
 
 
 class DuplicateKeyError(ValueError):
