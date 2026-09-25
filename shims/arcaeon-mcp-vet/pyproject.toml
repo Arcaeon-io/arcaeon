@@ -5,7 +5,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "arcaeon-mcp-vet"
 # one patch above the old line: the moved code carried 0.0.17 (0.0.16 and 0.0.17 never published; PyPI last is 0.0.15), so 0.0.18 sorts above every number the old line used
-version = "0.0.18"
+# 0.0.19: re-release so the wheel carries the shim's own __version__ (cb45976); 0.0.18 shipped the moved code's string
+version = "0.0.19"
 description = "Compatibility shim: arcaeon-mcp-vet is now part of arcaeon (arcaeon.prove.vet). Installs arcaeon; goes away with arcaeon 1.0.0."
 requires-python = ">=3.10"
 license = "MIT"

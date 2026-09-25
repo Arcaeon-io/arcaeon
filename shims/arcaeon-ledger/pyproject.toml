@@ -5,7 +5,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "arcaeon-ledger"
 # one patch above the old line: PyPI last 0.8.0
-version = "0.8.1"
+# 0.8.2: re-release so the wheel carries the shim's own __version__ (cb45976); 0.8.1 shipped the moved code's string
+version = "0.8.2"
 description = "Compatibility shim: arcaeon-ledger is now part of arcaeon (arcaeon.record.ledger). Installs arcaeon; goes away with arcaeon 1.0.0."
 requires-python = ">=3.10"
 license = "MIT"

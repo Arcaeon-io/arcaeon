@@ -5,7 +5,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "arcaeon-all"
 # one patch above the old line: PyPI last 0.2.2
-version = "0.2.3"
+# 0.2.4: patch re-release alongside the other twelve shims (cb45976); this marker's __version__ was already its own
+version = "0.2.4"
 description = "Compatibility shim: arcaeon-all is now part of arcaeon (arcaeon[all]). Installs arcaeon; goes away with arcaeon 1.0.0."
 requires-python = ">=3.10"
 license = "MIT"

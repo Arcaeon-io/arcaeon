@@ -7,7 +7,7 @@ goes away with arcaeon 1.0.0.
 """
 import warnings as _warnings
 
-__version__ = "0.2.3"
+__version__ = "0.2.4"
 
 #: the one package this marker now stands for
 COMPONENTS = ("arcaeon",)

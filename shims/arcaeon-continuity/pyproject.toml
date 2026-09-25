@@ -5,7 +5,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "arcaeon-continuity"
 # one patch above the old line: PyPI last 0.2.4
-version = "0.2.5"
+# 0.2.6: re-release so the wheel carries the shim's own __version__ (cb45976); 0.2.5 shipped the moved code's string
+version = "0.2.6"
 description = "Compatibility shim: arcaeon-continuity is now part of arcaeon (arcaeon.prove.continuity). Installs arcaeon; goes away with arcaeon 1.0.0."
 requires-python = ">=3.10"
 license = "MIT"
