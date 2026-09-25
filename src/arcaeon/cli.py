@@ -424,7 +424,9 @@ def _pin(argv) -> int:
         "(an append-only pin file you keep somewhere the log's writer cannot "
         "reach). Hosted: --remote (POST to the hosted witness; needs ARCAEON_KEY)."))
     ap.add_argument("ledger")
-    ap.add_argument("--ns", "--namespace", dest="ns", required=True)
+    ap.add_argument("--ns", "--namespace", dest="ns", default=None,
+                    help="required with --witness; with --remote it defaults to one "
+                         "derived from your key's prefix and the ledger")
     where = ap.add_mutually_exclusive_group(required=True)
     where.add_argument("--witness", help="local witness pin file (JSONL)")
     where.add_argument("--remote", action="store_true", help="the hosted witness")
@@ -437,6 +439,8 @@ def _pin(argv) -> int:
     from arcaeon.record.ledger import Ledger, verify_file
     # A ledger `verify` rates COULD NOT LOOK is not pinned green (qa-fixes item
     # 3). Absent or empty stays pinnable as genesis, the library's own rule.
+    if a.witness and not a.ns:
+        return _usage("pin: --ns is required with --witness")
     lp = Path(a.ledger)
     if lp.is_file():
         vr = verify_file(lp)
@@ -469,9 +473,64 @@ def _pin(argv) -> int:
                           f"verify: {head.first_break}"}, indent=1))
         return V.EXIT_BAD
     fn = remote.renew if a.renew else remote.pin
-    out = fn(a.ns, head.rows, head.chain, remote.key() or "")
+    key = remote.key() or ""
+    if a.ns:
+        out = fn(a.ns, head.rows, head.chain, key)
+    else:
+        out = _pin_ns_from_key(fn, lp, head, key)
     print(json.dumps(out, indent=1))
     return V.EXIT_GOOD if out.get("ok") else V.EXIT_BAD
+
+
+#: The first namespace `pin --remote` tries with no --ns, before it knows the
+#: key's prefix (the operator's own key covers it).
+_PIN_NS_BASE = "arcaeon"
+
+
+def _ledger_ns_part(p: Path) -> str:
+    """`ledger-<12 hex>` from the ledger's FIRST row's chain value: stable
+    when the file moves, different per ledger (two ledgers in one namespace
+    would fight over the witness's monotonic head), and it carries no part of
+    the path. An empty or unreadable ledger is just `ledger`."""
+    from arcaeon.record.row import loads_strict
+    try:
+        with open(p, "rb") as f:
+            for raw in f:
+                if raw.strip():
+                    row = loads_strict(raw.decode("utf-8"))
+                    chain = row.get("chain") if isinstance(row, dict) else None
+                    if isinstance(chain, str) and chain:
+                        return "ledger-" + hashlib.sha256(chain.encode()).hexdigest()[:12]
+                    break
+    except Exception:  # noqa: BLE001  an id we cannot derive is just "ledger"
+        pass
+    return "ledger"
+
+
+def _pin_ns_from_key(fn, lp: Path, head, key: str) -> dict:
+    """`pin --remote` with no --ns: seal's namespace-from-the-key logic
+    (arcaeon.remote.sealed_scan). Try `<learned prefix>-ledger-<id>` if this
+    process already learned the key's prefix, else `arcaeon-ledger-<id>`; on a
+    403 that names the key's prefix (it spends no credit), remember the prefix
+    and retry ONCE under `<prefix>-ledger-<id>`. The namespace used is in the
+    printed answer so the next run can pass it as --ns."""
+    from arcaeon.remote import sealed_scan as S
+    part = _ledger_ns_part(lp)
+
+    def join(prefix: str) -> str:
+        return prefix + part if prefix.endswith("-") else prefix + "-" + part
+
+    known = S._prefix_cache.get(S._key_id(key)) if key else None
+    ns = join(known) if known else join(_PIN_NS_BASE)
+    out = fn(ns, head.rows, head.chain, key)
+    prefix = S.prefix_from_refusal(out) if not out.get("ok") else None
+    if prefix and key:
+        S._prefix_cache[S._key_id(key)] = prefix
+        derived = join(prefix)
+        if derived != ns and S._NS_RE.match(derived):
+            ns = derived
+            out = fn(ns, head.rows, head.chain, key)
+    return {**out, "namespace": out.get("namespace", ns)}
 
 
 def _witness_file_problem(p: Path) -> str | None:

@@ -188,10 +188,17 @@ the ledger's current head (row count and chain) to a witness: a local pin
 file with `--witness FILE`, or the hosted witness with `--remote` (needs
 `ARCAEON_KEY`).
 
+`--ns` is required with `--witness`. With `--remote` it may be left out: the
+namespace is then `<your key's prefix>-ledger-<id>`, where the id comes from
+the ledger's first row (never its path), so each ledger gets its own. It
+works the way `seal` does: it tries `arcaeon-ledger-<id>`, and if the witness
+refuses that and names your key's prefix (the refusal costs no credit), it
+retries once under your prefix. The namespace used is printed with the pin.
+
 **Usage**
 
 ```text
-usage: arcaeon pin [-h] --ns NS (--witness WITNESS | --remote) [--renew]
+usage: arcaeon pin [-h] [--ns NS] (--witness WITNESS | --remote) [--renew]
                    ledger
 ```
 

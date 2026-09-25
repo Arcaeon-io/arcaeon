@@ -530,3 +530,90 @@ def test_version_key_not_set_and_extras_listed(monkeypatch, capsys):
         assert "sign" in line
     extras = line.split("extras:")[1].split(";")[0].strip()
     assert extras == "none" or set(extras.split(", ")) <= {"mcp", "ts", "sign"}
+
+
+# --- pin --remote with no --ns (B020) -----------------------------------------------
+
+def _refuse_unless(prefix):
+    """A stub witness: 403 naming `prefix` unless the namespace starts with it."""
+    sent = []
+
+    def post(url, body, key, timeout=None):
+        sent.append(body["namespace"])
+        if not body["namespace"].startswith(prefix):
+            return 403, {"error": f'this key may only pin namespaces starting with "{prefix}"'}
+        return 201, {"ok": True, "namespace": body["namespace"]}
+    return sent, post
+
+
+def test_pin_ns_from_key_retries_once_under_the_named_prefix(tmp_path, monkeypatch, capsys):
+    from arcaeon.remote import sealed_scan, witness
+    sealed_scan._reset_prefix_cache()
+    monkeypatch.setenv("ARCAEON_KEY", "wk_test_pin_ns")
+    sent, post = _refuse_unless("wk-ab12-")
+    monkeypatch.setattr(witness, "_http_post", post)
+    p = tmp_path / "secret_name.jsonl"
+    cli.main(["log", str(p), '{"op": "one"}'])
+    capsys.readouterr()
+    assert cli.main(["pin", str(p), "--remote"]) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert len(sent) == 2
+    assert sent[0].startswith("arcaeon-ledger-") and sent[1].startswith("wk-ab12-ledger-")
+    assert sent[0][len("arcaeon-"):] == sent[1][len("wk-ab12-"):]
+    assert out["ok"] is True and out["namespace"] == sent[1]
+    assert "secret" not in sent[1]
+    # the same process now goes straight to the derived namespace: one request
+    cli.main(["log", str(p), '{"op": "two"}'])
+    capsys.readouterr()
+    assert cli.main(["pin", str(p), "--remote"]) == 0
+    capsys.readouterr()
+    assert sent[2:] == [sent[1]]
+    sealed_scan._reset_prefix_cache()
+
+
+def test_pin_ns_from_key_differs_per_ledger(tmp_path, monkeypatch, capsys):
+    from arcaeon.remote import sealed_scan, witness
+    sealed_scan._reset_prefix_cache()
+    monkeypatch.setenv("ARCAEON_KEY", "wk_test_pin_ns")
+    sent, post = _refuse_unless("arcaeon-")
+    monkeypatch.setattr(witness, "_http_post", post)
+    a, b = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
+    cli.main(["log", str(a), '{"op": "a"}'])
+    cli.main(["log", str(b), '{"op": "b"}'])
+    assert cli.main(["pin", str(a), "--remote"]) == 0
+    assert cli.main(["pin", str(b), "--remote"]) == 0
+    capsys.readouterr()
+    assert len(sent) == 2 and sent[0] != sent[1]
+    sealed_scan._reset_prefix_cache()
+
+
+def test_pin_ns_from_key_explicit_ns_is_never_second_guessed(tmp_path, monkeypatch, capsys):
+    from arcaeon.remote import sealed_scan, witness
+    sealed_scan._reset_prefix_cache()
+    monkeypatch.setenv("ARCAEON_KEY", "wk_test_pin_ns")
+    sent, post = _refuse_unless("wk-ab12-")
+    monkeypatch.setattr(witness, "_http_post", post)
+    p = tmp_path / "a.jsonl"
+    cli.main(["log", str(p), '{"op": "one"}'])
+    assert cli.main(["pin", str(p), "--ns", "demo", "--remote"]) == 1
+    capsys.readouterr()
+    assert sent == ["demo"]
+    sealed_scan._reset_prefix_cache()
+
+
+def test_pin_ns_from_key_witness_file_still_needs_ns(tmp_path, capsys):
+    p = tmp_path / "a.jsonl"
+    cli.main(["log", str(p), '{"op": "one"}'])
+    assert cli.main(["pin", str(p), "--witness", str(tmp_path / "w.jsonl")]) == 2
+    assert "--ns is required with --witness" in capsys.readouterr().err
+    assert not (tmp_path / "w.jsonl").exists()
+
+
+def test_pin_ns_from_key_without_a_key_sends_nothing(tmp_path, monkeypatch, capsys):
+    from arcaeon.remote import witness
+    monkeypatch.delenv("ARCAEON_KEY", raising=False)
+    monkeypatch.setattr(witness, "_http_post", lambda *a, **k: pytest.fail("network used"))
+    p = tmp_path / "a.jsonl"
+    cli.main(["log", str(p), '{"op": "one"}'])
+    assert cli.main(["pin", str(p), "--remote"]) == 1
+    assert "ARCAEON_KEY" in capsys.readouterr().out
