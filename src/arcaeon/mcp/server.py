@@ -19,7 +19,10 @@ disagree is the day the connector lies about a chain.
 NAMESPACING. Upstream names that already read as ledger tools keep their names
 (`ledger_append`, `ledger_verify`); the agent-facing three get the prefix
 (`ledger_prove_my_conduct`, and so on), and mcp-vet's `mcp_vet_*` becomes
-`vet_*`. One list of eleven tools where the prefix says which product answers.
+`vet_*`. The deal lane's three writers and its verdict appear as `deal_mandate`,
+`deal_commit` and `deal_dispute`, calling `arcaeon.record.deal` directly (the
+same functions `arcaeon deal` runs). One list of fourteen tools where the
+prefix says which product answers.
 
 THE DRIFT RISK, stated. The wrappers are written out by hand rather than
 generated, because the SDK derives a tool's JSON schema from a real Python
@@ -70,6 +73,7 @@ from arcaeon.record.ledger import Ledger
 from arcaeon.record.ledger import __version__ as LEDGER_VERSION
 from arcaeon.record.ledger.mcp_server import TOOLS as _LEDGER_UPSTREAM
 from arcaeon.record.ledger.mcp_server import handle as _ledger_handle
+from arcaeon.record import deal as _deal
 from arcaeon.prove.vet import __version__ as VET_VERSION
 from arcaeon.prove.vet.server import GRADE_DESCRIPTION as _VET_GRADE_DESCRIPTION
 from arcaeon.prove.vet.server import SCAN_DESCRIPTION as _VET_SCAN_DESCRIPTION
@@ -98,10 +102,12 @@ VET_TOOLS = {
 }
 
 WITNESS_TOOLS = ("witness_pin", "witness_renew")
+DEAL_TOOLS = ("deal_mandate", "deal_commit", "deal_dispute")
 PAID_TOOLS = WITNESS_TOOLS
 STATUS_TOOL = "arcaeon_status"
 
-ALL_TOOLS = sorted([*LEDGER_TOOLS.values(), *VET_TOOLS.values(), *WITNESS_TOOLS, STATUS_TOOL])
+ALL_TOOLS = sorted([*LEDGER_TOOLS.values(), *VET_TOOLS.values(), *WITNESS_TOOLS,
+                    *DEAL_TOOLS, STATUS_TOOL])
 FREE_TOOLS = [n for n in ALL_TOOLS if n not in PAID_TOOLS]
 
 
@@ -351,6 +357,37 @@ def _witness_call(tool: str, write, args: dict):
     return write(args["namespace"], args["rows"], args["chain"], key)
 
 
+# --- the deal lane ---------------------------------------------------------
+# Import only: every answer comes from arcaeon.record.deal, the module
+# `arcaeon deal` runs. The row / report goes back as plain JSON (a
+# could-not-check reason is a str subclass carrying extra attributes; the
+# round trip hands the caller the plain string, exactly what the ledger holds).
+
+def _plain(value):
+    return json.loads(json.dumps(value, ensure_ascii=False))
+
+
+def _deal_mandate(args: dict) -> dict:
+    d = _deal.Deal(args["ledger"], "buyer", args["deal"])
+    return _plain(d.mandate(merchant=args["merchant"], cap=args["cap"],
+                            currency=args["currency"], not_before=args.get("not_before"),
+                            not_after=args.get("not_after"), may=args.get("may"),
+                            may_not=args.get("may_not")))
+
+
+def _deal_commit(args: dict) -> dict:
+    d = _deal.Deal(args["ledger"], args["party"], args["deal"])
+    return _plain(d.commit(items=args["items"], total=args["total"],
+                           currency=args["currency"], seller=args["seller"],
+                           ship_to=args.get("ship_to"), buyer_ref=args.get("buyer_ref"),
+                           mandate_digest=args.get("mandate_digest"),
+                           note=args.get("note")))
+
+
+def _deal_dispute(args: dict) -> dict:
+    return _plain(_deal.dispute(args["deal"], args["buyer"], args["seller"]).to_dict())
+
+
 def _server_class():
     """The SDK's server class under whichever name the installed version uses
     (2.x: MCPServer; 1.x: FastMCP). Same probe mcp-vet ships."""
@@ -499,6 +536,59 @@ def build_server():
         args = {"namespace": namespace, "rows": rows, "chain": chain}
         outcome = _attempt(_witness_call, "witness_renew", witness.renew, args)
         return _record_call("witness_renew", args, outcome)
+
+    # --- the deal lane ------------------------------------------------------
+
+    @_tool(
+        name="deal_mandate",
+        description=(
+            "Record a buyer's MANDATE for a deal on the buyer's ledger: the merchant, "
+            "a spend cap in a currency, an optional time window, and optional lists of "
+            "acts the agent may / may not take. Writes one hash-chained deal.mandate "
+            "row and returns it (with mandate_digest). Records; enforces nothing and "
+            "moves no money."),
+    )
+    def deal_mandate(ledger: str, deal: str, merchant: str, cap: str, currency: str,
+                     not_before: str | None = None, not_after: str | None = None,
+                     may: list[str] | None = None,
+                     may_not: list[str] | None = None) -> dict:
+        args = {"ledger": ledger, "deal": deal, "merchant": merchant, "cap": cap,
+                "currency": currency, "not_before": not_before, "not_after": not_after,
+                "may": may, "may_not": may_not}
+        outcome = _attempt(_deal_mandate, args)
+        return _record_call("deal_mandate", args, outcome)
+
+    @_tool(
+        name="deal_commit",
+        description=(
+            "Record the agreed terms of a deal (items, total, currency, seller) on one "
+            "party's ledger. party is 'buyer' or 'seller'. The buyer's row also says "
+            "whether the terms are inside the buyer's latest mandate (true / false / "
+            "null = could not check) and why. ship_to is digested, never stored."),
+    )
+    def deal_commit(ledger: str, deal: str, party: str, items: list[dict], total: str,
+                    currency: str, seller: str, ship_to: str | None = None,
+                    buyer_ref: str | None = None, mandate_digest: str | None = None,
+                    note: str | None = None) -> dict:
+        args = {"ledger": ledger, "deal": deal, "party": party, "items": items,
+                "total": total, "currency": currency, "seller": seller,
+                "ship_to": ship_to, "buyer_ref": buyer_ref,
+                "mandate_digest": mandate_digest, "note": note}
+        outcome = _attempt(_deal_commit, args)
+        return _record_call("deal_commit", args, outcome)
+
+    @_tool(
+        name="deal_dispute",
+        description=(
+            "The deal verdict over the buyer's and the seller's ledgers: MATCHED, "
+            "MISSING, ALTERED or COULD NOT LOOK, with the timeline, each finding, and "
+            "what the verdict does not prove. Reads only; never raises (a ledger it "
+            "cannot read is COULD NOT LOOK)."),
+    )
+    def deal_dispute(deal: str, buyer: str, seller: str) -> dict:
+        args = {"deal": deal, "buyer": buyer, "seller": seller}
+        outcome = _attempt(_deal_dispute, args)
+        return _record_call("deal_dispute", args, outcome)
 
     # --- what is in here, and what costs money ----------------------------
 
