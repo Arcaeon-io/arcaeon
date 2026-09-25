@@ -578,6 +578,19 @@ def run(command: list[str], ledger_path: str, *, server: str | None = None,
         mandate_error=watch.gate.error if watch else None,
     )
 
+    if watch is not None and watch.enforce and not watch.gate.ok:
+        # Enforce with no readable mandate has nothing to enforce, and starting
+        # anyway would either block every call or pass every call unjudged.
+        # Neither is what enforce promised, so it refuses to start: exit 3,
+        # COULD NOT LOOK (arcaeon.verdict). Record-only never gets here: it
+        # starts and rows every call as could-not-look.
+        sys.stderr.write(f"arcaeon-adapter: refusing to start: --mandate-enforce and the "
+                         f"mandate {watch.gate.status}: {watch.gate.error}\n")
+        sys.stderr.flush()
+        obs.session_end(reason="mandate_unreadable", exit_code=3,
+                        error=f"mandate {watch.gate.status}: {watch.gate.error}")
+        return 3
+
     cin = stdin if stdin is not None else _binary_stdin()
     cout = stdout if stdout is not None else _binary_stdout()
 
