@@ -2,8 +2,8 @@
 """arcaeon_all: a marker. `pip install arcaeon-all` now installs `arcaeon[all]`.
 
 The ten components it used to pin are one package now, `arcaeon`, with every
-extra. The old names stay importable (`versions()`, `COMPONENTS`). This marker
-goes away with arcaeon 1.0.0.
+extra. The old names stay importable (`versions()`, `COMPONENTS`). This marker has
+no removal date yet; it will be set from download counts (SUNSET_DATE).
 """
 import warnings as _warnings
 
@@ -14,7 +14,13 @@ COMPONENTS = ("arcaeon",)
 
 __all__ = ["__version__", "COMPONENTS", "versions"]
 
-_warnings.warn("arcaeon_all is deprecated: import arcaeon instead (removed in arcaeon 1.0.0)",
+#: The removal date. None = not decided: it will be set from download counts,
+#: and until then the warning says so instead of naming a release.
+SUNSET_DATE = None
+_WHEN = (f"removed on {SUNSET_DATE}" if SUNSET_DATE
+         else "no removal date yet; it will be set from download counts")
+
+_warnings.warn(f"arcaeon_all is deprecated: import arcaeon instead ({_WHEN})",
                DeprecationWarning, stacklevel=2)
 
 

@@ -3,7 +3,8 @@
 
 `pip install arcaeon-receipt` installs `arcaeon` and this one forwarding module, nothing
 else. Every old name (and every old submodule, `arcaeon_receipt.<name>`) resolves to
-the same object in its new home. The shim goes away with arcaeon 1.0.0.
+the same object in its new home. The shim has no removal date yet;
+it will be set from download counts (SUNSET_DATE).
 """
 import importlib as _importlib
 import importlib.abc as _abc
@@ -51,7 +52,13 @@ __all__ = ['RECEIPT_VERSION',
            'attach_attestation_signature',
            '__version__']
 
-_warnings.warn("arcaeon_receipt is deprecated: import arcaeon.record.receipt instead (removed in arcaeon 1.0.0)",
+#: The removal date. None = not decided: it will be set from download counts,
+#: and until then the warning says so instead of naming a release.
+SUNSET_DATE = None
+_WHEN = (f"removed on {SUNSET_DATE}" if SUNSET_DATE
+         else "no removal date yet; it will be set from download counts")
+
+_warnings.warn(f"arcaeon_receipt is deprecated: import arcaeon.record.receipt instead ({_WHEN})",
                DeprecationWarning, stacklevel=2)
 
 _target = _importlib.import_module(_NEW)

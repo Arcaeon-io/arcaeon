@@ -57,9 +57,11 @@ was never published, so PyPI's last is 0.0.15.
 
 ## When they go away
 
-With `arcaeon` 1.0.0. That release also removes `--legacy-exit` and the
-no-terminal MCP fallback. Until then the shims are the last release of each old
-name and receive no changes; to stop seeing the warning, change the import to
-the new module in the table above.
+No removal date yet; it will be set from download counts. Each shim holds
+that in one constant, `SUNSET_DATE = None`, and its DeprecationWarning says
+"no removal date yet; it will be set from download counts" until a date is
+set there. Until then the shims take only fixes to themselves (the next
+patch of each carries its own `__version__`, cb45976); to stop seeing the
+warning, change the import to the new module in the table above.
 
 The checks for all of this are in `tests/test_shims.py`.

@@ -7,7 +7,7 @@ name = "arcaeon-distill"
 # one patch above the old line: PyPI last 0.1.7
 # 0.1.9: re-release so the wheel carries the shim's own __version__ (cb45976); 0.1.8 shipped the moved code's string
 version = "0.1.9"
-description = "Compatibility shim: arcaeon-distill is now part of arcaeon (arcaeon.save.distill). Installs arcaeon; goes away with arcaeon 1.0.0."
+description = "Compatibility shim: arcaeon-distill is now part of arcaeon (arcaeon.save.distill). Installs arcaeon; no removal date yet (set from download counts)."
 requires-python = ">=3.10"
 license = "MIT"
 authors = [{ name = "Arcaeon" }]

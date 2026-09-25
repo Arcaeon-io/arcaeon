@@ -7,7 +7,7 @@ name = "arcaeon-compact"
 # one patch above the old line: PyPI last 0.1.5
 # 0.1.7: re-release so the wheel carries the shim's own __version__ (cb45976); 0.1.6 shipped the moved code's string
 version = "0.1.7"
-description = "Compatibility shim: arcaeon-compact is now part of arcaeon (arcaeon.prove.compact). Installs arcaeon; goes away with arcaeon 1.0.0."
+description = "Compatibility shim: arcaeon-compact is now part of arcaeon (arcaeon.prove.compact). Installs arcaeon; no removal date yet (set from download counts)."
 requires-python = ">=3.10"
 license = "MIT"
 authors = [{ name = "Arcaeon" }]

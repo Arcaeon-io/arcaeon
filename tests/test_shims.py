@@ -373,3 +373,43 @@ def test_shim_without_a_script_runs_a_real_call(name):
     proc = _run(name, "import warnings\nwarnings.simplefilter('ignore', DeprecationWarning)\n"
                 + LIBRARY_CASES[name])
     assert proc.returncode == 0, proc.stderr[-2000:]
+
+
+# --- B044: no invented removal date --------------------------------------------------
+
+SUNSET_PHRASE = "no removal date yet; it will be set from download counts"
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_sunset_date_is_none_and_the_warning_says_so(name):
+    old, _new = TABLE[name]
+    proc = _run(name, f"""
+        import json, warnings
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            import {old} as shim
+        mine = [str(w.message) for w in caught
+                if issubclass(w.category, DeprecationWarning) and "{old}" in str(w.message)]
+        print(json.dumps({{"file": shim.__file__, "sunset": shim.SUNSET_DATE, "mine": mine}}))
+    """)
+    out = _json_tail(proc)
+    assert Path(out["file"]).resolve().is_relative_to((SHIMS / name).resolve()), out["file"]
+    assert out["sunset"] is None
+    assert len(out["mine"]) == 1 and out["mine"][0].endswith(f"({SUNSET_PHRASE})"), out["mine"]
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_sunset_no_shim_names_a_removal_release(name):
+    """One constant decides the wording; no file in the shim names a release
+    or date it will be removed in."""
+    old, _new = TABLE[name]
+    src = (SHIMS / name / old / "__init__.py").read_text(encoding="utf-8")
+    assert src.count("SUNSET_DATE = None") == 1
+    assert "1.0.0" not in src and "removed in" not in src
+    assert "1.0.0" not in _pyproject(name)["project"]["description"]
+
+
+def test_sunset_the_readme_names_no_removal_release():
+    text = (SHIMS / "README.md").read_text(encoding="utf-8")
+    section = text.split("## When they go away", 1)[1]
+    assert SUNSET_PHRASE in section and "1.0.0" not in section
