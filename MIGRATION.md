@@ -1,5 +1,50 @@
 # MIGRATION: 13 packages into one `arcaeon`
 
+## Unreleased
+
+Not in any release yet. These are committed on main and will ship in the next
+version; until then `pip install arcaeon` does not have them. Each item names
+the lane (A, B or C) of the work and the commit ids that carry it.
+
+- **Additive COULD NOT LOOK keys (lane A: e7cb56f, 34df5f3, 026d882, 4925e90,
+  b2e4bb8, 886f98b; lane B: 4b1fdfa).** `arcaeon.verdict.REASON_WORDS`
+  (`unreadable`, `missing`, `empty`, `name_not_found`, `bounded`, `network`)
+  and `arcaeon.verdict.could_not_look()` are new. Every COULD NOT LOOK result
+  in reconcile, audit, deal, receipt batches, verify, log, pin and once
+  rebuild-index now also carries `looked_for`, `where` and `reason_word`
+  beside the old `reason`. Nothing was renamed or removed, so a reader that
+  ignores unknown keys sees no change. docs/WORDS.md explains each word.
+- **The `status` verb (lane B: c721824, 406e127).** `arcaeon status [--json]`
+  shows the last run of each verb and the targets whose newest look ended
+  COULD NOT LOOK. It checks the balance only when `ARCAEON_KEY` is set.
+- **The activity journal (lane B: 68c125a, a24d939, 541f4d5, feff413).** Every
+  verb run appends one line to `~/.arcaeon/activity.jsonl` (or under
+  `$ARCAEON_HOME`): the verb, its exit code, the word, and the target as a
+  sha256, never the path. `ARCAEON_JOURNAL=0` turns it off. A journal that
+  cannot be written never changes a verb's exit code.
+- **`stamp` and `credits` exit codes (lane B: d981d0f, 36d1505).** When the
+  request to the hosted witness never completes, both now answer COULD NOT
+  LOOK, exit 3, `reason_word` `network` (before: exit 1). `stamp` on a
+  missing or unreadable file is COULD NOT LOOK, exit 3 (before: bad usage,
+  exit 2), matching `verify`. `credits` prints one plain sentence; `--json`
+  gives the raw answer.
+- **`verify --witness` (lane B: f3b27f1, 4b1fdfa).** `arcaeon verify LEDGER
+  --witness PINS` compares the ledger with its last pin in a local pin file:
+  the report gains `since_pin`, the rows added since then, and a ledger with
+  fewer rows than its pin is BROKEN, exit 1.
+- **`log --field` and stdin (lane B: b638493).** `arcaeon log FILE --field
+  KEY=VALUE` (repeatable; `KEY:=JSON` for typed values) and `arcaeon log
+  FILE -` write a row with no JSON quoting on the command line.
+- **The mandate gate (lane C: a33797b, f75d5e4, 9d2afd7, 451b923, 2763a92,
+  0b1f879, 5f24990).** `arcaeon proxy --mandate PATH` checks every tool call
+  against a mandate and writes a row when a call falls outside it. The default
+  is record-only: the call is still forwarded. `--mandate-enforce` opts in to
+  refusing it. `--policy FILE` pins system-prompt or policy files by hash at
+  session start. See docs/MANDATE_GATE.md.
+- **Deal tools over MCP (lane C: 3951465, 18b9659).** The MCP server gains
+  `deal_mandate`, `deal_commit` and `deal_dispute` (fourteen tools, twelve
+  free).
+
 ## 0.9.1 (2026-09-25)
 
 - `arcaeon verify` on a path it cannot read (missing, a directory, no
