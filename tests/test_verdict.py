@@ -176,3 +176,43 @@ def test_arcaeon_badge_on_nothing_gradeable_is_3(tmp_path, capsys):
     (empty / "README.md").write_text("nothing to grade", encoding="utf-8")
     assert cli.main(["badge", str(empty)]) == 3
     capsys.readouterr()
+
+
+# --- the supersedes walk: resolver_conflict is its own kind -----------------------
+
+def _specimen_rows():
+    """Fixture-built specimen (mindgrapez's fourth rule, Colony 2026-09-25):
+    two rows claim `old`, then two later resolver rows name different sets."""
+    return [
+        {"id": "old"},
+        {"id": "a", "supersedes": ["old"]},
+        {"id": "b", "supersedes": ["old"]},
+        {"id": "c", "supersedes": ["old"]},
+        {"id": "r1", "supersedes": ["a", "b"]},
+        {"id": "r2", "supersedes": ["b", "c"]},
+    ]
+
+
+def test_resolver_conflict_is_a_fixed_row_naming_both_ids_and_both_sets(capsys):
+    found = R.print_walk(_specimen_rows())
+    conflicts = [r for r in found if r["kind"] == "resolver_conflict"]
+    assert conflicts == [{"kind": "resolver_conflict", "of": "old", "resolvers": ["r1", "r2"],
+                          "supersedes": [["a", "b"], ["b", "c"]]}]
+    fork = [r for r in found if r["kind"] == "supersede_fork" and r["of"] == "old"]
+    assert fork == [{"kind": "supersede_fork", "of": "old", "claimants": ["a", "b", "c"],
+                     "resolved_by": None}]
+    out = capsys.readouterr().out.splitlines()
+    assert ("kind: resolver_conflict  of: old  resolvers: r1, r2  "
+            "supersedes: [a, b] vs [b, c]") in out
+
+
+def test_resolver_conflict_absent_when_one_resolver_covers_the_fork():
+    rows = [{"id": "old"}, {"id": "a", "supersedes": ["old"]},
+            {"id": "b", "supersedes": "old"}, {"id": "r", "supersedes": ["a", "b"]}]
+    found = R.walk_supersedes(rows)
+    assert [r["kind"] for r in found] == ["supersede_fork"]
+    assert found[0]["resolved_by"] == "r"
+
+
+def test_resolver_conflict_never_raises_on_junk_rows():
+    assert R.walk_supersedes([None, 7, {"supersedes": ["x"]}, {"id": 3}]) == []

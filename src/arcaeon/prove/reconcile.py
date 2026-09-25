@@ -75,7 +75,8 @@ from arcaeon.record.row import loads as _loads
 from arcaeon.record.row import loads_strict as _loads_strict
 
 __all__ = ["TAPE_FORMAT", "MATCHED", "MISSING", "ALTERED", "COULD_NOT_LOOK",
-           "EXIT_CODES", "LEGACY_EXIT_CODES", "Finding", "Reconciliation", "reconcile", "load_pins", "LIMITS"]
+           "EXIT_CODES", "LEGACY_EXIT_CODES", "Finding", "Reconciliation", "reconcile", "load_pins", "LIMITS",
+           "walk_supersedes", "walk_line", "print_walk"]
 
 TAPE_FORMAT = "arcaeon-tape/1"
 SIDES = ("agent", "tool")
@@ -683,3 +684,87 @@ def main(argv: list[str]) -> int:
     r = reconcile(args[0], args[1], pin_path=pin)
     print(json.dumps(r.to_dict(), indent=1))
     return LEGACY_EXIT_CODES[r.verdict] if legacy else r.exit_code
+
+
+# -- the supersedes walk -----------------------------------------------------
+#
+# A row that replaces another carries `supersedes: [<old id>, ...]` on the NEW
+# row only; the old row stays byte-identical and "superseded" is derived by
+# walking forward. The walk never breaks a tie by clock (a clock is a
+# writer-controlled field). It emits three fixed kinds:
+#
+#   supersede_fork     two or more rows claim the same old id. Both claimant
+#                      ids are named; the walk does not pick. `resolved_by`
+#                      names the one later row whose supersedes covers every
+#                      claimant, when exactly one such row exists.
+#   resolver_conflict  two later rows each name two or more of a fork's
+#                      claimants in `supersedes`, with different sets: two
+#                      claims about WHICH rows are claimants, one level above a
+#                      fork. One row per conflicting pair, naming both resolver
+#                      ids and both supersedes sets. Never folded into a fork.
+
+def _sup_list(row: dict) -> list:
+    s = row.get("supersedes")
+    if isinstance(s, str):
+        return [s]
+    if isinstance(s, list):
+        return [x for x in s if isinstance(x, str)]
+    return []
+
+
+def walk_supersedes(rows) -> list[dict]:
+    """Walk `rows` (dicts with `id` and optional `supersedes`) forward, in the
+    order given, and return the fork and resolver-conflict rows. Never raises
+    on a row that is not a dict or has no string `id`: it is skipped."""
+    order: list = []
+    sups: dict = {}
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("id"), str):
+            continue
+        rid = row["id"]
+        if rid in sups:
+            continue
+        order.append(rid)
+        sups[rid] = _sup_list(row)
+    pos = {rid: i for i, rid in enumerate(order)}
+    claimants: dict = {}
+    for rid in order:
+        for old in sups[rid]:
+            claimants.setdefault(old, []).append(rid)
+    out: list = []
+    for old, cl in claimants.items():
+        if len(cl) < 2:
+            continue
+        fork = set(cl)
+        last = max(pos[c] for c in cl)
+        cands = [rid for rid in order[last + 1:] if len(fork & set(sups[rid])) >= 2]
+        covering = [rid for rid in cands if fork <= set(sups[rid])]
+        out.append({"kind": "supersede_fork", "of": old, "claimants": list(cl),
+                    "resolved_by": covering[0] if len(covering) == 1 else None})
+        for i, a in enumerate(cands):
+            for b in cands[i + 1:]:
+                if set(sups[a]) != set(sups[b]):
+                    out.append({"kind": "resolver_conflict", "of": old,
+                                "resolvers": [a, b],
+                                "supersedes": [list(sups[a]), list(sups[b])]})
+    return out
+
+
+def walk_line(row: dict) -> str:
+    """The fixed one-line text of a walk row."""
+    if row.get("kind") == "resolver_conflict":
+        a, b = row["resolvers"]
+        sa, sb = row["supersedes"]
+        return (f"kind: resolver_conflict  of: {row['of']}  resolvers: {a}, {b}  "
+                f"supersedes: [{', '.join(sa)}] vs [{', '.join(sb)}]")
+    return (f"kind: supersede_fork  of: {row['of']}  claimants: {', '.join(row['claimants'])}"
+            f"  resolved_by: {row.get('resolved_by') or '-'}")
+
+
+def print_walk(rows, file=None) -> list[dict]:
+    """Walk and print one fixed line per fork / conflict. Returns the rows."""
+    import sys
+    found = walk_supersedes(rows)
+    for r in found:
+        print(walk_line(r), file=file or sys.stdout)
+    return found
