@@ -572,10 +572,10 @@ def run(command: list[str], ledger_path: str, *, server: str | None = None,
         tape=str(tape_path) if tape else None,
         tape_side=side if tape else None,
         tape_namespace=tape_namespace if tape else None,
-        mandate=watch.gate.path if watch else None,
         mandate_mode=watch.mode if watch else None,
-        mandate_status=watch.gate.status if watch else None,
-        mandate_error=watch.gate.error if watch else None,
+        # The mandate in force, pinned in the session's FIRST row: path, status,
+        # sha256 of the file's bytes, and the deal lane's body digest.
+        **(watch.gate.fingerprint() if watch else {}),
     )
 
     if watch is not None and watch.enforce and not watch.gate.ok:
