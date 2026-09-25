@@ -221,10 +221,13 @@ def _last_row_problem(p: Path) -> str | None:
 
 
 def _verify(argv) -> int:
-    argv, _legacy = V.pop_legacy_flag(argv)       # verify already used 3; nothing to keep
+    # verify already used 3 for a bounded chain; --legacy-exit keeps only the
+    # 0.9.0 code for a file that could not be read (1, BROKEN), see below
+    argv, legacy = V.pop_legacy_flag(argv)
     if _wants_help(argv) or len([a for a in argv if a != "--strict"]) != 1:
         print("usage: arcaeon verify <ledger.jsonl> [--strict]\n"
-              "exit 0 VERIFIED, 1 BROKEN, 3 COULD NOT LOOK (rows the chain could not speak for)")
+              "exit 0 VERIFIED, 1 BROKEN, 3 COULD NOT LOOK (rows the chain could not speak "
+              "for, or a file that could not be read)")
         return V.EXIT_GOOD if _wants_help(argv) else V.EXIT_USAGE
     # The ledger's own report, with the verdict word added as the first key
     # (the ledger CLI prints the same fields without it). The word comes from
@@ -238,7 +241,16 @@ def _verify(argv) -> int:
         return V.EXIT_USAGE
     r = verify_file(path, strict=strict)
     word = V.VERIFIED if r.ok is True else (V.COULD_NOT_LOOK if r.ok is None else V.BROKEN)
+    # A missing, unreadable or directory path: verify_file() reports ok=False
+    # "unreadable: ..." with zero rows read. Nothing was checked, so no break
+    # was found either: that is COULD NOT LOOK (exit 3), not BROKEN (0.9.1).
+    unread = (r.ok is False and not r.rows
+              and str(r.first_break or "").startswith("unreadable:"))
+    if unread:
+        word = V.COULD_NOT_LOOK
     print(json.dumps({"verdict": word, **r.__dict__}, indent=1))
+    if unread and legacy:
+        return V.EXIT_BAD                      # 0.9.0 / arcaeon-ledger verify said 1
     return V.exit_for(word)
 
 

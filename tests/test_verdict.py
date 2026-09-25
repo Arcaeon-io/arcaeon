@@ -123,6 +123,23 @@ def _bounded_log(p: Path) -> Path:
     return p
 
 
+@pytest.mark.parametrize("kind", ["missing", "directory"])
+def test_arcaeon_verify_on_a_path_it_cannot_read_is_could_not_look(kind, tmp_path, capsys):
+    """0.9.0 said BROKEN (exit 1) for a ledger that is not there: a break was
+    claimed where nothing was read. Nothing checked is COULD NOT LOOK, exit 3;
+    --legacy-exit keeps the old 1 for the 0.9.x release."""
+    p = tmp_path / "nope.jsonl"
+    if kind == "directory":
+        p.mkdir()
+    assert cli.main(["verify", str(p)]) == V.EXIT_COULD_NOT_LOOK
+    out = json.loads(capsys.readouterr().out)
+    assert out["verdict"] == V.COULD_NOT_LOOK
+    assert out["first_break"].startswith("unreadable:")
+    assert cli.main(["verify", str(p), "--strict"]) == V.EXIT_COULD_NOT_LOOK
+    assert cli.main(["verify", str(p), "--legacy-exit"]) == 1
+    capsys.readouterr()
+
+
 def test_arcaeon_verify_bounded_is_3(tmp_path, capsys):
     p = _bounded_log(tmp_path / "b.jsonl")
     assert cli.main(["verify", str(p)]) == 3

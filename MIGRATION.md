@@ -1,5 +1,25 @@
 # MIGRATION: 13 packages into one `arcaeon`
 
+## Unreleased: 0.9.1
+
+- `arcaeon verify` on a path it cannot read (missing, a directory, no
+  permission) now answers COULD NOT LOOK, exit 3. 0.9.0 answered BROKEN,
+  exit 1, which claimed a break in a file nothing had read. The JSON report is
+  unchanged except its `verdict` word (`first_break` still says
+  `unreadable: ...`). `--legacy-exit` returns the old 1 for the 0.9.x
+  releases. The `arcaeon-ledger verify` shim (0.8.1) runs `arcaeon verify`
+  without that flag, so it sees 3 as well.
+- Every verb's usage line reads `arcaeon <verb>`. Seven printed the old tool
+  name (`arcaeon-receipt`, `arcaeon-audit`, `arcaeon-baseline`,
+  `arcaeon-meter`, `arcaeon-mcp`, `python -m arcaeon.record.adapter.proxy`,
+  and `arcaeon vet badge` for `badge`).
+- Each shim module's `__version__` is its own release (the version in its
+  pyproject), not the moved code's internal string; `arcaeon_ledger` said
+  0.8.0 inside the 0.8.1 wheel.
+- The `arcaeon.cli` docstring's NETWORK note names the two verbs that go
+  online on request: `receipt cite` (CourtListener, unless `--fixture`) and
+  `proxy --pin-witness URL`.
+
 ## If you used the old packages
 
 Short version: nothing breaks the day you upgrade. Each old name has one last
@@ -294,7 +314,7 @@ LOOK. What changed, and how to keep the old code for the 0.9.x release:
 | vet badge | 4 = refused --sealed | 3 | 4 |
 | vet verify / audit-verify | 2 = not reproduced / broken | 1 | 2 |
 | vet probe | 2 = could not connect | 3 | 2 |
-| ledger verify | 3 already | 3 | 3 |
+| ledger verify | 3 bounded chain; 1 unreadable file | 3 for both (unreadable: from 0.9.1) | 3; 1 |
 
 Reconcile speaks the table natively; the others' moved code still returns its
 old code and `arcaeon <verb>` translates it through `verdict.LEGACY`. An argparse

@@ -51,10 +51,12 @@ chain over every row and names the first break.
 usage: arcaeon verify <ledger.jsonl> [--strict]
 ```
 
-**Exit codes:** 0 VERIFIED, every row checked. 1 BROKEN, or the file could
-not be read. 3 COULD NOT LOOK: no break found, but unchained rows before the
-chain began were skipped, so not every row was checked (`--strict` turns those
-into a break). 2 wrong arguments.
+**Exit codes:** 0 VERIFIED, every row checked. 1 BROKEN. 3 COULD NOT LOOK:
+the file could not be read (missing, a directory, no permission), or no break
+was found but unchained rows before the chain began were skipped, so not every
+row was checked (`--strict` turns those into a break). 2 wrong arguments.
+Through 0.9.0 an unreadable file was BROKEN, exit 1; `--legacy-exit` keeps that
+for the 0.9.x releases.
 
 ```console
 $ arcaeon verify agent.jsonl
