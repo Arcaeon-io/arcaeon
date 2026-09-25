@@ -57,7 +57,7 @@ chain over every row and names the first break.
 **Usage**
 
 ```text
-usage: arcaeon verify <ledger.jsonl> [--strict]
+usage: arcaeon verify <ledger.jsonl> [--strict] [--witness PINS [--ns NS]]
 ```
 
 **Exit codes:** 0 VERIFIED, every row checked. 1 BROKEN. 3 COULD NOT LOOK:
@@ -65,7 +65,16 @@ the file could not be read (missing, a directory, no permission), or no break
 was found but unchained rows before the chain began were skipped, so not every
 row was checked (`--strict` turns those into a break). 2 wrong arguments.
 Through 0.9.0 an unreadable file was BROKEN, exit 1; `--legacy-exit` keeps that
-for the 0.9.x releases.
+for the 0.9.x releases. A COULD NOT LOOK report carries `looked_for`, `where`
+and `reason_word` (`missing`, `unreadable`, `empty` or `bounded`), and says the
+same in one line on stderr.
+
+`--witness PINS` compares against a local pin file (the one `arcaeon pin
+--witness` writes): the report gains `since_pin`, the rows added since the
+ledger's last pin there, and stderr says it in words. A ledger holding FEWER
+rows than its pin had rows cut off the end, which the chain alone cannot see:
+that is BROKEN, exit 1. `--ns` picks the namespace when the pin file holds
+more than one.
 
 ```console
 $ arcaeon verify agent.jsonl

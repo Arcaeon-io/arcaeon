@@ -679,3 +679,138 @@ def test_stamp_missing_file_is_could_not_look_missing(monkeypatch, tmp_path, cap
     # a directory is unreadable, also 3, also nothing sent
     assert cli.main(["stamp", str(tmp_path)]) == 3
     assert json.loads(capsys.readouterr().out)["reason_word"] == "unreadable"
+
+
+# --- verify and friends: every COULD NOT LOOK names looked_for and where (B017) ------
+
+def _cnl_json(out):
+    return json.loads(out[out.index("{"):])
+
+
+def test_verify_missing_file_names_looked_for_and_where(tmp_path, capsys):
+    missing = tmp_path / "nope.jsonl"
+    assert cli.main(["verify", str(missing)]) == 3
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    assert j["verdict"] == "COULD NOT LOOK" and j["reason_word"] == "missing"
+    assert j["looked_for"] == "a ledger file" and j["where"] == str(missing)
+    assert "looked for a ledger file in " + str(missing) in cap.err
+
+
+def test_verify_bounded_and_empty_name_their_reason_word(tmp_path, capsys):
+    b = tmp_path / "b.jsonl"
+    b.write_text('{"a": 1}\n', encoding="utf-8")
+    assert cli.main(["verify", str(b)]) == 3
+    j = json.loads(capsys.readouterr().out)
+    assert j["reason_word"] == "bounded" and j["where"] == str(b) and j["looked_for"]
+    e = tmp_path / "e.jsonl"
+    e.write_text("", encoding="utf-8")
+    assert cli.main(["verify", str(e)]) == 3
+    assert json.loads(capsys.readouterr().out)["reason_word"] == "empty"
+
+
+def test_verify_green_carries_no_could_not_look_keys(tmp_path, capsys):
+    p = tmp_path / "a.jsonl"
+    cli.main(["log", str(p), '{"op": 1}'])
+    capsys.readouterr()
+    assert cli.main(["verify", str(p)]) == 0
+    j = json.loads(capsys.readouterr().out)
+    assert "looked_for" not in j and "reason_word" not in j
+
+
+def test_verify_log_refusal_prints_and_emits_looked_for(tmp_path, capsys):
+    p = tmp_path / "bin.jsonl"
+    p.write_bytes(b"\xff\xfe\x00binary\n")
+    assert cli.main(["log", str(p), '{"op": 1}']) == 3
+    cap = capsys.readouterr()
+    j = _cnl_json(cap.out)
+    assert j["verdict"] == "COULD NOT LOOK" and j["reason_word"] == "unreadable"
+    assert j["where"] == str(p) and j["looked_for"] == "a chained last row to append after"
+    assert "looked for: a chained last row to append after; where: " + str(p) in cap.err
+    assert p.read_bytes() == b"\xff\xfe\x00binary\n"
+
+
+def test_verify_witness_file_refusal_prints_and_emits_looked_for(tmp_path, capsys):
+    p = tmp_path / "a.jsonl"
+    cli.main(["log", str(p), '{"op": 1}'])
+    w = tmp_path / "w.jsonl"
+    w.write_text('{"not": "a pin"}\n', encoding="utf-8")
+    capsys.readouterr()
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 3
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    assert j["reason_word"] == "unreadable" and j["where"] == str(w)
+    assert j["looked_for"] == "a witness pin file to append to" and "error" in j
+    assert "looked for: a witness pin file to append to" in cap.err
+
+
+def test_verify_pin_of_a_bounded_ledger_emits_looked_for(tmp_path, capsys):
+    b = tmp_path / "b.jsonl"
+    b.write_text('{"a": 1}\n', encoding="utf-8")
+    assert cli.main(["pin", str(b), "--ns", "demo", "--witness", str(tmp_path / "w.jsonl")]) == 3
+    j = json.loads(capsys.readouterr().out)
+    assert j["reason_word"] == "bounded" and j["where"] == str(b) and j["looked_for"]
+
+
+def test_verify_unindexable_ledger_emits_looked_for(tmp_path, capsys):
+    p = tmp_path / "bin.jsonl"
+    p.write_bytes(b"\xff\xfe\x00binary\n")
+    assert cli.main(["once", "rebuild-index", str(p)]) == 3
+    cap = capsys.readouterr()
+    j = _cnl_json(cap.out)
+    assert j["reason_word"] == "unreadable" and j["where"] == str(p)
+    assert j["looked_for"] == "UTF-8 JSON lines to index"
+    assert "looked for: UTF-8 JSON lines to index" in cap.err
+
+
+def test_verify_rows_since_pin(tmp_path, capsys):
+    p = tmp_path / "a.jsonl"
+    w = tmp_path / "pins.jsonl"
+    cli.main(["log", str(p), '{"op": 1}'])
+    cli.main(["log", str(p), '{"op": 2}'])
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 0
+    for i in range(3):
+        cli.main(["log", str(p), json.dumps({"op": 10 + i})])
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 0
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    assert j["since_pin"]["rows_since_pin"] == 3 and j["since_pin"]["namespace"] == "demo"
+    assert j["since_pin"]["pinned_rows"] == 2
+    assert "rows added since the last pin (demo, 2 rows): 3" in cap.err
+    assert cli.main(["verify", str(p), "--witness", str(w), "--ns", "demo"]) == 0
+    assert json.loads(capsys.readouterr().out)["since_pin"]["rows_since_pin"] == 3
+
+
+def test_verify_rows_since_pin_truncation_is_broken(tmp_path, capsys):
+    p = tmp_path / "a.jsonl"
+    w = tmp_path / "pins.jsonl"
+    for i in range(3):
+        cli.main(["log", str(p), json.dumps({"op": i})])
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 0
+    lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
+    p.write_text("".join(lines[:2]), encoding="utf-8")        # cut the last row off
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 1
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    assert j["verdict"] == "BROKEN" and j["since_pin"]["truncated"] is True
+    assert "fewer row(s) than its last pin" in cap.err
+
+
+def test_verify_rows_since_pin_absent_or_ambiguous(tmp_path, capsys):
+    p = tmp_path / "a.jsonl"
+    cli.main(["log", str(p), '{"op": 1}'])
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(tmp_path / "none.jsonl")]) == 0
+    j = json.loads(capsys.readouterr().out)
+    assert j["since_pin"]["rows_since_pin"] is None
+    w = tmp_path / "pins.jsonl"
+    cli.main(["pin", str(p), "--ns", "one", "--witness", str(w)])
+    cli.main(["pin", str(p), "--ns", "two", "--witness", str(w)])
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 0
+    assert "pass --ns" in json.loads(capsys.readouterr().out)["since_pin"]["reason"]
+    assert cli.main(["verify", str(p), "--ns", "one"]) == 2
+    assert cli.main(["verify", str(p), "--witness"]) == 2
+    capsys.readouterr()

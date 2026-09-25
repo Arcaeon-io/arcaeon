@@ -286,12 +286,24 @@ def _log(argv) -> int:
     if problem:
         print(f"{V.COULD_NOT_LOOK}: refusing to append to {ledger}: {problem}; "
               f"nothing was written", file=sys.stderr)
-        return V.EXIT_COULD_NOT_LOOK
+        return _emit_could_not_look(V.could_not_look(
+            "a chained last row to append after", ledger, "unreadable", problem))
     from arcaeon.record.ledger import cli
     try:
         return _run(cli.main, ["append", ledger, body])
     except OSError as e:
         return _usage(f"log: cannot write {ledger}: {e.strerror or type(e).__name__}")
+
+
+def _emit_could_not_look(detail: dict, extra: dict | None = None, *, echo: bool = True) -> int:
+    """Print a COULD NOT LOOK's looked_for and where (stderr, one line) and
+    emit them with reason_word as JSON on stdout. Returns exit 3."""
+    if echo:
+        print(f"  looked for: {detail['looked_for']}; where: {detail['where']}; "
+              f"reason_word: {detail['reason_word']}", file=sys.stderr)
+    print(json.dumps({"ok": False, "verdict": V.COULD_NOT_LOOK, **(extra or {}), **detail},
+                     indent=1))
+    return V.EXIT_COULD_NOT_LOOK
 
 
 def _last_row_problem(p: Path) -> str | None:
@@ -331,21 +343,38 @@ def _verify(argv) -> int:
     # verify already used 3 for a bounded chain; --legacy-exit keeps only the
     # 0.9.0 code for a file that could not be read (1, BROKEN), see below
     argv, legacy = V.pop_legacy_flag(argv)
-    if _wants_help(argv) or len([a for a in argv if a != "--strict"]) != 1:
-        print("usage: arcaeon verify <ledger.jsonl> [--strict]\n"
-              "exit 0 VERIFIED, 1 BROKEN, 3 COULD NOT LOOK (rows the chain could not speak "
-              "for, or a file that could not be read)")
-        return V.EXIT_GOOD if _wants_help(argv) else V.EXIT_USAGE
+    usage = ("usage: arcaeon verify <ledger.jsonl> [--strict] [--witness PINS [--ns NS]]\n"
+             "exit 0 VERIFIED, 1 BROKEN, 3 COULD NOT LOOK (rows the chain could not speak "
+             "for, or a file that could not be read). With --witness (a local pin file) "
+             "it also says how many rows were added since the ledger's last pin there.")
+    if _wants_help(argv):
+        print(usage)
+        return V.EXIT_GOOD
     # The ledger's own report, with the verdict word added as the first key
     # (the ledger CLI prints the same fields without it). The word comes from
     # the same three-valued `ok` the old exit code came from, so the two
     # cannot disagree: True VERIFIED 0, None COULD NOT LOOK 3, False BROKEN 1.
     from arcaeon.record.ledger import verify_file
-    strict = "--strict" in argv
-    path = next((a for a in argv if a != "--strict"), None)
-    if path is None or any(a.startswith("-") and a != "--strict" for a in argv):
-        print("usage: arcaeon verify <ledger.jsonl> [--strict]", file=sys.stderr)
+    strict, pins, ns, pos, i = False, None, None, [], 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--strict":
+            strict = True
+        elif a in ("--witness", "--ns"):
+            if i + 1 >= len(argv):
+                print(f"arcaeon: verify: {a} needs a value", file=sys.stderr)
+                return V.EXIT_USAGE
+            pins, ns = (argv[i + 1], ns) if a == "--witness" else (pins, argv[i + 1])
+            i += 1
+        elif a.startswith("-"):
+            pos.append(None)                   # an unknown flag: usage below
+        else:
+            pos.append(a)
+        i += 1
+    if len(pos) != 1 or pos[0] is None or (ns and not pins):
+        print(usage.splitlines()[0], file=sys.stderr)
         return V.EXIT_USAGE
+    path = pos[0]
     r = verify_file(path, strict=strict)
     word = V.VERIFIED if r.ok is True else (V.COULD_NOT_LOOK if r.ok is None else V.BROKEN)
     # A missing, unreadable or directory path: verify_file() reports ok=False
@@ -355,10 +384,78 @@ def _verify(argv) -> int:
               and str(r.first_break or "").startswith("unreadable:"))
     if unread:
         word = V.COULD_NOT_LOOK
-    print(json.dumps({"verdict": word, **r.__dict__}, indent=1))
+    report = {"verdict": word, **r.__dict__}
+    if word == V.COULD_NOT_LOOK:
+        if unread:
+            rw = "missing" if not Path(path).exists() else "unreadable"
+            d = V.could_not_look("a ledger file", path, rw, str(r.first_break))
+        elif r.verified_scope == "empty":
+            d = V.could_not_look("chained rows", path, "empty", "the ledger has no rows")
+        else:
+            d = V.could_not_look("a chain value on every row", path, "bounded",
+                                 f"{r.prechain} row(s) carry no chain, so the chain cannot "
+                                 f"speak for them ({r.verified_scope})")
+        report.update(d)
+        print(f"{V.COULD_NOT_LOOK} ({d['reason_word']}): looked for {d['looked_for']} "
+              f"in {d['where']}: {d['reason']}", file=sys.stderr)
+    if pins:
+        report["since_pin"] = _rows_since_pin_report(path, pins, ns)
+        sp = report["since_pin"]
+        if sp.get("rows_since_pin") is not None and sp["rows_since_pin"] < 0:
+            # Fewer rows than were pinned: rows were cut off the end. A chain
+            # that verifies on its own cannot see this; the pin can.
+            sp["truncated"] = True
+            if word == V.VERIFIED:
+                word = report["verdict"] = V.BROKEN
+            print(f"{V.BROKEN}: the ledger holds {-sp['rows_since_pin']} fewer row(s) than "
+                  f"its last pin ({sp['namespace']}, {sp['pinned_rows']} rows)", file=sys.stderr)
+        elif sp.get("rows_since_pin") is not None:
+            print(f"rows added since the last pin ({sp['namespace']}, {sp['pinned_rows']} "
+                  f"rows): {sp['rows_since_pin']}", file=sys.stderr)
+        else:
+            print(f"no pin compared: {sp['reason']}", file=sys.stderr)
+    print(json.dumps(report, indent=1))
     if unread and legacy:
         return V.EXIT_BAD                      # 0.9.0 / arcaeon-ledger verify said 1
     return V.exit_for(word)
+
+
+def _rows_since_pin_report(ledger: str, pins: str, ns: str | None) -> dict:
+    """The ledger's latest pin in a local pin file and the rows added since it
+    (arcaeon.record.ledger.witness.rows_since_pin). Without --ns the file must
+    hold pins for one namespace only. Never raises; says why when it cannot."""
+    from arcaeon.record.ledger import witness as W
+    if not Path(pins).is_file():
+        return {"rows_since_pin": None, "reason": f"no pin file at {pins}"}
+    problem = _witness_file_problem(Path(pins))
+    if problem:
+        return {"rows_since_pin": None, "reason": f"the pin file cannot be read: {problem}",
+                **V.could_not_look("a witness pin file", pins, "unreadable", problem)}
+    store = W.WitnessStore(pins)
+    if ns is None:
+        names = set()
+        for raw in Path(pins).read_text(encoding="utf-8", errors="replace").splitlines():
+            try:
+                names.add(json.loads(raw)["namespace"])
+            except (ValueError, KeyError, TypeError):
+                continue
+        if len(names) != 1:
+            return {"rows_since_pin": None,
+                    "reason": f"the pin file holds {len(names)} namespaces; pass --ns"}
+        ns = names.pop()
+    pin = store.latest(ns)
+    if not pin:
+        return {"rows_since_pin": None, "namespace": ns, "reason": f"no pin for {ns} in {pins}"}
+    rows_since = getattr(W, "rows_since_pin", None)
+    try:
+        n = rows_since(ledger, pin) if rows_since else None
+    except (ValueError, OSError) as e:
+        return {"rows_since_pin": None, "namespace": ns, "reason": str(e)}
+    if n is None:
+        return {"rows_since_pin": None, "namespace": ns,
+                "reason": "this install has no witness.rows_since_pin"}
+    return {"rows_since_pin": n, "namespace": ns, "pinned_rows": pin.get("rows"),
+            "pinned_chain": pin.get("chain")}
 
 
 def _receipt(argv) -> int:
@@ -387,7 +484,8 @@ def _once(argv) -> int:
         if problem:
             print(f"{V.COULD_NOT_LOOK}: once rebuild-index: cannot index {argv[1]}: "
                   f"{problem}; nothing was created", file=sys.stderr)
-            return V.EXIT_COULD_NOT_LOOK
+            return _emit_could_not_look(V.could_not_look(
+                "UTF-8 JSON lines to index", argv[1], "unreadable", problem))
     return _run(cli.main, argv)
 
 
@@ -445,20 +543,21 @@ def _pin(argv) -> int:
     if lp.is_file():
         vr = verify_file(lp)
         if vr.ok is None and vr.verified_scope != "empty":
-            print(json.dumps({"ok": False, "verdict": V.COULD_NOT_LOOK,
-                              "error": f"refusing to pin a ledger verify cannot vouch for "
-                                       f"({vr.verified_scope}; {vr.prechain} unchained "
-                                       f"row(s)); run `arcaeon verify` for the detail"},
-                             indent=1))
-            return V.EXIT_COULD_NOT_LOOK
+            err = (f"refusing to pin a ledger verify cannot vouch for "
+                   f"({vr.verified_scope}; {vr.prechain} unchained "
+                   f"row(s)); run `arcaeon verify` for the detail")
+            print(f"{V.COULD_NOT_LOOK}: {err}", file=sys.stderr)
+            return _emit_could_not_look(V.could_not_look(
+                "a chain value on every row", a.ledger, "bounded", err), {"error": err})
     if a.witness:
         from arcaeon.record.ledger.witness import WitnessStore, publish_head
         problem = _witness_file_problem(Path(a.witness))
         if problem:
-            print(json.dumps({"ok": False, "verdict": V.COULD_NOT_LOOK,
-                              "error": f"refusing to write to {a.witness}: {problem}; "
-                                       f"nothing was written"}, indent=1))
-            return V.EXIT_COULD_NOT_LOOK
+            err = f"refusing to write to {a.witness}: {problem}; nothing was written"
+            print(f"{V.COULD_NOT_LOOK}: {err}", file=sys.stderr)
+            return _emit_could_not_look(V.could_not_look(
+                "a witness pin file to append to", a.witness, "unreadable", problem),
+                {"error": err})
         try:
             rec = publish_head(WitnessStore(a.witness), a.ns, Ledger(a.ledger))
         except (ValueError, OSError) as e:
