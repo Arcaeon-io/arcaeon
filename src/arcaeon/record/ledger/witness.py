@@ -51,7 +51,8 @@ from pathlib import Path
 from arcaeon.record.ledger import Head, Ledger, UnverifiedLedgerError, chain_at
 
 __all__ = ["WitnessStore", "publish_head", "verify_against_witness", "WitnessVerdict",
-           "HostedWitness", "HostedWitnessError"]
+           "HostedWitness", "HostedWitnessError", "rows_since_pin", "stale",
+           "STALE_AFTER_ROWS"]
 
 
 @dataclass
@@ -780,3 +781,31 @@ def verify_against_witness(store: WitnessStore, namespace: str,
         detail += f" and has grown {grew} row(s) since (expected)"
     return _V("consistent", detail,
                           witness_rows=w_rows, witness_chain=w_chain, local_rows=local_rows)
+
+
+# -- staleness: rows written since the last pin -------------------------------
+
+#: The default gap, in rows, past which a pin is stale. The gap between pins is
+#: the real security parameter (see the module docstring): every row written
+#: after the last pin can be dropped undetectably. Callers pick their own.
+STALE_AFTER_ROWS = 100
+
+
+def rows_since_pin(ledger_path: str | Path, pin: dict) -> int:
+    """How many rows the ledger holds past the pin's `rows`.
+
+    `pin` is a witness record `{rows, chain, ...}` (what `publish_head` returns
+    and `WitnessStore.latest` gives back). Counted with `Ledger.head().rows`,
+    the same count a pin is taken with. A negative answer means the ledger now
+    holds FEWER rows than were pinned: that is truncation, and
+    `verify_against_witness` names it; this function only counts. Raises
+    ValueError when the pin carries no non-negative integer `rows`."""
+    r = pin.get("rows") if isinstance(pin, dict) else None
+    if not isinstance(r, int) or isinstance(r, bool) or r < 0:
+        raise ValueError(f"pin rows is not a non-negative integer: {r!r}")
+    return Ledger(ledger_path).head().rows - r
+
+
+def stale(gap_rows: int, limit: int = STALE_AFTER_ROWS) -> bool:
+    """True when more than `limit` rows were written since the last pin."""
+    return gap_rows > limit

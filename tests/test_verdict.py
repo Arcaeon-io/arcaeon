@@ -216,3 +216,30 @@ def test_resolver_conflict_absent_when_one_resolver_covers_the_fork():
 
 def test_resolver_conflict_never_raises_on_junk_rows():
     assert R.walk_supersedes([None, 7, {"supersedes": ["x"]}, {"id": 3}]) == []
+
+
+# --- witness.rows_since_pin and stale ---------------------------------------------
+
+def test_rows_since_pin_counts_rows_past_the_pin_and_stale_flags_the_gap(tmp_path):
+    from arcaeon.record.ledger import Ledger
+    from arcaeon.record.ledger.witness import (STALE_AFTER_ROWS, WitnessStore, publish_head,
+                                               rows_since_pin, stale)
+    p = tmp_path / "log.jsonl"
+    lg = Ledger(p)
+    for i in range(3):
+        lg.append({"evt": "x", "i": i})
+    pin = publish_head(WitnessStore(tmp_path / "w.jsonl"), "ns", lg)
+    assert rows_since_pin(p, pin) == 0
+    for i in range(5):
+        lg.append({"evt": "y", "i": i})
+    assert rows_since_pin(p, pin) == 5
+    assert rows_since_pin(p, {"rows": 10, "chain": "x"}) == -2   # fewer than pinned
+    assert stale(5, limit=4) and not stale(5, limit=5)
+    assert not stale(STALE_AFTER_ROWS) and stale(STALE_AFTER_ROWS + 1)
+
+
+@pytest.mark.parametrize("bad", [{}, {"rows": -1}, {"rows": True}, {"rows": "3"}, None])
+def test_rows_since_pin_refuses_a_pin_without_rows(tmp_path, bad):
+    from arcaeon.record.ledger.witness import rows_since_pin
+    with pytest.raises(ValueError):
+        rows_since_pin(tmp_path / "log.jsonl", bad)
