@@ -6,8 +6,11 @@ reimplements a check. Exit codes are arcaeon.verdict's one table (0 good,
 1 bad finding, 2 bad usage, 3 COULD NOT LOOK); `--legacy-exit` on a verb
 returns the old tool's own code for the 0.9.x release.
 
-NETWORK: only `pin --remote`, `seal`, `stamp` and `credits` reach the hosted
-witness, and only through arcaeon.remote. Every other verb works offline.
+NETWORK: `pin --remote`, `seal`, `stamp` and `credits` reach the hosted
+witness, through arcaeon.remote. Two more go online on request: `receipt cite`
+looks each citation up with CourtListener's API (unless --fixture), and
+`proxy --pin-witness URL` pins the tape head at that witness at session end.
+Every other verb works offline.
 
 THE 30-DAY FALLBACK. Before 0.9, `uvx arcaeon` (what an MCP registry client
 runs) started the MCP server, because the connector owned this name. Until the
@@ -21,6 +24,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+from functools import partial
 from pathlib import Path
 
 from arcaeon import __version__
@@ -241,12 +245,13 @@ def _verify(argv) -> int:
 def _receipt(argv) -> int:
     from arcaeon.record.receipt import cli
     sub = next((a for a in argv if not a.startswith("-")), None)
-    return _translated("receipt", cli.main, argv, sub)
+    return _translated("receipt", partial(cli.main, prog="arcaeon receipt"), argv, sub)
 
 
 def _once(argv) -> int:
     from arcaeon.record.once import cli
     if argv in (["-h"], ["--help"]):       # the old CLI answered --help with exit 1
+        print("usage: arcaeon once receipt|reclaim|rebuild-index <ledger> [key]\n")
         print((cli.__doc__ or "").strip())
         return V.EXIT_GOOD
     if argv[:1] == ["rebuild-index"] and len(argv) >= 2 and not Path(argv[1]).is_file():
@@ -290,7 +295,7 @@ def _unindexable_ledger_problem(p: Path) -> str | None:
 
 def _proxy(argv) -> int:
     from arcaeon.record.adapter import proxy
-    return _run(proxy.main, argv)
+    return _run(partial(proxy.main, prog="arcaeon proxy"), argv)
 
 
 def _pin(argv) -> int:
@@ -407,7 +412,7 @@ def _reconcile(argv) -> int:
 def _audit(argv) -> int:
     from arcaeon.prove.audit import cli
     sub = next((a for a in argv if not a.startswith("-")), None)
-    return _translated("audit", cli.main, argv, sub)
+    return _translated("audit", partial(cli.main, prog="arcaeon audit"), argv, sub)
 
 
 _VET_SUBCOMMANDS = {"scan", "grade", "grade-target", "badge", "verify", "serve",
@@ -427,7 +432,8 @@ def _vet(argv) -> int:
 
 def _badge(argv) -> int:
     from arcaeon.prove.vet import __main__ as vet_main
-    return _translated("badge", vet_main.main, ["badge", *argv], "badge")
+    # prog "arcaeon" makes the badge subparser's usage read `arcaeon badge`
+    return _translated("badge", partial(vet_main.main, prog="arcaeon"), ["badge", *argv], "badge")
 
 
 def _seal(argv) -> int:
@@ -456,7 +462,7 @@ def _seal(argv) -> int:
 
 def _baseline(argv) -> int:
     from arcaeon.prove.baseline import cli
-    return _run(cli.main, argv)
+    return _run(partial(cli.main, prog="arcaeon baseline"), argv)
 
 
 def _compact(argv) -> int:
@@ -587,7 +593,7 @@ def _dedup(argv) -> int:
 
 def _meter(argv) -> int:
     from arcaeon.save.meter import cli
-    return _run(cli.main, argv)
+    return _run(partial(cli.main, prog="arcaeon meter"), argv)
 
 
 # --- hosted --------------------------------------------------------------------
@@ -661,7 +667,7 @@ def _mcp(argv) -> int:
               file=sys.stderr)
         return V.EXIT_USAGE
     from arcaeon.mcp import __main__ as mcp_main
-    return _run(mcp_main.main, argv)
+    return _run(partial(mcp_main.main, prog="arcaeon mcp"), argv)
 
 
 #: name -> (module, entry). Each entry returns 0 when every check it claims passed.
@@ -713,6 +719,10 @@ COMPONENTS = {
 
 def _version(argv) -> int:
     import importlib
+    if _wants_help(argv):
+        print("usage: arcaeon version [--short]\n"
+              "print arcaeon's version and each moved family's; --short: the version only")
+        return V.EXIT_GOOD
     if "--short" in argv:
         print(__version__)
         return V.EXIT_GOOD

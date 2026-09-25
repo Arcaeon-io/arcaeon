@@ -60,8 +60,8 @@ def _does_not_prove(scope: dict) -> str:
     return "Does NOT prove: " + "; ".join(scope["does_not_prove"]) + "."
 
 
-def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="arcaeon-receipt")
+def main(argv=None, prog: str = "arcaeon-receipt") -> int:
+    ap = argparse.ArgumentParser(prog=prog)
     ap.add_argument("--version", action="version", version=f"arcaeon-receipt {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 

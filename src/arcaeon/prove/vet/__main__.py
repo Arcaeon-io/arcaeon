@@ -47,8 +47,8 @@ def _no_checks_reason(findings) -> str:
     return "no .py, .ts or .js file to grade"
 
 
-def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(prog="arcaeon vet", description=__doc__,
+def main(argv=None, prog: str = "arcaeon vet") -> int:
+    ap = argparse.ArgumentParser(prog=prog, description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("scan"); s.add_argument("file")

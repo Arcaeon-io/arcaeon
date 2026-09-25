@@ -671,9 +671,10 @@ def _binary_stdout():
 
 # -- CLI ---------------------------------------------------------------------
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None,
+         prog: str = "python -m arcaeon.record.adapter.proxy") -> int:
     ap = argparse.ArgumentParser(
-        prog="python -m arcaeon.record.adapter.proxy",
+        prog=prog,
         description="Record every MCP tool call at the stdio seam, without the agent's help.",
         epilog="Everything after -- is the MCP server command to wrap. Or, for an HTTP MCP "
                "server: --http-forward URL --listen HOST:PORT and no command.")

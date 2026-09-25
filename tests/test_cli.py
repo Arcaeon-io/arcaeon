@@ -67,6 +67,23 @@ def test_every_verb_answers_help_without_side_effects(verb, capsys, monkeypatch)
     assert (out.out + out.err).strip(), verb
 
 
+@pytest.mark.parametrize("verb", ALL_VERBS)
+def test_every_verb_usage_line_names_arcaeon_verb(verb, capsys, monkeypatch):
+    """0.9.0 printed the OLD tool name in seven verbs' usage lines (prog=
+    arcaeon-receipt, arcaeon-audit, arcaeon-baseline, arcaeon-meter,
+    arcaeon-mcp, `python -m arcaeon.record.adapter.proxy`, and `arcaeon vet
+    badge` for the badge verb). Every verb's usage now reads `arcaeon <verb>`."""
+    monkeypatch.delenv("ARCAEON_KEY", raising=False)
+    if verb == "mcp":
+        pytest.importorskip("mcp")
+    assert cli.main([verb, "--help"]) == 0
+    out = capsys.readouterr()
+    usage = [ln for ln in (out.out + "\n" + out.err).splitlines() if ln.startswith("usage:")]
+    assert usage, (verb, out.out[:300])
+    assert usage[0].startswith(f"usage: arcaeon {verb}"), (verb, usage[0])
+    assert usage[0][len(f"usage: arcaeon {verb}"):][:1] in ("", " "), (verb, usage[0])
+
+
 def test_version_verb_names_every_family(capsys):
     assert cli.main(["version"]) == 0
     out = capsys.readouterr().out
@@ -100,9 +117,9 @@ def test_mcp_verb_dispatches_to_the_connector(monkeypatch):
     pytest.importorskip("mcp")
     seen = []
     import arcaeon.mcp.__main__ as mm
-    monkeypatch.setattr(mm, "main", lambda argv=None: seen.append(argv) or 0)
+    monkeypatch.setattr(mm, "main", lambda argv=None, prog=None: seen.append((argv, prog)) or 0)
     assert cli.main(["mcp", "--log", "x.jsonl"]) == 0
-    assert seen == [["--log", "x.jsonl"]]
+    assert seen == [(["--log", "x.jsonl"], "arcaeon mcp")]
 
 
 def test_arcaeon_mcp_tools_lists_free_and_paid(tmp_path):

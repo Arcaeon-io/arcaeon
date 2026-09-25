@@ -33,9 +33,9 @@ def _add_common_runner_args(p: argparse.ArgumentParser) -> None:
                        "pass '' to skip chaining")
 
 
-def main(argv: "list[str] | None" = None) -> int:
+def main(argv: "list[str] | None" = None, prog: str = "arcaeon-baseline") -> int:
     ap = argparse.ArgumentParser(
-        prog="arcaeon-baseline",
+        prog=prog,
         description="Pre-registered probe sets for substrate-transition "
                     "measurement: register a score before the change, "
                     "compare it after.")

@@ -63,8 +63,8 @@ def _read_instrument_notes(path: str) -> str:
             "Notes are embedded verbatim, so they must decode cleanly.") from exc
 
 
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="arcaeon-audit",
+def main(argv: list[str] | None = None, prog: str = "arcaeon-audit") -> int:
+    ap = argparse.ArgumentParser(prog=prog,
                                  description="Tamper-evident audit logs for AI agents. A mechanism, not a certification.")
     ap.add_argument("--version", action="version", version=f"arcaeon-audit {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)

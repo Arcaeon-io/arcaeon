@@ -24,9 +24,9 @@ def _add_keys_arg(p: argparse.ArgumentParser) -> None:
                    help="keys file path (default: keys.json)")
 
 
-def main(argv: "list[str] | None" = None) -> int:
+def main(argv: "list[str] | None" = None, prog: str = "arcaeon-meter") -> int:
     ap = argparse.ArgumentParser(
-        prog="arcaeon-meter",
+        prog=prog,
         description="Keyed usage metering for agent tools: keys, monthly "
                     "caps, SQLite counts, billing export.")
     ap.add_argument("--version", action="version", version=__version__)

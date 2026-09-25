@@ -14,9 +14,9 @@ import os
 import sys
 
 
-def main(argv=None) -> int:
+def main(argv=None, prog: str = "arcaeon-mcp") -> int:
     ap = argparse.ArgumentParser(
-        prog="arcaeon-mcp",
+        prog=prog,
         description="Arcaeon's tools on one MCP stdio server (ledger, vet, witness).")
     ap.add_argument("--log", default=None,
                     help="ledger file path (default: agent.log.jsonl, or $ARCAEON_LEDGER_LOG)")
