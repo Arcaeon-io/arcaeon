@@ -13,6 +13,12 @@ The exit codes are one table for every verb (see the README): 0 good, 1 a bad
 finding, 2 bad usage, 3 COULD NOT LOOK. `--legacy-exit` returns the old tool's
 own code for the 0.9.x releases; where that differs, the section says so.
 
+Over many logs, the three words stay side by side. Any summary arcaeon prints
+across many ledgers or files (`status`, a batch of receipts) counts VERIFIED,
+BROKEN and COULD NOT LOOK separately and never folds them into one rate: a
+file nobody could read is not a pass and not a break, and a percentage would
+make it look like one or the other.
+
 Contents: Record (`log`, `verify`, `receipt`, `once`, `proxy`, `pin`, `deal`),
 Prove (`reconcile`, `audit`, `vet`, `badge`, `seal`, `baseline`, `compact`),
 Save (`distill`, `dedup`, `meter`), Hosted (`stamp`, `credits`, `buy`),

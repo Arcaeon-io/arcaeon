@@ -171,6 +171,13 @@ One table for every verb.
 3 is never a pass. A gate that treats only 0 as green fails on it, which is
 the point.
 
+Many logs, one summary: keep the three counts side by side. Any summary
+arcaeon prints over many logs shows how many were VERIFIED, how many BROKEN
+and how many COULD NOT LOOK, never one rate. "98% verified" hides whether the
+other 2% were broken or simply never read, and those call for very different
+Monday mornings. If you build your own dashboard on the exit codes, keep the
+three columns too.
+
 Before 0.9 some old tools used other codes for the same words (reconcile used
 2 for COULD NOT LOOK, for example). For the 0.9.x releases, `--legacy-exit` on
 a verb returns the old tool's own code, so a gate wired to it keeps working
