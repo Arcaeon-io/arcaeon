@@ -141,7 +141,7 @@ def _key() -> str | None:
     `Authorization: Bearer ` to the witness and let the server decide whether
     an unauthenticated caller is a caller. `test_empty_key.py` pins both arms.
 
-    NOT a startup check, on purpose. Ten of the eleven tools are free and need
+    NOT a startup check, on purpose. Twelve of the fourteen tools are free and need
     no key at all, so refusing to START over a blank optional variable would
     take the whole free lane down to enforce a gate on two tools. The refusal
     lives at the call, which is also where the config is read (see the note
