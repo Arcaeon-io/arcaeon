@@ -34,7 +34,7 @@ from __future__ import annotations
 __all__ = ["VERIFIED", "BROKEN", "COULD_NOT_LOOK", "MATCHED", "MISSING", "ALTERED",
            "NO_GRADEABLE_FILES", "COULD_NOT_LOOK_TOKEN", "WORDS", "EXIT_GOOD", "EXIT_BAD", "EXIT_USAGE",
            "EXIT_COULD_NOT_LOOK", "EXIT_BY_WORD", "LEGACY", "LEGACY_EXIT_FLAG",
-           "exit_for", "unify", "pop_legacy_flag"]
+           "exit_for", "unify", "pop_legacy_flag", "REASON_WORDS", "could_not_look"]
 
 VERIFIED = "VERIFIED"
 BROKEN = "BROKEN"
@@ -122,3 +122,23 @@ def pop_legacy_flag(argv: list[str]) -> tuple[list[str], bool]:
     argv = list(argv)
     legacy = LEGACY_EXIT_FLAG in argv
     return [a for a in argv if a != LEGACY_EXIT_FLAG], legacy
+
+
+#: Why a check could not look, as one fixed machine word. A COULD NOT LOOK
+#: result carries it as `reason_word` beside the human `reason`, so a reader
+#: can branch on the cause without parsing prose.
+REASON_WORDS = ("unreadable", "missing", "empty", "name_not_found", "bounded", "network")
+
+
+def could_not_look(looked_for, where, reason_word: str, reason: str) -> dict:
+    """The additive keys a COULD NOT LOOK result carries.
+
+    `looked_for` is what the check went looking for (a key, a row, a file),
+    `where` is where it looked, `reason_word` is one of REASON_WORDS and
+    `reason` is the human sentence. An unknown reason word raises ValueError:
+    a cause a reader cannot branch on is not a cause.
+    """
+    if reason_word not in REASON_WORDS:
+        raise ValueError(f"unknown reason word {reason_word!r}; expected one of {REASON_WORDS}")
+    return {"looked_for": looked_for, "where": where, "reason_word": reason_word,
+            "reason": reason}
