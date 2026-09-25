@@ -91,6 +91,7 @@ from pathlib import Path
 from ._ledger import backend, open_ledger
 from ._version import IMPL, VERSION
 from .observer import DEFAULT_MAX_FRAME, FrameSplitter, SeamObserver
+from .observer import _parse, _render_id, _safe_digest
 from .tape import WITNESS_KEY_ENV, TapeWriter, pin_at_session_end
 
 __all__ = ["main", "run", "relay", "IMPL", "VERSION"]
@@ -240,6 +241,86 @@ def relay(src, dst, observe=None, *, on_eof=None, corruptor=None,
                 pass
 
 
+# -- the mandate gate ----------------------------------------------------------
+
+class _MandateWatch:
+    """Checks every tools/call against a mandate and writes the rows.
+
+    Record-only (the default): `observe` is handed a COPY of each client frame
+    after it was forwarded, like every other observation in this file, so the
+    gate adds no latency and can never withhold a call. An outside call gets a
+    `mandate_outside` row; a call the gate could not judge gets a
+    `mandate_could_not_look` row; an inside call is counted, not rowed. See
+    docs/MANDATE_GATE.md.
+    """
+
+    def __init__(self, gate, obs: SeamObserver, *, enforce: bool = False):
+        self.gate = gate
+        self.obs = obs
+        self.enforce = enforce
+        self.mode = "enforce" if enforce else "record-only"
+        self.counts = {"inside": 0, "outside": 0, "could_not_look": 0}
+        self.blocked = 0
+        self._lock = threading.Lock()
+
+    def judge(self, msg: dict):
+        params = msg.get("params")
+        return self.gate.detail(params if params is not None else {})
+
+    def record(self, msg: dict, verdict: str, reason: str, extra: dict,
+               action: str) -> None:
+        with self._lock:
+            self.counts[verdict] = self.counts.get(verdict, 0) + 1
+            if action == "blocked":
+                self.blocked += 1
+        if verdict == "inside":
+            return
+        params = msg.get("params") if isinstance(msg.get("params"), dict) else {}
+        args = params.get("arguments")
+        tool = params.get("name")
+        rid = msg.get("id")
+        fields = {
+            "verdict": verdict, "rule": extra.get("rule"), "reason": str(reason),
+            "tool": tool if isinstance(tool, str) else None,
+            "rpc_id": _render_id(rid) if not isinstance(rid, (dict, list)) else None,
+            "args_digest": _safe_digest({} if args is None else args),
+            "who": self.gate.who, "mandate_mode": self.mode,
+            "mandate_file_sha256": self.gate.file_sha256, "action": action,
+        }
+        if verdict == "could_not_look":
+            fields.update(looked_for=extra.get("looked_for"), where=extra.get("where"),
+                          reason_word=extra.get("reason_word"))
+        evt = "mandate_outside" if verdict == "outside" else "mandate_could_not_look"
+        # The observer's own row writer, under its own lock: same chain, same
+        # seq counter, same repair ladder as every tool_call row.
+        with self.obs._lock:
+            self.obs._row(evt, **fields)
+
+    def observe(self, frame: bytes) -> None:
+        """Record-only: judge a copy of an already-forwarded client frame."""
+        for msg in _parse(frame):
+            if msg.get("method") == "tools/call":
+                v, why, extra = self.judge(msg)
+                self.record(msg, v, why, extra, "forwarded")
+
+    def session_end_fields(self) -> dict:
+        return {"mandate_inside": self.counts["inside"],
+                "mandate_outside": self.counts["outside"],
+                "mandate_could_not_look": self.counts["could_not_look"],
+                "mandate_blocked": self.blocked or None}
+
+
+def _observe_both(first, second):
+    """One observe callback that runs two. The second runs even if the first
+    raises; the first's exception still reaches `relay`, which counts it."""
+    def observe(frame: bytes) -> None:
+        try:
+            first(frame)
+        finally:
+            second(frame)
+    return observe
+
+
 # -- session wiring ----------------------------------------------------------
 
 def _server_label(command: list[str]) -> str:
@@ -262,7 +343,8 @@ def run(command: list[str], ledger_path: str, *, server: str | None = None,
         max_frame: int = DEFAULT_MAX_FRAME,
         stdin=None, stdout=None, tape_path: str | None = None,
         side: str = "agent", tape_namespace: str | None = None,
-        pin_witness: str | None = None, tape_pair: str | None = None) -> int:
+        pin_witness: str | None = None, tape_pair: str | None = None,
+        mandate_path: str | None = None, mandate_enforce: bool = False) -> int:
     """Spawn `command`, proxy stdio through it, log the seam. Returns the child's exit code.
 
     With `tape_path`, also keep this side's call tape (see `tape.py`): `side="agent"`
@@ -273,6 +355,10 @@ def run(command: list[str], ledger_path: str, *, server: str | None = None,
     pinned there at session end (`tape.pin_at_session_end`; key from
     $ARCAEON_WITNESS_KEY), and the outcome rides in `session_end.tape_pin`. A
     pin that cannot land never changes the exit code: it is named, not fatal.
+
+    With `mandate_path`, every tools/call is checked against that mandate
+    (`mandate_gate.py`, docs/MANDATE_GATE.md). Record-only unless
+    `mandate_enforce`.
     """
     log = open_ledger(ledger_path)
     label = server or _server_label(command)
@@ -280,6 +366,11 @@ def run(command: list[str], ledger_path: str, *, server: str | None = None,
             if tape_path else None)
     obs = SeamObserver(log.append, server=label, session=session, raw=raw, impl=IMPL,
                        tape=tape)
+    watch = None
+    if mandate_path is not None:
+        from . import mandate_gate  # lazy: a proxy without --mandate never imports it
+        watch = _MandateWatch(mandate_gate.load(mandate_path), obs,
+                              enforce=mandate_enforce)
 
     fault = os.environ.get(FAULT_ENV)
     corruptor = None
@@ -309,6 +400,10 @@ def run(command: list[str], ledger_path: str, *, server: str | None = None,
         tape=str(tape_path) if tape else None,
         tape_side=side if tape else None,
         tape_namespace=tape_namespace if tape else None,
+        mandate=watch.gate.path if watch else None,
+        mandate_mode=watch.mode if watch else None,
+        mandate_status=watch.gate.status if watch else None,
+        mandate_error=watch.gate.error if watch else None,
     )
 
     cin = stdin if stdin is not None else _binary_stdin()
@@ -343,9 +438,12 @@ def run(command: list[str], ledger_path: str, *, server: str | None = None,
             pass
 
     up_split = FrameSplitter(max_frame=max_frame)
+    client_observe = obs.observe_client_frame
+    if watch is not None:
+        client_observe = _observe_both(obs.observe_client_frame, watch.observe)
     down_split = FrameSplitter(max_frame=max_frame)
     up = threading.Thread(
-        target=relay, args=(cin, child.stdin, obs.observe_client_frame),
+        target=relay, args=(cin, child.stdin, client_observe),
         kwargs={"on_eof": close_child_stdin, "splitter": up_split},
         name="adapter-client-to-server", daemon=True)
     down = threading.Thread(
@@ -403,7 +501,8 @@ def run(command: list[str], ledger_path: str, *, server: str | None = None,
                     tape_calls=tape.calls if tape else None,
                     tape_failures=(obs.tape_failures + tape.write_failures) or None
                     if tape else None,
-                    tape_pin=tape_pin)
+                    tape_pin=tape_pin,
+                    **(watch.session_end_fields() if watch else {}))
     return code
 
 
@@ -717,6 +816,10 @@ def main(argv: list[str] | None = None,
     ap.add_argument("--upstream-timeout", type=float, default=300.0, metavar="SECONDS",
                     help="with --http-forward: socket timeout toward the upstream, which "
                          "also bounds how long an idle SSE stream is held (default 300)")
+    ap.add_argument("--mandate", default=None, metavar="PATH",
+                    help="check every tools/call against this mandate JSON (see "
+                         "docs/MANDATE_GATE.md). RECORD-ONLY by default: an outside "
+                         "call is still forwarded and gets a mandate_outside row.")
     ap.add_argument("--version", action="version", version=IMPL)
     ap.add_argument("command", nargs=argparse.REMAINDER,
                     help="-- <server command...>")
@@ -727,6 +830,9 @@ def main(argv: list[str] | None = None,
         command = command[1:]
     if args.http_forward is not None:
         from .http_forward import check_upstream, run_http_forward
+        if args.mandate is not None:
+            ap.error("--mandate applies to the stdio proxy only; --http-forward "
+                     "does not check mandates yet")
         if command:
             ap.error("--http-forward takes no server command: it forwards to the URL")
         try:
@@ -747,7 +853,8 @@ def main(argv: list[str] | None = None,
     return run(command, args.ledger, server=args.server, session=args.session,
                raw=args.raw, max_frame=args.max_frame, tape_path=args.tape,
                side=args.side, tape_namespace=args.tape_namespace,
-               pin_witness=args.pin_witness, tape_pair=args.tape_pair)
+               pin_witness=args.pin_witness, tape_pair=args.tape_pair,
+               mandate_path=args.mandate)
 
 
 if __name__ == "__main__":
