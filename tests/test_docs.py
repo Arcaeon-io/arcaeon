@@ -184,7 +184,7 @@ def test_readme_has_no_forbidden_phrase(phrase):
 
 
 def test_no_em_dash_in_the_new_docs():
-    for name in ("docs/VERBS.md", "docs/PUBLISH_DRY_RUN.md"):
+    for name in ("docs/VERBS.md", "docs/PUBLISH_DRY_RUN.md", "docs/WORDS.md"):
         assert "—" not in (ROOT / name).read_text(encoding="utf-8"), name
 
 
@@ -276,3 +276,22 @@ def test_migration_exit_column_agrees_with_verdict_legacy():
             continue
         verb = _VERB_OF.get(name)
         assert changed == (verb is not None and verb in V.LEGACY), name
+
+
+# --- docs/WORDS.md -------------------------------------------------------------------
+
+WORDS_MD = (ROOT / "docs" / "WORDS.md").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("word", list(V.WORDS))
+def test_every_verdict_word_is_explained_in_words_md(word):
+    assert f"**{word}.**" in WORDS_MD, word
+
+
+@pytest.mark.parametrize("reason", list(V.REASON_WORDS))
+def test_every_reason_word_has_a_line_in_words_md(reason):
+    assert re.search(r"^- `" + re.escape(reason) + r"`: \S", WORDS_MD, re.M), reason
+
+
+def test_readme_links_words_md():
+    assert "](docs/WORDS.md)" in README

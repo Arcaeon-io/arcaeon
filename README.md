@@ -159,7 +159,8 @@ fallback is removed in 1.0.0.
 
 ## Exit codes
 
-One table for every verb.
+One table for every verb. What each word means, in two sentences apiece, is
+in [docs/WORDS.md](docs/WORDS.md).
 
 | code | meaning |
 |---|---|
