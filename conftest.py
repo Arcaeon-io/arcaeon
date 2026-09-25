@@ -36,6 +36,15 @@ class _BlockOldNames(importlib.abc.MetaPathFinder):
         return None
 
 
+# 4. The activity journal (arcaeon.journal) is pointed at a throwaway directory
+#    for the whole run, subprocesses included, so the suite never writes to the
+#    developer's real ~/.arcaeon/activity.jsonl. A test that wants a journal
+#    of its own sets ARCAEON_HOME with monkeypatch.
+import tempfile  # noqa: E402
+
+os.environ["ARCAEON_HOME"] = tempfile.mkdtemp(prefix="arcaeon-test-home-")
+os.environ.pop("ARCAEON_JOURNAL", None)
+
 for _m in [m for m in sys.modules if m.split(".")[0] in OLD_NAMES]:
     del sys.modules[_m]
 sys.meta_path.insert(0, _BlockOldNames())

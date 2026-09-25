@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from arcaeon import cli
+from arcaeon import verdict as V
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -340,3 +341,73 @@ def test_selftest_verb_runs_every_bundled_selftest(capsys):
     summary = json.loads(out[out.rindex('{\n "selftests"'):])
     assert set(summary["selftests"]) == set(cli.SELFTESTS)
     assert summary["failed"] == []
+
+
+# --- the activity journal (B013) ----------------------------------------------------
+
+@pytest.fixture
+def jhome(tmp_path, monkeypatch):
+    d = tmp_path / "arc_home"
+    monkeypatch.setenv("ARCAEON_HOME", str(d))
+    monkeypatch.delenv("ARCAEON_JOURNAL", raising=False)
+    return d
+
+
+def _journal_rows(d):
+    f = d / "activity.jsonl"
+    if not f.exists():
+        return []
+    return [json.loads(x) for x in f.read_text(encoding="utf-8").splitlines() if x.strip()]
+
+
+def test_journal_one_line_per_invocation(jhome, tmp_path, capsys):
+    import hashlib
+    p = tmp_path / "a.jsonl"
+    assert cli.main(["log", str(p), '{"op": "one"}']) == 0
+    assert cli.main(["verify", str(p)]) == 0
+    assert cli.main(["verify", str(tmp_path / "missing.jsonl")]) == 3
+    assert cli.main(["log", str(p)]) == 2
+    capsys.readouterr()
+    rows = _journal_rows(jhome)
+    assert [(r["verb"], r["exit"], r["word"]) for r in rows] == [
+        ("log", 0, "OK"), ("verify", 0, "VERIFIED"),
+        ("verify", 3, V.COULD_NOT_LOOK), ("log", 2, "BAD USAGE")]
+    want = hashlib.sha256(os.path.normcase(os.path.abspath(str(p))).encode()).hexdigest()
+    assert rows[0]["target"] == rows[1]["target"] == want
+
+
+def test_journal_skips_help_version_and_unknown_verbs(jhome, capsys):
+    assert cli.main(["verify", "--help"]) == 0
+    assert cli.main(["verify", "--version"]) == 0
+    assert cli.main(["--help"]) == 0
+    assert cli.main(["frobnicate"]) == 2
+    capsys.readouterr()
+    assert _journal_rows(jhome) == []
+
+
+def test_journal_records_an_internal_error_as_could_not_look(jhome, monkeypatch, capsys):
+    def boom(argv):
+        raise RuntimeError("secret detail")
+    monkeypatch.setitem(cli.HANDLERS, "log", boom)
+    assert cli.main(["log", "x.jsonl", "{}"]) == 3
+    capsys.readouterr()
+    rows = _journal_rows(jhome)
+    assert len(rows) == 1 and rows[0]["exit"] == 3 and rows[0]["word"] == V.COULD_NOT_LOOK
+
+
+def test_journal_failure_never_changes_the_exit_code(jhome, monkeypatch, tmp_path, capsys):
+    from arcaeon import journal
+    monkeypatch.setattr(journal, "append", lambda *a, **k: 1 / 0)
+    assert cli.main(["log", str(tmp_path / "a.jsonl"), '{"op": 1}']) == 0
+    assert cli.main(["verify", str(tmp_path / "nope.jsonl")]) == 3
+    assert "Traceback" not in capsys.readouterr().err
+
+
+def test_journal_privacy_through_the_cli(jhome, tmp_path, capsys):
+    target = tmp_path / "secret_customer_ledger.jsonl"
+    cli.main(["log", str(target), '{"op": "wire 5000 to acct 99"}'])
+    cli.main(["verify", str(target)])
+    capsys.readouterr()
+    raw = (jhome / "activity.jsonl").read_text(encoding="utf-8")
+    for needle in (str(target), target.name, "secret_customer", "wire 5000", "acct 99"):
+        assert needle not in raw, needle

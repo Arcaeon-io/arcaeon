@@ -122,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"arcaeon {verb} {__version__}")
         return V.EXIT_GOOD
     try:
-        return handler(rest)
+        rc = handler(rest)
     except KeyboardInterrupt:
         raise
     except Exception as e:  # noqa: BLE001  the one front-door catch
@@ -131,7 +131,40 @@ def main(argv: list[str] | None = None) -> int:
         # (a message can carry a path or a value; the class cannot).
         print(f"arcaeon {verb}: could not finish: {type(e).__name__} [internal_error]",
               file=sys.stderr)
-        return V.EXIT_COULD_NOT_LOOK
+        rc = V.EXIT_COULD_NOT_LOOK
+    _journal(verb, rest, rc)
+    return rc
+
+
+#: Verbs the activity journal does not record: `status` reads the journal
+#: (recording it would bury the runs it reports), `mcp` is a server.
+_UNJOURNALED = {"status", "mcp"}
+#: Verbs whose first positional word is a subcommand, not the target.
+_SUBCOMMAND_VERBS = {"receipt", "once", "audit", "vet", "baseline", "meter", "deal", "distill"}
+
+
+def _journal_target(verb: str, rest: list[str]) -> str | None:
+    """The file a verb looked at: its first positional argument (after a
+    subcommand word, for verbs that have one). The journal stores only its
+    sha256; this function never opens it."""
+    head = rest[:rest.index("--")] if "--" in rest else rest
+    pos = [a for a in head if not a.startswith("-") or a == "-"]
+    if verb in _SUBCOMMAND_VERBS and pos and not Path(pos[0]).exists() \
+            and not any(c in pos[0] for c in "/\\."):
+        pos = pos[1:]
+    return pos[0] if pos else None
+
+
+def _journal(verb: str, rest: list[str], rc) -> None:
+    """One activity line per verb run (arcaeon.journal). Help is not a run.
+    Never raises, never changes rc."""
+    if verb in _UNJOURNALED or _wants_help(rest):
+        return
+    try:
+        from arcaeon import journal
+        journal.append(verb, journal.word_for(verb, rc), rc, _journal_target(verb, rest))
+    except Exception:  # noqa: BLE001  the journal never breaks the verb
+        pass
 
 
 # --- dispatch helpers --------------------------------------------------------
