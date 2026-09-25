@@ -519,7 +519,7 @@ def run(command: list[str], ledger_path: str, *, server: str | None = None,
         side: str = "agent", tape_namespace: str | None = None,
         pin_witness: str | None = None, tape_pair: str | None = None,
         mandate_path: str | None = None, mandate_enforce: bool = False,
-        policy_paths: list | None = None) -> int:
+        policy_paths: list | None = None, access_names: bool = False) -> int:
     """Spawn `command`, proxy stdio through it, log the seam. Returns the child's exit code.
 
     With `tape_path`, also keep this side's call tape (see `tape.py`): `side="agent"`
@@ -541,7 +541,8 @@ def run(command: list[str], ledger_path: str, *, server: str | None = None,
     """
     log = open_ledger(ledger_path)
     label = server or _server_label(command)
-    tape = (TapeWriter(tape_path, side=side, namespace=tape_namespace)
+    tape = (TapeWriter(tape_path, side=side, namespace=tape_namespace,
+                       access_names=access_names)
             if tape_path else None)
     obs = SeamObserver(log.append, server=label, session=session, raw=raw, impl=IMPL,
                        tape=tape)
@@ -1036,6 +1037,11 @@ def main(argv: list[str] | None = None,
                     help="pin this system-prompt or policy file in session_begin by "
                          "sha256 (repeatable). Hashes only; the contents are never "
                          "written to the ledger.")
+    ap.add_argument("--access-names", action="store_true",
+                    help="with --tape: each tape row also lists the files, URLs and "
+                         "record names in that call's arguments (name + digest, never "
+                         "contents), for tape.access_register(). OFF by default: a "
+                         "name can itself be personal data.")
     ap.add_argument("--version", action="version", version=IMPL)
     ap.add_argument("command", nargs=argparse.REMAINDER,
                     help="-- <server command...>")
@@ -1044,6 +1050,8 @@ def main(argv: list[str] | None = None,
     command = list(args.command)
     if command and command[0] == "--":
         command = command[1:]
+    if args.access_names and not args.tape:
+        ap.error("--access-names needs --tape PATH")
     if args.mandate_enforce and args.mandate is None:
         ap.error("--mandate-enforce needs --mandate PATH")
     if args.http_forward is not None:
@@ -1073,7 +1081,7 @@ def main(argv: list[str] | None = None,
                side=args.side, tape_namespace=args.tape_namespace,
                pin_witness=args.pin_witness, tape_pair=args.tape_pair,
                mandate_path=args.mandate, mandate_enforce=args.mandate_enforce,
-               policy_paths=args.policy)
+               policy_paths=args.policy, access_names=args.access_names)
 
 
 if __name__ == "__main__":

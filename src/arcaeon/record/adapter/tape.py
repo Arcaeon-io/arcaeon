@@ -43,19 +43,33 @@ sides by construction (same function, same canonical JSON), so a relay that
 re-serializes a frame without changing it does not break a match, and a relay
 that changes one character does. `rpc_id` is carried for a human reading the
 tape but is NOT in either digest: a legitimate relay may renumber ids.
+
+THE ACCESS REGISTER (opt-in)
+----------------------------
+`TapeWriter(access_names=True)` (proxy `--access-names`) adds one field to
+each row: `access`, the files, URLs and record names found in that call's
+arguments, each as `{kind, name, digest}`. `access_register(path)` folds a
+tape (or a `--raw` seam log) into one list: what the agent touched, by name,
+and in which calls. Names and digests only, never contents: no file is
+opened, a URL keeps scheme, host and path (userinfo, query and fragment are
+dropped from the name), and `digest` is over the full argument value as sent.
+Off by default because a name can itself be personal data (a file called
+after a patient); the default tape stays digests only.
 """
 from __future__ import annotations
 
 import json
+import re
 import threading
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from ._ledger import digest_json, open_ledger
 
 __all__ = ["TAPE_FORMAT", "SIDES", "TapeWriter", "request_digest", "response_digest",
            "pin_at_session_end", "WITNESS_KEY_ENV", "INVALID_ID", "valid_rpc_id",
-           "render_invalid_id"]
+           "render_invalid_id", "extract_access", "access_register"]
 
 #: The witness bearer key is read from the environment, never from argv: argv
 #: is recorded (redacted) in `session_begin`, and a key has no business there.
@@ -116,6 +130,146 @@ def _status(msg: dict) -> str:
     return "error" if isinstance(res, dict) and res.get("isError") is True else "ok"
 
 
+# -- the access register ------------------------------------------------------
+
+_URL = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]{1,15}://")
+_PATHISH = re.compile(r"^(?:/|~[/\\]|\.{1,2}[/\\]|[A-Za-z]:[/\\]|\\\\)")
+_FILE_KEYS = frozenset({"path", "file", "files", "filename", "file_name", "filepath",
+                        "file_path", "paths", "dir", "directory", "folder", "src",
+                        "dest", "destination", "cwd", "root", "source_path",
+                        "target_path", "output_path", "input_path"})
+_FILE_SUFFIXES = ("_path", "_file", "_dir", "_filename")
+_RECORD_KEYS = frozenset({"record", "record_id", "record_name", "table", "table_name",
+                          "collection", "document", "document_id", "doc_id", "namespace",
+                          "bucket", "index", "sheet", "database", "db", "entity",
+                          "object_key"})
+_MAX_NAME = 512
+_MAX_ENTRIES = 256
+_MAX_DEPTH = 8
+
+
+def _url_name(value: str) -> tuple[str, str]:
+    """(kind, name) for a URL: file:// is a file; anything else keeps scheme,
+    host, port and path only. A credential in userinfo or the query string
+    never reaches the name."""
+    try:
+        u = urlsplit(value)
+        if u.scheme.lower() == "file":
+            return "file", (u.netloc + u.path) if u.netloc else u.path
+        host = u.hostname or ""
+        try:
+            port = f":{u.port}" if u.port else ""
+        except ValueError:
+            port = ""
+        return "url", f"{u.scheme}://{host}{port}{u.path}"
+    except ValueError:
+        return "url", value.split("?", 1)[0].split("#", 1)[0]
+
+
+def extract_access(arguments: Any) -> list[dict]:
+    """Files, URLs and record names in one call's arguments, as
+    `{kind, name, digest}`. `digest` is over the value exactly as sent (the
+    json-c14n digest of the string), so two calls naming the same thing share
+    it. Bounded: depth 8, 256 entries. Never opens anything."""
+    out: list[dict] = []
+    seen: set = set()
+
+    def add(kind: str, name: str, value: Any) -> None:
+        name = name if len(name) <= _MAX_NAME else name[:_MAX_NAME - 3] + "..."
+        d = _safe(value)
+        if (kind, d) in seen or len(out) >= _MAX_ENTRIES:
+            return
+        seen.add((kind, d))
+        out.append({"kind": kind, "name": name, "digest": d})
+
+    def walk(v: Any, key: str | None, depth: int) -> None:
+        if depth > _MAX_DEPTH or len(out) >= _MAX_ENTRIES:
+            return
+        k = key.lower() if isinstance(key, str) else ""
+        if isinstance(v, dict):
+            for kk, vv in v.items():
+                walk(vv, kk if isinstance(kk, str) else None, depth + 1)
+        elif isinstance(v, list):
+            for vv in v:
+                walk(vv, key, depth + 1)
+        elif isinstance(v, str) and v:
+            if _URL.match(v):
+                add(*_url_name(v), v)
+            elif k in _FILE_KEYS or k.endswith(_FILE_SUFFIXES) or _PATHISH.match(v):
+                add("file", v, v)
+            elif k in _RECORD_KEYS:
+                add("record", v, v)
+        elif isinstance(v, int) and not isinstance(v, bool) and k in _RECORD_KEYS:
+            add("record", str(v), v)
+
+    walk(arguments, None, 0)
+    return out
+
+
+def access_register(tape_path: str | Path) -> dict:
+    """Every file, URL and record name seen in a tape's tools/call arguments,
+    folded into one list: `{kind, name, digest, calls, tools}` per thing, where
+    `calls` are the tape indices (or seam `seq`) that named it. Names and
+    digests only; never contents.
+
+    Reads a tape written with `access_names` (rows carry `access`) or a seam
+    log written with `--raw` (rows carry `args`, extracted here). A call row
+    with neither is counted in `calls_without_names`, so a register built from
+    a digest-only tape says it could not see names instead of reading empty.
+    Never raises: an unreadable file comes back with `could_not_look`."""
+    path = Path(tape_path)
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except FileNotFoundError:
+        return {"source": str(path), "entries": [], "calls": 0,
+                "could_not_look": {"looked_for": "the tape", "where": str(path),
+                                   "reason_word": "missing",
+                                   "reason": f"no file at {path}"}}
+    except OSError as e:
+        return {"source": str(path), "entries": [], "calls": 0,
+                "could_not_look": {"looked_for": "the tape", "where": str(path),
+                                   "reason_word": "unreadable",
+                                   "reason": f"{type(e).__name__}: {e}"}}
+    by: dict = {}
+    calls = named = 0
+    for raw in text.split("\n"):
+        if not raw.strip():
+            continue
+        try:
+            row = json.loads(raw)
+        except (ValueError, RecursionError):
+            continue
+        if not isinstance(row, dict):
+            continue
+        if row.get("evt") == "tape_call":
+            ref = row.get("idx")
+            found = row.get("access") if isinstance(row.get("access"), list) else None
+        elif row.get("evt") == "tool_call":
+            ref = row.get("seq")
+            found = extract_access(row["args"]) if "args" in row else None
+        else:
+            continue
+        calls += 1
+        if found is None:
+            continue
+        named += 1
+        for e in found:
+            if not isinstance(e, dict) or not isinstance(e.get("name"), str):
+                continue
+            key = (e.get("kind"), e.get("digest"))
+            ent = by.setdefault(key, {"kind": e.get("kind"), "name": e["name"],
+                                      "digest": e.get("digest"), "calls": [], "tools": []})
+            ent["calls"].append(ref)
+            tool = row.get("tool")
+            if isinstance(tool, str) and tool not in ent["tools"]:
+                ent["tools"].append(tool)
+    entries = sorted(by.values(), key=lambda e: (str(e["kind"]), e["name"]))
+    return {"source": str(path), "entries": entries, "calls": calls,
+            "calls_named": named, "calls_without_names": calls - named,
+            "note": "names and digests only; no file was opened and no contents "
+                    "were read. A call that went around this seam is not here."}
+
+
 class TapeWriter:
     """Allocate call indices in arrival order; commit rows in index order.
 
@@ -124,12 +278,14 @@ class TapeWriter:
     """
 
     def __init__(self, path: str | Path, *, side: str = "agent",
-                 namespace: str | None = None, emit=None):
+                 namespace: str | None = None, emit=None, access_names: bool = False):
         if side not in SIDES:
             raise ValueError(f"side must be one of {SIDES}, not {side!r}")
         self.path = Path(path)
         self.side = side
         self.namespace = namespace
+        #: Opt-in: each row also carries `access` (see "THE ACCESS REGISTER").
+        self.access_names = access_names
         self._emit = emit or open_ledger(self.path).append
         self._lock = threading.Lock()
         last = self._last_idx()
@@ -176,6 +332,8 @@ class TapeWriter:
                 "rpc_id": None if rpc_id is None or isinstance(rpc_id, bool) else str(rpc_id),
                 "req": request_digest(params),
             }
+            if self.access_names:
+                self._open[idx]["access"] = _access_of(params)
             return idx
 
     def invalid_call(self, params: Any, rpc_id: Any) -> int:
@@ -194,6 +352,8 @@ class TapeWriter:
                 "req": request_digest(params),
                 "resp": None, "status": INVALID_ID,
             }
+            if self.access_names:
+                self._ready[idx]["access"] = _access_of(params)
             self._drain()
             return idx
 
@@ -230,6 +390,14 @@ class TapeWriter:
             except Exception:
                 self.write_failures += 1
             self._committed = k
+
+
+def _access_of(params: Any) -> list[dict]:
+    args = params.get("arguments") if isinstance(params, dict) else None
+    try:
+        return extract_access(args if args is not None else {})
+    except Exception:  # the register never costs the tape row
+        return []
 
 
 def pin_at_session_end(tape_path, *, witness_url: str, key: str | None,
