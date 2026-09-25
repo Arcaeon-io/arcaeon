@@ -110,10 +110,18 @@ class Finding:
     side: str | None        # MISSING: the SHORT side. ALTERED: the side that contradicts, or None
     reason: str
     index_side: str | None = None   # whose numbering `at` is in ("agent"/"tool")
+    # Additive (0.9.x): what the check looked for, where, and why it could not
+    # look as one of arcaeon.verdict.REASON_WORDS. A MISSING/ALTERED finding
+    # looked and found; these stay None on it.
+    looked_for: str | None = None
+    where: str | None = None
+    reason_word: str | None = None
 
     def to_dict(self) -> dict:
         return {"verdict": self.verdict, "at": self.at, "side": self.side,
-                "index_side": self.index_side, "reason": self.reason}
+                "index_side": self.index_side, "reason": self.reason,
+                "looked_for": self.looked_for, "where": self.where,
+                "reason_word": self.reason_word}
 
 
 @dataclass
@@ -128,6 +136,14 @@ class Reconciliation:
     could_not_look: list = field(default_factory=list)
     pins_checked: list = field(default_factory=list)
     limits: list = field(default_factory=lambda: list(LIMITS))
+    # Additive (0.9.x): on COULD NOT LOOK, what the first unlooked-at thing was,
+    # where it was looked for, and why as a fixed word (arcaeon.verdict.REASON_WORDS).
+    # `could_not_look_detail` carries the same three keys plus `reason` for every
+    # entry of `could_not_look`, in the same order.
+    looked_for: str | None = None
+    where: str | None = None
+    reason_word: str | None = None
+    could_not_look_detail: list = field(default_factory=list)
 
     @property
     def exit_code(self) -> int:
@@ -153,7 +169,10 @@ class Reconciliation:
                 "findings": [f.to_dict() for f in self.findings],
                 "could_not_look": list(self.could_not_look),
                 "pins_checked": list(self.pins_checked),
-                "limits": list(self.limits), "exit_code": self.exit_code}
+                "limits": list(self.limits), "exit_code": self.exit_code,
+                "looked_for": self.looked_for, "where": self.where,
+                "reason_word": self.reason_word,
+                "could_not_look_detail": [dict(d) for d in self.could_not_look_detail]}
 
 
 # -- loading one tape --------------------------------------------------------
@@ -168,6 +187,15 @@ class _Tape:
     calls: list = field(default_factory=list)      # rows that passed the index walk
     broken: bool = False
     cnl: str | None = None                         # could-not-look reason
+    cnl_detail: dict | None = None                 # looked_for/where/reason_word/reason
+
+    def refuse(self, reason: str, looked_for: str, reason_word: str,
+               where: str | None = None) -> "_Tape":
+        """Mark this tape COULD NOT LOOK, with the additive fields beside the reason."""
+        self.cnl = reason
+        self.cnl_detail = _v.could_not_look(looked_for, where or str(self.path),
+                                            reason_word, reason)
+        return self
 
     @property
     def name(self) -> str:
@@ -257,14 +285,11 @@ def _load(label: str, path: str | Path, findings: list) -> _Tape:
     try:
         t.path.stat()
     except FileNotFoundError:
-        t.cnl = f"{label} not found: {t.path}"
-        return t
+        return t.refuse(f"{label} not found: {t.path}", label, "missing")
     except OSError as e:
-        t.cnl = f"{label} unreadable: {e}"
-        return t
+        return t.refuse(f"{label} unreadable: {e}", label, "unreadable")
     if t.path.is_dir():
-        t.cnl = f"{label} is a directory, not a tape: {t.path}"
-        return t
+        return t.refuse(f"{label} is a directory, not a tape: {t.path}", label, "unreadable")
     # Read exactly as verify_file reads, and answer COULD NOT LOOK on the lines
     # it would raise on (or that are too deep to read without guessing).
     try:
@@ -273,8 +298,8 @@ def _load(label: str, path: str | Path, findings: list) -> _Tape:
         lines = []                # verify_file reports it as unreadable below
     why = _cannot_read(label, lines)
     if why:
-        t.cnl = why
-        return t
+        m = _LINE.search(why)
+        return t.refuse(why, f"{label} line {m.group(1)}" if m else label, "unreadable")
     # strict: every row of a tape must be chained; a tape has no legacy prefix.
     res = verify_file(t.path, strict=True)
     if res.ok is None and res.verified_scope == "empty":
@@ -282,8 +307,7 @@ def _load(label: str, path: str | Path, findings: list) -> _Tape:
     if res.ok is not True:
         fb = res.first_break or "chain does not verify"
         if fb.startswith("unreadable"):
-            t.cnl = f"{label} {fb}"
-            return t
+            return t.refuse(f"{label} {fb}", label, "unreadable")
         # Try to learn the side from any readable row, so the finding names it.
         t.side = _peek_side(t.path)
         m = _LINE.search(fb)
@@ -299,19 +323,37 @@ def _load(label: str, path: str | Path, findings: list) -> _Tape:
         except (ValueError, RecursionError):
             # verify_file stripped this line with str.strip(), which also removes
             # \x0b \x0c \x1c-\x1f \x85 \xa0 U+2028 U+3000 ...; json.loads does not.
-            t.cnl = (f"{label} row {n} verifies but does not read a second time "
-                     f"(whitespace json.loads does not strip) [whitespace_outside_json]")
-            return t
+            return t.refuse(f"{label} row {n} verifies but does not read a second time "
+                            f"(whitespace json.loads does not strip) [whitespace_outside_json]",
+                            f"{label} row {n}", "unreadable")
         if not _is_tape_row(row):
-            t.cnl = f"{label} row {n} is not an {TAPE_FORMAT} row"
-            return t
+            absent = _absent_key(row)
+            where = f"{t.path} row {n}"
+            if absent is not None:
+                return t.refuse(f"{label} row {n} is not an {TAPE_FORMAT} row", absent,
+                                "name_not_found", where)
+            return t.refuse(f"{label} row {n} is not an {TAPE_FORMAT} row",
+                            f"an {TAPE_FORMAT} row", "unreadable", where)
         if t.side is None:
             t.side, t.ns = row["side"], row.get("ns")
         elif row["side"] != t.side:
-            t.cnl = f"{label} mixes sides ({t.side} and {row['side']}) at row {n}"
-            return t
+            return t.refuse(f"{label} mixes sides ({t.side} and {row['side']}) at row {n}",
+                            f"{t.side}-side row", "unreadable", f"{t.path} row {n}")
         t.rows.append(row)
     return t
+
+
+#: The keys every tape row carries. A row missing one is COULD NOT LOOK with
+#: reason word `name_not_found` and the key reconcile looked for, verbatim, in
+#: `looked_for`: a reader sees the name the check went looking for inside the
+#: refusal, so a name that does not exist on the tape cannot hide behind it.
+_ROW_KEYS = ("evt", "tape", "side", "idx", "req", "resp")
+
+
+def _absent_key(row: Any) -> str | None:
+    if not isinstance(row, dict):
+        return None
+    return next((k for k in _ROW_KEYS if k not in row), None)
 
 
 def _peek_side(path: Path) -> str | None:
@@ -393,7 +435,10 @@ def _check_pin(pin: dict, t: _Tape, findings: list, cnl: list, checked: list) ->
     rec = {"side": t.name, "namespace": pin.get("namespace"), "rows": m}
     checked.append(rec)
     if t.cnl:
-        cnl.append(f"pin for {t.name} could not be checked: {t.cnl}")
+        why = f"pin for {t.name} could not be checked: {t.cnl}"
+        d = t.cnl_detail or {}
+        cnl.append(_Cnl(why, d.get("looked_for", t.name), d.get("where", str(t.path)),
+                        d.get("reason_word", "unreadable")))
         rec["result"] = "could_not_look"
         return
     have = len(t.rows)
@@ -416,6 +461,23 @@ def _check_pin(pin: dict, t: _Tape, findings: list, cnl: list, checked: list) ->
         rec["result"] = "head_differs"
         return
     rec["result"] = "agrees"
+
+
+class _Cnl(str):
+    """A could-not-look reason: still the plain string `could_not_look` has
+    always carried, with the additive fields riding beside it."""
+
+    def __new__(cls, reason: str, looked_for, where, reason_word: str):
+        obj = super().__new__(cls, reason)
+        obj.detail = _v.could_not_look(looked_for, where, reason_word, reason)
+        return obj
+
+
+def _detail(c) -> dict:
+    d = getattr(c, "detail", None)
+    if d is not None:
+        return dict(d)
+    return _v.could_not_look(None, None, "unreadable", str(c))
 
 
 # -- lining the tapes up -----------------------------------------------------
@@ -523,7 +585,10 @@ def reconcile(tape_a: str | Path, tape_b: str | Path, *,
         return _reconcile(tape_a, tape_b, pins=pins, pin_path=pin_path)
     except Exception as e:  # the fence: an answer, not a crash
         why = f"reconcile could not finish: {type(e).__name__} [internal_error]"
-        return Reconciliation(verdict=COULD_NOT_LOOK, reason=why, could_not_look=[why])
+        d = _v.could_not_look("a verdict", f"{tape_a}, {tape_b}", "unreadable", why)
+        return Reconciliation(verdict=COULD_NOT_LOOK, reason=why, could_not_look=[why],
+                              looked_for=d["looked_for"], where=d["where"],
+                              reason_word=d["reason_word"], could_not_look_detail=[d])
 
 
 def _reconcile(tape_a, tape_b, *, pins=None, pin_path=None) -> Reconciliation:
@@ -533,7 +598,9 @@ def _reconcile(tape_a, tape_b, *, pins=None, pin_path=None) -> Reconciliation:
     tapes = [_load("tape_a", tape_a, findings), _load("tape_b", tape_b, findings)]
     for t in tapes:
         if t.cnl:
-            cnl.append(t.cnl)
+            d = t.cnl_detail or {}
+            cnl.append(_Cnl(t.cnl, d.get("looked_for", t.label), d.get("where", str(t.path)),
+                            d.get("reason_word", "unreadable")))
 
     readable = [t for t in tapes if not t.cnl and not t.broken]
     for t in readable:
@@ -543,7 +610,9 @@ def _reconcile(tape_a, tape_b, *, pins=None, pin_path=None) -> Reconciliation:
     tool = next((t for t in tapes if t.side == "tool"), None)
     sides = [t.side for t in tapes if t.side]
     if len(sides) == 2 and sides[0] == sides[1]:
-        cnl.append(f"both tapes are {sides[0]}-side tapes; reconcile needs one of each")
+        other = "tool" if sides[0] == "agent" else "agent"
+        cnl.append(_Cnl(f"both tapes are {sides[0]}-side tapes; reconcile needs one of each",
+                        f"a {other}-side tape", f"{tapes[0].path}, {tapes[1].path}", "missing"))
         agent = tool = None
     # An empty tape has no row to name its side: it is the side the other is not.
     if len(readable) == 2 and agent is None and tool is not None:
@@ -551,7 +620,8 @@ def _reconcile(tape_a, tape_b, *, pins=None, pin_path=None) -> Reconciliation:
     elif len(readable) == 2 and tool is None and agent is not None:
         tool = next(t for t in readable if t is not agent and t.side is None)
     if len(readable) == 2 and not tapes[0].rows and not tapes[1].rows:
-        cnl.append("both tapes are empty: an idle agent and a silent recorder look identical")
+        cnl.append(_Cnl("both tapes are empty: an idle agent and a silent recorder look identical",
+                        "tape rows", f"{tapes[0].path}, {tapes[1].path}", "empty"))
 
     matched = 0
     can_align = (agent is not None and tool is not None and agent in readable
@@ -563,10 +633,13 @@ def _reconcile(tape_a, tape_b, *, pins=None, pin_path=None) -> Reconciliation:
     if pin_path is not None:
         try:
             pins = list(pins or []) + load_pins(pin_path)
+        except FileNotFoundError as e:
+            cnl.append(_Cnl(f"pin unreadable: {e}", "a witness pin", str(pin_path), "missing"))
         except (OSError, ValueError) as e:
-            cnl.append(f"pin unreadable: {e}")
+            cnl.append(_Cnl(f"pin unreadable: {e}", "a witness pin", str(pin_path), "unreadable"))
         except RecursionError:
-            cnl.append("pin unreadable: nested deeper than the JSON reader goes [nesting_too_deep]")
+            cnl.append(_Cnl("pin unreadable: nested deeper than the JSON reader goes "
+                            "[nesting_too_deep]", "a witness pin", str(pin_path), "unreadable"))
     for pin in pins or []:
         for t in _pin_targets(pin, tapes):
             _check_pin(pin, t, findings, cnl, checked)
@@ -574,13 +647,18 @@ def _reconcile(tape_a, tape_b, *, pins=None, pin_path=None) -> Reconciliation:
     counts = {t.name: len(t.rows) for t in tapes}
     r = Reconciliation(verdict=MATCHED, matched=matched, counts=counts,
                        findings=sorted(findings, key=lambda f: (f.at or 0, f.verdict)),
-                       could_not_look=cnl, pins_checked=checked)
+                       could_not_look=[str(c) for c in cnl], pins_checked=checked,
+                       could_not_look_detail=[_detail(c) for c in cnl])
     if findings:
         h = _headline(findings)
         r.verdict, r.at, r.side, r.reason = h.verdict, h.at, h.side, h.reason
     elif cnl or not can_align:
         r.verdict = COULD_NOT_LOOK
-        r.reason = cnl[0] if cnl else "the two tapes could not be paired"
+        r.reason = str(cnl[0]) if cnl else "the two tapes could not be paired"
+        d = (r.could_not_look_detail[0] if r.could_not_look_detail else
+             _v.could_not_look("an agent-side and a tool-side tape",
+                               f"{tapes[0].path}, {tapes[1].path}", "missing", r.reason))
+        r.looked_for, r.where, r.reason_word = d["looked_for"], d["where"], d["reason_word"]
     else:
         r.reason = f"{matched} calls on each tape, same digests"
     return r
