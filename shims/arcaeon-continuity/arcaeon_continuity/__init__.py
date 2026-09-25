@@ -13,6 +13,9 @@ import warnings as _warnings
 
 _NEW = "arcaeon.prove.continuity"
 
+#: this shim's own release (its pyproject version), not the moved code's
+__version__ = "0.2.5"
+
 #: old submodule -> its new home (MIGRATION.md, "Per-module tables")
 _SUBMODULES = {
     'arcaeon_continuity.__main__': 'arcaeon.prove.continuity.__main__',

@@ -13,6 +13,9 @@ import warnings as _warnings
 
 _NEW = "arcaeon.prove.vet"
 
+#: this shim's own release (its pyproject version), not the moved code's
+__version__ = "0.0.18"
+
 #: old submodule -> its new home (MIGRATION.md, "Per-module tables")
 _SUBMODULES = {
     'mcp_vet.__main__': 'arcaeon.prove.vet.__main__',

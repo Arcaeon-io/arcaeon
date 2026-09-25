@@ -13,6 +13,9 @@ import warnings as _warnings
 
 _NEW = "arcaeon.record.once"
 
+#: this shim's own release (its pyproject version), not the moved code's
+__version__ = "0.2.4"
+
 #: old submodule -> its new home (MIGRATION.md, "Per-module tables")
 _SUBMODULES = {
     'arcaeon_once._ledger': 'arcaeon.record.call_record',

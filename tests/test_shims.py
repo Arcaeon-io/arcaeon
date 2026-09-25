@@ -184,6 +184,24 @@ def test_old_import_yields_every_old_public_name(name):
 
 
 @pytest.mark.parametrize("name", NAMES)
+def test_shim_dunder_version_is_its_own_pyproject_version(name):
+    """0.9.0 shipped shims whose `__version__` fell through `__getattr__` to the
+    moved code's internal string (arcaeon_ledger said 0.8.0 inside the 0.8.1
+    wheel). Each shim module now carries its own release; pin it to pyproject."""
+    old, _new = TABLE[name]
+    declared = _pyproject(name)["project"]["version"]
+    proc = _run(name, f"""
+        import json, warnings
+        warnings.simplefilter("ignore", DeprecationWarning)
+        import {old} as shim
+        print(json.dumps({{"file": shim.__file__, "version": shim.__version__}}))
+    """)
+    out = _json_tail(proc)
+    assert Path(out["file"]).resolve().is_relative_to((SHIMS / name).resolve()), out["file"]
+    assert out["version"] == declared, (name, out["version"], declared)
+
+
+@pytest.mark.parametrize("name", NAMES)
 def test_deprecation_warning_fires_once_and_names_the_new_module(name):
     old, new = TABLE[name]
     proc = _run(name, f"""
