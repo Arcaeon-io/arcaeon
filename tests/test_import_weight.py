@@ -103,7 +103,7 @@ def test_the_row_format_has_no_second_copy_in_src():
 def test_base_install_declares_zero_dependencies_and_the_four_extras():
     meta = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     assert meta["name"] == "arcaeon"
-    assert meta["version"] == "0.9.0"
+    assert meta["version"] == "0.9.1"
     assert meta["requires-python"] == ">=3.10"
     assert meta["dependencies"] == []
     extras = meta["optional-dependencies"]

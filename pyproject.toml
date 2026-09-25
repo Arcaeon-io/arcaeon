@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "arcaeon"
-version = "0.9.0"
+version = "0.9.1"
 description = "A record of what an agent did that the agent cannot quietly rewrite, and a way for anyone who doubts it to check."
 readme = "README.md"
 requires-python = ">=3.10"

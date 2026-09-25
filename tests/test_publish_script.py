@@ -143,8 +143,8 @@ def test_upload_order_and_token_only_in_subprocess_env(publish, tmp_path, monkey
 
     def init(self, a):
         orig(self, a)
-        self.version = "0.9.0"
-        self.main_artifacts = [dist / "arcaeon-0.9.0-py3-none-any.whl", dist / "arcaeon-0.9.0.tar.gz"]
+        self.version = "0.9.1"
+        self.main_artifacts = [dist / "arcaeon-0.9.1-py3-none-any.whl", dist / "arcaeon-0.9.1.tar.gz"]
         self.shim_wheels = [dist / "shims" / f"s{i}-0.1-py3-none-any.whl" for i in range(13)]
 
     monkeypatch.setattr(publish.Ctx, "__init__", init)

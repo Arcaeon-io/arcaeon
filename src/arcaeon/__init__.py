@@ -16,4 +16,4 @@ Importing `arcaeon` imports nothing else: no submodule, no third-party
 package, no network. The base install has zero runtime dependencies; the
 heavy parts sit behind extras ([mcp], [ts], [sign], [all]).
 """
-__version__ = "0.9.0"
+__version__ = "0.9.1"

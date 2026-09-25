@@ -1,6 +1,6 @@
 # MIGRATION: 13 packages into one `arcaeon`
 
-## Unreleased: 0.9.1
+## 0.9.1 (2026-09-25)
 
 - `arcaeon verify` on a path it cannot read (missing, a directory, no
   permission) now answers COULD NOT LOOK, exit 3. 0.9.0 answered BROKEN,
@@ -19,6 +19,21 @@
 - The `arcaeon.cli` docstring's NETWORK note names the two verbs that go
   online on request: `receipt cite` (CourtListener, unless `--fixture`) and
   `proxy --pin-witness URL`.
+- Every verb answers `--version` the same way: `arcaeon <verb> 0.9.1`, exit
+  0. 0.9.0 let each moved tool answer for itself (`arcaeon audit --version`
+  printed `arcaeon-audit 0.1.8`, `arcaeon baseline --version` a bare
+  component number, `arcaeon selftest --version` ran every selftest) and
+  16 of the 23 verbs had no `--version` at all (a usage error). `arcaeon once
+  --help` now opens `arcaeon once` with `arcaeon once ...` examples, where it
+  opened `arcaeon-once CLI` with `python -m arcaeon.record.once.cli` ones.
+- `seal` and `badge --sealed` without `--ns`: no behavior change, now covered
+  for both verbs. 0.9.0 already derived the default namespace from the key's
+  own prefix (see "Namespace from the key" below: the witness names the
+  prefix only in the 403 body of its pin endpoint, before any metering; the
+  balance endpoint's JSON carries none), so a stranger never needed `--ns`.
+  0.9.0's tests proved it for `seal` only; 0.9.1 adds `badge --sealed` with a
+  fake key and a stubbed 403-then-201 witness, and proves `--ns` stays an
+  override posted exactly as given, once.
 
 ## If you used the old packages
 

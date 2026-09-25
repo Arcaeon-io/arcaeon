@@ -364,7 +364,7 @@ LIBRARY_CASES = {
                        "text = '. '.join(f'Sentence {i} says something new' for i in range(400))\n"
                        "r = distill(text, budget=50)\n"
                        "assert r.truncated is True and r.est_tokens_after <= 50",
-    "arcaeon-all": "import arcaeon_all\nassert arcaeon_all.versions() == {'arcaeon': '0.9.0'}",
+    "arcaeon-all": "import arcaeon_all\nassert arcaeon_all.versions() == {'arcaeon': '0.9.1'}",
 }
 
 

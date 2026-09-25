@@ -5,8 +5,8 @@ publish is a public write and waits on Daniel's go.
 
 ## What this folder holds
 
-- `server.json`: the registry record for `io.arcaeon/arcaeon` 0.9.0, pointing at
-  the PyPI package `arcaeon` 0.9.0, started as `arcaeon mcp`.
+- `server.json`: the registry record for `io.arcaeon/arcaeon` 0.9.1, pointing at
+  the PyPI package `arcaeon` 0.9.1, started as `arcaeon mcp`.
 - `server.schema.2025-12-11.json`: a copy of the schema the record names
   (`https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json`,
   fetched 2026-09-24), so `tests/test_registry_entry.py` validates offline.
@@ -38,17 +38,17 @@ publish is a public write and waits on Daniel's go.
 
 1. **PyPI first.** The registry stores metadata only; it points at the PyPI
    package and checks it at publish time. It fetches
-   `https://pypi.org/pypi/arcaeon/0.9.0/json` and looks for the exact string
+   `https://pypi.org/pypi/arcaeon/0.9.1/json` and looks for the exact string
    `mcp-name: io.arcaeon/arcaeon` in that version's description (the rendered
    README). The marker is now in `README.md` as a hidden comment, line 3:
-   `<!-- mcp-name: io.arcaeon/arcaeon -->`. **0.9.0 must be built from a commit
-   that has that line.** PyPI versions are immutable: if 0.9.0 goes up without
-   it, 0.9.0 can never be listed and the listing needs 0.9.1.
+   `<!-- mcp-name: io.arcaeon/arcaeon -->`. **0.9.1 must be built from a commit
+   that has that line** (it does: README.md line 3). PyPI versions are
+   immutable: a version that goes up without it can never be listed.
    `tools/publish.py --upload` handles the PyPI side (main package, then the 13
    shims); its closing notes list this registry step as next.
 2. Confirm the marker is live (read-only):
    ```bash
-   curl -s https://pypi.org/pypi/arcaeon/0.9.0/json | py -c "import json,sys; d=json.load(sys.stdin)['info']['description']; print('MARKER FOUND' if 'mcp-name: io.arcaeon/arcaeon' in d else 'MARKER MISSING')"
+   curl -s https://pypi.org/pypi/arcaeon/0.9.1/json | py -c "import json,sys; d=json.load(sys.stdin)['info']['description']; print('MARKER FOUND' if 'mcp-name: io.arcaeon/arcaeon' in d else 'MARKER MISSING')"
    ```
 3. Confirm the domain proof is still served (read-only):
    `curl -s https://arcaeon.io/.well-known/mcp-registry-auth` should print a
@@ -132,8 +132,8 @@ cost is two listings that describe the old split.
 - [ ] `repository` replaced with the real repo, or removed.
 - [ ] `py -m pytest -q tests/test_registry_entry.py` green.
 - [ ] `server.json` `version` and `packages[0].version` equal the PyPI version.
-- [ ] PyPI 0.9.0 live; the step 2 check prints `MARKER FOUND`.
+- [ ] PyPI 0.9.1 live; the step 2 check prints `MARKER FOUND`.
 - [ ] Step 3 prints the `v=MCPv1; k=ed25519; ...` line.
 - [ ] `mcp-publisher validate server.json` prints valid.
-- [ ] After publish, the read-back lists 0.9.0 as `active`, `isLatest: true`.
+- [ ] After publish, the read-back lists 0.9.1 as `active`, `isLatest: true`.
 - [ ] Then, if agreed, deprecate the two old listings and read them back.
