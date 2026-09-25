@@ -470,7 +470,11 @@ def _check_attestation_signature(receipt: dict, body_digest: Any) -> dict:
             "algorithm_claimed": sig.get("algorithm"),
             "note": ("the signature value was NOT checked: the receipt format carries no public "
                      "key and names no signature scheme this verifier can run. Check it against "
-                     "the auditor's published key out of band.")}
+                     "the auditor's published key out of band."),
+            # additive (0.9.x): the could-not-look fields of arcaeon.verdict
+            "looked_for": "a public key and signature scheme for attestation_signature.value",
+            "where": "the receipt (format arcaeon-receipt/0.1 carries neither)",
+            "reason_word": "missing"}
 
 
 def _claimed_fields(receipt: dict, res: dict, ots: bool) -> list:

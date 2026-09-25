@@ -550,3 +550,43 @@ def test_page_canonicalizer_still_loads_and_runs_under_node():
                               capture_output=True, text=True, timeout=30)
         assert proc.returncode == 0, proc.stderr
         assert out.read_text(encoding="utf-8") == '{"a":2,"b":1}'
+
+
+# --- could-not-look fields (0.9.x, additive) ------------------------------------
+
+def test_every_could_not_look_row_carries_looked_for_where_reason_word(tmp_path):
+    from arcaeon import verdict as V
+    staged = stage_class(tmp_path)
+    (staged / "07_seq_strong.receipt.json").write_text("[1, 2, 3]", encoding="utf-8")
+    (staged / "08_x.receipt.json").write_text('{"kind": ', encoding="utf-8")
+    result = verify_batch.verify_batch([staged])
+    for r in result["rows"]:
+        assert {"looked_for", "where", "reason_word"} <= set(r), r
+        if r["verdict"] == verify_batch.UNDETERMINED:
+            assert r["reason_word"] in V.REASON_WORDS and r["looked_for"] and r["where"], r
+        else:
+            assert r["looked_for"] is r["where"] is r["reason_word"] is None, r
+    by = {r["id"]: r for r in result["rows"]}
+    assert by["07_seq_strong.receipt.json"]["looked_for"] == "a JSON object"
+    assert by["08_x.receipt.json"]["reason_word"] == "unreadable"
+    # the text a person reads is unchanged
+    assert "reason_word" not in verify_batch.render(result)
+
+
+def test_a_missing_ledger_names_it_in_looked_for(tmp_path):
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    for p in example_receipts()[:2]:
+        shutil.copy2(p, bare / p.name)
+    result = verify_batch.verify_batch([bare])
+    for r in result["rows"]:
+        assert r["reason_word"] == "missing" and r["looked_for"] == "ledger.jsonl", r
+
+
+def test_the_attestation_signature_could_not_look_carries_the_fields():
+    from arcaeon.record.receipt.core import _check_attestation_signature
+    got = _check_attestation_signature(
+        {"attestation_signature": {"signed_over": "body_digest", "body_digest": "abc",
+                                   "value": "sig", "algorithm": "unspecified"}}, "abc")
+    assert got["verdict"] == "could_not_look" and got["reason_word"] == "missing"
+    assert "public key" in got["looked_for"] and got["where"]

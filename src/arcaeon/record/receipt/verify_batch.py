@@ -30,6 +30,8 @@ import json
 from pathlib import Path
 from typing import Iterable, List, Optional
 
+from arcaeon import verdict as _v
+
 from .core import ANCHOR_POSITIVE, verify_receipt
 
 #: Published cap on receipts per free bulk verification pass
@@ -55,6 +57,19 @@ SAY = {OK: "VERIFIED", FAIL: "BROKEN", UNDETERMINED: "COULD NOT LOOK"}
 LEDGER_NEGATIVE = ("chain_broken", "row_not_found", "head_mismatch")
 
 RECEIPT_GLOB = "*.receipt.json"
+
+#: OpenTimestamps statuses (core.ots_verify) -> the reason word for an anchor
+#: that was asked for and not proven. Anything unlisted is "unreadable".
+_ANCHOR_REASON_WORD = {"no_anchor": "missing", "tool_missing": "missing",
+                       "not_checked": "missing", None: "missing", "pending": "bounded"}
+
+
+def _could_not_look(row: dict, looked_for: str, where: str, reason_word: str) -> dict:
+    """Add the three additive could-not-look keys (arcaeon.verdict) to an
+    undetermined row. The machine verdict and the reason text are unchanged."""
+    d = _v.could_not_look(looked_for, where, reason_word, row["reason"])
+    row.update(looked_for=d["looked_for"], where=d["where"], reason_word=d["reason_word"])
+    return row
 
 
 class CapExceeded(ValueError):
@@ -160,32 +175,34 @@ def verify_one(path: Path, *, ledger_path: Optional[str | Path] = None,
     file seven and leave the coordinator guessing about eight through
     twenty."""
     row = {"id": path.name, "path": str(path), "verdict": UNDETERMINED,
-           "ledger": "not_checked", "anchor": None, "reason": ""}
+           "ledger": "not_checked", "anchor": None, "reason": "",
+           "looked_for": None, "where": None, "reason_word": None}
     try:
         text = path.read_text(encoding="utf-8")
     except OSError as exc:
         row["reason"] = f"unreadable file: {str(exc)[:120]}"
-        return row
+        return _could_not_look(row, "the receipt file", str(path),
+                               "missing" if isinstance(exc, FileNotFoundError) else "unreadable")
     except UnicodeDecodeError as exc:
         # A ValueError, not an OSError: without this, one non-UTF-8 file
         # raised out of verify_one and killed the whole batch.
         row["reason"] = f"not UTF-8 text: {str(exc)[:120]}"
-        return row
+        return _could_not_look(row, "UTF-8 text", str(path), "unreadable")
     try:
         rc = json.loads(text)
     except ValueError as exc:
         row["reason"] = f"not readable JSON: {str(exc)[:120]}"
-        return row
+        return _could_not_look(row, "a JSON receipt", str(path), "unreadable")
     if not isinstance(rc, dict):
         row["reason"] = "not a JSON object: a receipt is an object at the top level"
-        return row
+        return _could_not_look(row, "a JSON object", str(path), "unreadable")
 
     led_path, claims_ledger = resolve_ledger(rc, path, ledger_path)
     try:
         res = verify_receipt(rc, ledger_path=led_path, ots=ots, source_text=text)
     except Exception as exc:  # defensive: core says it never raises
         row["reason"] = f"verifier could not run on this file: {str(exc)[:120]}"
-        return row
+        return _could_not_look(row, "a verdict", str(path), "unreadable")
 
     row["ledger"] = res["ledger"]["status"]
     anc = (rc.get("anchor") or {}).get("status")
@@ -234,7 +251,9 @@ def verify_one(path: Path, *, ledger_path: Optional[str | Path] = None,
         # not recognise. Not a pass and not an accusation.
         row["reason"] = (f"body digest ok, but the anchor was asked for and not "
                          f"proven (status {res['anchor'].get('status')})")
-        return row
+        return _could_not_look(row, "a proven OpenTimestamps anchor", f"{path} anchor",
+                               _ANCHOR_REASON_WORD.get(res["anchor"].get("status"),
+                                                       "unreadable"))
     if not claims_ledger:
         # Every receipt this format issues carries a ledger claim
         # (build_receipt requires a ledger and always writes the block). The
@@ -244,14 +263,15 @@ def verify_one(path: Path, *, ledger_path: Optional[str | Path] = None,
         row["reason"] = ("body digest ok, but the receipt carries no ledger "
                          "claim (block missing or chain null): its sequence "
                          "is unchecked")
-        return row
+        return _could_not_look(row, "ledger.chain", f"{path} ledger block", "name_not_found")
     if led_path is None:
         # The body is intact, but the receipt makes a sequence claim nobody
         # in this run could check. Not a pass and not an accusation.
         name = Path(str((rc.get("ledger") or {}).get("path") or "")).name or "the ledger"
         row["reason"] = (f"body digest ok, but {name} was not found beside the "
                          "receipt: its ledger sequence claim is unchecked")
-        return row
+        return _could_not_look(row, name, str(ledger_path) if ledger_path is not None
+                               else str(path.parent), "missing")
     row["verdict"] = OK
     return row
 
@@ -263,9 +283,11 @@ def _verify_one_guarded(path: Path, **kw) -> dict:
     try:
         return verify_one(path, **kw)
     except Exception as exc:  # defensive
-        return {"id": path.name, "path": str(path), "verdict": UNDETERMINED,
-                "ledger": "not_checked", "anchor": None,
-                "reason": f"verifier could not run on this file: {str(exc)[:120]}"}
+        return _could_not_look(
+            {"id": path.name, "path": str(path), "verdict": UNDETERMINED,
+             "ledger": "not_checked", "anchor": None,
+             "reason": f"verifier could not run on this file: {str(exc)[:120]}"},
+            "a verdict", str(path), "unreadable")
 
 
 def verify_batch(targets: Iterable[str | Path], *,
