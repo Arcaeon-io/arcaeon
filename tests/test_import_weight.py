@@ -119,3 +119,30 @@ def test_package_version_matches_pyproject():
     import arcaeon
     meta = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     assert arcaeon.__version__ == meta["version"]
+
+
+_STDLIB_PROBE = r"""
+import json, sys
+before = set(sys.modules)
+import importlib
+importlib.import_module(sys.argv[1])
+new = {m.split(".")[0] for m in set(sys.modules) - before}
+third = sorted(n for n in new if n != "arcaeon" and n not in sys.stdlib_module_names)
+print(json.dumps({"third_party": third,
+                  "arcaeon_modules": sorted(m for m in sys.modules if m.startswith("arcaeon"))}))
+"""
+
+
+@pytest.mark.parametrize("module", ["arcaeon.journal", "arcaeon.status"])
+def test_journal_and_status_import_stdlib_only(module):
+    """B049: the journal is written on every verb and `status` reads it, so both
+    stay on the standard library: every top-level module their import brings
+    in, apart from arcaeon's own, is in sys.stdlib_module_names."""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = SRC
+    p = subprocess.run([sys.executable, "-c", _STDLIB_PROBE, module],
+                       capture_output=True, text=True, env=env, timeout=120)
+    assert p.returncode == 0, p.stderr
+    out = json.loads(p.stdout.strip().splitlines()[-1])
+    assert out["third_party"] == [], (module, out["third_party"])
+    assert module in out["arcaeon_modules"]
