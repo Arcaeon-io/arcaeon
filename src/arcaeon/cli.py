@@ -53,6 +53,7 @@ VERBS = {
     "credits":   ("remote", "show your witness balance (needs ARCAEON_KEY)"),
     "buy":       ("remote", "print the checkout link for a plan (opens nothing)"),
     "mcp":       ("serve",  "start the MCP connector server on stdio (needs arcaeon[mcp])"),
+    "status":    ("check",  "what arcaeon did lately here: last run per verb, open COULD NOT LOOKs"),
     "selftest":  ("check",  "run every bundled selftest"),
     "version":   ("check",  "print arcaeon's version and each family's"),
 }
@@ -739,6 +740,11 @@ SELFTESTS = {
 }
 
 
+def _status(argv) -> int:
+    from arcaeon import status
+    return _run(status.main, argv)
+
+
 def _selftest(argv) -> int:
     import importlib
     names = [a for a in argv if not a.startswith("-")] or list(SELFTESTS)
@@ -799,7 +805,7 @@ HANDLERS = {
     "pin": _pin, "deal": _deal, "reconcile": _reconcile, "audit": _audit, "vet": _vet, "badge": _badge,
     "seal": _seal, "baseline": _baseline, "compact": _compact, "distill": _distill,
     "dedup": _dedup, "meter": _meter, "stamp": _stamp, "credits": _credits, "buy": _buy,
-    "mcp": _mcp, "selftest": _selftest, "version": _version,
+    "mcp": _mcp, "status": _status, "selftest": _selftest, "version": _version,
 }
 assert set(HANDLERS) == set(VERBS), "every listed verb has a handler"
 

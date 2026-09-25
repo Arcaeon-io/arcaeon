@@ -17,7 +17,7 @@ own code for the 0.9.x releases; where that differs, the section says so.
 Contents: Record (`log`, `verify`, `receipt`, `once`, `proxy`, `pin`, `deal`),
 Prove (`reconcile`, `audit`, `vet`, `badge`, `seal`, `baseline`, `compact`),
 Save (`distill`, `dedup`, `meter`), Hosted (`stamp`, `credits`, `buy`),
-Serve (`mcp`), This install (`selftest`, `version`).
+Serve (`mcp`), This install (`status`, `selftest`, `version`).
 
 ---
 
@@ -656,6 +656,35 @@ $ arcaeon mcp --tools
 Until 1.0.0, `arcaeon` with no verb and a stdin that is not a terminal also
 starts this server, so `uvx arcaeon` in an older registry listing keeps
 working.
+
+## `status`
+
+Answers: what did arcaeon do lately on this machine, and is anything still
+unlooked-at? Reads the local activity journal (`~/.arcaeon/activity.jsonl`,
+or `$ARCAEON_HOME`): the last run of each verb with its word and time, and
+the targets whose newest look ended COULD NOT LOOK. The journal stores each
+target as a sha256, never the path, so a target is shown by its first 12 hex
+digits. The balance is checked only when `ARCAEON_KEY` is set; without a key
+no request is made. `ARCAEON_JOURNAL=0` stops the journal being written.
+
+**Usage**
+
+```text
+usage: arcaeon status [--json]
+```
+
+**Exit codes:** 0 the status printed. 2 an unknown flag.
+
+```console
+$ arcaeon status
+arcaeon status  (journal: /home/you/.arcaeon/activity.jsonl)
+last run per verb:
+  verify     COULD NOT LOOK     2026-09-25T10:02:00Z
+  log        OK                 2026-09-25T10:01:00Z
+open COULD NOT LOOKs: 1
+  verify     target 3f1c9a0b7d22  2026-09-25T10:02:00Z
+balance: not checked, no key
+```
 
 ## `selftest`
 

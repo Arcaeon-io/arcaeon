@@ -24,7 +24,8 @@ COUNCIL_VERBS = ["log", "verify", "reconcile", "pin", "seal", "stamp", "vet", "b
                  "meter", "proxy", "mcp", "credits", "buy", "selftest", "version"]
 #: Verbs added after the council's list, each with its authority.
 #: deal: DEAL_LANE_DESIGN_2026-09-24.md (the witnessed-transaction lane).
-ADDED_VERBS = ["deal"]
+#: status: Daniel's HUD slice 1 (batch lane B, B015), reads the activity journal.
+ADDED_VERBS = ["deal", "status"]
 ALL_VERBS = COUNCIL_VERBS + ADDED_VERBS
 
 
