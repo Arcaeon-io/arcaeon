@@ -207,6 +207,13 @@ The short version, before the detail:
   reader.** Today you take our word for who operated it when a given pin was
   made. That stays true until we publish a custody record, and we have not
   yet.
+- **Reproducible by us, not yet by you.** Re-running the session behind a
+  ledger takes the model, the tool server and their state at the time, which
+  whoever ran it has and an outside reader does not. Until there is a way to
+  hand that over, the substitute is the proxy's request and response digests:
+  every call row `arcaeon proxy` writes carries `args_digest` for the request
+  and `result_digest` for the response. Given the bytes, you can check they
+  are the ones that crossed the seam; you cannot re-run the call to get them.
 
 What a hash chain proves: the rows were not changed in place after they were
 written. An edit, a deletion or a reorder in the middle breaks every later
