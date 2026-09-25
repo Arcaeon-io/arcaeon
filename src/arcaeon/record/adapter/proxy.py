@@ -92,7 +92,7 @@ from ._ledger import backend, open_ledger
 from ._version import IMPL, VERSION
 from .observer import DEFAULT_MAX_FRAME, FrameSplitter, SeamObserver
 from .observer import _parse, _render_id, _safe_digest
-from .tape import WITNESS_KEY_ENV, TapeWriter, pin_at_session_end
+from .tape import WITNESS_KEY_ENV, TapeWriter, pin_at_session_end, valid_rpc_id
 
 __all__ = ["main", "run", "relay", "IMPL", "VERSION"]
 
@@ -310,6 +310,178 @@ class _MandateWatch:
                 "mandate_blocked": self.blocked or None}
 
 
+#: JSON-RPC error code the proxy answers a blocked call with. In the -32000 to
+#: -32099 band JSON-RPC 2.0 reserves for implementation-defined server errors.
+MANDATE_BLOCK_CODE = -32001
+
+
+class _AlignedWriter:
+    """The client's stdout, shared by the server-to-client relay and the gate.
+
+    The relay writes the server's bytes in whatever chunks the pipe gave it,
+    and a chunk can end mid-frame. An error reply injected at that moment
+    would land INSIDE a server frame and corrupt it. So an injected line waits
+    until the stream is at a frame boundary (the last byte written was a
+    newline) and goes out then. Only used under --mandate-enforce; record-only
+    never writes to the client at all.
+    """
+
+    def __init__(self, dst):
+        self._dst = dst
+        self._lock = threading.Lock()
+        self._at_boundary = True
+        self._pending: list[bytes] = []
+
+    def write(self, data: bytes) -> None:
+        with self._lock:
+            if not data:
+                return
+            self._dst.write(data)
+            self._at_boundary = data.endswith(b"\n")
+            if self._at_boundary and self._pending:
+                self._flush_pending()
+
+    def flush(self) -> None:
+        with self._lock:
+            self._dst.flush()
+
+    def inject(self, line: bytes) -> None:
+        with self._lock:
+            self._pending.append(line)
+            if self._at_boundary:
+                self._flush_pending()
+
+    def _flush_pending(self) -> None:
+        while self._pending:
+            self._dst.write(self._pending.pop(0))
+        self._dst.flush()
+
+    def drain(self) -> None:
+        """Session over: anything still waiting goes out, boundary or not."""
+        with self._lock:
+            if self._pending:
+                try:
+                    self._flush_pending()
+                except (OSError, ValueError):
+                    pass
+
+
+def _block_reply(msgs: list, was_list: bool, reasons: dict) -> bytes | None:
+    """The JSON-RPC error(s) a blocked frame is answered with, or None when no
+    message in it can be answered (notifications, invalid ids)."""
+    out = []
+    for i, msg in enumerate(msgs):
+        rid = msg.get("id")
+        if "method" not in msg or rid is None or not valid_rpc_id(rid):
+            continue
+        verdict, why = reasons.get(i, ("outside", "the frame carried a call the "
+                                       "mandate does not allow"))
+        out.append({"jsonrpc": "2.0", "id": rid, "error": {
+            "code": MANDATE_BLOCK_CODE,
+            "message": f"blocked by mandate ({verdict.replace('_', ' ')}): {why}",
+            "data": {"mandate": verdict}}})
+    if not out:
+        return None
+    body = out if was_list else out[0]
+    return json.dumps(body, ensure_ascii=False).encode("utf-8") + b"\n"
+
+
+def _gated_relay(src, dst, watch, observe, out: _AlignedWriter, *, obs,
+                 splitter: FrameSplitter, on_eof=None) -> None:
+    """Client -> server under --mandate-enforce: LOOK, then forward.
+
+    The one place in this proxy where bytes wait for a check. Each client
+    frame is held until its newline arrives, judged, and then either forwarded
+    byte-for-byte (frame + the same newline) or answered with a JSON-RPC error
+    and never forwarded. Frames that are not tools/call pass untouched. A
+    frame past `splitter.max_frame` cannot be judged; under enforce it is
+    dropped (not forwarded) and rowed, because forwarding an unjudged call is
+    the one thing enforce mode promises not to do.
+    """
+    buf = bytearray()
+    resync = False
+    max_frame = splitter.max_frame
+
+    def handle(frame: bytes, newline: bool) -> None:
+        msgs = []
+        was_list = False
+        txt = frame.strip()
+        if txt:
+            try:
+                parsed = json.loads(txt.decode("utf-8"))
+                was_list = isinstance(parsed, list)
+            except (ValueError, UnicodeDecodeError, RecursionError):
+                parsed = None
+            msgs = _parse(frame) if parsed is not None else []
+        judged = {}
+        for i, msg in enumerate(msgs):
+            if msg.get("method") == "tools/call":
+                judged[i] = watch.judge(msg)
+        block = any(v[0] != "inside" for v in judged.values())
+        if not block:
+            dst.write(frame + (b"\n" if newline else b""))
+            dst.flush()
+            for i in judged:
+                watch.record(msgs[i], *judged[i], "forwarded")
+            try:
+                observe(frame)
+            except Exception:
+                splitter.observe_failures += 1
+            return
+        for i, (v, why, extra) in judged.items():
+            watch.record(msgs[i], v, why, extra, "blocked")
+        reply = _block_reply(msgs, was_list,
+                             {i: (v, str(why)) for i, (v, why, _) in judged.items()
+                              if v != "inside"})
+        try:
+            observe(frame)          # the attempt: opens its tool_call row
+        except Exception:
+            splitter.observe_failures += 1
+        if reply is not None:
+            out.inject(reply)
+            try:
+                obs.observe_server_frame(reply)     # ...and pairs it with the answer
+            except Exception:
+                splitter.observe_failures += 1
+
+    try:
+        while True:
+            chunk = _read_some(src, CHUNK)
+            if not chunk:
+                break
+            buf.extend(chunk)
+            while True:
+                nl = buf.find(b"\n")
+                if nl < 0:
+                    break
+                frame = bytes(buf[:nl])
+                del buf[:nl + 1]
+                if resync:
+                    resync = False
+                    continue
+                handle(frame, True)
+            if len(buf) > max_frame:
+                buf.clear()
+                resync = True
+                splitter.dropped_oversize += 1
+                watch.record({}, "could_not_look",
+                             f"a client frame over {max_frame} bytes cannot be judged "
+                             f"and was not forwarded",
+                             {"rule": "frame", "looked_for": "a complete frame",
+                              "where": "client stdin", "reason_word": "bounded"},
+                             "blocked")
+        if buf and not resync:
+            handle(bytes(buf), False)
+    except (BrokenPipeError, OSError, ValueError):
+        splitter.relay_errors += 1
+    finally:
+        if on_eof is not None:
+            try:
+                on_eof()
+            except Exception:
+                pass
+
+
 def _observe_both(first, second):
     """One observe callback that runs two. The second runs even if the first
     raises; the first's exception still reaches `relay`, which counts it."""
@@ -438,14 +610,26 @@ def run(command: list[str], ledger_path: str, *, server: str | None = None,
             pass
 
     up_split = FrameSplitter(max_frame=max_frame)
-    client_observe = obs.observe_client_frame
-    if watch is not None:
-        client_observe = _observe_both(obs.observe_client_frame, watch.observe)
     down_split = FrameSplitter(max_frame=max_frame)
-    up = threading.Thread(
-        target=relay, args=(cin, child.stdin, client_observe),
-        kwargs={"on_eof": close_child_stdin, "splitter": up_split},
-        name="adapter-client-to-server", daemon=True)
+    aligned = None
+    if watch is not None and watch.enforce:
+        # Enforce: look BEFORE forwarding, and answer blocked calls on the
+        # client's stdout without cutting into a server frame.
+        aligned = _AlignedWriter(cout)
+        cout = aligned
+        up = threading.Thread(
+            target=_gated_relay,
+            args=(cin, child.stdin, watch, obs.observe_client_frame, aligned),
+            kwargs={"obs": obs, "splitter": up_split, "on_eof": close_child_stdin},
+            name="adapter-client-to-server", daemon=True)
+    else:
+        client_observe = obs.observe_client_frame
+        if watch is not None:
+            client_observe = _observe_both(obs.observe_client_frame, watch.observe)
+        up = threading.Thread(
+            target=relay, args=(cin, child.stdin, client_observe),
+            kwargs={"on_eof": close_child_stdin, "splitter": up_split},
+            name="adapter-client-to-server", daemon=True)
     down = threading.Thread(
         target=relay, args=(child.stdout, cout, obs.observe_server_frame),
         kwargs={"corruptor": corruptor, "splitter": down_split},
@@ -476,6 +660,8 @@ def run(command: list[str], ledger_path: str, *, server: str | None = None,
     # that hasn't hung up. If the timeout expires, the counters are read anyway:
     # best-effort figures beat blocking shutdown on a dead session.
     up.join(timeout=1.0)
+    if aligned is not None:
+        aligned.drain()
     orphans = obs.flush_pending(reason=f"session_ended:{reason}")
     tape_pin = None
     if tape is not None:
@@ -820,6 +1006,11 @@ def main(argv: list[str] | None = None,
                     help="check every tools/call against this mandate JSON (see "
                          "docs/MANDATE_GATE.md). RECORD-ONLY by default: an outside "
                          "call is still forwarded and gets a mandate_outside row.")
+    ap.add_argument("--mandate-enforce", action="store_true",
+                    help="with --mandate: BLOCK a call outside the mandate (the agent "
+                         "gets a JSON-RPC error; the call never reaches the server). "
+                         "OFF by default. A missing or unreadable mandate then "
+                         "refuses to start (exit 3).")
     ap.add_argument("--version", action="version", version=IMPL)
     ap.add_argument("command", nargs=argparse.REMAINDER,
                     help="-- <server command...>")
@@ -828,6 +1019,8 @@ def main(argv: list[str] | None = None,
     command = list(args.command)
     if command and command[0] == "--":
         command = command[1:]
+    if args.mandate_enforce and args.mandate is None:
+        ap.error("--mandate-enforce needs --mandate PATH")
     if args.http_forward is not None:
         from .http_forward import check_upstream, run_http_forward
         if args.mandate is not None:
@@ -854,7 +1047,7 @@ def main(argv: list[str] | None = None,
                raw=args.raw, max_frame=args.max_frame, tape_path=args.tape,
                side=args.side, tape_namespace=args.tape_namespace,
                pin_witness=args.pin_witness, tape_pair=args.tape_pair,
-               mandate_path=args.mandate)
+               mandate_path=args.mandate, mandate_enforce=args.mandate_enforce)
 
 
 if __name__ == "__main__":

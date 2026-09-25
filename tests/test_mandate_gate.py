@@ -230,7 +230,10 @@ def test_enforce_outside_call_gets_a_jsonrpc_error_and_a_row(tmp_path, mandate_f
     # the inside calls went through untouched, in order, around the block
     assert resp[3]["result"]["content"][0]["text"] == "hello"
     assert resp[5]["result"]["content"][0]["text"] == "after"
-    assert [m["id"] for m in (json.loads(l) for l in p.stdout.splitlines())] == [1, 2, 3, 4, 5]
+    # every request answered exactly once, each line a whole frame (the proxy's
+    # own answer may arrive before the server's: JSON-RPC pairs by id)
+    ids = [json.loads(l)["id"] for l in p.stdout.splitlines()]
+    assert sorted(ids) == [1, 2, 3, 4, 5]
     rows = _rows(ledger)
     assert rows[0]["mandate_mode"] == "enforce"
     o = [r for r in rows if r["evt"] == "mandate_outside"]
@@ -249,6 +252,22 @@ def test_enforce_inside_only_stream_is_byte_identical(tmp_path, mandate_file):
     ledger = tmp_path / "seam.jsonl"
     p = _run(["--mandate", str(mandate_file), "--mandate-enforce"], ledger, stream=stream)
     assert p.stdout == _direct(stream)
+
+
+def test_enforce_injected_error_waits_for_a_frame_boundary():
+    """A server frame arriving in two chunks must not have the proxy's error
+    reply spliced into its middle."""
+    import io
+    from arcaeon.record.adapter.proxy import _AlignedWriter
+    sink = io.BytesIO()
+    w = _AlignedWriter(sink)
+    w.write(b'{"id":1,"res')
+    w.inject(b'{"id":9,"error":{}}\n')
+    assert sink.getvalue() == b'{"id":1,"res'      # held
+    w.write(b'ult":1}\n')
+    assert sink.getvalue() == b'{"id":1,"result":1}\n{"id":9,"error":{}}\n'
+    w.inject(b'{"id":10}\n')                           # at a boundary: goes now
+    assert sink.getvalue().endswith(b'{"id":10}\n')
 
 
 def test_enforce_is_off_by_default_nothing_blocked(tmp_path, mandate_file):
