@@ -169,7 +169,7 @@
           "price_usd_month": 9,
           "cap": "2,000 pins/month",
           "checkout": "https://buy.stripe.com/6oUaEYd987LP3xy21b0RG04",
-          "note": "Stripe-hosted checkout; provisioning within a day of the receipt email. Self-hosting the witness library remains free forever. Reframed as the human/org convenience door (COUNCIL_PRICING_REVIEW_2026-08-14.md), not the agent-default unit — see the three prepaid credit packs below for that. (The three packs are live as of 2026-08-16: one-time Stripe checkout, credits applied automatically at fulfilment, with a webhook backstop for slower payment methods. That path has not yet carried a real paid purchase, so treat it as built rather than proven.)"
+          "note": "Stripe-hosted checkout; provisioning within a day of the receipt email. Self-hosting the witness library remains free forever. Reframed as the human/org convenience door (COUNCIL_PRICING_REVIEW_2026-08-14.md), not the agent-default unit — see the three prepaid credit packs below for that. (The credit packs are listed and Stripe checkout is live; credits are applied by the fulfilment page after checkout. The Stripe webhook backstop is not yet configured, and no real purchase has completed yet.)"
         },
         {
           "plan": "mini",
