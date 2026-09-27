@@ -49,7 +49,14 @@ THE VERDICT, first match wins:
   COMPARED        every claim was lined up. Disagreement is filed, not failed.
 
 Exit codes (the arcaeon table): COMPARED 0, MISSING 1, BROKEN 1, COULD NOT
-LOOK 3. Stdlib only. Reads ledgers; never writes them.
+LOOK 3. Stdlib only. `compare` reads ledgers; it never writes them.
+
+THE RECEIPT (`issue_receipt`, the CLI's `--receipt OUT`). A compare result
+can be issued as an `arcaeon-receipt/0.1` receipt carrying both readings
+ledgers' heads and every count and per-claim line, so `arcaeon receipt verify
+OUT` catches any later edit by the body digest. It is local and free: no
+witness pin, no timestamp anchor, nothing sent. The receipt's own row goes to
+OUT + ".ledger.jsonl" (the one file this module writes).
 """
 from __future__ import annotations
 
@@ -62,7 +69,8 @@ from arcaeon.record.ledger import verify_file
 
 __all__ = ["COMPARE_FORMAT", "COMPARED", "AGREED", "DISAGREED", "MISSING", "COULD_NOT_LOOK",
            "BROKEN", "INFORMATIVE_AT", "LIMITS", "EXIT_CODES", "SAME_READER", "SAME_PROVIDER",
-           "DISTINCT_PROVIDER", "INDEPENDENCE_CLASSES", "compare"]
+           "DISTINCT_PROVIDER", "INDEPENDENCE_CLASSES", "compare", "RECEIPT_KIND",
+           "RECEIPT_SCOPE", "issue_receipt", "receipt_ledger_for"]
 
 COMPARE_FORMAT = "arcaeon-readings-compare/1"
 
@@ -270,3 +278,83 @@ def compare(ledger_a: str | Path, ledger_b: str | Path) -> dict:
         extra = {**indep, **_v.could_not_look("every claim lined up", f"{a}, {b}", "bounded",
                                      f"{n} claim(s) could not be lined up"), "ledger": None}
     return _result(a, b, word, claims=claims, summary=summary, extra=extra)
+
+
+# --------------------------------------------------------------------------
+# the comparison as a receipt (K043): local, free
+# --------------------------------------------------------------------------
+
+RECEIPT_KIND = "readings-compare"
+RECEIPT_NAMESPACE = "second-read"
+RECEIPT_SCOPE = {
+    "proves": [
+        "These are the counts and per-claim lines this compare filed for the two readings "
+        "ledgers named in the subject, at the two ledger heads named there.",
+        "Any later edit to a count, a status, a reading or a head in this receipt changes "
+        "its body digest, and `arcaeon receipt verify` names the mismatch.",
+    ],
+    "does_not_prove": [
+        "Whether any claim holds: two readers agreeing measures how ambiguous the sentence "
+        "was for them, not which reading is right.",
+        "Who or what wrote either ledger: reader ids and providers are what the rows say "
+        "about themselves.",
+        "That the two readers share no habits: readers from one model family or one vendor "
+        "agree more for that reason alone.",
+        "Anything to a stranger about when it was issued: this receipt is local and "
+        "unwitnessed (no witness pin, no timestamp anchor); the witness-sealed version is "
+        "the hosted reconcile, which is not deployed.",
+    ],
+}
+
+
+def _head_of(path: Path) -> dict:
+    from arcaeon.record.ledger import Ledger
+    h = Ledger(path).head()
+    return {"path": str(path), "rows": h.rows, "chain": h.chain,
+            "chain_ok": h.ok, "first_break": h.first_break}
+
+
+def receipt_ledger_for(out: str | Path) -> Path:
+    """The default ledger a compare receipt is chained into: beside OUT."""
+    o = Path(out)
+    return o.with_name(o.name + ".ledger.jsonl")
+
+
+def issue_receipt(result: dict, out: str | Path, *, ledger_path: str | Path | None = None,
+                  issued_at: str | None = None) -> tuple[dict, Path, Path]:
+    """Issue a compare result as a receipt through `arcaeon.record.receipt.core`.
+
+    The subject carries both readings ledgers' heads (rows, chain, and whether
+    the chain held); the one check carries the verdict, the two counts, the
+    independence class and every per-claim line, so editing any of them
+    breaks the body digest. Local and free: no witness pin and no
+    OpenTimestamps anchor are made, so nothing leaves this machine. The
+    receipt row is chained into `ledger_path` (default: OUT + ".ledger.jsonl").
+    Returns (receipt, receipt path, receipt ledger path).
+    """
+    from arcaeon.record.receipt.core import build_receipt, save_receipt
+    led = Path(ledger_path) if ledger_path is not None else receipt_ledger_for(out)
+    ledgers = result.get("ledgers") or {}
+    subject = {"compare_format": result.get("format"),
+               "ledgers": {side: _head_of(Path(ledgers[side])) for side in ("a", "b")
+                           if ledgers.get(side)}}
+    check = {"verdict": result.get("verdict"), "exit": result.get("exit"),
+             "summary": result.get("summary"), "independence": result.get("independence"),
+             "independence_counts": result.get("independence_counts"),
+             "reason_word": result.get("reason_word"), "reason": result.get("reason"),
+             "claims": [{"claim_id": c.get("claim_id"), "status": c.get("status"),
+                         "side": c.get("side"), "independence": c.get("independence"),
+                         "a": _receipt_side(c.get("a")), "b": _receipt_side(c.get("b"))}
+                        for c in result.get("claims") or []]}
+    receipt = build_receipt(RECEIPT_KIND, subject, [check], RECEIPT_SCOPE, ledger_path=led,
+                            namespace=RECEIPT_NAMESPACE, extra={"limits": list(LIMITS)},
+                            witness=False, anchor=False, issued_at=issued_at)
+    path = save_receipt(receipt, out)
+    return receipt, path, led
+
+
+def _receipt_side(view: dict | None) -> dict | None:
+    if not view:
+        return None
+    return {k: view.get(k) for k in ("reading", "reader_id", "provider", "model",
+                                     "near_match_id", "claim_sha256", "criterion_sha256")}

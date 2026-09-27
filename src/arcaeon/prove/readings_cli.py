@@ -2,7 +2,7 @@
 """arcaeon.prove.readings_cli: the `arcaeon second-read` verb.
 
     arcaeon second-read criterion FILE --ledger L [--supersedes SHA] [--json]
-    arcaeon second-read compare A B [--json]
+    arcaeon second-read compare A B [--json] [--receipt OUT]
     arcaeon second-read submit --ledger L --reader-id X --provider P --claim-id C
                                (--claim-file F | --claim-sha256 SHA) --reading WORD
                                [--criterion-sha256 SHA | --criterion-file F]
@@ -17,14 +17,16 @@
                             [--base-url-a URL] [--key-env-a VAR] [--reader-id-a ID]
                             [--base-url-b URL] [--key-env-b VAR] [--reader-id-b ID]
                             [--criterion-sha256 SHA | --criterion-file F]
-                            [--keep-text] [--timeout S] [--send] [--json]
+                            [--keep-text] [--timeout S] [--send] [--receipt OUT] [--json]
 
 `compare` lines up two readings ledgers (see `arcaeon.prove.readings_compare`)
 and prints a human first line such as
 
     compared 24 claims: 3 disagreed of 24 read
 
-or, with `--json`, the whole comparison object plus nothing else.
+or, with `--json`, the whole comparison object plus nothing else. With
+`--receipt OUT` the comparison is also issued as a local receipt (see
+`readings_compare.issue_receipt`; `arcaeon receipt verify OUT` checks it).
 
 Exit codes (the arcaeon table): COMPARED 0 (the comparison completed; a
 disagreement is filed, not failed), MISSING 1, BROKEN 1, COULD NOT LOOK 3,
@@ -130,14 +132,32 @@ def compare_main(argv: list[str] | None = None) -> int:
     p.add_argument("a", help="the first readings ledger")
     p.add_argument("b", help="the second readings ledger")
     p.add_argument("--json", action="store_true", help="print the comparison object as JSON")
+    p.add_argument("--receipt", default=None,
+                   help="also issue the comparison as a local receipt at this path")
     args = p.parse_args(argv)
     from arcaeon.prove.readings_compare import compare
     res = compare(args.a, args.b)
+    if args.receipt:
+        try:
+            res["receipt"] = _issue_receipt(res, args.receipt)
+        except (OSError, ValueError) as e:
+            print(f"{_PROG} compare: cannot write the receipt [{type(e).__name__}]",
+                  file=sys.stderr)
+            return _v.EXIT_USAGE
     if args.json:
         print(json.dumps(res, ensure_ascii=False, sort_keys=True))
     else:
         print("\n".join(human_lines(res)))
+        if res.get("receipt"):
+            print(f"receipt written: {res['receipt']['path']}")
     return res["exit"]
+
+
+def _issue_receipt(cmp: dict, out) -> dict:
+    """Issue a compare result as a local receipt (K043); where it went."""
+    from arcaeon.prove.readings_compare import issue_receipt
+    receipt, path, ledger = issue_receipt(cmp, out)
+    return {"path": str(path), "ledger": str(ledger), "body_digest": receipt["body_digest"]}
 
 
 #: The result shape of one submit.
@@ -528,6 +548,8 @@ def run_main(argv: list[str] | None = None) -> int:
     p.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="seconds per call")
     p.add_argument("--send", action="store_true",
                    help="actually send the claims (a disclosure to both endpoints)")
+    p.add_argument("--receipt", default=None,
+                   help="also issue the comparison as a local receipt at this path")
     p.add_argument("--json", action="store_true", help="print the result as JSON")
     args = p.parse_args(argv)
     try:
@@ -564,10 +586,18 @@ def run_main(argv: list[str] | None = None) -> int:
     except ReaderError as e:
         print(f"{_PROG} run: {e}", file=sys.stderr)
         return _v.EXIT_USAGE
+    if args.receipt and res.get("comparison"):
+        try:
+            res["receipt"] = _issue_receipt(res["comparison"], args.receipt)
+        except (OSError, ValueError) as e:
+            print(f"{_PROG} run: cannot write the receipt [{type(e).__name__}]", file=sys.stderr)
+            return _v.EXIT_USAGE
     if args.json:
         print(json.dumps(res, ensure_ascii=False, sort_keys=True))
     else:
         print("\n".join(run_human_lines(res)))
+        if res.get("receipt"):
+            print(f"receipt written: {res['receipt']['path']}")
     return res["exit"]
 
 
