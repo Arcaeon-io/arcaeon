@@ -992,3 +992,99 @@ def test_first_five_open_step_runs(tmp_path):
                        env=env, capture_output=True, text=True, encoding="utf-8",
                        errors="replace", timeout=60)
     assert p.returncode == 0 and "usage: arcaeon open" in p.stdout, (p.stdout, p.stderr)
+
+
+# --- docs/WHAT_IT_CAN_AND_CANNOT_PROVE.md (K121) --------------------------------------
+
+CAN_CANNOT = (ROOT / "docs" / "WHAT_IT_CAN_AND_CANNOT_PROVE.md").read_text(encoding="utf-8")
+
+
+def _flat(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _readme_limit_bullets() -> list[str]:
+    bullets, cur = [], None
+    for line in _section(README, "Limits").replace("\r\n", "\n").splitlines():
+        if line.startswith("- "):
+            if cur is not None:
+                bullets.append(cur)
+            cur = line[2:]
+        elif cur is not None and line.startswith("  ") and line.strip():
+            cur += " " + line.strip()
+        else:
+            if cur is not None:
+                bullets.append(cur)
+            cur = None
+    if cur is not None:
+        bullets.append(cur)
+    return [_flat(b) for b in bullets]
+
+
+def test_can_cannot_carries_every_readme_limits_line():
+    bullets = _readme_limit_bullets()
+    assert len(bullets) >= 12, bullets
+    page = _flat(CAN_CANNOT)
+    missing = [b for b in bullets if b not in page]
+    assert not missing, missing
+    vet = _flat("`vet` and `badge` report what their own checks found in the bytes they "
+                "read. They are not a review by a person and not a safety certification.")
+    assert vet in _flat(README) and vet in page
+
+
+def test_can_cannot_puts_the_limits_first():
+    headings = re.findall(r"^## (.*)$", CAN_CANNOT, re.M)
+    assert headings == ["What it cannot prove", "What it can prove"], headings
+    first_bullet = CAN_CANNOT.index("\n- ")
+    assert CAN_CANNOT.index("## What it cannot prove") < first_bullet
+
+
+def test_can_cannot_names_each_source_of_its_limits():
+    page = _flat(CAN_CANNOT).lower()
+    for must in ("the proxy cannot see who is behind the agent",
+                 "what was written was not changed after pinning", "self_asserted",
+                 "`operator_at_t` reads `unknown`", "whether a claim holds",
+                 "one family", "one vendor", "record-only is a record, not a control",
+                 "never a pass and never exits 0", "dispatch"):
+        assert must in page, must
+
+
+def _caps_words(text: str) -> set[str]:
+    text = re.sub(r"```.*?```", " ", text, flags=re.S)
+    text = re.sub(r"`[^`]*`", " ", text)
+    text = re.sub(r"\]\([^)]*\)", "]", text)
+    return set(re.findall(r"\b[A-Z]{3,}(?: [A-Z]{3,})*\b", text))
+
+
+def test_can_cannot_uses_only_the_words_in_words_md():
+    allowed = set(V.WORDS) | _caps_words(WORDS_MD) | {"JSON", "README"}
+    stray = _caps_words(CAN_CANNOT) - allowed
+    assert not stray, stray
+
+
+def test_can_cannot_says_truth_only_among_the_limits():
+    cannot = _section(CAN_CANNOT, "What it cannot prove")
+    can = _section(CAN_CANNOT, "What it can prove")
+    assert "truth" in cannot.lower()
+    for phrase in ("truth", "is true", "tamper-proof", "guarantee"):
+        assert phrase not in can.lower(), phrase
+
+
+@pytest.mark.parametrize("phrase", ["independent witness", "ai act ready", "compliant",
+                                    "conformant", "is available", "available now",
+                                    "—", "–"])
+def test_can_cannot_makes_no_overclaim(phrase):
+    assert phrase not in CAN_CANNOT.lower(), phrase
+
+
+def test_can_cannot_tamper_proof_only_in_a_negation():
+    low = CAN_CANNOT.lower()
+    hits = list(re.finditer("tamper-proof", low))
+    assert hits
+    for m in hits:
+        assert any(n in low[max(0, m.start() - 40):m.start()] for n in _NEGATIONS)
+
+
+def test_first_five_and_can_cannot_link_each_other_and_words_md():
+    assert "](WHAT_IT_CAN_AND_CANNOT_PROVE.md)" in FIRST_FIVE
+    assert "](WORDS.md)" in FIRST_FIVE and "](WORDS.md)" in CAN_CANNOT
