@@ -774,8 +774,10 @@ def render_readme(res: dict, window: list[dict], *,
         "# Evidence pack",
         "",
         "This folder is evidence toward the logging duties in the EU AI Act for one "
-        "agent and one window of time. It shows what was written, and that it was "
-        "not changed after it was written or pinned.",
+        "agent and one window of time. It shows what was written and that every "
+        "row hashes to the next. With a pin, it also shows the rows up to the "
+        "pinned head are the ones that existed at pin time. Without a pin, a full "
+        "rewrite by the holder still checks out.",
         "",
         "## The agent",
         "",

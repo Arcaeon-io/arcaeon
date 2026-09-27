@@ -110,3 +110,15 @@ def test_negation_rule(ledger, tmp_path, agent):
 def test_no_dashes(pack):
     text = _readme(pack[0])
     assert "–" not in text and "—" not in text
+
+
+def test_readme_claims_only_what_a_pin_backs(ledger, tmp_path):
+    """OA5: a ledger rewritten from row 1 with no pin verifies clean, so the
+    README never says the rows were not changed after they were written."""
+    out = tmp_path / "pack"
+    build_pack(ledger, out, agent="agent-a")
+    text = (out / "README.md").read_text(encoding="utf-8")
+    assert "changed after it was written" not in text
+    assert "every row hashes to the next" in text
+    assert "With a pin, it also shows the rows up to the pinned head" in text
+    assert "Without a pin, a full rewrite by the holder still checks out." in text

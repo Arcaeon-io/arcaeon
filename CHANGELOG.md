@@ -11,6 +11,7 @@ any version on PyPI; `pip install arcaeon` does not have them.
 
 ### Plug-in batch (branch plugin-2026-09-27)
 
+- **OA5.** The pack README no longer says the records were "not changed after it was written": without a pin it shows every row hashes to the next; with a pin, that the rows up to the pinned head existed at pin time.
 - **OA4.** `connect --write` on a config removed by another program mid-write answers COULD NOT LOOK, exit 3, new reason word `target_vanished`, and leaves nothing behind; it raised FileNotFoundError before.
 - **OA3.** The dashboard's origin guard drops a default port both ways, so on `--port 80` the `Origin: http://127.0.0.1` a browser sends is its own; every non-default port still needs the exact port.
 - **OA2.** A reader whose endpoint redirects to a malformed Location (a bad port, a bad IPv6 host) is refused like any redirect: COULD NOT LOOK `redirect_refused`, reason "redirect refused: ...", the run continues and the key is not sent.
