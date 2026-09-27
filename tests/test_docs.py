@@ -826,3 +826,169 @@ def test_changelog_exists_and_its_top_section_is_unreleased():
 @pytest.mark.parametrize("phrase", ["—", "–", "available now"])
 def test_changelog_has_no_dash_or_available_now(phrase):
     assert phrase not in CHANGELOG_MD.read_text(encoding="utf-8").lower(), phrase
+
+
+# --- docs/FIRST_FIVE_MINUTES.md (K120) ------------------------------------------------
+
+FIRST_FIVE = (ROOT / "docs" / "FIRST_FIVE_MINUTES.md").read_text(encoding="utf-8")
+
+
+def _prose_sentences(text: str) -> list[str]:
+    """The page's sentences, as a reader meets them: code blocks and headings
+    out, link targets out, one paragraph (or bullet) ends a sentence even when
+    it closes on a colon or no mark at all."""
+    body = re.sub(r"```.*?```", "\n\n", text, flags=re.S)
+    body = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", body)
+    paras, cur = [], []
+    for line in body.splitlines():
+        s = line.strip()
+        if not s or s.startswith("#") or s.startswith("- ") or s.startswith(">"):
+            if cur:
+                paras.append(" ".join(cur))
+            cur = []
+            if s.startswith("- ") or s.startswith(">"):
+                cur = [s.lstrip("->").strip()]
+            continue
+        cur.append(s)
+    if cur:
+        paras.append(" ".join(cur))
+    out = []
+    for p in paras:
+        out += [x for x in re.split(r"(?<=[.!?:])\s+", p) if re.search(r"[A-Za-z]", x)]
+    return out
+
+
+def test_first_five_sentences_average_18_words_or_fewer():
+    sentences = _prose_sentences(FIRST_FIVE)
+    assert len(sentences) >= 20, len(sentences)
+    words = sum(len(s.split()) for s in sentences)
+    assert words / len(sentences) <= 18, (words / len(sentences), words, len(sentences))
+
+
+def test_first_five_follows_the_three_steps_in_order():
+    low = FIRST_FIVE.lower()
+    at = [low.index("install.ps1"), low.index("$ arcaeon open"),
+          low.index("check my agent log with arcaeon")]
+    assert at == sorted(at), at
+    assert "install.sh" in low
+
+
+@pytest.mark.parametrize("phrase", ["tamper-proof", "independent", "compliant", "truth",
+                                    "guarantee", "is available", "\u2014", "\u2013"])
+def test_first_five_makes_no_overclaim(phrase):
+    assert phrase not in FIRST_FIVE.lower(), phrase
+
+
+def test_first_five_puts_its_limits_before_the_steps():
+    headings = re.findall(r"^## (.*)$", FIRST_FIVE, re.M)
+    assert headings[0] == "What it cannot do", headings
+    assert "next release" in FIRST_FIVE and "dispatch" in FIRST_FIVE
+
+
+def _stub_bin(tmp_path: Path) -> Path:
+    """Stand-ins for py, python3, pipx and arcaeon, first on PATH, so the
+    installer's -Apply / --apply path runs its own logic and downloads nothing."""
+    d = tmp_path / "stub-bin"
+    d.mkdir(exist_ok=True)
+    (d / "py.cmd").write_text("@echo stub py %*\r\n@exit /b 0\r\n", encoding="ascii")
+    real = sys.executable.replace("\\", "/")
+    sh_stubs = {
+        "python3": f'#!/bin/sh\nif [ "$1" = "-c" ]; then exec "{real}" "$@"; fi\n'
+                   'if [ "$1" = "--version" ]; then echo "Python stub"; exit 0; fi\n'
+                   'echo "stub python3 $*"\n',
+        "pipx": '#!/bin/sh\necho "stub pipx $*"\n',
+        "arcaeon": '#!/bin/sh\necho "stub arcaeon $*"\n',
+    }
+    for name, body in sh_stubs.items():
+        p = d / name
+        p.write_bytes(body.encode("ascii"))
+        p.chmod(0o755)
+    return d
+
+
+def _site_script(name: str, tmp_path: Path) -> Path:
+    root = os.environ.get("ARCAEON_SITE_ROOT")
+    if not root or not (Path(root) / name).is_file():
+        pytest.skip(f"ARCAEON_SITE_ROOT is not set or has no {name}")
+    dst = tmp_path / name
+    dst.write_bytes((Path(root) / name).read_bytes())
+    return dst
+
+
+def _first_five_argv(cmd: str, tmp_path: Path, env: dict):
+    import shutil
+    argv = shlex.split(cmd)
+    if argv[0] == "arcaeon":
+        return [sys.executable, "-m", "arcaeon", *argv[1:]]
+    if argv[0] == "powershell" and "install.ps1" in argv:
+        if not shutil.which("powershell"):
+            pytest.skip("no powershell on this machine")
+        _site_script("install.ps1", tmp_path)
+        env["PATH"] = str(_stub_bin(tmp_path)) + os.pathsep + env.get("PATH", "")
+        return argv
+    if argv[0] == "sh" and "install.sh" in argv:
+        sh = shutil.which("sh")
+        if not sh:
+            pytest.skip("no sh on this machine")
+        _site_script("install.sh", tmp_path)
+        env["PATH"] = str(_stub_bin(tmp_path)) + os.pathsep + env.get("PATH", "")
+        return [sh, *argv[1:]]
+    pytest.fail(f"FIRST_FIVE_MINUTES step this test cannot run: {cmd}")
+
+
+def _run_first_five(steps, tmp_path):
+    for step in steps:
+        env = dict(os.environ, PYTHONPATH=str(SRC), PYTHONIOENCODING="utf-8",
+                   ARCAEON_HOME=str(tmp_path / "home"),
+                   ARCAEON_CONNECT_HOME=str(tmp_path / "connect-home"))
+        env.pop("ARCAEON_KEY", None)
+        argv = _first_five_argv(step["cmd"], tmp_path, env)
+        p = subprocess.run(argv, cwd=tmp_path, env=env, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=120)
+        assert p.returncode == step["exit"], (step["cmd"], p.stdout, p.stderr)
+        out_lines = {x.strip() for x in p.stdout.splitlines()}
+        for want in step["expect"]:
+            assert want in out_lines, (step["cmd"], want, p.stdout)
+
+
+def _first_five_steps(prefix: str) -> list[dict]:
+    return [s for s in _console_steps(FIRST_FIVE) if s["cmd"].startswith(prefix)]
+
+
+def test_first_five_every_command_is_one_this_test_runs():
+    steps = _console_steps(FIRST_FIVE)
+    assert len(steps) >= 8
+    for s in steps:
+        assert s["cmd"].split()[0] in ("arcaeon", "powershell", "sh"), s["cmd"]
+
+
+def test_first_five_arcaeon_steps_print_what_the_page_says(tmp_path):
+    steps = [s for s in _first_five_steps("arcaeon ") if s["cmd"] != "arcaeon open"]
+    assert len(steps) >= 4
+    _run_first_five(steps, tmp_path)
+
+
+def test_first_five_windows_installer_steps_run_without_the_network(tmp_path):
+    steps = _first_five_steps("powershell ")
+    assert len(steps) == 2 and steps[1]["cmd"].endswith("-Apply")
+    _run_first_five(steps, tmp_path)
+
+
+def test_first_five_posix_installer_steps_run_without_the_network(tmp_path):
+    steps = _first_five_steps("sh ")
+    assert len(steps) == 2 and steps[1]["cmd"].endswith("--apply")
+    _run_first_five(steps, tmp_path)
+
+
+def test_first_five_open_step_runs(tmp_path):
+    """`arcaeon open` starts a server and a browser, so the page's step is run
+    here only as far as its usage line; until K107 lands it is skipped."""
+    assert "arcaeon open" in [s["cmd"] for s in _console_steps(FIRST_FIVE)]
+    if importlib.util.find_spec("arcaeon.serve.open_cli") is None:
+        pytest.skip("arcaeon open is not built in this checkout (K107)")
+    env = dict(os.environ, PYTHONPATH=str(SRC), PYTHONIOENCODING="utf-8",
+               ARCAEON_HOME=str(tmp_path / "home"))
+    p = subprocess.run([sys.executable, "-m", "arcaeon", "open", "--help"], cwd=tmp_path,
+                       env=env, capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=60)
+    assert p.returncode == 0 and "usage: arcaeon open" in p.stdout, (p.stdout, p.stderr)
