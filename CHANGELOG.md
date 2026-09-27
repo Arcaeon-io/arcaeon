@@ -6,8 +6,12 @@ that adds a JSON field or a verb.
 
 ## Unreleased
 
-Not in any release yet. These are committed on a local branch and are not in
-any version on PyPI; `pip install arcaeon` does not have them.
+Nothing yet.
+
+## 0.10.0 (2026-09-27)
+
+The plug-in batch. A minor release: nothing was removed or renamed. The few
+changes to existing behaviour are named under 0.10.0 in MIGRATION.md.
 
 ### Plug-in batch (branch plugin-2026-09-27)
 
