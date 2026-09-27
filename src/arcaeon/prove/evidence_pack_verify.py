@@ -43,6 +43,17 @@ witnessed, which the README says in its does-not-show list. What no step can
 catch is a pack whose every file was rewritten together with no pin to hold
 it; only a witness the rewriter cannot reach does that.
 
+Review 2 (K06xR): verify re-derives what it can from the pack itself and
+never takes the manifest's word for it. `manifest.sha256` (beside the
+manifest, "<hex>  manifest.json") must match the manifest's bytes: missing is
+COULD NOT LOOK "missing", different is BROKEN. It catches an edit to the
+manifest alone; a rewriter who recomputes it too is caught only by a pin. A
+manifest without `checks` or `counts` is BROKEN "manifest incomplete".
+could_not_look.json must equal the COULD NOT LOOK entries of `checks`. The
+window is re-selected from records.jsonl with the manifest's own agent and
+bounds; an empty window, or agent rows whose time could not be read, that the
+pack does not list as COULD NOT LOOK is BROKEN (the pack hides its finding).
+
 The overall verdict is the worst step: BROKEN outranks COULD NOT LOOK, which
 outranks VERIFIED. COULD NOT LOOK never exits 0.
 
@@ -63,6 +74,7 @@ from arcaeon import verdict as V
 __all__ = ["verify_pack", "main", "STEPS"]
 
 MANIFEST = "manifest.json"
+MANIFEST_SHA = "manifest.sha256"
 
 
 def _worst(words: list[str]) -> str:
@@ -88,7 +100,7 @@ def _step_hashes(pack: Path, manifest: dict) -> dict:
     # Walk the WHOLE folder, not just its top level: a file planted in a
     # subfolder is in the pack and nothing vouches for it, so it is unlisted.
     on_disk = {p.relative_to(pack).as_posix() for p in pack.rglob("*")
-               if p.is_file()} - {MANIFEST}
+               if p.is_file()} - {MANIFEST, MANIFEST_SHA}
     changed, missing = [], []
     for name in sorted(listed):
         p = pack / name
@@ -113,6 +125,33 @@ def _step_hashes(pack: Path, manifest: dict) -> dict:
                     **V.could_not_look(", ".join(missing), str(pack), "missing",
                                        "the manifest lists these files and they are "
                                        "not in the pack, so they could not be rehashed")})
+        return res
+    res["verdict"] = V.VERIFIED
+    return res
+
+
+def _step_manifest_hash(pack: Path, manifest: dict) -> dict:
+    """The manifest's own bytes against manifest.sha256 beside it."""
+    check = "manifest hash"
+    side = pack / MANIFEST_SHA
+    if not side.is_file():
+        return _cnl(check, MANIFEST_SHA, str(pack), "missing",
+                    "the pack has no manifest.sha256, so the manifest's own bytes "
+                    "could not be checked")
+    try:
+        text = side.read_text(encoding="ascii").strip()
+        want, _, name = text.partition("  ")
+        if name != MANIFEST or not re.fullmatch(r"[0-9a-f]{64}", want):
+            raise ValueError("not '<64 hex>  manifest.json'")
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        return _cnl(check, MANIFEST_SHA, str(pack), "unreadable",
+                    f"manifest.sha256 could not be read ({e})")
+    got = hashlib.sha256((pack / MANIFEST).read_bytes()).hexdigest()
+    res = {"check": check, "manifest_sha256": got, "recorded": want}
+    if got != want:
+        res.update({"verdict": V.BROKEN, "finding": (
+            "manifest.json's sha256 differs from manifest.sha256: the manifest was "
+            "changed after it was written")})
         return res
     res["verdict"] = V.VERIFIED
     return res
@@ -218,6 +257,58 @@ def _step_window(pack: Path, manifest: dict) -> dict:
 
 CNL_FILE = "could_not_look.json"
 _CNL_FIELDS = ("looked_for", "where", "reason_word", "reason")
+_CNL_ENTRY_KEYS = ("check",) + _CNL_FIELDS
+
+
+def _rederive(pack: Path, manifest: dict, entries: list[dict]) -> list[str]:
+    """What the build must have found, found again from records.jsonl.
+
+    The window is re-selected with the manifest's own agent and bounds (the
+    ones the README states). It must name the lines window.jsonl holds; an
+    empty window must be listed as COULD NOT LOOK "empty", and agent rows
+    whose time could not be read as "unreadable". A pack that hides one of
+    these is BROKEN, whatever its counts say.
+    """
+    from arcaeon.prove.evidence_pack import PackUsageError, _lines, parse_when, select_window
+
+    records, window = pack / "records.jsonl", pack / "window.jsonl"
+    if not records.is_file() or not window.is_file():
+        return []  # the hash and window steps already report a missing file
+    problems = []
+    win_rows = len(_lines(window.read_bytes()))
+    words = [e.get("reason_word") for e in entries]
+    w = manifest.get("window") if isinstance(manifest.get("window"), dict) else {}
+    try:
+        since, until = parse_when(w.get("from")), parse_when(w.get("to"))
+        agent = w.get("agent")
+        if agent is not None and not isinstance(agent, str):
+            raise PackUsageError("agent is not a string")
+    except (PackUsageError, TypeError, AttributeError):
+        problems.append("the manifest's window (agent, from, to) could not be read, so "
+                        "the window could not be selected again")
+        since = until = agent = None
+        rederived = None
+    else:
+        sel, unplaced = select_window(records.read_bytes(), agent=agent, since=since,
+                                      until=until)
+        rederived = [x["line"] for x in sel]
+        if unplaced and "unreadable" not in words:
+            problems.append(f"ledger lines {unplaced} match the agent with a time that "
+                            "could not be read, and could_not_look.json does not say so")
+    if rederived is not None:
+        seen = []
+        for line in _lines(window.read_bytes()):
+            try:
+                seen.append(json.loads(line.decode("utf-8")).get("line"))
+            except (UnicodeDecodeError, ValueError, AttributeError):
+                seen.append(None)
+        if seen != rederived:
+            problems.append(f"selecting the window again from records.jsonl gives ledger "
+                            f"lines {rederived}, window.jsonl holds {seen}")
+    if win_rows == 0 and "empty" not in words:
+        problems.append("the window is empty and could_not_look.json does not say so "
+                        "(an empty window is COULD NOT LOOK, never VERIFIED)")
+    return problems
 
 
 def _step_build(pack: Path, manifest: dict) -> dict:
@@ -236,24 +327,37 @@ def _step_build(pack: Path, manifest: dict) -> dict:
         return _cnl(check, CNL_FILE, str(pack), "unreadable",
                     f"could_not_look.json could not be read as a list of entries ({e})")
     counts = manifest.get("counts")
-    if not isinstance(counts, dict) or not isinstance(counts.get("could_not_look"), int):
-        return _cnl(check, "the build's verdict counts", MANIFEST, "unreadable",
-                    "manifest.json has no `counts.could_not_look` to check the file against")
+    checks = manifest.get("checks")
+    incomplete = []
+    if not isinstance(counts, dict) or not all(
+            isinstance(counts.get(k), int) and not isinstance(counts.get(k), bool)
+            for k in ("verified", "broken", "could_not_look")):
+        incomplete.append("`counts` (verified, broken, could_not_look)")
+    if not isinstance(checks, list) or not all(isinstance(c, dict) for c in checks):
+        incomplete.append("`checks`")
+    if incomplete:
+        return {"check": check, "entries": entries, "verdict": V.BROKEN,
+                "finding": (f"manifest incomplete: it has no readable "
+                            f"{' or '.join(incomplete)}, which every pack writes")}
     res = {"check": check, "entries": entries, "manifest_counts": counts}
     problems = []
+    listed_cnl = [{k: c.get(k) for k in _CNL_ENTRY_KEYS} for c in checks
+                  if c.get("verdict") == V.COULD_NOT_LOOK]
+    if listed_cnl != [{k: e.get(k) for k in _CNL_ENTRY_KEYS} for e in entries]:
+        problems.append("could_not_look.json does not hold the COULD NOT LOOK "
+                        "entries of the manifest's `checks`")
+    problems += _rederive(pack, manifest, entries)
     if len(entries) != counts["could_not_look"]:
         problems.append(f"counts mismatch: could_not_look.json holds {len(entries)} "
                         f"entr{'y' if len(entries) == 1 else 'ies'}, the manifest's "
                         f"counts.could_not_look is {counts['could_not_look']}")
-    checks = manifest.get("checks")
-    if isinstance(checks, list):
-        by_word = {w: sum(isinstance(c, dict) and c.get("verdict") == w for c in checks)
-                   for w in (V.VERIFIED, V.BROKEN, V.COULD_NOT_LOOK)}
-        claimed = {V.VERIFIED: counts.get("verified"), V.BROKEN: counts.get("broken"),
-                   V.COULD_NOT_LOOK: counts.get("could_not_look")}
-        if by_word != claimed:
-            problems.append("counts mismatch: the manifest's `checks` list does not add "
-                            "up to its `counts`")
+    by_word = {w: sum(c.get("verdict") == w for c in checks)
+               for w in (V.VERIFIED, V.BROKEN, V.COULD_NOT_LOOK)}
+    claimed = {V.VERIFIED: counts.get("verified"), V.BROKEN: counts.get("broken"),
+               V.COULD_NOT_LOOK: counts.get("could_not_look")}
+    if by_word != claimed:
+        problems.append("counts mismatch: the manifest's `checks` list does not add "
+                        "up to its `counts`")
     if problems:
         res.update({"verdict": V.BROKEN, "finding": "; ".join(problems)})
         return res
@@ -450,8 +554,8 @@ def _step_pins(pack: Path, manifest: dict, *, witness=None, remote: bool = False
 #: The verify steps, in order. Each takes (pack folder, loaded manifest) and
 #: returns one check dict with a `verdict` word. The pins step (_step_pins)
 #: runs after these, since it takes verify's --witness / --remote options.
-STEPS: list[Callable[[Path, dict], dict]] = [_step_hashes, _step_chain,
-                                              _step_window, _step_build]
+STEPS: list[Callable[[Path, dict], dict]] = [_step_hashes, _step_chain, _step_window,
+                                              _step_build, _step_manifest_hash]
 
 
 def verify_pack(pack: str | Path, *, witness: str | Path | None = None,

@@ -22,7 +22,10 @@ def _manifest(out):
 
 
 def _write_manifest(out, m):
+    """The attacker who rewrites the manifest fixes manifest.sha256 too."""
     (out / "manifest.json").write_text(json.dumps(m, indent=2), encoding="utf-8")
+    h = hashlib.sha256((out / "manifest.json").read_bytes()).hexdigest()
+    (out / "manifest.sha256").write_bytes(f"{h}  manifest.json".encode("ascii") + bytes([10]))
 
 
 def _edit_and_hide(out, old, new):

@@ -27,8 +27,12 @@ def test_every_other_file_is_hashed(ledger, tmp_path):
     out = tmp_path / "pack"
     build_pack(ledger, out, agent="agent-a")
     m = _manifest(out)
-    on_disk = sorted(p.name for p in out.iterdir() if p.is_file() and p.name != "manifest.json")
+    on_disk = sorted(p.name for p in out.iterdir() if p.is_file()
+                     and p.name not in ("manifest.json", "manifest.sha256"))
     assert sorted(m["files"]) == on_disk
+    # the manifest's own hash sits beside it, not inside it (review 2)
+    want = hashlib.sha256((out / "manifest.json").read_bytes()).hexdigest()
+    assert (out / "manifest.sha256").read_bytes() == f"{want}  manifest.json".encode() + b"\n"
     assert "manifest.json" not in m["files"]
     for name in ("records.jsonl", "window.jsonl", "integrity.json", "ARTICLE_12_SUMMARY.md"):
         assert m["files"][name] == hashlib.sha256((out / name).read_bytes()).hexdigest()

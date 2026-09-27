@@ -33,6 +33,9 @@ MANIFEST = "manifest.json"
 CNL_FILE = "could_not_look.json"
 #: The one-page reader's note inside the pack (K055).
 README = "README.md"
+#: The manifest's own hash, beside it (K06xR review 2): `sha256sum -c` format,
+#: "<64 hex>  manifest.json". It cannot sit inside the manifest it hashes.
+MANIFEST_SHA = "manifest.sha256"
 #: What a pack does not show, printed verbatim in README.md: the bullets of
 #: spec section 6 ("What must not be claimed"), word for word. Kept here, one
 #: list, so the page and any test read the same words.
@@ -425,4 +428,9 @@ def _write_manifest(out: Path, res: dict, integrity: dict, audit_manifest: dict,
         "audit_export": audit_manifest,
     }
     (out / MANIFEST).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    # The manifest's own hash, written after it. It catches an edit to the
+    # manifest alone; a rewriter who also recomputes this line is caught only
+    # by a pin, which is why the pins step exists.
+    (out / MANIFEST_SHA).write_bytes(
+        f"{_sha256_file(out / MANIFEST)}  {MANIFEST}\n".encode("ascii"))
     return manifest
