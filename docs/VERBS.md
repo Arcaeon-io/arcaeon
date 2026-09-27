@@ -803,7 +803,31 @@ TODO(K019)
 
 ## `schema`
 
-TODO(K013)
+Answers: what does the local HTTP API accept and return, for a program or
+framework that reads OpenAPI? Prints the OpenAPI 3.1 document built from the
+same route table `arcaeon serve` dispatches on, so it is the very document
+the server answers at `GET /openapi.json`: one operation per route with an
+`operationId`, each route's request and response schemas under
+`components.schemas`, and the bearer security scheme on every route but
+`/health` and `/openapi.json`. `docs/openapi.json` is this output, held to
+it by a drift test.
+
+**Usage**
+
+```text
+usage: arcaeon schema [-h] [--format {openapi}] [--out FILE]
+```
+
+`--out FILE` writes the document to a file (UTF-8, LF line endings) instead
+of printing it.
+
+**Exit codes:** 0 printed or written. 2 bad usage (an unknown `--format`).
+3 the `--out` file could not be written.
+
+```console
+$ arcaeon schema --format openapi | py -c "import json,sys; d=json.load(sys.stdin); print(d['openapi'], len(d['paths']))"
+3.1.0 21
+```
 
 ## `open`
 
