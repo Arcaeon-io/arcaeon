@@ -507,3 +507,156 @@ def test_mandate_doc_names_every_surface_and_the_enforce_warning():
                  "Enforce stops your agent", "mandate_sessions.jsonl",
                  "tests/test_mandate_default_record_only.py"):
         assert must in MANDATE_MD, must
+
+
+# --- docs/ADAPTERS.md: every example runs against the fake frameworks (K092) ---------
+
+ADAPTERS_MD = (ROOT / "docs" / "ADAPTERS.md").read_text(encoding="utf-8")
+
+#: Section heading -> the adapter module its example imports.
+_ADAPTER_SECTIONS = {
+    "OpenAI Agents SDK": "arcaeon.adapters.openai_agents",
+    "LangChain and LangGraph": "arcaeon.adapters.langchain",
+    "LlamaIndex": "arcaeon.adapters.llamaindex",
+    "CrewAI": "arcaeon.adapters.crewai",
+    "AutoGen": "arcaeon.adapters.autogen",
+}
+
+
+def _fake_frameworks() -> dict:
+    """Stand-ins for the five frameworks: each class takes what the adapter
+    hands it and calls back the way the framework does. Never the real SDKs."""
+    import types
+
+    class AgentsFunctionTool:
+        def __init__(self, *, name, description, params_json_schema, on_invoke_tool,
+                     strict_json_schema=True):
+            self.name, self.on_invoke_tool = name, on_invoke_tool
+
+    class StructuredTool:
+        def __init__(self, *, name, description, args_schema, func, coroutine=None):
+            self.name, self.func = name, func
+
+        def invoke(self, tool_input):
+            return self.func(**tool_input)
+
+    class ToolMetadata:
+        def __init__(self, *, name, description, fn_schema):
+            self.name = name
+
+    class LlamaFunctionTool:
+        def __init__(self, *, fn, metadata, async_fn=None):
+            self.fn, self.metadata = fn, metadata
+
+        def call(self, **kwargs):
+            return self.fn(**kwargs)
+
+    class CrewBaseTool:
+        def __init__(self, *, name, description, args_schema):
+            self.name = name
+
+        def run(self, **kwargs):
+            return self._run(**kwargs)
+
+    class AutogenBaseTool:
+        def __init__(self, args_type, return_type, name, description, strict=False):
+            self.args_type, self.name = args_type, name
+
+        async def run_json(self, args, cancellation_token):
+            v = getattr(self.args_type, "model_validate", None)
+            return await self.run(v(args) if v else args, cancellation_token)
+
+    class CancellationToken:
+        pass
+
+    def mod(name, **attrs):
+        m = types.ModuleType(name)
+        m.__dict__.update(attrs)
+        return m
+
+    mods = {
+        "agents": mod("agents", FunctionTool=AgentsFunctionTool),
+        "langchain_core": mod("langchain_core"),
+        "langchain_core.tools": mod("langchain_core.tools", StructuredTool=StructuredTool),
+        "llama_index": mod("llama_index"),
+        "llama_index.core": mod("llama_index.core"),
+        "llama_index.core.tools": mod("llama_index.core.tools", FunctionTool=LlamaFunctionTool,
+                                      ToolMetadata=ToolMetadata),
+        "crewai": mod("crewai"),
+        "crewai.tools": mod("crewai.tools", BaseTool=CrewBaseTool),
+        "autogen_core": mod("autogen_core", CancellationToken=CancellationToken),
+        "autogen_core.tools": mod("autogen_core.tools", BaseTool=AutogenBaseTool),
+    }
+    mods["langchain_core"].tools = mods["langchain_core.tools"]
+    mods["llama_index"].core = mods["llama_index.core"]
+    mods["llama_index.core"].tools = mods["llama_index.core.tools"]
+    mods["crewai"].tools = mods["crewai.tools"]
+    mods["autogen_core"].tools = mods["autogen_core.tools"]
+    if importlib.util.find_spec("pydantic") is None:
+        # Three adapters build an args model; on a base install stand in for
+        # pydantic too (a class is all these examples need from it).
+        mods["pydantic"] = mod("pydantic", Field=lambda default, description=None: default,
+                               create_model=lambda name, **f: type(name, (), {}))
+    return mods
+
+
+def _adapter_examples() -> list[tuple[str, str, list[str]]]:
+    """(heading, python source, expected output lines) per framework section."""
+    out = []
+    for heading in _ADAPTER_SECTIONS:
+        body = _section(ADAPTERS_MD, heading)
+        code = _fenced(body, "python")
+        shown = _fenced(body, "text")
+        assert len(code) == 1 and len(shown) == 1, heading
+        out.append((heading, code[0], shown[0].splitlines()))
+    return out
+
+
+def test_adapters_doc_has_one_example_per_framework():
+    headings = re.findall(r"^## (.+)$", ADAPTERS_MD, re.M)
+    for h, module in _ADAPTER_SECTIONS.items():
+        assert h in headings, h
+        assert f"from {module} import arcaeon_tools" in _section(ADAPTERS_MD, h), h
+    assert len(_adapter_examples()) == 5
+
+
+def test_adapters_doc_examples_print_what_the_doc_says(tmp_path, monkeypatch, capsys):
+    import io
+    import threading
+    from arcaeon.serve import server as S
+    home = tmp_path / "home"
+    root = tmp_path / "served"
+    home.mkdir()
+    root.mkdir()
+    monkeypatch.setenv("ARCAEON_HOME", str(home))
+    monkeypatch.setenv("ARCAEON_JOURNAL", "0")
+    monkeypatch.delenv("ARCAEON_KEY", raising=False)
+    monkeypatch.chdir(root)
+    for name, m in _fake_frameworks().items():
+        monkeypatch.setitem(sys.modules, name, m)
+    for module in _ADAPTER_SECTIONS.values():
+        monkeypatch.delitem(sys.modules, module, raising=False)
+    token = "docs-adapters-token"
+    (home / "serve.token").write_text(token, encoding="utf-8")
+    server = S.make_server(port=0, token=token, root=root)
+    ready = threading.Event()
+    t = threading.Thread(target=S.run, args=(server,),
+                         kwargs={"ready": ready, "out": io.StringIO()}, daemon=True)
+    t.start()
+    try:
+        assert ready.wait(10)
+        for heading, code, expect in _adapter_examples():
+            capsys.readouterr()
+            exec(compile(code, f"docs/ADAPTERS.md#{heading}", "exec"), {"__name__": "__doc__"})
+            got = capsys.readouterr().out.splitlines()
+            assert got == expect, (heading, got, expect)
+    finally:
+        server.shutdown()
+        t.join(10)
+    assert not t.is_alive()
+
+
+@pytest.mark.parametrize("phrase", ["tamper-proof", "independent", "truth", "is true",
+                                    "compliant", "guarantee", "—", "–"])
+def test_adapters_doc_makes_no_overclaim(phrase):
+    assert phrase not in ADAPTERS_MD.lower(), phrase
