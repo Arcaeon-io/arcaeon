@@ -139,3 +139,14 @@ def test_importing_the_table_pulls_in_no_handler():
     p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=60)
     assert p.returncode == 0, p.stderr
     assert p.stdout.strip() == "[]"
+
+
+def test_evidence_pack_verify_takes_witness_and_remote_and_aat_needs_out():
+    """Lane D (K060, K061): verify_pack(pack, witness=, remote=) and
+    export_aat(ledger, out); the route schemas carry the same fields."""
+    r = R.find("POST", "/v1/evidence-pack/verify")
+    assert {"pack", "witness", "remote"} <= set(r.request_schema["properties"])
+    assert R.validate(r, {"pack": "p", "remote": "yes"}) is not None
+    assert R.validate(r, {"pack": "p", "witness": "w.jsonl", "remote": True}) is None
+    aat = R.find("POST", "/v1/export/aat")
+    assert "'out'" in (R.validate(aat, {"ledger": "l.jsonl"}) or "")
