@@ -27,7 +27,8 @@ from arcaeon.connect import write as W
 GOLDEN = Path(__file__).resolve().parent / "golden"
 FAKE_HOMES = (("windows", r"C:\Users\u"), ("macos", "/Users/u"), ("linux", "/fake/u"))
 NOTHING = "nothing written (add --write to apply)"
-WRITE_GOLDEN = ("claude-desktop", "claude-code", "cursor")
+WRITE_GOLDEN = ("claude-desktop", "claude-code", "cursor",      # K022
+                "windsurf", "vscode", "gemini-cli")           # K023
 SEED = '{\n  "theme": "dark",\n  "KEY": {\n    "other": {"command": "other-server"}\n  }\n}\n'
 
 

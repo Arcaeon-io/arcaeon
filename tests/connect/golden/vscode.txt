@@ -57,3 +57,19 @@ would merge (only the 'arcaeon' entry; every other key stays):
   }
 }
 nothing written (add --write to apply)
+
+## --write into a config holding one other server (every OS)
+changed: servers.arcaeon (added)
+{
+  "theme": "dark",
+  "servers": {
+    "other": {"command": "other-server"},
+    "arcaeon": {
+      "type": "stdio",
+      "command": "arcaeon",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}
