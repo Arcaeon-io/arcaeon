@@ -264,3 +264,75 @@ def test_cli_round_trip_and_exit_codes(tmp_path, capsys):
     assert cli.main(["deal", "handshake", "--help"]) == 0
     assert cli.main(["deal", "handshake"]) == 2
     assert "handshake" in (capsys.readouterr().out)
+
+
+# KH7R: an acceptance is bound to the proposal row it cites ------------------------
+
+def test_honest_acceptance_cites_the_proposal_row_hash_and_position(tmp_path):
+    a, b = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
+    H.propose(a, {"earlier": True}, handshake="h-before")      # the proposal is row 2
+    offer = H.propose(a, dict(TERMS), agent="agent-a", to="agent-b", handshake="h-bound")
+    got = H.accept(b, offer, agent="agent-b")
+    (_, pa), (pb,) = C.rows(a), C.rows(b)
+    assert offer["proposer_row"] == 2 and offer["proposer_chain"] == pa["chain"]
+    assert pb["proposal_chain"] == pa["chain"] and pb["proposal_row"] == 2
+    assert got["proposer_row"] == 2
+    r = H.verify(a, b, "h-bound")
+    assert r.verdict == H.AGREED_TERMS and r.exit_code == 0, r.to_dict()
+    assert r.results[0]["fields"] == [] and r.results[0]["position"] == []
+
+
+def test_accept_replayed_onto_a_second_proposal_is_different_terms(tmp_path):
+    a, b = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
+    first = H.propose(a, dict(TERMS), agent="agent-a", to="agent-b", handshake="h-one")
+    second = H.propose(a, dict(TERMS), agent="agent-a", to="agent-b", handshake="h-two")
+    H.accept(b, first, agent="agent-b")
+    # a replay through accept(): the second offer, carrying the first one's citation
+    replay = dict(second, proposer_chain=first["proposer_chain"],
+                  proposer_row=first["proposer_row"])
+    H.accept(b, replay, agent="agent-b")
+    r = H.verify(a, b, "h-two")
+    assert r.verdict == H.DIFFERENT_TERMS and r.exit_code == 1, r.to_dict()
+    assert r.results[0]["fields"] == ["proposal_hash"]
+    assert "another proposal" in r.reason
+    assert H.verify(a, b, "h-one").verdict == H.AGREED_TERMS
+    # a replay by copying the accept row onto the second id, rechained
+    b2 = tmp_path / "b2.jsonl"
+    H.accept(b2, first, agent="agent-b")
+    (row,) = C.rows(b2)
+    copy = json.loads(json.dumps(row))
+    copy["deal"] = copy["shared"]["handshake"] = "h-two"
+    copy["step_digest"] = digest_json(copy["shared"])
+    C.write_rechained(b2, [row, copy])
+    assert verify_file(b2).ok
+    r = H.verify(a, b2, "h-two")
+    assert r.verdict == H.DIFFERENT_TERMS and r.results[0]["fields"] == ["proposal_hash"]
+
+
+def test_accept_citing_a_position_that_holds_a_different_row_is_different_terms(tmp_path):
+    a, b = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
+    H.propose(a, {"unrelated": 1}, handshake="h-zero")         # row 1
+    offer = H.propose(a, dict(TERMS), agent="agent-a", to="agent-b", handshake="h-pos")
+    H.accept(b, offer, agent="agent-b")
+    rows = C.rows(b)
+    rows[0]["proposal_row"] = 1                                # row 1 is another row
+    C.write_rechained(b, rows)
+    r = H.verify(a, b, "h-pos")
+    assert r.verdict == H.DIFFERENT_TERMS and r.exit_code == 1, r.to_dict()
+    assert r.results[0]["fields"] == ["proposal_hash"] and "that row's hash" in r.reason
+    rows[0]["proposal_row"] = 99                               # a row that does not exist
+    C.write_rechained(b, rows)
+    r = H.verify(a, b, "h-pos")
+    assert r.verdict == H.MISSING and r.results[0]["fields"] == ["proposal_hash"]
+    del rows[0]["proposal_row"]                                # no citation at all
+    C.write_rechained(b, rows)
+    assert H.verify(a, b, "h-pos").verdict == H.DIFFERENT_TERMS
+
+
+def test_accept_refuses_an_offer_that_cites_no_proposal_row(tmp_path):
+    offer = H.propose(tmp_path / "a.jsonl", TERMS, agent="agent-a", to="agent-b")
+    for bad in (dict(offer, proposer_chain=None), dict(offer, proposer_row=None),
+                dict(offer, proposer_row=0), dict(offer, proposer_row=True)):
+        with pytest.raises(ValueError, match="proposer_"):
+            H.accept(tmp_path / "b.jsonl", bad, agent="agent-b")
+    assert not (tmp_path / "b.jsonl").exists()

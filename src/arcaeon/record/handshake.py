@@ -18,12 +18,16 @@ words:
   AGREED TERMS     the proposal on one ledger and the acceptance on the other
                    carry the same terms (canonical JSON digest). Exit 0.
   DIFFERENT TERMS  both are there and the terms differ; the fields are named.
-                   Also: one side proposed again after the other accepted, or
-                   a row's step_digest no longer matches the body it carries.
-                   Exit 1.
+                   Also: one side proposed again after the other accepted, a
+                   row's step_digest no longer matches the body it carries, or
+                   the acceptance is not bound to the proposal row it lines up
+                   with (field `proposal_hash`: it cites another row, or a
+                   position that holds a different row). Exit 1.
   MISSING          one half is not there: a proposal nobody accepted, an
-                   acceptance with no proposal, or an acceptance written on the
-                   proposer's own ledger instead of the other side's. Exit 1.
+                   acceptance with no proposal, an acceptance written on the
+                   proposer's own ledger instead of the other side's, or an
+                   acceptance citing a proposal row the ledger does not hold.
+                   Exit 1.
   COULD NOT LOOK   a ledger is missing, unreadable, or its chain is broken with
                    the terms still agreeing (an edited ledger is not agreement).
                    Never green. Exit 3.
@@ -35,8 +39,10 @@ through, so the row format is the deal lane's, unchanged:
       shared = {handshake, proposer, to, terms}; step_digest = digest_json(shared)
   kind "deal.handshake.accept"   party "acceptor"  deal = handshake id
       shared = the proposal's shared body, copied, never rebuilt;
-      beside it: agent (the acceptor's name), proposal_chain (the proposer's
-      row chain the offer carried).
+      beside it: agent (the acceptor's name), proposal_chain (the proposal
+      row's hash, its `chain`) and proposal_row (its position on the
+      proposer's ledger), both from the offer and both required: `verify`
+      holds the acceptance to exactly that row (KH7R).
 
 Because the rows are deal rows, `arcaeon deal show LEDGER --deal h-...` prints
 them. `deal dispute` on a handshake id answers COULD NOT LOOK (a handshake step
@@ -136,6 +142,30 @@ def _name(v: Any, what: str) -> str | None:
     return v
 
 
+def _position(path: str | Path, chain: str) -> int | None:
+    """The 1-indexed position of the last row whose `chain` is `chain`, counted
+    as chain_at / verify_file count rows (parseable JSON objects only)."""
+    n, at = 0, None
+    for raw in Path(path).read_text(encoding="utf-8", errors="replace").split("\n"):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            row = _loads(raw)
+        except ValueError:
+            continue
+        if not isinstance(row, dict):
+            continue
+        n += 1
+        if row.get("chain") == chain:
+            at = n
+    return at
+
+
+def _is_row_number(v: Any) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool) and v > 0
+
+
 def propose(ledger: str | Path, terms: dict, *, agent: str | None = None,
             to: str | None = None, handshake: str | None = None,
             ts: str | None = None) -> dict:
@@ -150,14 +180,15 @@ def propose(ledger: str | Path, terms: dict, *, agent: str | None = None,
     row = _Side(ledger, "proposer", hid)._write("handshake.propose", shared, None, ts)
     return {"kind": PROPOSAL_KIND, "handshake": hid, "proposer": agent, "to": to,
             "terms": terms, "terms_digest": digest, "proposer_chain": row["chain"],
-            "ts": row["ts"]}
+            "proposer_row": _position(ledger, row["chain"]), "ts": row["ts"]}
 
 
 def accept(ledger: str | Path, proposal: dict, *, agent: str | None = None,
            ts: str | None = None) -> dict:
     """Countersign an offer on the acceptor's own ledger. Refuses (ValueError)
     an offer that is not well formed, whose terms_digest does not match its
-    terms, or that names another agent in `to`."""
+    terms, that names another agent in `to`, or that does not cite the
+    proposal row it came from (proposer_chain and proposer_row)."""
     if not isinstance(proposal, dict):
         raise ValueError("the proposal must be a JSON object")
     if proposal.get("kind", PROPOSAL_KIND) != PROPOSAL_KIND:
@@ -177,12 +208,20 @@ def accept(ledger: str | Path, proposal: dict, *, agent: str | None = None,
     if proposal.get("terms_digest") is not None and proposal["terms_digest"] != digest:
         raise ValueError("the proposal's terms_digest does not match its terms: it was "
                          "changed after it was proposed; nothing was countersigned")
+    if not isinstance(proposal.get("proposer_chain"), str) or not proposal["proposer_chain"]:
+        raise ValueError("the proposal carries no proposer_chain: an acceptance must cite "
+                         "the proposal row it countersigns")
+    if not _is_row_number(proposal.get("proposer_row")):
+        raise ValueError("the proposal carries no proposer_row: an acceptance must cite "
+                         "the proposal row's position on the proposer's ledger")
     private = {"agent": agent if agent is not None else to,
-               "proposal_chain": proposal.get("proposer_chain")}
+               "proposal_chain": proposal["proposer_chain"],
+               "proposal_row": proposal["proposer_row"]}
     row = _Side(ledger, "acceptor", hid)._write("handshake.accept", shared, private, ts)
     return {"kind": ACCEPTANCE_KIND, "handshake": hid, "acceptor": private["agent"],
             "terms_digest": digest, "acceptor_chain": row["chain"],
-            "proposer_chain": proposal.get("proposer_chain"), "ts": row["ts"]}
+            "proposer_chain": private["proposal_chain"],
+            "proposer_row": private["proposal_row"], "ts": row["ts"]}
 
 
 # -- the verdict ---------------------------------------------------------------
@@ -226,6 +265,7 @@ class _Read:
     name: str
     path: Path
     rows: list = field(default_factory=list)        # (row number, row), handshake rows
+    chains: dict = field(default_factory=dict)      # row number -> that row's chain, every row
     cnl: dict | None = None                         # unreadable: the four keys
     broken: str | None = None                       # chain broken: the reason
 
@@ -256,6 +296,8 @@ def _read(name: str, path: str | Path) -> _Read:
                 return r
             t.rows.append(row)
     for n, row in enumerate(t.rows, 1):
+        if isinstance(row, dict):
+            r.chains[n] = row.get("chain")
         if isinstance(row, dict) and row.get("kind") in (KIND_PROPOSE, KIND_ACCEPT):
             r.rows.append((n, row))
     return r
@@ -272,6 +314,27 @@ def _self_ok(row: dict) -> bool:
             digest_json(row["shared"]) == row.get("step_digest")
     except ValueError:
         return False
+
+
+def _binding(P: _Read, np_: int, O: _Read, nq: int, q: dict) -> tuple | None:
+    """None when the acceptance cites exactly the proposal row it is lined up
+    with (hash and position); else (word, reason)."""
+    cited, at = q.get("proposal_chain"), q.get("proposal_row")
+    me = f"ledger {O.name} row {nq}"
+    if not isinstance(cited, str) or not _is_row_number(at):
+        return DIFFERENT_TERMS, (f"{me} does not cite the proposal row it accepts (it needs "
+                                 f"proposal_chain and proposal_row)")
+    if at not in P.chains:
+        return MISSING, (f"{me} cites ledger {P.name} row {at}, and ledger {P.name} holds no "
+                         f"row {at}")
+    if P.chains[at] != cited:
+        return DIFFERENT_TERMS, (f"{me} cites proposal hash {cited} at ledger {P.name} row "
+                                 f"{at}, but that row's hash is {P.chains[at]}")
+    if at != np_:
+        return DIFFERENT_TERMS, (f"{me} cites ledger {P.name} row {at}, not the proposal it "
+                                 f"is lined up with (row {np_}): the acceptance belongs to "
+                                 f"another proposal")
+    return None
 
 
 def _one(hid: str, a: _Read, b: _Read) -> dict:
@@ -307,10 +370,9 @@ def _one(hid: str, a: _Read, b: _Read) -> dict:
     if len(props[P.name]) > 1:
         res["position"].append(f"ledger {P.name} holds {len(props[P.name])} proposals for "
                                f"{hid}; the last (row {np_}) is lined up")
-    if q.get("proposal_chain") not in (None, p.get("chain")):
-        res["position"].append(f"the acceptance cites proposal chain "
-                               f"{q.get('proposal_chain')}, not the chain of ledger "
-                               f"{P.name} row {np_}")
+    bind = _binding(P, np_, O, nq, q)
+    if bind:
+        res["position"].append(bind[1])
     try:
         same = digest_json(p.get("shared")) == digest_json(q.get("shared"))
     except ValueError:
@@ -329,6 +391,9 @@ def _one(hid: str, a: _Read, b: _Read) -> dict:
         res["fields"] = ["step_digest"]
         res["reason"] = (f"{hid}: {bad} carries a step_digest that does not match the terms "
                          f"it holds; the row was edited after it was written")
+    elif bind:
+        res["verdict"], res["fields"] = bind[0], ["proposal_hash"]
+        res["reason"] = f"{hid}: {bind[1]}"
     elif broken:
         res["verdict"] = COULD_NOT_LOOK
         res["reason"] = (f"{hid}: the terms agree, but ledger {broken[0].name}'s chain is "

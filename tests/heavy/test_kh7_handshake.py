@@ -184,3 +184,19 @@ def test_bad_bodies_are_400_or_usage_never_a_verdict(agents):
     assert st == 400 and body["exit"] == 2
     st, body = a.post("verify", {"a": str(a.ledger)})
     assert st == 400 and body["exit"] == 2
+
+
+def test_an_accept_replayed_onto_another_proposal_is_different_terms(agents):
+    a, b = agents
+    first, _ = _handshake(a, b, "h-first")
+    st, p = a.post("propose", {"ledger": str(a.ledger), "terms": TERMS, "agent": a.name,
+                               "to": b.name, "handshake": "h-second"})
+    replay = dict(p["proposal"], proposer_chain=first["proposer_chain"],
+                  proposer_row=first["proposer_row"])
+    st, acc = b.post("accept", {"ledger": str(b.ledger), "proposal": replay, "agent": b.name})
+    assert st == 200 and acc["exit"] == 0
+    st, v = _verify_on_a(a, b, "h-second")
+    assert st == 200 and v["verdict"] == "DIFFERENT TERMS" and v["exit"] == 1, v
+    assert v["results"][0]["fields"] == ["proposal_hash"]
+    st, v = _verify_on_a(a, b, "h-first")
+    assert v["verdict"] == "AGREED TERMS"
