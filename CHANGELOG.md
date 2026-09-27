@@ -11,6 +11,16 @@ any version on PyPI; `pip install arcaeon` does not have them.
 
 ### Plug-in batch (branch plugin-2026-09-27)
 
+- **K14xR (c290700).** The test suite points ARCAEON_HOME and MCP_VET_AUDIT_LEDGER away from the real home for every test and fails the session if the real ~/.arcaeon or ~/.mcp_vet changed.
+- **K143 (a44ff9f).** A socket guard in the test suite: loopback only unless a test is marked `live`; the `live` marker is registered and skipped by default.
+- **K142 (1aa4818, eaac34d).** `py tools/release_check.py --offline` prints one PASS or named FAIL line per plug-in surface check.
+- **K141 (a69d628).** A test holds MIGRATION.md to naming every new JSON field.
+- **K140 (1515137, 1f927ff).** This file.
+- **K107 (c352778, 579c6cb).** `arcaeon open` opens the local dashboard with a one-time sign-in code, starting a loopback server when none is running.
+- **K100 to K109 (950e6c5 to bf79d9e).** The local dashboard: pages `/`, `/status`, `/verify`, `/packs`, `/readings`, `/mandate`, `POST /session/code`, a one-time code exchanged for an HttpOnly SameSite=Strict cookie, an origin guard on form posts, `Content-Security-Policy: default-src 'self'`, pages that read without JavaScript, and the new module `arcaeon.words`.
+- **K020 to K025 (f54f2ba, 7dc64ff, a7cf939, 4a22674, 1e3f2c3, 3d7a5b0).** `arcaeon connect --write`, `--undo`, `--check` and `--path`, entries for all eight clients, and a launch line that uses uvx when present; new reason words `unreadable`, `path_unconfirmed`, `no_backup`, `unwritable`.
+- **K016R (1ea6ed1).** The Python and JS clients send the home serve token only to loopback; plain http to another host exits 2 (`insecure`) unless `allow_insecure` is set.
+- **K015b (083f75e).** Journal rows may carry an optional `reason_word`.
 - **KH7R (bdca088).** A handshake acceptance is bound to the proposal row it cites (`proposer_chain`, `proposer_row`); verify answers DIFFERENT TERMS on `proposal_hash`, or MISSING when the cited row does not exist.
 - **KH7 (4514b6b, edb7f9d, 2e99fa6).** Agent-to-agent handshake: `arcaeon deal handshake propose|accept|verify` and `POST /v1/handshake/propose`, `/accept`, `/verify`, with two new words, AGREED TERMS and DIFFERENT TERMS.
 - **KH5 (95c2f05, 901c719).** A heavy test runs one six-call script through the stdio proxy, the HTTP forward and call_proxy, record-only and enforce, and checks the three ledgers agree row for row.
