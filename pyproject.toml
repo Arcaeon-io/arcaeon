@@ -62,6 +62,7 @@ where = ["src"]
 "arcaeon.remote" = ["offers.json"]
 "arcaeon.prove.continuity" = ["calibration_fixtures.jsonl"]
 "arcaeon.prove.baseline" = ["probes/*.jsonl"]
+"arcaeon.serve" = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

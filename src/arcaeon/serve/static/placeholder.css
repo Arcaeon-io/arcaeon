@@ -1,0 +1,90 @@
+/* TODO(design-system): replace with the Claude Design system (navy #0C1828 / gold, C2 chevron mark) before any second face ships */
+
+/* Placeholder only: system fonts, no external font, no image, no import. */
+:root {
+  --ink: #1b1f24;
+  --paper: #fbfbf9;
+  --rule: #d6d6d0;
+  --ok: #1f6f3f;
+  --ok-bg: #e6f2ea;
+  --bad: #9b1c1c;
+  --bad-bg: #f8e6e6;
+  --unknown: #5c5c5c;
+  --unknown-bg: #ececea;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  line-height: 1.5;
+}
+
+nav.top {
+  padding: 0.75rem 1.5rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+nav.top a {
+  margin-right: 1rem;
+}
+
+nav.top a[aria-current="page"] {
+  font-weight: bold;
+}
+
+main {
+  max-width: 60rem;
+  padding: 1rem 1.5rem 3rem;
+}
+
+table {
+  border-collapse: collapse;
+  margin: 0.5rem 0 1rem;
+}
+
+th, td {
+  border: 1px solid var(--rule);
+  padding: 0.3rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+}
+
+.verdict {
+  border-left: 0.4rem solid var(--unknown);
+  background: var(--unknown-bg);
+  padding: 0.5rem 1rem;
+  margin: 1rem 0;
+}
+
+.verdict-word {
+  font-weight: bold;
+  margin: 0;
+}
+
+/* The three states. COULD NOT LOOK is grey, never green. */
+.state-ok { border-color: var(--ok); background: var(--ok-bg); }
+.state-bad { border-color: var(--bad); background: var(--bad-bg); }
+.state-unknown { border-color: var(--unknown); background: var(--unknown-bg); }
+
+td.state-ok { color: var(--ok); }
+td.state-bad { color: var(--bad); }
+td.state-unknown { color: var(--unknown); }
+
+.counts td {
+  font-size: 1.4rem;
+  text-align: center;
+  min-width: 8rem;
+}
+
+textarea {
+  width: 100%;
+  min-height: 10rem;
+  font-family: ui-monospace, monospace;
+}
+
+.note {
+  color: var(--unknown);
+  font-size: 0.9rem;
+}
