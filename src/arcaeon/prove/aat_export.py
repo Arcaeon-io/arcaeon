@@ -39,6 +39,12 @@ included. Each line of the file IS the JCS form of its record, so a reader
 can hash line N-1 as bytes. A value JCS cannot write exactly (NaN, Infinity,
 an integer past 2**53, a lone surrogate) is refused, left out of its record
 and listed, never rounded (`arcaeon.prove.jcs`).
+
+Beside `FILE.jsonl` the export writes `FILE_gaps.json` (so `aat.jsonl` gets
+`aat_gaps.json`, K063): its `which_chain` header says which chain proves
+what, and every field left out is one COULD NOT LOOK entry with
+`reason_word: "bounded"`. The export's verdict is still the source ledger's
+chain check; the gaps say how far the export reaches, they are not a check.
 """
 from __future__ import annotations
 
@@ -51,7 +57,8 @@ from urllib.parse import quote
 from arcaeon import verdict as V
 
 __all__ = ["map_row", "export_aat", "AAT_FORMAT", "AGENT_URI_PREFIX", "NEVER_EMITTED",
-           "AatUsageError", "chain_records", "verify_aat_bytes", "AAT_CHAIN_ALGORITHM"]
+           "AatUsageError", "chain_records", "verify_aat_bytes", "AAT_CHAIN_ALGORITHM",
+           "WHICH_CHAIN", "EMITTED_WHEN_HELD", "gaps_path", "build_gaps"]
 
 AAT_FORMAT = "agent-audit-trail"
 #: The URI prefix our agent names get, so `agent_id` is a URI as the draft
@@ -62,6 +69,32 @@ AGENT_URI_PREFIX = "urn:arcaeon:agent:"
 NEVER_EMITTED = ("record_id", "agent_version", "trust_level", "record_phase",
                  "signature", "signer_kid", "human_override", "risk_score",
                  "trust_assignment", "batch")
+
+#: Why each field the draft defines is never written (spec section 3).
+_NOT_EMITTED_WHY = {
+    "record_id": "a UUIDv4 minted at export would not be original to the row",
+    "agent_version": "the rows do not record which version of the agent ran",
+    "trust_level": "we issue no identity passports, so no level above L0 or L1 is known",
+    "record_phase": "when each row is written relative to the act has not been audited",
+    "signature": "rows are not signed (the sign extra is not wired to rows)",
+    "signer_kid": "rows are not signed, so there is no signing key id",
+    "human_override": "the rows carry no field for it",
+    "risk_score": "the rows carry no field for it",
+    "trust_assignment": "the rows carry no field for it",
+    "batch": "the rows carry no field for it",
+    "external_timestamp": "the daily anchor is a pointer, not a timestamp token, so it "
+                          "is not written as one",
+}
+#: The fields map_row writes when, and only when, the row holds them.
+EMITTED_WHEN_HELD = ("timestamp", "agent_id", "session_id", "action_type",
+                     "action_detail", "response_hash", "input_hash", "output_hash",
+                     "outcome", "sequence_number", "recording_component")
+#: The export's header line: which chain proves what (spec section 3).
+WHICH_CHAIN = ("Two chains ride in this export. The AAT chain (prev_hash, SHA-256 over "
+               "RFC 8785 JCS) was computed at export: it proves the export was not "
+               "altered after export, and nothing about the ledger before it. The "
+               "original chain is the `chain` field on each record: only it speaks for "
+               "the rows as they were written.")
 
 _LIFECYCLE = frozenset({"session_begin", "session_end", "mcp_initialize", "tools_list",
                         "system_start", "system_stop"})
@@ -94,6 +127,48 @@ def _drop(rec: dict, path: str) -> str:
     if isinstance(rec.get(top), dict) and not rec[top]:
         rec.pop(top)
     return top
+
+
+def gaps_path(out: str | Path) -> Path:
+    """The gaps sidecar for an export file: `aat.jsonl` -> `aat_gaps.json`."""
+    out = Path(out)
+    return out.with_name(out.stem + "_gaps.json")
+
+
+def _lines_phrase(lines: list[int]) -> str:
+    return ("ledger line " if len(lines) == 1 else "ledger lines ") + \
+        ", ".join(str(n) for n in lines)
+
+
+def build_gaps(records: list[dict], refused: list[dict], skipped: list[int]) -> list[dict]:
+    """Every field left out, one COULD NOT LOOK entry each, reason_word bounded."""
+    gaps: list[dict] = []
+    for field, why in _NOT_EMITTED_WHY.items():
+        gaps.append(V.could_not_look(f"AAT field {field}", "every record", "bounded",
+                                     f"left out: {why}"))
+    refused_at = {(r.get("source_line"), r["field"]) for r in refused}
+    for field in EMITTED_WHEN_HELD:
+        missing = [r.get("source_line") for r in records
+                   if field not in r and (r.get("source_line"), field) not in refused_at]
+        if missing:
+            e = V.could_not_look(f"AAT field {field}", _lines_phrase(missing), "bounded",
+                                 "left out: the row holds no value for it, and none is "
+                                 "guessed")
+            e["lines"] = missing
+            gaps.append(e)
+    for r in refused:
+        e = V.could_not_look(f"AAT field {r['field']}", _lines_phrase([r["source_line"]]),
+                             "bounded", f"left out: JCS cannot write it exactly "
+                             f"({r['why']}), and it is not rounded")
+        e["lines"] = [r["source_line"]]
+        gaps.append(e)
+    if skipped:
+        e = V.could_not_look("an AAT record", _lines_phrase(skipped), "bounded",
+                             "left out: the line is not a JSON object, so no record "
+                             "was made from it")
+        e["lines"] = list(skipped)
+        gaps.append(e)
+    return gaps
 
 
 def chain_records(records: list[dict]) -> tuple[list[bytes], str | None, list[dict]]:
@@ -249,6 +324,9 @@ def export_aat(ledger: str | Path, out: str | Path) -> dict:
                             "inherently lossy); name a .jsonl file")
     if out.exists():
         raise AatUsageError(f"{out} exists; an export is written to a new file")
+    gp = gaps_path(out)
+    if gp.exists():
+        raise AatUsageError(f"{gp} exists; an export is written to new files")
     if not ledger.is_file():
         res = {"verdict": V.COULD_NOT_LOOK, "exit": V.EXIT_COULD_NOT_LOOK, "out": None}
         res.update(V.could_not_look("a ledger file", str(ledger), "missing",
@@ -270,6 +348,7 @@ def export_aat(ledger: str | Path, out: str | Path) -> dict:
     with out.open("wb") as fh:
         for b in lines:
             fh.write(b + b"\n")
+    gaps = build_gaps(records, refused, skipped)
     vr = verify_file(ledger)
     word = V.VERIFIED if vr.ok is True else V.BROKEN if vr.ok is False else V.COULD_NOT_LOOK
     res = {"verdict": word, "exit": V.EXIT_BY_WORD[word], "out": str(out),
@@ -277,7 +356,15 @@ def export_aat(ledger: str | Path, out: str | Path) -> dict:
            "source_chain": {"ok": vr.ok, "rows": vr.rows, "first_break": vr.first_break},
            "aat_chain": {"algorithm": AAT_CHAIN_ALGORITHM, "records": len(lines),
                          "head": head},
-           "refused": refused}
+           "refused": refused, "which_chain": WHICH_CHAIN,
+           "gaps_file": str(gp), "gaps": len(gaps)}
+    sidecar = {"format": AAT_FORMAT,
+               "scope": "a subset of draft-sharif-agent-audit-trail-05 fields; not "
+                        "AAT-conformant",
+               "which_chain": WHICH_CHAIN, "export": out.name,
+               "aat_chain": res["aat_chain"], "source_chain": res["source_chain"],
+               "gaps": gaps}
+    gp.write_bytes((json.dumps(sidecar, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
     if word == V.BROKEN:
         res["finding"] = f"the source ledger's chain breaks at {vr.first_break}"
     elif word == V.COULD_NOT_LOOK:
