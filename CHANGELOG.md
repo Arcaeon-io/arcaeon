@@ -87,7 +87,7 @@ any version on PyPI; `pip install arcaeon` does not have them.
 - **K032 (0e1dd52).** The readings compare core, with `disagreed` and `read` as two integers and `not_yet_informative` under 20 read.
 - **K031 (060ea67).** Criterion rows; a reading needs its criterion frozen earlier in the ledger.
 - **K030 (cf82cdd).** The reading row format, `arcaeon-reading/1`.
-- **K019c (1d16e27).** Connect tests use a fake POSIX home outside /home/.
+- **K019c (1d16e27).** Connect tests use a fake POSIX home, /fake/u, so no real user home folder is named in the tree.
 - **K019 (2ee0c9e, 8716d8a).** `arcaeon connect <client>` prints the plan and writes nothing.
 - **K018 (f79e3ad).** `arcaeon connect --list` and the eight-client catalog.
 - **K017 (5aed605).** Zero-dependency JavaScript client, clients/js/arcaeon.mjs, not published to any registry.
