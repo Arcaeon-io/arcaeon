@@ -120,6 +120,10 @@ the lane (A, B or C) of the work and the commit ids that carry it.
   `readings_receipt.json` (and `readings_receipt.ledger.jsonl`) and a manifest `readings`
   block; `receipt verify` runs on the copy at build and on every pack verify (fails is
   BROKEN, unreadable or missing is exit 3).
+- **`evidence-pack --zip [--built-at TS]` (lane D: K068).** Also writes `<out>.zip`: sorted
+  entries, fixed times, stored, byte-identical for the same input and build time
+  (`--built-at`, else `SOURCE_DATE_EPOCH`, else the clock). `evidence-pack verify` takes
+  the zip. `audit.export_bundle` gains `generated_at=` for the export's three stamps.
 
 ## 0.9.1 (2026-09-25)
 

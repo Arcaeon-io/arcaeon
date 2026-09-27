@@ -6,8 +6,8 @@
                           [--system-id ID] [--provider NAME] [--format aat]
                           [--deal ID (--buyer B | --seller S)]
                           [--mandate FILE] [--readings RECEIPT [--readings-ledger L]]
-                          [--json]
-    arcaeon evidence-pack verify PACK [--json]
+                          [--zip] [--built-at TS] [--json]
+    arcaeon evidence-pack verify PACK|PACK.zip [--json]
 
 Exit codes as every verb: 0 VERIFIED, 1 BROKEN, 2 bad usage, 3 COULD NOT LOOK.
 """
@@ -15,7 +15,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+from datetime import datetime, timezone
 
 from arcaeon import verdict as V
 
@@ -55,8 +57,25 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                         "runs on it at build and on every pack verify")
     p.add_argument("--readings-ledger", default=None,
                    help="with --readings: the ledger the receipt was issued into")
+    p.add_argument("--zip", dest="zip_out", action="store_true",
+                   help="also write OUT.zip: sorted entries, fixed times, so two builds "
+                        "of the same input at the same --built-at are byte-identical")
+    p.add_argument("--built-at", default=None,
+                   help="the build time the pack states, YYYY-MM-DDTHH:MM:SSZ (default: "
+                        "SOURCE_DATE_EPOCH when set, else the clock)")
     p.add_argument("--json", action="store_true", help="print the result as JSON")
     return p
+
+
+def _source_date_epoch() -> str | None:
+    """SOURCE_DATE_EPOCH (the reproducible-builds convention) as a stamp, or None."""
+    v = os.environ.get("SOURCE_DATE_EPOCH", "").strip()
+    if not v:
+        return None
+    try:
+        return datetime.fromtimestamp(int(v), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    except (ValueError, OverflowError, OSError):
+        return v   # build_pack refuses it by name
 
 
 def main(argv: list[str] | None = None, *, prog: str = "arcaeon evidence-pack") -> int:
@@ -74,7 +93,9 @@ def main(argv: list[str] | None = None, *, prog: str = "arcaeon evidence-pack") 
                          formats=tuple(a.formats), deal=a.deal,
                          deal_buyer=a.buyer, deal_seller=a.seller,
                          mandate=a.mandate, readings=a.readings,
-                         readings_ledger=a.readings_ledger)
+                         readings_ledger=a.readings_ledger,
+                         built_at=a.built_at or _source_date_epoch(),
+                         zip_out=a.zip_out)
     except PackUsageError as e:
         print(f"{prog}: {e}", file=sys.stderr)
         return V.EXIT_USAGE
@@ -88,6 +109,8 @@ def main(argv: list[str] | None = None, *, prog: str = "arcaeon evidence-pack") 
         if res.get("reason"):
             line += f" ({res['reason_word']}: {res['reason']})"
         print(line)
+        if res.get("zip"):
+            print(f"zip: {res['zip']} sha256 {res['zip_sha256']}")
     return res["exit"]
 
 

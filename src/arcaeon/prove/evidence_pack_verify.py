@@ -80,6 +80,12 @@ manifest. Verify runs `receipt verify` on readings_receipt.json again (with
 the copied ledger when the pack has one); a receipt that fails is BROKEN
 naming the file, and the result must be the one the manifest recorded.
 
+Zip (K068): PACK may be the `<out>.zip` that `evidence-pack --zip` writes.
+Its entries are read into a temporary folder and verified exactly as the
+folder would be. An entry that is not a plain top-level file name (a
+subfolder, a `..`, an absolute path) or a name twice is BROKEN: nothing in
+the manifest can vouch for it. A zip that cannot be read is COULD NOT LOOK.
+
 The overall verdict is the worst step: BROKEN outranks COULD NOT LOOK, which
 outranks VERIFIED. COULD NOT LOOK never exits 0.
 
@@ -92,6 +98,8 @@ import hashlib
 import json
 import re
 import sys
+import tempfile
+import zipfile
 from pathlib import Path
 from typing import Callable
 
@@ -856,6 +864,58 @@ STEPS: list[Callable[[Path, dict], dict]] = [_step_hashes, _step_chain, _step_wi
                                               _step_readings]
 
 
+#: The most a pack zip may unpack to. A pack bigger than this is COULD NOT
+#: LOOK "bounded", never read past the bound.
+ZIP_MAX_BYTES = 4 * 1024 ** 3
+
+
+def _verify_zip(zp: Path, **kw) -> dict:
+    """Verify a pack zip by unpacking it into a temporary folder (K068)."""
+    base = {"pack": str(zp)}
+
+    def cnl(word, reason):
+        c = _cnl("pack zip", "an evidence pack zip", str(zp), word, reason)
+        return {**base, "verdict": V.COULD_NOT_LOOK, "exit": V.EXIT_COULD_NOT_LOOK,
+                "checks": [c], **{k: c[k] for k in _CNL_FIELDS}}
+
+    try:
+        zf = zipfile.ZipFile(zp)
+    except (OSError, zipfile.BadZipFile) as e:
+        return cnl("unreadable", f"the file could not be read as a zip ({e})")
+    with zf:
+        infos = zf.infolist()
+        names = [i.filename for i in infos]
+        bad = sorted({n for n in names if n != Path(n).name or "\\" in n or n in ("", ".", "..")
+                      or n.endswith("/")})
+        dup = sorted({n for n in names if names.count(n) > 1})
+        if bad or dup:
+            parts = []
+            if bad:
+                parts.append(f"entries that are not a plain top-level file: {bad}")
+            if dup:
+                parts.append(f"entries named twice: {dup}")
+            c = {"check": "pack zip", "verdict": V.BROKEN, "finding": "; ".join(parts)}
+            return {**base, "verdict": V.BROKEN, "exit": V.EXIT_BAD, "checks": [c],
+                    "finding": f"pack zip: {c['finding']}"}
+        if sum(i.file_size for i in infos) > ZIP_MAX_BYTES:
+            return cnl("bounded", f"the zip unpacks to more than {ZIP_MAX_BYTES} bytes, "
+                                  "past what verify reads")
+        with tempfile.TemporaryDirectory(prefix="arcaeon-pack-") as tmp:
+            folder = Path(tmp)
+            try:
+                for i in infos:
+                    with zf.open(i) as src:
+                        data = src.read(ZIP_MAX_BYTES + 1)
+                    (folder / i.filename).write_bytes(data)
+            except (OSError, zipfile.BadZipFile, RuntimeError, ValueError) as e:
+                return cnl("unreadable", f"an entry could not be read from the zip ({e})")
+            res = verify_pack(folder, **kw)
+    res["pack"] = str(zp)
+    res["zip"] = {"entries": len(infos),
+                  "sha256": hashlib.sha256(zp.read_bytes()).hexdigest()}
+    return res
+
+
 def verify_pack(pack: str | Path, *, witness: str | Path | None = None,
                 remote: bool = False, namespace: str | None = None) -> dict:
     """Verify the pack folder `pack`. Returns `verdict`, integer `exit`,
@@ -868,6 +928,8 @@ def verify_pack(pack: str | Path, *, witness: str | Path | None = None,
     lists no pin of its own."""
     pack = Path(pack)
     base = {"pack": str(pack)}
+    if pack.is_file():
+        return _verify_zip(pack, witness=witness, remote=remote, namespace=namespace)
     if not pack.is_dir():
         c = _cnl("pack folder", "an evidence pack folder", str(pack), "missing",
                  "no folder at that path, so there is no pack to check")
@@ -918,7 +980,7 @@ def verify_pack(pack: str | Path, *, witness: str | Path | None = None,
 def _parser(prog: str) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=prog, description="Verify an evidence pack: rehash "
                                 "every file against its manifest, rerun the chain.")
-    p.add_argument("pack", help="the evidence pack folder")
+    p.add_argument("pack", help="the evidence pack folder, or the .zip --zip wrote")
     p.add_argument("--witness", default=None,
                    help="the local pin file to check the pack's local pins against")
     p.add_argument("--remote", action="store_true",

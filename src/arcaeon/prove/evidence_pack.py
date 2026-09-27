@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -53,6 +55,13 @@ MANDATE_ROWS = "mandate_rows.json"
 #: issued into. Build and verify both run `receipt verify` on the copy.
 READINGS_RECEIPT = "readings_receipt.json"
 READINGS_LEDGER = "readings_receipt.ledger.jsonl"
+#: With --zip (K068): every entry at the zip's top level, sorted by name,
+#: stored (not deflated, so no zlib version changes a byte), each with this
+#: fixed time and mode, so two builds of the same input, stated at the same
+#: build time, are byte-identical.
+ZIP_DATE_TIME = (1980, 1, 1, 0, 0, 0)
+_ZIP_MODE = 0o100644 << 16
+_STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
 #: The mandate gate's row events that carry a per-call verdict (proxy.py).
 _MANDATE_VERDICT_EVTS = ("mandate_outside", "mandate_could_not_look",
                          "mandate_cap_exceeded")
@@ -177,7 +186,8 @@ def build_pack(ledger: str | Path, out: str | Path, *,
                deal_seller: str | Path | None = None,
                mandate: str | Path | None = None,
                readings: str | Path | None = None,
-               readings_ledger: str | Path | None = None) -> dict:
+               readings_ledger: str | Path | None = None,
+               built_at: str | None = None, zip_out: bool = False) -> dict:
     """Build an evidence pack from `ledger` into the empty folder `out`.
 
     Returns a result dict with `verdict` (one arcaeon.verdict word), an integer
@@ -218,6 +228,13 @@ def build_pack(ledger: str | Path, out: str | Path, *,
     receipt that fails it is BROKEN, one that cannot be read COULD NOT LOOK.
     Without `readings_ledger` the ledger tie is not checked, as with
     `arcaeon receipt verify` run without --ledger, and the manifest says so.
+
+    `built_at` ("YYYY-MM-DDTHH:MM:SSZ") is the build time the pack states,
+    in the manifest and in every file export_bundle stamps; None means the
+    clock. `zip_out` also writes `<out>.zip` beside the folder (K068): sorted
+    entries, fixed times, stored, so two builds of the same input with the
+    same `built_at` are byte-identical. `evidence-pack verify` accepts the
+    zip. The result carries `zip` and `zip_sha256`.
     """
     from arcaeon.prove.audit import export_bundle
 
@@ -236,6 +253,13 @@ def build_pack(ledger: str | Path, out: str | Path, *,
         raise PackUsageError("--buyer / --seller are only read with --deal")
     if readings_ledger is not None and readings is None:
         raise PackUsageError("--readings-ledger is only read with --readings")
+    if built_at is not None and not (isinstance(built_at, str)
+                                     and _STAMP.fullmatch(built_at)):
+        raise PackUsageError(f"--built-at {built_at!r} is not YYYY-MM-DDTHH:MM:SSZ")
+    zip_path = out.parent / (out.name + ".zip")
+    if zip_out and zip_path.exists():
+        raise PackUsageError(f"{zip_path} exists; a pack never writes over an older "
+                             "pack's zip")
     unknown = sorted(set(formats) - {"aat"})
     if unknown:
         raise PackUsageError(f"unknown --format {unknown}; the one extra format is aat")
@@ -247,7 +271,8 @@ def build_pack(ledger: str | Path, out: str | Path, *,
                            "the ledger named was not found, so there is nothing to pack")
 
     export_bundle(ledger, out, system_id=system_id, provider=provider,
-                  witness=witness, witness_namespace=witness_namespace)
+                  witness=witness, witness_namespace=witness_namespace,
+                  generated_at=built_at)
     raw = (out / "records.jsonl").read_bytes()
     window, unplaced = select_window(raw, agent=agent, since=t_from, until=t_to)
     with (out / "window.jsonl").open("wb") as fh:
@@ -308,9 +333,26 @@ def build_pack(ledger: str | Path, out: str | Path, *,
     audit_manifest = json.loads((out / MANIFEST).read_text(encoding="utf-8"))
     _write_manifest(out, res, integrity, audit_manifest, window, unplaced, checks,
                     aat=aat, deal=deal_block, mandate=mandate_block,
-                    readings=readings_block)
+                    readings=readings_block, built_at=built_at)
     res["files"] = sorted(p.name for p in out.iterdir() if p.is_file())
+    if zip_out:
+        res["zip"] = str(zip_path)
+        res["zip_sha256"] = write_zip(out, zip_path)
     return res
+
+
+def write_zip(folder: Path, zip_path: Path) -> str:
+    """Write the pack folder's files into `zip_path`, deterministically, and
+    return the zip's sha256. Top-level files only: a pack is flat."""
+    names = sorted(p.name for p in folder.iterdir() if p.is_file())
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED) as zf:
+        for name in names:
+            info = zipfile.ZipInfo(name, date_time=ZIP_DATE_TIME)
+            info.compress_type = zipfile.ZIP_STORED
+            info.create_system = 3      # the same on every OS
+            info.external_attr = _ZIP_MODE
+            zf.writestr(info, (folder / name).read_bytes())
+    return hashlib.sha256(zip_path.read_bytes()).hexdigest()
 
 
 def _fold_check(res: dict, check: dict) -> None:
@@ -781,7 +823,8 @@ def _write_manifest(out: Path, res: dict, integrity: dict, audit_manifest: dict,
                     window: list[dict], unplaced: list[int],
                     checks: list[dict], *, aat: dict | None = None,
                     deal: dict | None = None, mandate: dict | None = None,
-                    readings: dict | None = None) -> dict:
+                    readings: dict | None = None,
+                    built_at: str | None = None) -> dict:
     """Write manifest.json LAST, over every other file in the pack.
 
     The three counts are of the checks this build ran (the records chain with
@@ -801,7 +844,7 @@ def _write_manifest(out: Path, res: dict, integrity: dict, audit_manifest: dict,
     manifest = {
         "pack_schema": PACK_SCHEMA,
         "tool": f"arcaeon/{__version__}",
-        "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "built_at": built_at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "verdict": res["verdict"], "exit": res["exit"],
         "files": files,
         "chain_head": {"chain": head.chain, "rows": head.rows, "ok": head.ok,

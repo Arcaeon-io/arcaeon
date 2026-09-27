@@ -601,8 +601,16 @@ def export_bundle(log_path: str | Path, out_dir: str | Path, *,
                   system_id: str = "", provider: str = "",
                   witness: Any = None,
                   witness_namespace: str | None = None,
-                  instrument_notes: str | None = None) -> Path:
-    """Build a regulator-ready export folder from a log file. See AuditLog.export_bundle."""
+                  instrument_notes: str | None = None,
+                  generated_at: str | None = None) -> Path:
+    """Build a regulator-ready export folder from a log file. See AuditLog.export_bundle.
+
+    `generated_at` (ISO 8601, "YYYY-MM-DDTHH:MM:SSZ") stamps the export's
+    three times (integrity.json checked_at, manifest.json generated_at, the
+    summary's Generated line) instead of the clock, so two exports of the
+    same log at the same stated time are byte-identical (K068). The caller
+    states it; it is never read off the log."""
+    stamp = generated_at or _now_iso()
     log_path = Path(log_path)
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
@@ -778,7 +786,7 @@ def export_bundle(log_path: str | Path, out_dir: str | Path, *,
                  "bundle_schema": BUNDLE_SCHEMA_VERSION,
                  "records_sha256": hashlib.sha256(raw).hexdigest(),
                  "verified_file": "records.jsonl",
-                 "checked_at": _now_iso(),
+                 "checked_at": stamp,
                  "how_to_reverify": _reverify_recipe(witness_block, witness_namespace)}
     # Additive (0.9.x): every COULD NOT LOOK says what it looked for, where, and
     # why as one fixed word (arcaeon.verdict.REASON_WORDS). None on a finding
@@ -820,7 +828,7 @@ def export_bundle(log_path: str | Path, out_dir: str | Path, *,
                 "period_covered": {"from": s["first_ts"], "to": s["last_ts"]},
                 "event_counts": s["counts"],
                 "unknown_event_types": s["unknown_event_types"],
-                "generated_at": _now_iso(), "tool": f"arcaeon-audit/{__version__}"}
+                "generated_at": stamp, "tool": f"arcaeon-audit/{__version__}"}
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     # How much the CHAIN can say about these rows. Since a witness accusation
@@ -1005,7 +1013,7 @@ does not validate, edit, or vouch for its contents. Also in the bundle as
 
 **Provider:** {provider or '(unspecified)'}
 **Records:** {len(rows)}  ·  **Period covered:** {s['first_ts']} → {s['last_ts']}
-**Generated:** {_now_iso()} by arcaeon-audit/{__version__}
+**Generated:** {stamp} by arcaeon-audit/{__version__}
 
 ## Integrity
 {integrity_line}
