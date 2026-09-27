@@ -3,7 +3,11 @@
 
 Exit codes: 0 a clean stop (Ctrl+C), 2 bad usage (including any --host but
 127.0.0.1: exposing the server is a deploy decision), 3 the server could not
-start (the port is taken, the address cannot be bound).
+start (the port is taken, the address cannot be bound, the token file cannot
+be read or created).
+
+Every route but /health and /openapi.json needs the token in serve.token
+(K005); `arcaeon serve --print-token` prints it and exits 0.
 """
 from __future__ import annotations
 
@@ -23,11 +27,22 @@ def _parser() -> argparse.ArgumentParser:
                     help="must be 127.0.0.1 (anything else is refused, exit 2)")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT,
                     help=f"default {DEFAULT_PORT}; 0 picks a free port")
+    ap.add_argument("--print-token", action="store_true",
+                    help="print the bearer token clients send (created on first run) and exit")
     return ap
 
 
 def main(argv: list[str] | None = None) -> int:
     a = _parser().parse_args(list(sys.argv[1:] if argv is None else argv))
+    from arcaeon.serve import auth
+    if a.print_token:
+        try:
+            print(auth.load_or_create())
+        except OSError as e:
+            print(f"arcaeon serve: cannot read or create {auth.token_path()} "
+                  f"({e.strerror or type(e).__name__})", file=sys.stderr)
+            return V.EXIT_COULD_NOT_LOOK
+        return V.EXIT_GOOD
     if not 0 <= a.port <= 65535:
         print(f"arcaeon serve: --port {a.port} is not a port (0 to 65535)", file=sys.stderr)
         return V.EXIT_USAGE
@@ -38,8 +53,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"arcaeon serve: {e}", file=sys.stderr)
         return V.EXIT_USAGE
     except OSError as e:
+        if getattr(e, "filename", None):      # the token file, not the socket
+            print(f"arcaeon serve: cannot read or create {auth.token_path()} "
+                  f"({e.strerror or type(e).__name__})", file=sys.stderr)
+            return V.EXIT_COULD_NOT_LOOK
         print(f"arcaeon serve: cannot listen on 127.0.0.1:{a.port} "
               f"({e.strerror or type(e).__name__})", file=sys.stderr)
         return V.EXIT_COULD_NOT_LOOK
+    print(f"arcaeon serve: token in {auth.token_path()} "
+          "(send it as `Authorization: Bearer <token>`; --print-token shows it)",
+          file=sys.stderr, flush=True)
     S.run(srv)
     return V.EXIT_GOOD

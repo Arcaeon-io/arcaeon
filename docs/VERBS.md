@@ -737,18 +737,26 @@ pid and port for as long as the server runs.
 **Usage**
 
 ```text
-usage: arcaeon serve [-h] [--host HOST] [--port PORT]
+usage: arcaeon serve [-h] [--host HOST] [--port PORT] [--print-token]
 ```
 
 A verdict never rides in the HTTP status: VERIFIED, BROKEN and COULD NOT
 LOOK all come back as 200 with `exit` 0, 1 or 3 in the body. The status
 codes are for the request itself: 400 bad usage (not JSON, a field the
 route refuses, a Host header that is not this loopback address), 404 no
-such route, 405 the wrong method, 413 a body over 10 MB.
+such route, 405 the wrong method, 413 a body over 10 MB, 401 no token or
+the wrong one.
 
-**Exit codes:** 0 the server stopped cleanly (Ctrl+C). 2 bad usage,
-including `--host` anything but 127.0.0.1. 3 the server could not start
-(the port is taken).
+Every route but `/health` and `/openapi.json` needs the token the first run
+writes to `~/.arcaeon/serve.token` (owner-only where the OS allows), sent as
+`Authorization: Bearer <token>` or `X-Arcaeon-Token: <token>`.
+`arcaeon serve --print-token` prints it and exits. The token never appears
+in the request log, the journal or an error body.
+
+**Exit codes:** 0 the server stopped cleanly (Ctrl+C), or `--print-token`
+printed the token. 2 bad usage, including `--host` anything but 127.0.0.1.
+3 the server could not start (the port is taken, the token file cannot be
+read or created).
 
 ```console
 $ arcaeon serve --port 0

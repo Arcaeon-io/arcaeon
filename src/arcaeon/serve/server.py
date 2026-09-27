@@ -18,6 +18,10 @@ never rides in the HTTP status. A handler that raises is COULD NOT LOOK
 The request log goes to stderr as method, path (query string dropped) and
 status. It never carries a header or a body, so a token cannot reach it.
 
+Token auth (K005, serve/auth.py): every route but /health and /openapi.json
+needs the serve.token value as a bearer token or X-Arcaeon-Token; without
+it, 401. The check runs before the body is read.
+
 `run()` writes <ARCAEON_HOME or ~/.arcaeon>/serve.json (pid, port, url) once
 the socket is bound, and removes it on a clean exit if it is still ours.
 """
@@ -33,6 +37,7 @@ from urllib.parse import urlsplit
 
 from arcaeon import verdict as V
 from arcaeon.serve import DEFAULT_PORT, MAX_BODY
+from arcaeon.serve import auth
 from arcaeon.serve import routes as R
 
 LOOPBACK = "127.0.0.1"
@@ -41,6 +46,10 @@ SERVE_JSON = "serve.json"
 #: A too-large body up to this size is read and dropped before the 413, so a
 #: client still writing its body receives the answer instead of a reset.
 _DRAIN_LIMIT = 4 * MAX_BODY
+
+
+#: make_server's default for `token`: load (or on first run create) serve.token.
+AUTO = object()
 
 
 class HostRefused(ValueError):
@@ -183,9 +192,19 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, result)
 
     def _authorized(self, route: R.Route) -> bool:
-        """Token check hook (K005 fills it in). True: carry on."""
-        check = getattr(self.server, "authorize", None)
-        return True if check is None else bool(check(self, route))
+        """The token check (K005). True: carry on. False: a 401 was sent.
+        Open routes (/health, /openapi.json) need no token. The 401 body
+        names the headers to use and never echoes what was sent."""
+        token = getattr(self.server, "token", None)
+        if route.open or token is None:
+            return True
+        problem = auth.check(token, self.headers)
+        if problem is None:
+            return True
+        self.close_connection = True          # an unread body stays unread
+        self._send(401, {"error": problem},
+                   headers={"WWW-Authenticate": 'Bearer realm="arcaeon"'})
+        return False
 
     def do_GET(self):     # noqa: N802  stdlib names
         self._dispatch()
@@ -206,18 +225,27 @@ class Handler(BaseHTTPRequestHandler):
 class Server(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = False       # a second server on a busy port fails loud
+    #: The bearer token every non-open route needs; None turns auth off
+    #: (embedding and tests only; `arcaeon serve` always sets one).
+    token: str | None = None
 
     @property
     def url(self) -> str:
         return f"http://{LOOPBACK}:{self.server_address[1]}"
 
 
-def make_server(host: str = LOOPBACK, port: int = DEFAULT_PORT) -> Server:
-    """A bound, not yet serving, server. Any host but 127.0.0.1 is refused."""
+def make_server(host: str = LOOPBACK, port: int = DEFAULT_PORT, *, token=AUTO) -> Server:
+    """A bound, not yet serving, server. Any host but 127.0.0.1 is refused.
+
+    `token`: AUTO (the default) loads serve.token, creating it on first run;
+    a string uses that token; None serves without auth (tests, embedding)."""
     if host != LOOPBACK:
         raise HostRefused(f"refusing --host {host}: {REFUSE_HOST}; "
                           f"arcaeon serve binds {LOOPBACK} only")
-    return Server((LOOPBACK, port), Handler)
+    tok = auth.load_or_create() if token is AUTO else token
+    srv = Server((LOOPBACK, port), Handler)
+    srv.token = tok
+    return srv
 
 
 def serve_json_path() -> Path:
