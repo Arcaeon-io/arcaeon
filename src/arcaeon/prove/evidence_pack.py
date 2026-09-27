@@ -81,12 +81,14 @@ def parse_when(text: str | None) -> datetime | None:
 
 
 def _lines(raw: bytes) -> list[bytes]:
-    """The ledger's lines without their terminators (LF or CRLF), in order.
-    Line N of the file is index N-1."""
+    """The ledger's lines, split on LF only, in order; line N of the file is
+    index N-1. Only the LF split on is removed: a CRLF line keeps its CR, so
+    a window row stays byte-identical to its record on a CRLF ledger (the JSON
+    parser reads the CR as whitespace)."""
     parts = raw.split(b"\n")
     if parts and parts[-1] == b"":
         parts.pop()
-    return [p[:-1] if p.endswith(b"\r") else p for p in parts]
+    return parts
 
 
 def select_window(raw: bytes, *, agent: str | None = None,

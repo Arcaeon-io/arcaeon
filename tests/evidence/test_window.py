@@ -102,3 +102,16 @@ def test_cli_flags(ledger, tmp_path, capsys):
                                  "--json"])
     assert rc == 0
     assert [r["line"] for r in _window(out)] == [3]
+
+
+def test_crlf_ledger_window_rows_are_byte_identical(ledger, tmp_path):
+    """A CRLF ledger: each window row is its record line's exact bytes, CR kept."""
+    ledger.write_bytes(ledger.read_bytes().replace(b"\n", b"\r\n"))
+    out = tmp_path / "pack"
+    build_pack(ledger, out, agent="agent-a")
+    records = (out / "records.jsonl").read_bytes().split(b"\n")
+    w = _window(out)
+    assert [r["line"] for r in w] == [1, 3]
+    for r in w:
+        assert r["raw"].endswith("\r")
+        assert r["raw"].encode("utf-8") == records[r["line"] - 1]
