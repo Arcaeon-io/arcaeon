@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$title</title>
+<link rel="stylesheet" href="/static/placeholder.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+$nav
+<main>
+<h1>$title</h1>
+<p>A mandate file says which tools an agent may call, what it may spend and
+when. This page explains one in plain sentences, the same sentences
+<code>arcaeon mandate explain</code> prints, and lists the calls the last
+session in a ledger made outside it.</p>
+<h2>The last gated session on this machine</h2>
+$last_session
+$result
+<form method="post" action="/mandate">
+$pickers
+<p><button type="submit">Explain it</button></p>
+</form>
+<p class="note">Record-only is the default: a call outside the mandate is
+still forwarded, and the ledger gets a row naming it. This page reads those
+rows; it blocks nothing and changes nothing.</p>
+</main>
+</body>
+</html>
