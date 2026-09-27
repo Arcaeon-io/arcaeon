@@ -31,8 +31,18 @@ its value.
 
 A failed call raises `ReaderCallError` with a `reason_word` from
 `arcaeon.verdict.REASON_WORDS` (`network` when the request never completed,
-`unreadable` when the answer came back in a shape we cannot read). A failed
+`unreadable` when the answer came back in a shape we cannot read,
+`redirect_refused` when the endpoint answered with a redirect). A failed
 call never becomes a reading: the caller writes nothing for that claim.
+
+NO REDIRECTS, NO PROXIES (K036R). A reader talks to the endpoint it was
+given and to nothing else. A 3xx answer is never followed: following it
+would copy the key header (`Authorization`, `x-api-key`, `x-goog-api-key`)
+to whatever host the `Location` names, https to http included, and the
+answer would be recorded under the original `endpoint_host`. It is a
+`redirect_refused` error naming the Location host. Proxy settings
+(`HTTP_PROXY`, `HTTPS_PROXY`, the Windows registry) are ignored, so a key
+never passes through a proxy the caller did not name.
 
 PRESETS (`reader_from_spec`, the CLI's `--reader`). `ollama:<model>` is the
 OpenAI-compatible reader at `OLLAMA_BASE_URL` (`http://127.0.0.1:11434/v1`,
@@ -108,21 +118,43 @@ def parse_answer(answer: Any) -> str:
     return word if word in READING_WORDS else "undetermined"
 
 
+def _opener():
+    """A urllib opener that follows no redirect and uses no proxy."""
+    import urllib.request
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None  # never follow: the 3xx surfaces as an HTTPError
+
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
+
+
 def post_json(url: str, body: dict, headers: dict, timeout: float) -> Any:
     """POST a JSON body, return the decoded JSON answer. Raises ReaderCallError.
 
-    No error message carries a header value (a key rides in the headers).
+    Talks to `url` only: no redirect is followed and no proxy is used (see
+    NO REDIRECTS, NO PROXIES above). No error message carries a header value
+    (a key rides in the headers).
     """
     import urllib.error
     import urllib.request
+    from urllib.parse import urljoin
     host = urlsplit(url).hostname or "?"
     data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(url, data=data, method="POST",
                                  headers={"Content-Type": "application/json", **headers})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _opener().open(req, timeout=timeout) as resp:
             raw = resp.read()
     except urllib.error.HTTPError as e:
+        if 300 <= e.code < 400:
+            loc = e.headers.get("Location") if e.headers is not None else None
+            to = (urlsplit(urljoin(url, loc)).hostname if loc else None) or "no Location host"
+            to_port = urlsplit(urljoin(url, loc)).port if loc else None
+            where = f"{to}:{to_port}" if to_port else to
+            raise ReaderCallError(f"{host} answered HTTP {e.code} redirecting to {where}; "
+                                  "not followed, the key was not sent there",
+                                  "redirect_refused") from None
         raise ReaderCallError(f"{host} answered HTTP {e.code}", "network") from None
     except (urllib.error.URLError, OSError, ValueError) as e:
         raise ReaderCallError(f"the request to {host} did not complete [{type(e).__name__}]",

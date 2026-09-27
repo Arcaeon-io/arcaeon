@@ -56,6 +56,7 @@ script can branch on the cause without reading the sentence.
 - `name_not_found`: the file was read, but the name the check needed (a key, a namespace, a record) was not in it.
 - `bounded`: only part of it could be checked, for example rows written before the chain began, so the answer covers less than the whole.
 - `network`: the request to the hosted witness never completed, so the answer is unknown, not no.
+- `redirect_refused`: the endpoint answered with a redirect to another address. It was not followed and the key was not sent there, so there is no answer to record.
 
 ## Many logs at once
 

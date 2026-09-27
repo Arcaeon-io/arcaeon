@@ -147,7 +147,8 @@ def pop_legacy_flag(argv: list[str]) -> tuple[list[str], bool]:
 #: Why a check could not look, as one fixed machine word. A COULD NOT LOOK
 #: result carries it as `reason_word` beside the human `reason`, so a reader
 #: can branch on the cause without parsing prose.
-REASON_WORDS = ("unreadable", "missing", "empty", "name_not_found", "bounded", "network")
+REASON_WORDS = ("unreadable", "missing", "empty", "name_not_found", "bounded", "network",
+                "redirect_refused")
 
 
 def could_not_look(looked_for, where, reason_word: str, reason: str) -> dict:
