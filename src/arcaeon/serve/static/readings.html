@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$title</title>
+<link rel="stylesheet" href="/static/placeholder.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+$nav
+<main>
+<h1>$title</h1>
+<p>Two readers read the same claims against one frozen sentence, each into its
+own readings ledger. This page lines the two ledgers up claim by claim, the same
+comparison <code>arcaeon second-read compare</code> runs, and shows every claim
+the readers read differently.</p>
+$result
+<form method="post" action="/readings">
+$pickers
+<p><button type="submit">Compare them</button></p>
+</form>
+<p class="note">The two numbers are how many claims the readers disagreed on
+and how many both of them read. They are kept as two numbers, never one rate.
+Under twenty claims read they are shown but marked not yet informative.
+Agreement says the readers read the sentence the same way; it does not say any
+claim holds.</p>
+</main>
+</body>
+</html>
