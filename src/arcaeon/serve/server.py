@@ -180,6 +180,36 @@ class Handler(BaseHTTPRequestHandler):
                 break
             left -= len(chunk)
 
+    def _discard_body(self) -> None:
+        """Read and drop a declared body (never parsed) before a refusal, so
+        the client gets the answer instead of a reset (WinError 10053) when the
+        connection closes with its bytes still unread. A chunked body or a bad
+        or oversized length is left alone; the connection closes anyway."""
+        if self.headers.get("Transfer-Encoding"):
+            return
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return
+        if 0 < n <= MAX_BODY:
+            self._drain(n)
+
+    def _oversize_refused(self) -> bool:
+        """A declared body over MAX_BODY gets the 413 _read_body gives it
+        (drained up to _DRAIN_LIMIT first). True: the 413 was sent."""
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return False
+        if n <= MAX_BODY or self.headers.get("Transfer-Encoding"):
+            return False
+        self.close_connection = True
+        if n <= _DRAIN_LIMIT:
+            self._drain(n)
+        self._send(413, {"error": f"the body is over {MAX_BODY // (1024 * 1024)} MB",
+                         "limit": MAX_BODY})
+        return True
+
     def _read_body(self):
         """(body dict or None, error already sent?)."""
         raw_len = self.headers.get("Content-Length")
@@ -276,7 +306,10 @@ class Handler(BaseHTTPRequestHandler):
         problem = auth.check(token, self.headers)
         if problem is None:
             return True
-        self.close_connection = True          # an unread body stays unread
+        self.close_connection = True
+        if self._oversize_refused():
+            return False
+        self._discard_body()                  # dropped unparsed, so the 401 arrives
         self._send(401, {"error": problem},
                    headers={"WWW-Authenticate": 'Bearer realm="arcaeon"'})
         return False
