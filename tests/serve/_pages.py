@@ -72,10 +72,17 @@ def get(srv, path, *, cookie=None, headers=None) -> Reply:
     return request(srv, path, headers=h)
 
 
-def post_form(srv, path, fields: dict, *, cookie=None) -> Reply:
+def post_form(srv, path, fields: dict, *, cookie=None, origin="self", headers=None) -> Reply:
+    """A browser's form post. `origin` "self" sends the server's own Origin,
+    as a browser posting from the page does (K108); None sends none."""
     h = {"Content-Type": "application/x-www-form-urlencoded"}
+    if origin == "self":
+        h["Origin"] = srv.url
+    elif origin is not None:
+        h["Origin"] = origin
     if cookie:
         h["Cookie"] = cookie
+    h.update(headers or {})
     return request(srv, path, data=urllib.parse.urlencode(fields).encode("utf-8"),
                    headers=h, method="POST")
 

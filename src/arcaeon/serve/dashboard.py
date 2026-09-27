@@ -14,6 +14,9 @@ a browser in with a one-time code instead:
    after CODE_TTL seconds; a second use, or a late one, is 401.
 3. Every page and static file then needs that cookie or the bearer token.
    Without either it is 401 with a page saying how to get a fresh link.
+4. A form POST let in on the cookie must carry `Origin` equal to this
+   server's own origin (auth.origin_ok, K108), else 403 and the form is not
+   read. Bearer-token calls are not checked.
 
 Every page answer carries `Content-Security-Policy: default-src 'self'` (plus
 no framing, forms to this origin only, no base tag), so a page loads nothing
@@ -57,8 +60,11 @@ SESSION_TTL = 12 * 3600
 
 CSP = ("default-src 'self'; base-uri 'none'; form-action 'self'; "
        "frame-ancestors 'none'")
+#: "same-origin", not "no-referrer": under no-referrer a browser sends
+#: `Origin: null` on the page's own form posts, which the origin guard (K108)
+#: would refuse. same-origin still sends nothing to any other site.
 PAGE_HEADERS = {"Content-Security-Policy": CSP, "X-Frame-Options": "DENY",
-                "Referrer-Policy": "no-referrer"}
+                "Referrer-Policy": "same-origin"}
 
 #: Page path -> the module that renders it (`render(req) -> (status, html)`,
 #: plus METHODS, the methods it answers). Imported on first use.
@@ -196,6 +202,11 @@ class DashboardHandler(S.Handler):
             return
         form: dict = {}
         if self.command == "POST":
+            if not self._origin_ok():
+                self.close_connection = True      # the form stays unread
+                self._page(403, _common().simple_page(
+                    "Not accepted", _common().esc(auth.ORIGIN_REFUSED) + "."))
+                return
             got = self._read_form()
             if got is None:
                 return
@@ -226,6 +237,13 @@ class DashboardHandler(S.Handler):
         if auth.presented(self.headers) is not None:
             return auth.check(token, self.headers) is None
         return sessions(self.server).valid(self._cookie_sid())
+
+    def _origin_ok(self) -> bool:
+        """K108: a POST let in on the session cookie must come from this
+        server's own origin. A bearer-token call (an agent) is not checked."""
+        if auth.presented(self.headers) is not None:
+            return True                  # _page_authorized already checked it
+        return auth.origin_ok(self.headers, self.server.server_address[1])
 
     def _redeem(self, code: str) -> None:
         sid = sessions(self.server).redeem(code)

@@ -14,6 +14,17 @@ route table's OPEN_PATHS). `arcaeon serve --print-token` prints it.
 The token never reaches a log, the journal or an error body: the request log
 carries only method, path and status; a 401 says which header to send and
 never echoes what was sent; the comparison is constant-time.
+
+Browser-origin guard (K108). A browser signed in to the dashboard carries a
+session cookie, and a browser sends cookies wherever a page tells it to post.
+So a POST the dashboard accepts on its cookie must carry `Origin` equal to
+the origin the server answers on (`served_origins`: http://127.0.0.1:<port>
+and http://localhost:<port>); a missing, `null` or other Origin is refused
+with 403 before the form is read. SameSite=Strict already keeps the cookie
+off cross-site posts; this is the second lock, and it holds in a browser that
+ignores SameSite. A call carrying the bearer token (an agent) is not checked:
+a web page cannot attach that header without the token, and agents send no
+Origin.
 """
 from __future__ import annotations
 
@@ -24,6 +35,9 @@ from pathlib import Path
 
 TOKEN_FILE = "serve.token"
 HEADER = "X-Arcaeon-Token"
+
+ORIGIN_REFUSED = ("this form did not come from this dashboard's own page, so it was not "
+                  "read; open the page from `arcaeon open` and send it from there")
 
 NO_TOKEN = ("no token: send `Authorization: Bearer <token>` or `X-Arcaeon-Token: <token>` "
             "(`arcaeon serve --print-token` shows it)")
@@ -95,3 +109,17 @@ def check(token: str, headers) -> str | None:
     if not hmac.compare_digest(got.encode("utf-8", "replace"), token.encode("utf-8")):
         return WRONG_TOKEN
     return None
+
+
+def served_origins(port: int) -> frozenset[str]:
+    """The origins a browser shows for this server's own pages."""
+    return frozenset({f"http://127.0.0.1:{port}", f"http://localhost:{port}"})
+
+
+def origin_ok(headers, port: int) -> bool:
+    """True if the request's Origin is exactly one of this server's origins.
+    A missing Origin, "null", a different scheme, host or port is False."""
+    got = headers.get("Origin")
+    if got is None:
+        return False
+    return got.strip().rstrip("/").lower() in served_origins(port)
