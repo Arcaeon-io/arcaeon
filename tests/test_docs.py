@@ -808,3 +808,21 @@ def test_partner_doc_states_its_limits():
                                     "—", "–"])
 def test_partner_doc_makes_no_overclaim(phrase):
     assert phrase not in PARTNER_MD.lower(), phrase
+
+
+# --- CHANGELOG.md (K140) ----------------------------------------------------------
+
+CHANGELOG_MD = ROOT / "CHANGELOG.md"
+
+
+def test_changelog_exists_and_its_top_section_is_unreleased():
+    assert CHANGELOG_MD.is_file(), "CHANGELOG.md is missing"
+    text = CHANGELOG_MD.read_text(encoding="utf-8")
+    headings = re.findall(r"^## .*$", text, re.M)
+    assert headings, "CHANGELOG.md has no ## section"
+    assert headings[0].rstrip() == "## Unreleased", headings[0]
+
+
+@pytest.mark.parametrize("phrase", ["—", "–", "available now"])
+def test_changelog_has_no_dash_or_available_now(phrase):
+    assert phrase not in CHANGELOG_MD.read_text(encoding="utf-8").lower(), phrase
