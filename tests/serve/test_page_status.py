@@ -102,14 +102,14 @@ def test_no_checks_today_is_not_a_pass(home, root):
 
 def test_a_real_serve_call_shows_up(home, root):
     """A COULD NOT LOOK through the server's own route lands in the journal and
-    on the page; the journal row carries no reason word, so none is claimed."""
+    on the page, with the reason word the route journals (K015b)."""
     with P.running(root) as srv:
         r = P.request(srv, "/v1/verify", data=json.dumps({"ledger": "nope.jsonl"}).encode(),
                       headers={"Authorization": f"Bearer {P.TOKEN}",
                                "Content-Type": "application/json"}, method="POST")
         assert r.status == 200 and json.loads(r.text)["exit"] == 3
         page = P.get(srv, "/status", cookie=P.sign_in(srv)).text
-    assert "You checked 1 file today. One could not be read." in page
+    assert "You checked 1 file today. One could not be read (missing)." in page
 
 
 def test_the_page_never_prints_a_path(home, root):
