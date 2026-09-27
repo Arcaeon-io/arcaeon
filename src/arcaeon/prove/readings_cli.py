@@ -12,6 +12,12 @@
                             [--base-url URL] [--key-env VAR] [--reader-id ID]
                             [--criterion-sha256 SHA | --criterion-file F]
                             [--keep-text] [--timeout S] [--send] [--json]
+    arcaeon second-read run --claims FILE --reader-a SPEC --ledger-a L
+                            --reader-b SPEC --ledger-b L
+                            [--base-url-a URL] [--key-env-a VAR] [--reader-id-a ID]
+                            [--base-url-b URL] [--key-env-b VAR] [--reader-id-b ID]
+                            [--criterion-sha256 SHA | --criterion-file F]
+                            [--keep-text] [--timeout S] [--send] [--json]
 
 `compare` lines up two readings ledgers (see `arcaeon.prove.readings_compare`)
 and prints a human first line such as
@@ -50,6 +56,16 @@ completed). Ask exit codes: 0 every claim got a reading, or a dry run; 2 bad
 usage; 3 one or more claims COULD NOT LOOK. The ledger holds readings, not
 findings: a written reading is what that model answered, nothing more.
 
+`run` is two asks and one compare: every claim goes to `--reader-a` (into
+`--ledger-a`) and to `--reader-b` (into `--ledger-b`), then the two ledgers
+are lined up exactly as `compare` does. Same dry-run rule: without `--send`
+it prints both endpoint hosts, the claim count and the first prompt, and
+makes no request. One reader id on both sides is refused before any request
+(COULD NOT LOOK, `reason_word: "bounded"`): that is not a second read. Run
+exit codes are the compare's (COMPARED 0, MISSING or BROKEN 1, COULD NOT LOOK
+3), except that a COMPARED run where some claim got no reading on either
+side exits 3; 2 is bad usage; a dry run is 0.
+
 Stdlib only.
 """
 from __future__ import annotations
@@ -62,7 +78,8 @@ from pathlib import Path
 from arcaeon import verdict as _v
 
 __all__ = ["main", "compare_main", "human_lines", "SUBCOMMANDS", "SUBMIT_FORMAT", "submit",
-           "submit_main", "ASK_FORMAT", "ask", "ask_main", "load_claims", "ASK_RETRIES"]
+           "submit_main", "ASK_FORMAT", "ask", "ask_main", "load_claims", "ASK_RETRIES",
+           "RUN_FORMAT", "run", "run_main", "run_human_lines"]
 
 _PROG = "arcaeon second-read"
 
@@ -413,6 +430,147 @@ def ask_main(argv: list[str] | None = None) -> int:
     return res["exit"]
 
 
+#: The result shape of one run.
+RUN_FORMAT = "arcaeon-reading-run/1"
+
+
+def _run_not_computed(reason: str) -> dict:
+    from arcaeon.prove.readings_compare import _not_computed
+    return _not_computed(reason)
+
+
+def run(claims: list[dict], reader_a, reader_b, ledger_a, ledger_b, *, criterion_text: str,
+        send: bool = False, keep_text: bool = False, retries: int = ASK_RETRIES) -> dict:
+    """Two readers, two ledgers, one compare.
+
+    Puts every claim to `reader_a` (into `ledger_a`) and to `reader_b` (into
+    `ledger_b`) through `ask`, then lines the two ledgers up with
+    `readings_compare.compare`. Without `send` nothing is sent and nothing is
+    written (the dry run). One reader id on both sides is refused before any
+    request (`reason_word: "bounded"`): that would not be a second read.
+    """
+    from arcaeon.prove import readings as R
+    from arcaeon.prove.readers import build_prompt
+    from arcaeon.prove.readings_compare import SAME_READER_REASON, compare
+    pa, pb = Path(ledger_a), Path(ledger_b)
+    crit = R.normalize_criterion(criterion_text)
+    base = {"format": RUN_FORMAT, "readers": {"a": reader_a.reader_info, "b": reader_b.reader_info},
+            "ledgers": {"a": str(pa), "b": str(pb)}, "criterion_sha256": R.sha256_text(crit),
+            "claims": len(claims)}
+    if R.canonical_reader_id(reader_a.reader_id) == R.canonical_reader_id(reader_b.reader_id):
+        return {**base, "sent": False, "requests": 0, "verdict": _v.COULD_NOT_LOOK,
+                "summary": _run_not_computed(SAME_READER_REASON),
+                **_v.could_not_look("two different readers", reader_a.reader_id, "bounded",
+                                    SAME_READER_REASON),
+                "exit": _v.EXIT_COULD_NOT_LOOK}
+    if not send:
+        return {**base, "sent": False, "requests": 0,
+                "endpoint_hosts": {"a": reader_a.endpoint_host, "b": reader_b.endpoint_host},
+                "first_prompt": build_prompt(crit, claims[0]["claim"]),
+                "summary": _run_not_computed("dry run: nothing was sent, so nothing was read"),
+                "note": "dry run: nothing was sent; add --send to put these claims to both readers",
+                "exit": _v.EXIT_GOOD}
+    asks = {"a": ask(claims, reader_a, pa, criterion_text=crit, send=True, keep_text=keep_text,
+                     retries=retries),
+            "b": ask(claims, reader_b, pb, criterion_text=crit, send=True, keep_text=keep_text,
+                     retries=retries)}
+    cmp = compare(pa, pb)
+    cnl = [{"side": side, **item} for side in ("a", "b") for item in asks[side]["could_not_look"]]
+    exit_code = cmp["exit"]
+    if exit_code == _v.EXIT_GOOD and cnl:
+        exit_code = _v.EXIT_COULD_NOT_LOOK
+    return {**base, "sent": True, "requests": asks["a"]["requests"] + asks["b"]["requests"],
+            "asks": {s: {"counts": asks[s]["counts"], "requests": asks[s]["requests"]}
+                     for s in ("a", "b")},
+            "could_not_look": cnl, "verdict": cmp["verdict"], "summary": cmp["summary"],
+            "comparison": cmp, "exit": exit_code}
+
+
+def run_human_lines(res: dict) -> list[str]:
+    """The human rendering of a run result, first line first."""
+    if not res["sent"] and res.get("reason_word") == "bounded":
+        return [f"{_v.COULD_NOT_LOOK}: {res['reason']}; nothing was sent"]
+    if not res["sent"]:
+        h, r = res["endpoint_hosts"], res["readers"]
+        return [f"dry run: nothing sent. would send {res['claims']} claims to {h['a']} "
+                f"({r['a']['id']}) and to {h['b']} ({r['b']['id']}); add --send to send",
+                "first claim as it would be sent:", res["first_prompt"]]
+    lines = human_lines(res["comparison"])
+    for side in ("a", "b"):
+        k = res["asks"][side]["counts"]
+        lines.insert(len(lines) - 1, f"reader {side} {res['readers'][side]['id']}: "
+                     f"{k['written']} readings written, {k['could_not_look']} could not look")
+    for item in res["could_not_look"]:
+        lines.insert(len(lines) - 1,
+                     f"  COULD NOT LOOK {item['claim_id']} (reader {item['side']}): {item['reason']}")
+    return lines
+
+
+def run_main(argv: list[str] | None = None) -> int:
+    """`second-read run ...`: two readers, two ledgers, one compare."""
+    from arcaeon.prove import readings as R
+    from arcaeon.prove.readers import DEFAULT_TIMEOUT, ReaderError, reader_from_spec
+    p = argparse.ArgumentParser(prog=f"{_PROG} run",
+                                description="put every claim in a file to two readers, then "
+                                            "compare the two ledgers (dry run unless --send)")
+    p.add_argument("--claims", required=True, help='JSONL: {"claim_id", "claim"} per line')
+    for side in ("a", "b"):
+        p.add_argument(f"--reader-{side}", required=True, help=f"reader {side}'s spec")
+        p.add_argument(f"--ledger-{side}", required=True, help=f"reader {side}'s readings ledger")
+        p.add_argument(f"--base-url-{side}", default=None, help=f"reader {side}'s endpoint")
+        p.add_argument(f"--key-env-{side}", default=None,
+                       help=f"the environment variable holding reader {side}'s key")
+        p.add_argument(f"--reader-id-{side}", default=None, help=f"reader {side}'s id to record")
+    c = p.add_mutually_exclusive_group()
+    c.add_argument("--criterion-sha256", help="a criterion frozen in ledger a (or b)")
+    c.add_argument("--criterion-file", help="the criterion text (frozen first if new there)")
+    p.add_argument("--keep-text", action="store_true", help="keep each answer's text in its row")
+    p.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT, help="seconds per call")
+    p.add_argument("--send", action="store_true",
+                   help="actually send the claims (a disclosure to both endpoints)")
+    p.add_argument("--json", action="store_true", help="print the result as JSON")
+    args = p.parse_args(argv)
+    try:
+        if Path(args.ledger_a).resolve() == Path(args.ledger_b).resolve():
+            raise ValueError("--ledger-a and --ledger-b must be two different ledgers")
+        claims = load_claims(args.claims)
+        readers = {s: reader_from_spec(getattr(args, f"reader_{s}"),
+                                       base_url=getattr(args, f"base_url_{s}"),
+                                       key_env=getattr(args, f"key_env_{s}"),
+                                       reader_id=getattr(args, f"reader_id_{s}"),
+                                       timeout=args.timeout) for s in ("a", "b")}
+        if args.criterion_file:
+            crit = _read_text(args.criterion_file, "criterion file")
+            if not R.normalize_criterion(crit):
+                raise ValueError("criterion file is empty")
+        else:
+            found = (_criterion_text_in(Path(args.ledger_a), args.criterion_sha256)
+                     or _criterion_text_in(Path(args.ledger_b), args.criterion_sha256))
+            if found is None:
+                raise ValueError(f"no criterion {'named ' + args.criterion_sha256 + ' ' if args.criterion_sha256 else ''}"
+                                 f"is frozen in {args.ledger_a} or {args.ledger_b}; "
+                                 "give --criterion-file")
+            crit = found[1]
+        if args.send:
+            for r in readers.values():
+                if r.key_env:
+                    r._key()  # an unset key variable is bad usage, before any request
+    except (ValueError, ReaderError) as e:
+        print(f"{_PROG} run: {e}", file=sys.stderr)
+        return _v.EXIT_USAGE
+    try:
+        res = run(claims, readers["a"], readers["b"], args.ledger_a, args.ledger_b,
+                  criterion_text=crit, send=args.send, keep_text=args.keep_text)
+    except ReaderError as e:
+        print(f"{_PROG} run: {e}", file=sys.stderr)
+        return _v.EXIT_USAGE
+    if args.json:
+        print(json.dumps(res, ensure_ascii=False, sort_keys=True))
+    else:
+        print("\n".join(run_human_lines(res)))
+    return res["exit"]
+
+
 def _criterion(argv):
     from arcaeon.prove.readings import criterion_main
     return criterion_main(argv)
@@ -424,6 +582,7 @@ SUBCOMMANDS = {
     "compare": (compare_main, "line up two readings ledgers: COMPARED / MISSING / BROKEN / COULD NOT LOOK"),
     "submit": (submit_main, "file your own reading of one claim (the door for any AI or person)"),
     "ask": (ask_main, "put a claims file to one reader, one reading per claim (dry run unless --send)"),
+    "run": (run_main, "two readers, two ledgers, one compare (dry run unless --send)"),
 }
 
 
