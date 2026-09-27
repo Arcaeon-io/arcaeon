@@ -59,6 +59,11 @@ the lane (A, B or C) of the work and the commit ids that carry it.
 - **The pack README (lane D: K055).** Every pack now holds a one-page `README.md`: the
   agent, the window, the verdict in words, what the pack does not show
   (`arcaeon.prove.evidence_pack.DOES_NOT_SHOW`), and the two commands to check it.
+- **`evidence-pack verify` (lane D: K056).** `arcaeon evidence-pack verify PACK [--json]`
+  (`arcaeon.prove.evidence_pack_verify.verify_pack`) rehashes every file the manifest
+  lists: a changed byte or an unlisted file is BROKEN naming the file, a listed file that
+  is gone is COULD NOT LOOK `missing`. A build on a missing ledger now prints "no
+  evidence pack written" instead of "evidence pack at None".
 
 ## 0.9.1 (2026-09-25)
 

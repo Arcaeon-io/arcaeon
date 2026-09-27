@@ -4,6 +4,7 @@
     arcaeon evidence-pack --ledger L --out DIR [--agent ID] [--from TS] [--to TS]
                           [--witness STORE --namespace NS]
                           [--system-id ID] [--provider NAME] [--json]
+    arcaeon evidence-pack verify PACK [--json]
 
 Exit codes as every verb: 0 VERIFIED, 1 BROKEN, 2 bad usage, 3 COULD NOT LOOK.
 """
@@ -39,6 +40,10 @@ def _parser(prog: str) -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None, *, prog: str = "arcaeon evidence-pack") -> int:
     from arcaeon.prove.evidence_pack import PackUsageError, build_pack
 
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if argv[:1] == ["verify"]:
+        from arcaeon.prove import evidence_pack_verify
+        return evidence_pack_verify.main(argv[1:], prog=f"{prog} verify")
     a = _parser(prog).parse_args(argv)
     try:
         res = build_pack(a.ledger, a.out, system_id=a.system_id, provider=a.provider,
@@ -50,7 +55,10 @@ def main(argv: list[str] | None = None, *, prog: str = "arcaeon evidence-pack") 
     if a.json:
         print(json.dumps(res, indent=2))
     else:
-        line = f"{res['verdict']}: evidence pack at {res['out']}"
+        # No folder was written when the ledger was missing: say so, never
+        # "evidence pack at None".
+        line = (f"{res['verdict']}: evidence pack at {res['out']}" if res.get("out")
+                else f"{res['verdict']}: no evidence pack written")
         if res.get("reason"):
             line += f" ({res['reason_word']}: {res['reason']})"
         print(line)
