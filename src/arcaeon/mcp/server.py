@@ -103,11 +103,12 @@ VET_TOOLS = {
 
 WITNESS_TOOLS = ("witness_pin", "witness_renew")
 DEAL_TOOLS = ("deal_mandate", "deal_commit", "deal_dispute")
+MANDATE_TOOLS = ("mandate_check",)
 PAID_TOOLS = WITNESS_TOOLS
 STATUS_TOOL = "arcaeon_status"
 
 ALL_TOOLS = sorted([*LEDGER_TOOLS.values(), *VET_TOOLS.values(), *WITNESS_TOOLS,
-                    *DEAL_TOOLS, STATUS_TOOL])
+                    *DEAL_TOOLS, *MANDATE_TOOLS, STATUS_TOOL])
 FREE_TOOLS = [n for n in ALL_TOOLS if n not in PAID_TOOLS]
 
 
@@ -388,6 +389,25 @@ def _deal_dispute(args: dict) -> dict:
     return _plain(_deal.dispute(args["deal"], args["buyer"], args["seller"]).to_dict())
 
 
+# --- the mandate gate, one call at a time (K078) ---------------------------
+# Import only: the answer is arcaeon.record.mandate_cli.check, the function
+# `arcaeon mandate check` and POST /v1/mandate/check run. Record-only by
+# construction: it says inside, outside or could_not_look and blocks nothing.
+
+def _mandate_check(args: dict) -> dict:
+    from arcaeon.record import mandate_cli  # lazy: only this tool loads the gate
+    fields = args.get("fields")
+    if not isinstance(fields, dict):
+        raise ValueError("`fields` must be a JSON object")
+    name = fields.get("name")
+    if not isinstance(name, str) or not name:
+        raise ValueError("`fields` needs \"name\": the tool name of the call to check")
+    res = mandate_cli.check(args["mandate"], fields, at=args.get("at"),
+                            spent=args.get("spent"))
+    res["exit"] = mandate_cli.CHECK_EXIT[res["verdict"]]
+    return _plain(res)
+
+
 def _server_class():
     """The SDK's server class under whichever name the installed version uses
     (2.x: MCPServer; 1.x: FastMCP). Same probe mcp-vet ships."""
@@ -589,6 +609,26 @@ def build_server():
         args = {"deal": deal, "buyer": buyer, "seller": seller}
         outcome = _attempt(_deal_dispute, args)
         return _record_call("deal_dispute", args, outcome)
+
+    # --- the mandate gate ----------------------------------------------------
+
+    @_tool(
+        name="mandate_check",
+        description=(
+            "Is ONE call inside a mandate file? mandate is the path of the mandate "
+            "JSON (docs/MANDATE_GATE.md); fields holds the call: \"name\" is the tool "
+            "and every other key is an argument (for example {\"name\": "
+            "\"place_order\", \"total\": \"19.00\", \"currency\": \"USD\"}). at is an "
+            "optional ISO time for the window check, spent an optional amount the "
+            "session already spent (for spend_cap.total). Answers verdict inside, "
+            "outside or could_not_look, the rule and reason, and exit 0, 1 or 3. "
+            "Reads only: it blocks nothing and writes no row."),
+    )
+    def mandate_check(mandate: str, fields: dict, at: str | None = None,
+                      spent: str | None = None) -> dict:
+        args = {"mandate": mandate, "fields": fields, "at": at, "spent": spent}
+        outcome = _attempt(_mandate_check, args)
+        return _record_call("mandate_check", args, outcome)
 
     # --- what is in here, and what costs money ----------------------------
 

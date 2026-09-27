@@ -109,6 +109,10 @@ def _drive_every_tool_once(tmp_path):
         "currency": "USD", "seller": "m"})
     out["deal_dispute"] = _call("deal_dispute", {
         "deal": "d-rec", "buyer": buyer, "seller": str(tmp_path / "deal.seller.jsonl")})
+    mandate = tmp_path / "mandate.json"
+    mandate.write_text('{"forbidden_acts": ["refund"]}', encoding="utf-8")
+    out["mandate_check"] = _call("mandate_check", {
+        "mandate": str(mandate), "fields": {"name": "refund"}})
     out["arcaeon_status"] = _call("arcaeon_status", {})
     return out
 
@@ -127,7 +131,7 @@ def test_every_tool_leaves_exactly_one_record_with_its_own_name(monkeypatch, tmp
     assert sorted(results) == sorted(ALL_TOOLS), (sorted(results), ALL_TOOLS)
 
     rows = _rows(rec)
-    assert len(rows) == len(ALL_TOOLS) == 14, [r["tool"] for r in rows]
+    assert len(rows) == len(ALL_TOOLS) == 15, [r["tool"] for r in rows]
     assert [r["tool"] for r in rows] == list(results), [r["tool"] for r in rows]
     assert all(r["ok"] is True for r in rows), [(r["tool"], r.get("error")) for r in rows]
     for r in rows:
@@ -150,17 +154,17 @@ def test_the_chain_verifies_and_a_tampered_row_is_named(monkeypatch, tmp_path):
     _drive_every_tool_once(tmp_path)
 
     v = verify_call_record(rec)
-    assert v["ok"] is True and v["rows"] == 14 and v["breaks"] == 0, v
+    assert v["ok"] is True and v["rows"] == 15 and v["breaks"] == 0, v
     assert v["first_break"] is None, v
 
     from arcaeon.record.ledger import verify_file
     lib = verify_file(rec, strict=True)
-    assert lib.ok is True and lib.rows == 14, lib
+    assert lib.ok is True and lib.rows == 15, lib
 
     err, through_tool = _call("ledger_verify_peer_ledger",
                               {"jsonl_text": rec.read_text(encoding="utf-8"), "strict": True})
     assert not err, through_tool
-    assert through_tool["rows"] == 14, through_tool
+    assert through_tool["rows"] == 15, through_tool
     assert through_tool.get("ok", through_tool.get("chain_verified")) is True, through_tool
     # that verification was itself a tool call, so it is row 12 now
     assert [r["tool"] for r in _rows(rec)][-1] == "ledger_verify_peer_ledger"
