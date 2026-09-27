@@ -11,11 +11,11 @@ any version on PyPI; `pip install arcaeon` does not have them.
 
 ### Plug-in batch (branch plugin-2026-09-27)
 
-- **OA5.** The pack README no longer says the records were "not changed after it was written": without a pin it shows every row hashes to the next; with a pin, that the rows up to the pinned head existed at pin time.
-- **OA4.** `connect --write` on a config removed by another program mid-write answers COULD NOT LOOK, exit 3, new reason word `target_vanished`, and leaves nothing behind; it raised FileNotFoundError before.
-- **OA3.** The dashboard's origin guard drops a default port both ways, so on `--port 80` the `Origin: http://127.0.0.1` a browser sends is its own; every non-default port still needs the exact port.
-- **OA2.** A reader whose endpoint redirects to a malformed Location (a bad port, a bad IPv6 host) is refused like any redirect: COULD NOT LOOK `redirect_refused`, reason "redirect refused: ...", the run continues and the key is not sent.
-- **OA1.** Pack verify: a file the manifest lists that is gone from the pack is BROKEN, exit 1, naming the file (was COULD NOT LOOK, exit 3), and deleting could_not_look.json no longer hides "manifest incomplete".
+- **OA5 (b0c37ad).** The pack README no longer says the records were "not changed after it was written": without a pin it shows every row hashes to the next; with a pin, that the rows up to the pinned head existed at pin time.
+- **OA4 (077b48f).** `connect --write` on a config removed by another program mid-write answers COULD NOT LOOK, exit 3, new reason word `target_vanished`, and leaves nothing behind; it raised FileNotFoundError before.
+- **OA3 (c91325b).** The dashboard's origin guard drops a default port both ways, so on `--port 80` the `Origin: http://127.0.0.1` a browser sends is its own; every non-default port still needs the exact port.
+- **OA2 (0281667).** A reader whose endpoint redirects to a malformed Location (a bad port, a bad IPv6 host) is refused like any redirect: COULD NOT LOOK `redirect_refused`, reason "redirect refused: ...", the run continues and the key is not sent.
+- **OA1 (e4a9f12).** Pack verify: a file the manifest lists that is gone from the pack is BROKEN, exit 1, naming the file (was COULD NOT LOOK, exit 3), and deleting could_not_look.json no longer hides "manifest incomplete".
 - **K021R (aa69d47).** `arcaeon connect --undo` refuses a config changed since the write: COULD NOT LOOK, exit 3, new reason word `changed_since_write`, nothing touched, and the reason names the backup to compare against. `--write` now leaves a `<backup>.written` sidecar beside each backup holding the sha256 of the bytes it wrote; undo consumes it with the backup. A backup with no sidecar (made before this change) is restored as before.
 - **KH8 (61b9aa6).** `arcaeon mcp --http` serves the stdio server's same 19 tools over streamable HTTP on 127.0.0.1 with the serve token; fails closed (COULD NOT LOOK, exit 3) without the `[mcp]` extra.
 - **K14xR (c290700).** The test suite points ARCAEON_HOME and MCP_VET_AUDIT_LEDGER away from the real home for every test and fails the session if the real ~/.arcaeon or ~/.mcp_vet changed.
