@@ -584,6 +584,10 @@ def test_a_todo_marker_anywhere_under_docs_or_src_is_named(tmp_path):
                                            encoding="utf-8")
     status, detail = rc.check_todo_markers(tmp_path)
     assert status == "FAIL" and "docs/sub/x.md TODO(K123)" in detail
+    (tmp_path / "docs" / "sub" / "x.md").write_text(
+        "## `log`\n\ntext\n\n## `demo`\n\nTODO(K116)\n", encoding="utf-8")
+    status, detail = rc.check_todo_markers(tmp_path)
+    assert status == "FAIL" and "docs/sub/x.md section demo TODO(K116)" in detail
     (tmp_path / "docs" / "sub" / "x.md").write_text("ok\n", encoding="utf-8")
     assert rc.check_todo_markers(tmp_path)[0] == "PASS"
 

@@ -903,7 +903,9 @@ def check_unbuilt_verbs(root: Path = ROOT) -> tuple[str, str]:
 
 
 def todo_markers(root: Path = ROOT) -> list[str]:
-    """`<file> TODO(K###)` for each marker left under TODO_SCAN."""
+    """`<file> TODO(K###)` for each marker left under TODO_SCAN; in a markdown
+    file, `<file> section <heading> TODO(K###)`, naming the `## ` section the
+    marker sits in, so the report says which verb's section is unwritten."""
     hits = []
     for name in TODO_SCAN:
         base = root / name
@@ -920,8 +922,16 @@ def todo_markers(root: Path = ROOT) -> list[str]:
                 text = f.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            for mark in sorted(set(re.findall(re.escape(TODO_MARK) + r"\d*\)?", text))):
-                hits.append(f"{f.relative_to(root).as_posix()} {mark}")
+            rel = f.relative_to(root).as_posix()
+            section = None
+            for line in text.splitlines():
+                if f.suffix == ".md" and line.startswith("## "):
+                    section = line[3:].strip().strip("`")
+                for mark in sorted(set(re.findall(re.escape(TODO_MARK) + r"\d*\)?", line))):
+                    where = f"{rel} section {section}" if section else rel
+                    hit = f"{where} {mark}"
+                    if hit not in hits:
+                        hits.append(hit)
     return hits
 
 
