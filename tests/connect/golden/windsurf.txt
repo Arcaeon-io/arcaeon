@@ -1,0 +1,56 @@
+## --os windows, home C:\Users\u
+arcaeon connect windsurf  (Windsurf (Cascade), stdio-mcp, windows)
+file: C:\Users\u\AppData\Roaming\devin\mcp_config.json  (<state>)
+confirmed: yes
+source: https://docs.windsurf.com/windsurf/cascade/mcp (read 2026-09-27)
+note: the Windsurf page now redirects to docs.devin.ai/desktop/cascade/mcp, which gives these paths; builds from before the move read ~/.codeium/windsurf/mcp_config.json
+would merge (only the 'arcaeon' entry; every other key stays):
+{
+  "mcpServers": {
+    "arcaeon": {
+      "command": "arcaeon",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}
+nothing written (add --write to apply)
+
+## --os macos, home /Users/u
+arcaeon connect windsurf  (Windsurf (Cascade), stdio-mcp, macos)
+file: /Users/u/.config/devin/mcp_config.json  (<state>)
+confirmed: yes
+source: https://docs.windsurf.com/windsurf/cascade/mcp (read 2026-09-27)
+note: the Windsurf page now redirects to docs.devin.ai/desktop/cascade/mcp, which gives these paths; builds from before the move read ~/.codeium/windsurf/mcp_config.json
+would merge (only the 'arcaeon' entry; every other key stays):
+{
+  "mcpServers": {
+    "arcaeon": {
+      "command": "arcaeon",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}
+nothing written (add --write to apply)
+
+## --os linux, home /home/u
+arcaeon connect windsurf  (Windsurf (Cascade), stdio-mcp, linux)
+file: /home/u/.config/devin/mcp_config.json  (<state>)
+confirmed: yes
+source: https://docs.windsurf.com/windsurf/cascade/mcp (read 2026-09-27)
+note: the Windsurf page now redirects to docs.devin.ai/desktop/cascade/mcp, which gives these paths; builds from before the move read ~/.codeium/windsurf/mcp_config.json
+would merge (only the 'arcaeon' entry; every other key stays):
+{
+  "mcpServers": {
+    "arcaeon": {
+      "command": "arcaeon",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}
+nothing written (add --write to apply)

@@ -1,0 +1,59 @@
+## --os windows, home C:\Users\u
+arcaeon connect vscode  (VS Code (Copilot agent mode), stdio-mcp, windows)
+file: C:\Users\u\AppData\Roaming\Code\User\mcp.json  (<state>)
+confirmed: NO, the client's docs did not state this path; check it before --write
+source: https://code.visualstudio.com/docs/copilot/customization/mcp-servers (read 2026-09-27)
+note: the page confirms the `servers` key and a user-profile mcp.json, but reaches it through `MCP: Open User Configuration`, not by path; a workspace's .vscode/mcp.json takes the same key
+would merge (only the 'arcaeon' entry; every other key stays):
+{
+  "servers": {
+    "arcaeon": {
+      "type": "stdio",
+      "command": "arcaeon",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}
+nothing written (add --write to apply)
+
+## --os macos, home /Users/u
+arcaeon connect vscode  (VS Code (Copilot agent mode), stdio-mcp, macos)
+file: /Users/u/Library/Application Support/Code/User/mcp.json  (<state>)
+confirmed: NO, the client's docs did not state this path; check it before --write
+source: https://code.visualstudio.com/docs/copilot/customization/mcp-servers (read 2026-09-27)
+note: the page confirms the `servers` key and a user-profile mcp.json, but reaches it through `MCP: Open User Configuration`, not by path; a workspace's .vscode/mcp.json takes the same key
+would merge (only the 'arcaeon' entry; every other key stays):
+{
+  "servers": {
+    "arcaeon": {
+      "type": "stdio",
+      "command": "arcaeon",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}
+nothing written (add --write to apply)
+
+## --os linux, home /home/u
+arcaeon connect vscode  (VS Code (Copilot agent mode), stdio-mcp, linux)
+file: /home/u/.config/Code/User/mcp.json  (<state>)
+confirmed: NO, the client's docs did not state this path; check it before --write
+source: https://code.visualstudio.com/docs/copilot/customization/mcp-servers (read 2026-09-27)
+note: the page confirms the `servers` key and a user-profile mcp.json, but reaches it through `MCP: Open User Configuration`, not by path; a workspace's .vscode/mcp.json takes the same key
+would merge (only the 'arcaeon' entry; every other key stays):
+{
+  "servers": {
+    "arcaeon": {
+      "type": "stdio",
+      "command": "arcaeon",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}
+nothing written (add --write to apply)

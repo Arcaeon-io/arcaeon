@@ -1,0 +1,56 @@
+## --os windows, home C:\Users\u
+arcaeon connect claude-code  (Claude Code, stdio-mcp, windows)
+file: C:\Users\u\.claude.json  (<state>)
+confirmed: yes
+source: https://code.claude.com/docs/en/mcp (read 2026-09-27)
+note: user scope; a project's own .mcp.json takes the same mcpServers key
+would merge (only the 'arcaeon' entry; every other key stays):
+{
+  "mcpServers": {
+    "arcaeon": {
+      "command": "arcaeon",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}
+nothing written (add --write to apply)
+
+## --os macos, home /Users/u
+arcaeon connect claude-code  (Claude Code, stdio-mcp, macos)
+file: /Users/u/.claude.json  (<state>)
+confirmed: yes
+source: https://code.claude.com/docs/en/mcp (read 2026-09-27)
+note: user scope; a project's own .mcp.json takes the same mcpServers key
+would merge (only the 'arcaeon' entry; every other key stays):
+{
+  "mcpServers": {
+    "arcaeon": {
+      "command": "arcaeon",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}
+nothing written (add --write to apply)
+
+## --os linux, home /home/u
+arcaeon connect claude-code  (Claude Code, stdio-mcp, linux)
+file: /home/u/.claude.json  (<state>)
+confirmed: yes
+source: https://code.claude.com/docs/en/mcp (read 2026-09-27)
+note: user scope; a project's own .mcp.json takes the same mcpServers key
+would merge (only the 'arcaeon' entry; every other key stays):
+{
+  "mcpServers": {
+    "arcaeon": {
+      "command": "arcaeon",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}
+nothing written (add --write to apply)

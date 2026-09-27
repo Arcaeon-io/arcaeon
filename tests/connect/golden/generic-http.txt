@@ -1,0 +1,29 @@
+## --os windows, home C:\Users\u
+arcaeon connect generic-http  (Any HTTP / OpenAPI framework, http-openapi, windows)
+confirmed: yes
+source: https://spec.openapis.org/oas/v3.1.0 (read 2026-09-27)
+note: no file to change: point the framework at GET /openapi.json on a running `arcaeon serve`
+url: http://127.0.0.1:8787  (the default port; start it with `arcaeon serve`)
+openapi: http://127.0.0.1:8787/openapi.json
+token: <ARCAEON_HOME>/serve.token  (`arcaeon serve --print-token` prints it; send it as `Authorization: Bearer <token>`)
+nothing written (add --write to apply)
+
+## --os macos, home /Users/u
+arcaeon connect generic-http  (Any HTTP / OpenAPI framework, http-openapi, macos)
+confirmed: yes
+source: https://spec.openapis.org/oas/v3.1.0 (read 2026-09-27)
+note: no file to change: point the framework at GET /openapi.json on a running `arcaeon serve`
+url: http://127.0.0.1:8787  (the default port; start it with `arcaeon serve`)
+openapi: http://127.0.0.1:8787/openapi.json
+token: <ARCAEON_HOME>/serve.token  (`arcaeon serve --print-token` prints it; send it as `Authorization: Bearer <token>`)
+nothing written (add --write to apply)
+
+## --os linux, home /home/u
+arcaeon connect generic-http  (Any HTTP / OpenAPI framework, http-openapi, linux)
+confirmed: yes
+source: https://spec.openapis.org/oas/v3.1.0 (read 2026-09-27)
+note: no file to change: point the framework at GET /openapi.json on a running `arcaeon serve`
+url: http://127.0.0.1:8787  (the default port; start it with `arcaeon serve`)
+openapi: http://127.0.0.1:8787/openapi.json
+token: <ARCAEON_HOME>/serve.token  (`arcaeon serve --print-token` prints it; send it as `Authorization: Bearer <token>`)
+nothing written (add --write to apply)

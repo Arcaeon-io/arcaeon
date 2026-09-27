@@ -540,14 +540,16 @@ The receipt proves what was dropped, never that dropping it was wise.
 
 Answers: did a second model, reading the same claims against the same
 frozen sentence, come out where the first one did? `arcaeon second-read
-<criterion|compare|submit|ask> ...`: `criterion` freezes one criterion
+<criterion|compare|submit|ask|run> ...`: `criterion` freezes one criterion
 sentence into a readings ledger (every reading cites its sha256); `submit`
 files your own reading of one claim (the door for any AI or person, the
 same as `POST /v1/readings`); `ask` puts a claims file to one reader, one
 reading per claim, as a dry run unless `--send`; `compare A B` lines up two
 readings ledgers claim by claim and files each disagreement with both
-readings. COMPARED means both ledgers were read and lined up, never that
-the claims are true.
+readings; `run` puts one claims file to two readers and compares the two
+ledgers, as a dry run unless `--send`. `--receipt OUT` on `compare` and
+`run` issues a local receipt for the comparison. COMPARED means both
+ledgers were read and lined up, never that the claims are true.
 
 **Usage**
 
@@ -810,6 +812,13 @@ spends only with two opt-ins: `ARCAEON_KEY` set, and the server started with
 NOT LOOK (`exit` 3, `refused: true`) and nothing is sent, so an agent can
 never spend by surprise. A local pin to a witness file under the root is free.
 
+Every call that reaches a handler is one line in the activity journal, verb
+`serve:<route>` (`serve:/v1/verify`), with its verdict word, its exit and the
+sha256 of the path it named, so `arcaeon status` shows HTTP work beside CLI
+work. `/health` and `/openapi.json` are not journaled, nor is a request
+refused before a handler ran. `ARCAEON_JOURNAL=0` writes nothing, and a
+journal that cannot be written never changes a response.
+
 **Exit codes:** 0 the server stopped cleanly (Ctrl+C), or `--print-token`
 printed the token. 2 bad usage, including `--host` anything but 127.0.0.1.
 3 the server could not start (the port is taken, the token file cannot be
@@ -826,7 +835,56 @@ $ curl -s http://127.0.0.1:54817/health
 
 ## `connect`
 
-TODO(K019)
+Answers: what exactly does my AI client need in its config to reach
+arcaeon, and what would change if I let arcaeon put it there? `arcaeon
+connect <client>` prints the config file it would change, the exact JSON it
+would merge into it (only the `arcaeon` entry, under the client's own key),
+and ends `nothing written (add --write to apply)`. By default it writes
+nothing and creates nothing. `arcaeon connect --list` prints every client
+it knows with its transport and whether the path is confirmed.
+
+**Usage**
+
+```text
+usage: arcaeon connect --list [--json]
+       arcaeon connect <client> [--os windows|macos|linux] [--json]
+```
+
+Clients: `claude-desktop`, `claude-code`, `cursor`, `windsurf`, `vscode`,
+`gemini-cli` (each starts `arcaeon mcp` over stdio), `chatgpt` (reaches
+tools only at a public HTTPS address; the loopback server is not one, so
+it needs a public URL, which is a deploy decision) and `generic-http` (the
+URL, where the token lives, and the OpenAPI URL of `arcaeon serve`).
+
+Each path was read from the client's public docs on the date the catalog
+records. Where those docs did not state the path, the output says
+`confirmed: NO`; check the file before letting anything write it. `--os`
+previews another machine (`~` or `%APPDATA%` stand in for its home).
+`ARCAEON_CONNECT_HOME` replaces the home directory, for trying it on a copy.
+
+**Exit codes:** 0 printed. 2 bad usage (no client, an unknown client or
+option).
+
+```console
+$ arcaeon connect cursor --os linux
+arcaeon connect cursor  (Cursor, stdio-mcp, linux)
+file: ~/.cursor/mcp.json  (on another machine)
+confirmed: yes
+source: https://cursor.com/docs/context/mcp (read 2026-09-27)
+note: global file; a project's .cursor/mcp.json takes the same key
+would merge (only the 'arcaeon' entry; every other key stays):
+{
+  "mcpServers": {
+    "arcaeon": {
+      "command": "arcaeon",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}
+nothing written (add --write to apply)
+```
 
 ## `schema`
 
@@ -871,6 +929,12 @@ the targets whose newest look ended COULD NOT LOOK. The journal stores each
 target as a sha256, never the path, so a target is shown by its first 12 hex
 digits. The balance is checked only when `ARCAEON_KEY` is set; without a key
 no request is made. `ARCAEON_JOURNAL=0` stops the journal being written.
+The `mandate` line sums every mandate-gated session recorded in
+`~/.arcaeon/mandate_sessions.jsonl`: sessions, inside, outside, COULD NOT
+LOOK, blocked, cap exceeded and mandate file changes (`--json` carries them
+under `mandate` as `sessions`, `inside`, `outside`, `could_not_look`,
+`blocked`, `cap_exceeded`, `changes`). HTTP calls to `arcaeon serve` show
+as `serve:<route>`.
 
 **Usage**
 
@@ -888,6 +952,7 @@ last run per verb:
   log        OK                 2026-09-25T10:01:00Z
 open COULD NOT LOOKs: 1
   verify     target 3f1c9a0b7d22  2026-09-25T10:02:00Z
+mandate: 2 gated sessions: 14 inside, 1 outside, 0 COULD NOT LOOK, 1 blocked, 0 cap exceeded, 0 mandate file changes
 balance: not checked, no key
 ```
 

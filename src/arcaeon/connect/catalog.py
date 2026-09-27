@@ -108,9 +108,8 @@ CATALOG: tuple[Entry, ...] = (
           note="user settings; a project's .gemini/settings.json takes the same key"),
     Entry("chatgpt", "ChatGPT", "remote-connector", None, {}, _yes(*OSES),
           "https://developers.openai.com/plugins/deploy/connect-chatgpt",
-          note="ChatGPT reaches outside tools only at a public HTTPS address (a "
-               "connector or a GPT Action); the page also names a Secure MCP Tunnel, "
-               "which arcaeon does not set up"),
+          note="the page also names a Secure MCP Tunnel, which arcaeon does not "
+               "set up"),
     Entry("generic-http", "Any HTTP / OpenAPI framework", "http-openapi", None, {},
           _yes(*OSES),
           "https://spec.openapis.org/oas/v3.1.0",
@@ -146,16 +145,27 @@ def home() -> Path:
 
 
 def _bases(os_name: str, home_dir: str | None) -> dict:
-    overridden = home_dir is not None or bool(os.environ.get(HOME_ENV, "").strip())
-    h = home_dir if home_dir is not None else str(home())
+    """{home}, {appdata}, {xdg_config} for `os_name`, as strings in its form.
+
+    A given home (the argument, else ARCAEON_CONNECT_HOME) is taken as written
+    and fixes all three. Without one: this OS reads the real home, APPDATA and
+    XDG_CONFIG_HOME; another OS (a preview for a different machine) gets the
+    placeholders a user would type there, `~` or `%USERPROFILE%`/`%APPDATA%`."""
     pure = PureWindowsPath if os_name == "windows" else PurePosixPath
-    appdata = xdg = None
-    if not overridden and os_name == current_os():
-        appdata = os.environ.get("APPDATA", "").strip() or None
-        xdg = os.environ.get("XDG_CONFIG_HOME", "").strip() or None
+    h = home_dir if home_dir is not None else (os.environ.get(HOME_ENV, "").strip() or None)
+    if h is not None:
+        return {"home": str(pure(h)), "appdata": str(pure(h, "AppData", "Roaming")),
+                "xdg_config": str(pure(h, ".config"))}
+    if os_name != current_os():
+        if os_name == "windows":
+            return {"home": "%USERPROFILE%", "appdata": "%APPDATA%",
+                    "xdg_config": str(pure("%USERPROFILE%", ".config"))}
+        return {"home": "~", "appdata": "~/AppData/Roaming", "xdg_config": "~/.config"}
+    h = str(Path.home())
     return {"home": str(pure(h)),
-            "appdata": appdata or str(pure(h, "AppData", "Roaming")),
-            "xdg_config": xdg or str(pure(h, ".config"))}
+            "appdata": os.environ.get("APPDATA", "").strip() or str(pure(h, "AppData", "Roaming")),
+            "xdg_config": (os.environ.get("XDG_CONFIG_HOME", "").strip()
+                           or str(pure(h, ".config")))}
 
 
 def config_path(entry: Entry, os_name: str | None = None,

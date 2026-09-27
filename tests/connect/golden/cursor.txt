@@ -1,0 +1,56 @@
+## --os windows, home C:\Users\u
+arcaeon connect cursor  (Cursor, stdio-mcp, windows)
+file: C:\Users\u\.cursor\mcp.json  (<state>)
+confirmed: yes
+source: https://cursor.com/docs/context/mcp (read 2026-09-27)
+note: global file; a project's .cursor/mcp.json takes the same key
+would merge (only the 'arcaeon' entry; every other key stays):
+{
+  "mcpServers": {
+    "arcaeon": {
+      "command": "arcaeon",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}
+nothing written (add --write to apply)
+
+## --os macos, home /Users/u
+arcaeon connect cursor  (Cursor, stdio-mcp, macos)
+file: /Users/u/.cursor/mcp.json  (<state>)
+confirmed: yes
+source: https://cursor.com/docs/context/mcp (read 2026-09-27)
+note: global file; a project's .cursor/mcp.json takes the same key
+would merge (only the 'arcaeon' entry; every other key stays):
+{
+  "mcpServers": {
+    "arcaeon": {
+      "command": "arcaeon",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}
+nothing written (add --write to apply)
+
+## --os linux, home /home/u
+arcaeon connect cursor  (Cursor, stdio-mcp, linux)
+file: /home/u/.cursor/mcp.json  (<state>)
+confirmed: yes
+source: https://cursor.com/docs/context/mcp (read 2026-09-27)
+note: global file; a project's .cursor/mcp.json takes the same key
+would merge (only the 'arcaeon' entry; every other key stays):
+{
+  "mcpServers": {
+    "arcaeon": {
+      "command": "arcaeon",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}
+nothing written (add --write to apply)
