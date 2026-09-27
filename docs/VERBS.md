@@ -605,7 +605,33 @@ $ arcaeon evidence-pack verify pack.zip
 
 ## `export`
 
-TODO(K061)
+Answers: can another tool read my ledger in the record format it already
+speaks? `arcaeon export LEDGER --format agent-audit-trail --out FILE.jsonl`
+writes the ledger as draft-sharif-agent-audit-trail records, JSONL only. Each
+record holds only the fields the row itself holds (a field the row lacks is
+left out, never guessed), its `prev_hash` over the RFC 8785 JCS of the record
+before it, and our original `chain` and `source_line` beside it, because a
+chain computed at export proves the export, not the original. It is a subset
+of the draft, not a conformance claim. Beside the export it writes
+`FILE_gaps.json`: which chain is which, and one COULD NOT LOOK `bounded`
+entry per field left out. `--out` must be a new file; an existing one is
+refused.
+
+**Usage**
+
+```text
+usage: arcaeon export [-h] --format {agent-audit-trail} --out OUT [--json]
+                      ledger
+```
+
+**Exit codes:** the source ledger's own chain check, since the export copies
+what is there either way and says what it copied: 0 VERIFIED, 1 BROKEN. 2 bad
+usage (an existing `--out`, a non-JSONL name). 3 COULD NOT LOOK (the ledger
+is missing or unreadable).
+
+```console
+$ arcaeon export calls.jsonl --format agent-audit-trail --out calls.aat.jsonl
+```
 
 ## `distill`
 
