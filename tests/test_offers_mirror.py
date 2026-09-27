@@ -2,8 +2,9 @@
 
 The package cannot read the site at runtime, so `src/arcaeon/remote/offers.json`
 ships as a copy. A copy that drifts quotes an offer the catalog no longer makes.
-Where the site checkout is on disk, the two must be byte-identical; elsewhere
-(an end-user install) this skips.
+Where the site copy is named by ARCAEON_SITE_OFFERS (a path to its
+offers.json), the two must be byte-identical; unset or missing (an end-user
+install), this skips.
 """
 import os
 from pathlib import Path
@@ -13,16 +14,17 @@ import pytest
 from arcaeon.remote import offers
 
 BUNDLED = Path(offers.__file__).with_name("offers.json")
-SITE = Path(os.environ.get(
-    "ARCAEON_SITE_ROOT",
-    r"C:\Users\USER\velouria\projects\arcaeon_site")) / ".well-known" / "offers.json"
 
 
 def test_bundled_offers_is_byte_identical_to_the_site_copy():
-    if not SITE.is_file():
-        pytest.skip(f"no site offers.json at {SITE}")
-    assert BUNDLED.read_bytes() == SITE.read_bytes(), (
-        f"{BUNDLED} has drifted from {SITE}; copy the site file over, do not hand-edit")
+    raw = os.environ.get("ARCAEON_SITE_OFFERS")
+    if not raw:
+        pytest.skip("ARCAEON_SITE_OFFERS is not set; no site offers.json to compare")
+    site = Path(raw)
+    if not site.is_file():
+        pytest.skip("ARCAEON_SITE_OFFERS does not name a file")
+    assert BUNDLED.read_bytes() == site.read_bytes(), (
+        f"{BUNDLED} has drifted from {site}; copy the site file over, do not hand-edit")
 
 
 def test_upgrade_message_names_the_registration_grant_not_a_monthly_tier():
