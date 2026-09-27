@@ -43,6 +43,14 @@ AAT_GAPS_FILE = "aat_gaps.json"
 #: With --deal ID (K065): what arcaeon.record.deal.pack writes, at the top of
 #: the pack beside the other files, each hashed in the manifest.
 DEAL_FILES = ("verdict.json", "timeline.md", "buyer.deal.jsonl", "seller.deal.jsonl")
+#: With --mandate FILE (K066): the mandate file's bytes, copied verbatim, and
+#: the mandate rows section read off the window (counts, the file's sha256,
+#: the outside rows verbatim). verify re-derives the section from the two.
+MANDATE_COPY = "mandate_file.json"
+MANDATE_ROWS = "mandate_rows.json"
+#: The mandate gate's row events that carry a per-call verdict (proxy.py).
+_MANDATE_VERDICT_EVTS = ("mandate_outside", "mandate_could_not_look",
+                         "mandate_cap_exceeded")
 #: What a pack does not show, printed verbatim in README.md: the bullets of
 #: spec section 6 ("What must not be claimed"), word for word. Kept here, one
 #: list, so the page and any test read the same words.
@@ -161,7 +169,8 @@ def build_pack(ledger: str | Path, out: str | Path, *,
                agent: str | None = None, since: str | None = None,
                until: str | None = None, formats: tuple[str, ...] = (),
                deal: str | None = None, deal_buyer: str | Path | None = None,
-               deal_seller: str | Path | None = None) -> dict:
+               deal_seller: str | Path | None = None,
+               mandate: str | Path | None = None) -> dict:
     """Build an evidence pack from `ledger` into the empty folder `out`.
 
     Returns a result dict with `verdict` (one arcaeon.verdict word), an integer
@@ -184,6 +193,16 @@ def build_pack(ledger: str | Path, out: str | Path, *,
     two tapes are `deal_buyer` and `deal_seller`; the one left out is this
     pack's ledger. The dispute is one more check: MATCHED counts as VERIFIED,
     COULD NOT LOOK as COULD NOT LOOK (never exit 0), any other word as BROKEN.
+
+    `mandate` names the mandate file the gate judged the window against
+    (K066). Its bytes are copied to mandate_file.json and mandate_rows.json
+    holds, for the window: the inside / outside / could-not-look counts, the
+    file's sha256, and the outside and could-not-look rows verbatim. An
+    inside call is counted, not rowed, so its count is read off session_end
+    rows; a gated session whose session_end is not in the window leaves that
+    count short, which is COULD NOT LOOK "bounded". A file whose sha256 no
+    mandate_loaded / mandate_changed row in the window names is COULD NOT
+    LOOK: the counts cannot be tied to it.
     """
     from arcaeon.prove.audit import export_bundle
 
@@ -251,23 +270,178 @@ def build_pack(ledger: str | Path, out: str | Path, *,
         deal_block, deal_check = _fold_deal(out, ledger, deal, deal_buyer, deal_seller)
         checks.append(deal_check)
         res["deal"] = deal_block
-        dw = deal_check["verdict"]
-        if dw == V.BROKEN and res["verdict"] != V.BROKEN:
-            res.update({"verdict": V.BROKEN, "exit": V.EXIT_BAD,
-                        "finding": deal_check["finding"]})
-            for k in ("looked_for", "where", "reason_word", "reason"):
-                res.pop(k, None)
-        elif dw == V.COULD_NOT_LOOK and res["verdict"] == V.VERIFIED:
-            res.update({"verdict": V.COULD_NOT_LOOK, "exit": V.EXIT_COULD_NOT_LOOK,
-                        **{k: deal_check[k] for k in ("looked_for", "where",
-                                                      "reason_word", "reason")}})
+        _fold_check(res, deal_check)
+    mandate_block = None
+    if mandate is not None:
+        mandate_block, m_checks = _fold_mandate(out, Path(mandate), window)
+        res["mandate"] = mandate_block
+        for c in m_checks:
+            checks.append(c)
+            _fold_check(res, c)
     _write_cnl(out, checks)
     _write_readme(out, res, window, system_id=system_id, provider=provider)
     audit_manifest = json.loads((out / MANIFEST).read_text(encoding="utf-8"))
     _write_manifest(out, res, integrity, audit_manifest, window, unplaced, checks,
-                    aat=aat, deal=deal_block)
+                    aat=aat, deal=deal_block, mandate=mandate_block)
     res["files"] = sorted(p.name for p in out.iterdir() if p.is_file())
     return res
+
+
+def _fold_check(res: dict, check: dict) -> None:
+    """Fold one extra check's verdict into the build result: a BROKEN check
+    makes the pack BROKEN (its finding named), a COULD NOT LOOK one turns a
+    VERIFIED pack COULD NOT LOOK (never exit 0). A BROKEN pack stays BROKEN."""
+    w = check["verdict"]
+    if w == V.BROKEN and res["verdict"] != V.BROKEN:
+        res.update({"verdict": V.BROKEN, "exit": V.EXIT_BAD,
+                    "finding": check["finding"]})
+        for k in ("looked_for", "where", "reason_word", "reason"):
+            res.pop(k, None)
+    elif w == V.COULD_NOT_LOOK and res["verdict"] == V.VERIFIED:
+        res.update({"verdict": V.COULD_NOT_LOOK, "exit": V.EXIT_COULD_NOT_LOOK,
+                    **{k: check[k] for k in ("looked_for", "where",
+                                             "reason_word", "reason")}})
+
+
+def _is_count(v: Any) -> bool:
+    return isinstance(v, int) and not isinstance(v, bool) and v >= 0
+
+
+def mandate_section(records_raw: bytes, window_lines: list[int], *,
+                    mandate_name: str | None, mandate_bytes: bytes | None) -> dict:
+    """The mandate rows section for the window, from the records alone (K066).
+
+    One function for build and verify, so the file verify re-derives is the
+    file the build wrote. `window_lines` are the window's 1-based ledger
+    lines; `mandate_bytes` the mandate file's bytes (None when it could not
+    be read). Counts: outside and could-not-look are the gate's rows with
+    that verdict; inside is the sum of `mandate_inside` on the window's
+    session_end rows, since an inside call is counted, not rowed.
+    """
+    lines = _lines(records_raw)
+    counts = {"inside": 0, "outside": 0, "could_not_look": 0}
+    outside, cnl, loaded, changed, named = [], [], [], [], []
+    gated, ended = [], []
+    for n in window_lines:
+        if not isinstance(n, int) or not 1 <= n <= len(lines):
+            continue
+        text = lines[n - 1].decode("utf-8", errors="replace")
+        try:
+            row = json.loads(text)
+        except ValueError:
+            continue
+        if not isinstance(row, dict):
+            continue
+        evt, session = row.get("evt"), row.get("session")
+        if evt == "session_end":
+            if _is_count(row.get("mandate_inside")):
+                counts["inside"] += row["mandate_inside"]
+                ended.append(session)
+            continue
+        if evt == "mandate_loaded":
+            loaded.append(n)
+            if isinstance(row.get("mandate_file_sha256"), str):
+                named.append(row["mandate_file_sha256"])
+        elif evt == "mandate_changed":
+            changed.append(n)
+            if isinstance(row.get("to_sha256"), str):
+                named.append(row["to_sha256"])
+        elif evt in _MANDATE_VERDICT_EVTS and row.get("verdict") in ("outside",
+                                                                      "could_not_look"):
+            key = row["verdict"]
+            counts[key] += 1
+            (outside if key == "outside" else cnl).append({"line": n, "raw": text})
+        else:
+            continue
+        if session not in gated:
+            gated.append(session)
+    sha = hashlib.sha256(mandate_bytes).hexdigest() if mandate_bytes is not None else None
+    uniq: list[str] = []
+    for x in named:
+        if x not in uniq:
+            uniq.append(x)
+    return {
+        "mandate_file": mandate_name,
+        "copy": MANDATE_COPY if mandate_bytes is not None else None,
+        "mandate_file_sha256": sha,
+        "window_rows": len(window_lines),
+        "counts": counts,
+        "inside_counted_from": ("the mandate_inside field of the window's session_end "
+                                "rows (an inside call is counted, not rowed)"),
+        "sessions_without_end": [x for x in gated if x not in ended],
+        "named_sha256": uniq,
+        "loaded_lines": loaded,
+        "changed_lines": changed,
+        "file_is_named": (sha in uniq) if sha is not None else None,
+        "outside_rows": outside,
+        "could_not_look_rows": cnl,
+    }
+
+
+def mandate_checks(section: dict) -> list[dict]:
+    """The checks a mandate section stands for (K066): which file, and
+    whether the inside count is whole. Build and verify both read them off
+    the section, so a pack cannot drop one without verify saying so."""
+    if section["mandate_file_sha256"] is None:
+        return [{"check": "mandate file read", "verdict": V.COULD_NOT_LOOK,
+                 **V.could_not_look(f"the mandate file {section['mandate_file']!r}",
+                                    str(section["mandate_file"]), "missing",
+                                    "the mandate file named with --mandate could not be "
+                                    "read, so no count can be tied to it")}]
+    checks = []
+    tie: dict = {"check": "mandate file is the one the gate loaded"}
+    if not section["named_sha256"]:
+        tie.update({"verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            "a mandate_loaded or mandate_changed row naming a file sha256",
+            "window.jsonl", "missing",
+            "no row in the window names which mandate file the gate loaded, so the "
+            "counts cannot be tied to this file")})
+    elif not section["file_is_named"]:
+        tie.update({"verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            f"the mandate file sha256 {section['mandate_file_sha256']}", "window.jsonl",
+            "name_not_found",
+            f"the window's rows name {section['named_sha256']}, not this file, so the "
+            "counts are not counts against it")})
+    else:
+        tie["verdict"] = V.VERIFIED
+    checks.append(tie)
+    if section["sessions_without_end"]:
+        checks.append({"check": "mandate inside count", "verdict": V.COULD_NOT_LOOK,
+                       **V.could_not_look(
+                           f"session_end rows for sessions {section['sessions_without_end']}",
+                           MANDATE_ROWS, "bounded",
+                           "an inside call is counted only on its session's session_end "
+                           "row, and these gated sessions end outside the window, so "
+                           "the inside count is short by an unknown number")})
+    return checks
+
+
+def mandate_rows_bytes(section: dict) -> bytes:
+    """mandate_rows.json's exact bytes (LF, UTF-8), so verify can compare."""
+    return (json.dumps(section, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+def mandate_block(section: dict) -> dict:
+    """The manifest's `mandate` block, read off the section."""
+    return {"file": MANDATE_ROWS, "copy": section["copy"],
+            "mandate_file": section["mandate_file"],
+            "mandate_file_sha256": section["mandate_file_sha256"],
+            "counts": section["counts"]}
+
+
+def _fold_mandate(out: Path, path: Path, window: list[dict]) -> tuple[dict, list[dict]]:
+    """Write mandate_file.json and mandate_rows.json; return (block, checks)."""
+    try:
+        data = path.read_bytes() if path.is_file() else None
+    except OSError:
+        data = None
+    if data is not None:
+        (out / MANDATE_COPY).write_bytes(data)
+    section = mandate_section((out / "records.jsonl").read_bytes(),
+                              [w["line"] for w in window],
+                              mandate_name=path.name, mandate_bytes=data)
+    (out / MANDATE_ROWS).write_bytes(mandate_rows_bytes(section))
+    return mandate_block(section), mandate_checks(section)
 
 
 def _fold_deal(out: Path, ledger: Path, deal_id: str, buyer, seller) -> tuple[dict, dict]:
@@ -448,6 +622,19 @@ def _write_readme(out: Path, res: dict, window: list[dict], *,
             f"- Dispute: {dl['summary']}",
             f"- Files: {', '.join(dl['files'])} (timeline.md is for a person)",
         ]
+    mb = res.get("mandate")
+    if mb:
+        c = mb["counts"]
+        lines += [
+            "",
+            "## The mandate",
+            "",
+            f"- Mandate file: {mb['mandate_file']}, sha256 "
+            f"{mb['mandate_file_sha256'] or 'not read'}",
+            f"- Calls in the window: {c['inside']} inside, {c['outside']} outside, "
+            f"{c['could_not_look']} the gate could not judge",
+            f"- The outside rows, verbatim: {MANDATE_ROWS}",
+        ]
     verdict_text = _VERDICT_WORDS.get(res["verdict"], _VERDICT_WORDS[V.COULD_NOT_LOOK])
     if dl and res["verdict"] == V.BROKEN and str(res.get("finding", "")).startswith("deal "):
         verdict_text = (f"BROKEN. The two tapes of deal {dl['id']} do not agree: "
@@ -488,7 +675,7 @@ def _write_readme(out: Path, res: dict, window: list[dict], *,
 def _write_manifest(out: Path, res: dict, integrity: dict, audit_manifest: dict,
                     window: list[dict], unplaced: list[int],
                     checks: list[dict], *, aat: dict | None = None,
-                    deal: dict | None = None) -> dict:
+                    deal: dict | None = None, mandate: dict | None = None) -> dict:
     """Write manifest.json LAST, over every other file in the pack.
 
     The three counts are of the checks this build ran (the records chain with
@@ -535,6 +722,8 @@ def _write_manifest(out: Path, res: dict, integrity: dict, audit_manifest: dict,
         manifest["aat"] = aat
     if deal is not None:
         manifest["deal"] = deal
+    if mandate is not None:
+        manifest["mandate"] = mandate
     (out / MANIFEST).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     # The manifest's own hash, written after it. It catches an edit to the
     # manifest alone; a rewriter who also recomputes this line is caught only

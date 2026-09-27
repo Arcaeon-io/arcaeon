@@ -106,6 +106,11 @@ the lane (A, B or C) of the work and the commit ids that carry it.
 - **`evidence-pack --deal ID --buyer B | --seller S` (lane D: K065 ef5a276).** Adds
   `verdict.json`, `timeline.md`, `buyer.deal.jsonl`, `seller.deal.jsonl` and a manifest
   `deal` block; the dispute is one more check (ALTERED is BROKEN, COULD NOT LOOK is exit 3).
+- **`evidence-pack --mandate FILE` (lane D: K066).** Adds `mandate_file.json` (the mandate's
+  bytes), `mandate_rows.json` (window counts inside / outside / could-not-look, the file's
+  sha256, outside rows verbatim) and a manifest `mandate` block; verify rebuilds the section
+  from `records.jsonl`. A file no loaded row names, or a session ending outside the window,
+  is exit 3.
 
 ## 0.9.1 (2026-09-25)
 

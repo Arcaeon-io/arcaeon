@@ -67,6 +67,14 @@ it stands, checks its head against the manifest, and rebuilds aat_gaps.json's
 entries. Any difference is BROKEN naming the file. A pack without `aat` in
 its manifest has no AAT files to check (a planted one is unlisted, step 1).
 
+Mandate (K066): a pack built with --mandate lists `mandate` in its manifest.
+Verify rebuilds mandate_rows.json from records.jsonl, the manifest's window
+lines and mandate_file.json (the copied mandate), byte for byte; the copy's
+sha256 must be the one the section names; the manifest's `mandate` block and
+the mandate checks in its `checks` must be the ones the section stands for.
+Any difference is BROKEN naming the file, so an outside row cannot be
+dropped, nor a count or a could-not-look hidden, by fixing the hashes.
+
 The overall verdict is the worst step: BROKEN outranks COULD NOT LOOK, which
 outranks VERIFIED. COULD NOT LOOK never exits 0.
 
@@ -232,6 +240,68 @@ def _step_aat(pack: Path, manifest: dict) -> dict:
         problems.append(f"{gaps_p.name} differs from the gaps list recomputed from "
                         "records.jsonl")
     res = {"check": check, "records": len(lines), "head": head}
+    if problems:
+        res.update({"verdict": V.BROKEN, "finding": "; ".join(problems)})
+        return res
+    res["verdict"] = V.VERIFIED
+    return res
+
+
+def _step_mandate(pack: Path, manifest: dict) -> dict:
+    """Rebuild mandate_rows.json from the records and the copied mandate (K066)."""
+    from arcaeon.prove.evidence_pack import (MANDATE_COPY, MANDATE_ROWS, mandate_block,
+                                             mandate_checks, mandate_rows_bytes,
+                                             mandate_section)
+
+    check = "mandate rows"
+    claim = manifest.get("mandate")
+    if claim is None:
+        return {"check": check, "verdict": V.VERIFIED,
+                "note": "this pack was built without --mandate"}
+    if not isinstance(claim, dict) or claim.get("file") != MANDATE_ROWS or \
+            claim.get("copy") not in (MANDATE_COPY, None):
+        return {"check": check, "verdict": V.BROKEN,
+                "finding": f"manifest incomplete: `mandate` does not name {MANDATE_ROWS}"}
+    rows_p, records = pack / MANDATE_ROWS, pack / "records.jsonl"
+    for p in (rows_p, records):
+        if not p.is_file():
+            return _cnl(check, p.name, str(pack), "missing",
+                        f"the pack has no {p.name}, so the mandate rows could not be "
+                        "rebuilt")
+    copy = None
+    if claim.get("copy") is not None:
+        cp = pack / MANDATE_COPY
+        if not cp.is_file():
+            return _cnl(check, MANDATE_COPY, str(pack), "missing",
+                        "the pack has no mandate_file.json, so the mandate's sha256 "
+                        "could not be recomputed")
+        copy = cp.read_bytes()
+    lines = (manifest.get("window") or {}).get("lines")
+    if not isinstance(lines, list):
+        return _cnl(check, "the window's ledger line numbers", MANIFEST, "unreadable",
+                    "manifest.json has no `window.lines`, so the mandate rows could not "
+                    "be selected again")
+    section = mandate_section(records.read_bytes(), lines,
+                              mandate_name=claim.get("mandate_file"), mandate_bytes=copy)
+    problems = []
+    if rows_p.read_bytes() != mandate_rows_bytes(section):
+        problems.append(f"{MANDATE_ROWS} differs from the section rebuilt from "
+                        "records.jsonl and mandate_file.json")
+    if claim != mandate_block(section):
+        problems.append("the manifest's `mandate` block differs from the one rebuilt "
+                        f"from the records (counts {section['counts']}, sha256 "
+                        f"{section['mandate_file_sha256']})")
+    want = mandate_checks(section)
+    names = {c["check"] for c in want} | {"mandate file read",
+                                         "mandate file is the one the gate loaded",
+                                         "mandate inside count"}
+    got = [c for c in manifest.get("checks") or [] if isinstance(c, dict)
+           and c.get("check") in names]
+    if got != want:
+        problems.append("the manifest's mandate checks are not the ones the rebuilt "
+                        "section stands for")
+    res = {"check": check, "counts": section["counts"],
+           "outside_rows": len(section["outside_rows"])}
     if problems:
         res.update({"verdict": V.BROKEN, "finding": "; ".join(problems)})
         return res
@@ -738,7 +808,7 @@ def _step_pins(pack: Path, manifest: dict, *, witness=None, remote: bool = False
 #: runs after these, since it takes verify's --witness / --remote options.
 STEPS: list[Callable[[Path, dict], dict]] = [_step_hashes, _step_chain, _step_window,
                                               _step_build, _step_manifest_hash,
-                                              _step_aat]
+                                              _step_aat, _step_mandate]
 
 
 def verify_pack(pack: str | Path, *, witness: str | Path | None = None,
