@@ -89,9 +89,59 @@ def test_two_writes_two_undos_newest_first(capsys):
     assert len(W.backups(f)) == 2
     rc, out = _run(capsys, "cursor", "--undo")
     assert rc == 0 and "backups left: 1" in out
-    assert f.read_bytes() == mid.replace(b'"args"', b'"argz"')
-    assert _run(capsys, "cursor", "--undo")[0] == 0
-    assert f.read_bytes() == OTHERS.encode("utf-8") and W.backups(f) == []
+    edited = mid.replace(b'"args"', b'"argz"')
+    assert f.read_bytes() == edited
+    # the file now holds the user's edits, not the first write's bytes:
+    # the older backup is not rolled back over them
+    rc, out = _run(capsys, "cursor", "--undo", "--json")
+    assert rc == 3 and json.loads(out)["reason_word"] == "changed_since_write"
+    assert f.read_bytes() == edited and len(W.backups(f)) == 1
+
+
+def test_two_real_writes_undo_back_to_the_start(tmp_path):
+    f = tmp_path / "mcp.json"
+    f.write_bytes(OTHERS.encode("utf-8"))
+    assert W.write(f, "mcpServers", "arcaeon", {"command": "one"})["written"]
+    assert W.write(f, "mcpServers", "arcaeon", {"command": "two"})["written"]
+    assert W.undo(f)["exit"] == 0 and W.undo(f)["exit"] == 0
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["mcp.json"]
+    assert f.read_bytes() == OTHERS.encode("utf-8")
+
+
+def test_undo_refuses_to_delete_a_new_file_the_user_added_to(capsys):
+    f = Path(C.config_path(C.get("cursor")))
+    assert not f.exists()
+    assert _run(capsys, "cursor", "--write")[0] == 0
+    doc = json.loads(f.read_text(encoding="utf-8"))
+    doc["mcpServers"]["mine"] = {"command": "my-server"}
+    f.write_text(json.dumps(doc, indent=2) + "\n", encoding="utf-8")
+    after_edit = f.read_bytes()
+    before = _snapshot(_home())
+    rc, out = _run(capsys, "cursor", "--undo", "--json")
+    d = json.loads(out)
+    assert rc == 3 and d["reason_word"] == "changed_since_write"
+    assert "by hand" in d["reason"]
+    assert f.read_bytes() == after_edit and _snapshot(_home()) == before
+    rc, out = _run(capsys, "cursor", "--undo")
+    assert rc == 3 and "changed_since_write" in out and "nothing changed" in out
+
+
+def test_undo_refuses_an_older_backup_over_an_edit(capsys):
+    f = _seed("cursor", OTHERS)
+    assert _run(capsys, "cursor", "--write")[0] == 0
+    f.write_bytes(f.read_bytes().replace(b'"b"', b'"b2"'))       # user edit
+    f.write_bytes(f.read_bytes().replace(b'"args"', b'"argz"'))  # entry now differs
+    assert _run(capsys, "cursor", "--write")[0] == 0
+    newest = W.backups(f)[-1]
+    newest.unlink()                         # the newest backup is lost
+    f.write_bytes(f.read_bytes().replace(b'"b2"', b'"b3"'))       # and edited again
+    after_edit = f.read_bytes()
+    before = _snapshot(_home())
+    rc, out = _run(capsys, "cursor", "--undo", "--json")
+    d = json.loads(out)
+    assert rc == 3 and d["reason_word"] == "changed_since_write"
+    assert str(W.backups(f)[-1]) in d["reason"]                  # the diff hint
+    assert f.read_bytes() == after_edit and _snapshot(_home()) == before
 
 
 def test_undo_with_no_backup_is_3_and_changes_nothing(capsys):

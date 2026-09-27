@@ -12,6 +12,12 @@ write   backs the config file up to `<file>.arcaeon-bak-<UTC stamp>` (a byte
 undo    moves the newest backup back over the file (the backup is consumed),
         or, for an `.absent` marker, removes the file and the directories the
         write created. write then undo leaves the home byte-identical.
+        Every backup has a `<backup>.written` sidecar holding the sha256 of
+        the bytes that write put in the file; undo refuses (COULD NOT LOOK,
+        exit 3, `reason_word: "changed_since_write"`, nothing touched) when
+        the file no longer holds exactly those bytes, so it never deletes or
+        rolls back an edit made after the write. A backup with no sidecar
+        (made before sidecars existed) is restored as before.
 check   reads only: `present`, `absent`, or `stale` (the configured command
         no longer resolves).
 
@@ -24,6 +30,7 @@ guess at a file it cannot parse. Stdlib only.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -32,11 +39,12 @@ from pathlib import Path
 
 from arcaeon import verdict as V
 
-__all__ = ["BAK", "ABSENT", "Unreadable", "merge_text", "backups", "write", "undo",
+__all__ = ["BAK", "ABSENT", "WRITTEN", "Unreadable", "merge_text", "backups", "write", "undo",
            "check", "resolves"]
 
 BAK = ".arcaeon-bak-"
 ABSENT = ".absent"
+WRITTEN = ".written"
 _BOM = b"\xef\xbb\xbf"
 _WS = " \t\r\n"
 
@@ -199,7 +207,8 @@ def backups(file) -> list[Path]:
     file = Path(file)
     if not file.parent.is_dir():
         return []
-    found = [p for p in file.parent.glob(file.name + BAK + "*") if p.is_file()]
+    found = [p for p in file.parent.glob(file.name + BAK + "*")
+             if p.is_file() and not p.name.endswith(WRITTEN)]
     return sorted(found, key=lambda p: (_stamp_of(p, file), p.name))
 
 
@@ -211,6 +220,11 @@ def _new_backup_name(file: Path, absent: bool) -> Path:
         n += 1
         p = file.with_name(f"{file.name}{BAK}{stamp}-{n:03d}{tail}")
     return p
+
+
+def _sidecar(backup: Path) -> Path:
+    """Where the sha256 of the bytes a write produced is kept."""
+    return backup.with_name(backup.name + WRITTEN)
 
 
 def _cnl(file, reason_word: str, reason: str) -> dict:
@@ -255,7 +269,7 @@ def write(file, key: str, name: str, value) -> dict:
             pass
     raw_before = file.read_bytes() if text is not None else None
     created: list[str] = []
-    backup = tmp = None
+    backup = tmp = side = None
     try:
         if raw_before is None:
             missing, d = [], file.parent
@@ -277,13 +291,19 @@ def write(file, key: str, name: str, value) -> dict:
                 return _cnl(file, "unreadable", f"{file} changed while it was being "
                                                 "backed up; nothing written")
         bom = _BOM if raw_before is not None and raw_before.startswith(_BOM) else b""
+        data = bom + new.encode("utf-8")
+        side = _sidecar(backup)
+        with open(side, "x", encoding="ascii", newline="\n") as f:
+            f.write(hashlib.sha256(data).hexdigest() + "\n")
         tmp = file.with_name(f"{file.name}.arcaeon-tmp-{os.getpid()}")
         with open(tmp, "wb") as f:
-            f.write(bom + new.encode("utf-8"))
+            f.write(data)
         os.replace(tmp, file)
     except OSError as e:
         if tmp is not None and tmp.exists():
             tmp.unlink()
+        if side is not None and side.exists():
+            side.unlink()                        # the file never got `data`
         if raw_before is None:
             if backup is not None and backup.exists():
                 backup.unlink()
@@ -309,6 +329,20 @@ def undo(file) -> dict:
         return _cnl(file, "no_backup", f"no arcaeon backup of {file} to restore; "
                                        "nothing changed")
     b = found[-1]
+    side = _sidecar(b)
+    try:
+        want = side.read_text(encoding="ascii").strip() if side.is_file() else None
+        now = hashlib.sha256(file.read_bytes()).hexdigest() if file.is_file() else None
+    except OSError as e:
+        return _cnl(file, "unreadable", f"{file} could not be read "
+                                        f"({e.strerror or type(e).__name__})")
+    gone_is_fine = now is None and b.name.endswith(ABSENT)
+    if want is not None and now != want and not gone_is_fine:
+        what = ("it is gone" if now is None else "it holds edits made after the write")
+        todo = ("remove the arcaeon entry by hand" if b.name.endswith(ABSENT) else
+                f"compare it with the backup {b} and remove the arcaeon entry by hand")
+        return _cnl(file, "changed_since_write",
+                    f"{file} is not what arcaeon wrote ({what}); {todo}")
     try:
         if b.name.endswith(ABSENT):
             try:
@@ -318,6 +352,8 @@ def undo(file) -> dict:
             if file.exists():
                 file.unlink()
             b.unlink()
+            if side.exists():
+                side.unlink()
             for d in sorted(created, key=len, reverse=True):
                 try:
                     os.rmdir(d)                  # only if empty; never recursive
@@ -326,6 +362,8 @@ def undo(file) -> dict:
             kind = "absent"
         else:
             os.replace(b, file)
+            if side.exists():
+                side.unlink()
             kind = "copy"
     except OSError as e:
         return _cnl(file, "unwritable", f"{file} could not be restored "
