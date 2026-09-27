@@ -2,7 +2,7 @@
  "openapi": "3.1.0",
  "info": {
   "title": "arcaeon serve",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "description": "The local HTTP/JSON API of arcaeon: one route per check, each answering the CLI's --json plus an integer exit (0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK). Loopback only."
  },
  "servers": [

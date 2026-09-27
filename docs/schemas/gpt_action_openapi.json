@@ -2,7 +2,7 @@
  "openapi": "3.1.0",
  "info": {
   "title": "arcaeon serve",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "description": "The local HTTP/JSON API of arcaeon: one route per check, each answering the CLI's --json plus an integer exit (0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK). Loopback only. This manifest is for a custom GPT Action. Its server url is a placeholder: arcaeon serve binds 127.0.0.1 only, so a GPT can reach it only after whoever runs it puts it behind a public https url of their own, which is a deploy decision this file does not make. Replace the url, set the Action's auth to API key, Bearer, with the serve token. Free check routes only; the paid lane is not in this file."
  },
  "servers": [
