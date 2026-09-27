@@ -167,7 +167,7 @@ in [docs/WORDS.md](docs/WORDS.md).
 
 | code | meaning |
 |---|---|
-| 0 | good: VERIFIED, MATCHED, a clean grade, or the command did what it said |
+| 0 | good: VERIFIED, MATCHED, COMPARED, a clean grade, or the command did what it said |
 | 1 | a bad finding: BROKEN, MISSING, ALTERED, a high-severity grade, a receipt that does not check out |
 | 2 | bad usage: the verb could not start on what it was given |
 | 3 | COULD NOT LOOK: nothing wrong was found, and not everything could be checked |

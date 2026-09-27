@@ -514,7 +514,23 @@ The receipt proves what was dropped, never that dropping it was wise.
 
 ## `second-read`
 
-TODO(K034)
+Answers: did a second model, reading the same claims against the same
+frozen sentence, come out where the first one did? `arcaeon second-read
+<criterion|compare> ...`: `criterion` freezes one criterion sentence into a
+readings ledger (every reading cites its sha256); `compare A B` lines up two
+readings ledgers claim by claim and files each disagreement with both
+readings. COMPARED means both ledgers were read and lined up, never that
+the claims are true.
+
+**Usage**
+
+```text
+usage: arcaeon second-read <subcommand> [args...]
+```
+
+**Exit codes:** exit 0 COMPARED, 1 MISSING or BROKEN, 2 bad usage, 3 COULD
+NOT LOOK. A disagreement inside a COMPARED is filed, not failed: it does not
+change the exit.
 
 ## `evidence-pack`
 

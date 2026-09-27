@@ -55,11 +55,12 @@ COMPARED = "COMPARED"
 COULD_NOT_LOOK_TOKEN = "COULD_NOT_LOOK"
 
 #: Every verdict word, in the order a reader meets them.
-WORDS = (VERIFIED, BROKEN, COULD_NOT_LOOK, MATCHED, MISSING, ALTERED, NO_GRADEABLE_FILES)
+WORDS = (VERIFIED, BROKEN, COULD_NOT_LOOK, MATCHED, MISSING, ALTERED, NO_GRADEABLE_FILES,
+         COMPARED)
 
-#: The readings compare's own word. Kept out of WORDS (the record and
-#: completeness words) so the older tables that enumerate WORDS stay as they
-#: are; `exit_for` and docs/WORDS.md cover it all the same.
+#: The readings compare's own word, also in WORDS and EXIT_BY_WORD now that
+#: the README exit table carries it; kept as a name for the callers that
+#: ask for the compare words alone.
 COMPARE_WORDS = (COMPARED,)
 
 EXIT_GOOD = 0
@@ -77,11 +78,12 @@ EXIT_BY_WORD = {
     COULD_NOT_LOOK: EXIT_COULD_NOT_LOOK,
     COULD_NOT_LOOK_TOKEN: EXIT_COULD_NOT_LOOK,
     NO_GRADEABLE_FILES: EXIT_COULD_NOT_LOOK,
+    COMPARED: EXIT_GOOD,
 }
 
 #: COMPARED exits 0: the comparison completed. A DISAGREED claim inside it is
 #: filed with both readings, not failed. MISSING, BROKEN and COULD NOT LOOK
-#: from a compare use EXIT_BY_WORD above.
+#: from a compare use EXIT_BY_WORD above, which carries COMPARED too.
 EXIT_BY_COMPARE_WORD = {COMPARED: EXIT_GOOD}
 
 #: What each moved tool's own exit codes meant, translated into the table above.

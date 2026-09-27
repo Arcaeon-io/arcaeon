@@ -32,7 +32,7 @@ def test_an_unknown_word_never_gates_green():
 
 def test_the_words_are_the_words():
     assert V.WORDS == ("VERIFIED", "BROKEN", "COULD NOT LOOK", "MATCHED", "MISSING",
-                       "ALTERED", "NO GRADEABLE FILES")
+                       "ALTERED", "NO GRADEABLE FILES", "COMPARED")
 
 
 def test_every_legacy_could_not_look_code_becomes_3():

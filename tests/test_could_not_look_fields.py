@@ -34,7 +34,7 @@ def test_the_returned_dict_carries_all_four_keys(word):
 
 def test_the_verdict_words_are_unchanged():
     assert V.WORDS == ("VERIFIED", "BROKEN", "COULD NOT LOOK", "MATCHED", "MISSING",
-                       "ALTERED", "NO GRADEABLE FILES")
+                       "ALTERED", "NO GRADEABLE FILES", "COMPARED")
 
 
 # --- reconcile carries the fields ----------------------------------------------
