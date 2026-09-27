@@ -32,7 +32,7 @@ def test_story_ends_on_the_broken_line_and_exits_0(no_net, capsys):
 def test_story_is_plain_words(no_net, capsys):
     demo.main([])
     out = capsys.readouterr().out
-    for word in ("chain_mismatch", "sha256", "{", "Traceback", "—", "–"):
+    for word in ("chain_mismatch", "sha256", "{", "Traceback", chr(0x2014), chr(0x2013)):
         assert word not in out
     assert "20 dollars becomes 200 dollars" in out
 
