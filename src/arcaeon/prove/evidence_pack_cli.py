@@ -5,7 +5,8 @@
                           [--witness STORE --namespace NS]
                           [--system-id ID] [--provider NAME] [--format aat]
                           [--deal ID (--buyer B | --seller S)]
-                          [--mandate FILE] [--json]
+                          [--mandate FILE] [--readings RECEIPT [--readings-ledger L]]
+                          [--json]
     arcaeon evidence-pack verify PACK [--json]
 
 Exit codes as every verb: 0 VERIFIED, 1 BROKEN, 2 bad usage, 3 COULD NOT LOOK.
@@ -49,6 +50,11 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                    help="the mandate file the gate judged the window against: its "
                         "inside / outside / could-not-look counts, its sha256 and the "
                         "outside rows go in mandate_rows.json")
+    p.add_argument("--readings", default=None,
+                   help="a second-read comparison receipt to include; receipt verify "
+                        "runs on it at build and on every pack verify")
+    p.add_argument("--readings-ledger", default=None,
+                   help="with --readings: the ledger the receipt was issued into")
     p.add_argument("--json", action="store_true", help="print the result as JSON")
     return p
 
@@ -67,7 +73,8 @@ def main(argv: list[str] | None = None, *, prog: str = "arcaeon evidence-pack") 
                          agent=a.agent, since=a.since, until=a.until,
                          formats=tuple(a.formats), deal=a.deal,
                          deal_buyer=a.buyer, deal_seller=a.seller,
-                         mandate=a.mandate)
+                         mandate=a.mandate, readings=a.readings,
+                         readings_ledger=a.readings_ledger)
     except PackUsageError as e:
         print(f"{prog}: {e}", file=sys.stderr)
         return V.EXIT_USAGE

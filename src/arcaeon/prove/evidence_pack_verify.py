@@ -75,6 +75,11 @@ the mandate checks in its `checks` must be the ones the section stands for.
 Any difference is BROKEN naming the file, so an outside row cannot be
 dropped, nor a count or a could-not-look hidden, by fixing the hashes.
 
+Readings (K067): a pack built with --readings lists `readings` in its
+manifest. Verify runs `receipt verify` on readings_receipt.json again (with
+the copied ledger when the pack has one); a receipt that fails is BROKEN
+naming the file, and the result must be the one the manifest recorded.
+
 The overall verdict is the worst step: BROKEN outranks COULD NOT LOOK, which
 outranks VERIFIED. COULD NOT LOOK never exits 0.
 
@@ -304,6 +309,45 @@ def _step_mandate(pack: Path, manifest: dict) -> dict:
            "outside_rows": len(section["outside_rows"])}
     if problems:
         res.update({"verdict": V.BROKEN, "finding": "; ".join(problems)})
+        return res
+    res["verdict"] = V.VERIFIED
+    return res
+
+
+def _step_readings(pack: Path, manifest: dict) -> dict:
+    """Run receipt verify on the included comparison receipt again (K067)."""
+    from arcaeon.prove.evidence_pack import READINGS_LEDGER, READINGS_RECEIPT, readings_check
+
+    check = "second-read receipt"
+    claim = manifest.get("readings")
+    if claim is None:
+        return {"check": check, "verdict": V.VERIFIED,
+                "note": "this pack was built without --readings"}
+    if not isinstance(claim, dict) or claim.get("receipt") != READINGS_RECEIPT or \
+            claim.get("ledger") not in (READINGS_LEDGER, None):
+        return {"check": check, "verdict": V.BROKEN,
+                "finding": f"manifest incomplete: `readings` does not name {READINGS_RECEIPT}"}
+    if claim.get("ok") is None:
+        return {"check": check, "verdict": V.VERIFIED,
+                "note": "the build could not include the receipt; its could-not-look is "
+                        "in could_not_look.json"}
+    with_ledger = claim.get("ledger") is not None
+    for name in (READINGS_RECEIPT,) + ((READINGS_LEDGER,) if with_ledger else ()):
+        if not (pack / name).is_file():
+            return _cnl(check, name, str(pack), "missing",
+                        f"the pack has no {name}, so receipt verify could not run")
+    summary, got = readings_check(pack, with_ledger=with_ledger)
+    res = {"check": check, "receipt_verify": got, "ledger_status": summary["ledger_status"]}
+    if got["verdict"] != V.VERIFIED:
+        res.update({"verdict": got["verdict"],
+                    **({"finding": got["finding"]} if "finding" in got else
+                       {k: got[k] for k in _CNL_FIELDS})})
+        return res
+    recorded = {k: claim.get(k) for k in summary}
+    if recorded != summary:
+        res.update({"verdict": V.BROKEN, "finding": (
+            f"the manifest's `readings` block records {recorded}, receipt verify gives "
+            f"{summary}")})
         return res
     res["verdict"] = V.VERIFIED
     return res
@@ -808,7 +852,8 @@ def _step_pins(pack: Path, manifest: dict, *, witness=None, remote: bool = False
 #: runs after these, since it takes verify's --witness / --remote options.
 STEPS: list[Callable[[Path, dict], dict]] = [_step_hashes, _step_chain, _step_window,
                                               _step_build, _step_manifest_hash,
-                                              _step_aat, _step_mandate]
+                                              _step_aat, _step_mandate,
+                                              _step_readings]
 
 
 def verify_pack(pack: str | Path, *, witness: str | Path | None = None,

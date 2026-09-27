@@ -48,6 +48,11 @@ DEAL_FILES = ("verdict.json", "timeline.md", "buyer.deal.jsonl", "seller.deal.js
 #: the outside rows verbatim). verify re-derives the section from the two.
 MANDATE_COPY = "mandate_file.json"
 MANDATE_ROWS = "mandate_rows.json"
+#: With --readings RECEIPT (K067): a second-read comparison receipt, its
+#: bytes copied verbatim, and (with --readings-ledger) the ledger it was
+#: issued into. Build and verify both run `receipt verify` on the copy.
+READINGS_RECEIPT = "readings_receipt.json"
+READINGS_LEDGER = "readings_receipt.ledger.jsonl"
 #: The mandate gate's row events that carry a per-call verdict (proxy.py).
 _MANDATE_VERDICT_EVTS = ("mandate_outside", "mandate_could_not_look",
                          "mandate_cap_exceeded")
@@ -170,7 +175,9 @@ def build_pack(ledger: str | Path, out: str | Path, *,
                until: str | None = None, formats: tuple[str, ...] = (),
                deal: str | None = None, deal_buyer: str | Path | None = None,
                deal_seller: str | Path | None = None,
-               mandate: str | Path | None = None) -> dict:
+               mandate: str | Path | None = None,
+               readings: str | Path | None = None,
+               readings_ledger: str | Path | None = None) -> dict:
     """Build an evidence pack from `ledger` into the empty folder `out`.
 
     Returns a result dict with `verdict` (one arcaeon.verdict word), an integer
@@ -203,6 +210,14 @@ def build_pack(ledger: str | Path, out: str | Path, *,
     count short, which is COULD NOT LOOK "bounded". A file whose sha256 no
     mandate_loaded / mandate_changed row in the window names is COULD NOT
     LOOK: the counts cannot be tied to it.
+
+    `readings` names a second-read comparison receipt (K067), copied to
+    readings_receipt.json; `readings_ledger` the ledger it was issued into,
+    copied beside it so the receipt's row can be found again. `receipt
+    verify` runs on the copy at build and again on every pack verify: a
+    receipt that fails it is BROKEN, one that cannot be read COULD NOT LOOK.
+    Without `readings_ledger` the ledger tie is not checked, as with
+    `arcaeon receipt verify` run without --ledger, and the manifest says so.
     """
     from arcaeon.prove.audit import export_bundle
 
@@ -219,6 +234,8 @@ def build_pack(ledger: str | Path, out: str | Path, *,
                                  "--seller S (the one left out is --ledger)")
     elif deal_buyer is not None or deal_seller is not None:
         raise PackUsageError("--buyer / --seller are only read with --deal")
+    if readings_ledger is not None and readings is None:
+        raise PackUsageError("--readings-ledger is only read with --readings")
     unknown = sorted(set(formats) - {"aat"})
     if unknown:
         raise PackUsageError(f"unknown --format {unknown}; the one extra format is aat")
@@ -278,11 +295,20 @@ def build_pack(ledger: str | Path, out: str | Path, *,
         for c in m_checks:
             checks.append(c)
             _fold_check(res, c)
+    readings_block = None
+    if readings is not None:
+        readings_block, r_check = _fold_readings(out, Path(readings),
+                                                 None if readings_ledger is None
+                                                 else Path(readings_ledger))
+        res["readings"] = readings_block
+        checks.append(r_check)
+        _fold_check(res, r_check)
     _write_cnl(out, checks)
     _write_readme(out, res, window, system_id=system_id, provider=provider)
     audit_manifest = json.loads((out / MANIFEST).read_text(encoding="utf-8"))
     _write_manifest(out, res, integrity, audit_manifest, window, unplaced, checks,
-                    aat=aat, deal=deal_block, mandate=mandate_block)
+                    aat=aat, deal=deal_block, mandate=mandate_block,
+                    readings=readings_block)
     res["files"] = sorted(p.name for p in out.iterdir() if p.is_file())
     return res
 
@@ -442,6 +468,72 @@ def _fold_mandate(out: Path, path: Path, window: list[dict]) -> tuple[dict, list
                               mandate_name=path.name, mandate_bytes=data)
     (out / MANDATE_ROWS).write_bytes(mandate_rows_bytes(section))
     return mandate_block(section), mandate_checks(section)
+
+
+def readings_check(pack: Path, *, with_ledger: bool) -> tuple[dict, dict]:
+    """Run `receipt verify` on the pack's copy of the receipt (K067).
+
+    Returns (summary, check). One function for build and verify, so both
+    reach the same word the same way: ok is VERIFIED, not ok BROKEN with the
+    verifier's notes as the finding, unreadable COULD NOT LOOK."""
+    from arcaeon.record.receipt.core import loads_strict, verify_receipt
+
+    check_name = "second-read receipt verify"
+    rp = pack / READINGS_RECEIPT
+    lp = pack / READINGS_LEDGER if with_ledger else None
+    try:
+        text = rp.read_bytes().decode("utf-8")
+        receipt = loads_strict(text)
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        return ({"kind": None, "body_digest": None, "ok": None, "ledger_status": None},
+                {"check": check_name, "verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+                    "a second-read comparison receipt", READINGS_RECEIPT, "unreadable",
+                    f"the receipt could not be read as strict JSON ({e})")})
+    vr = verify_receipt(receipt, ledger_path=lp, source_text=text)
+    summary = {"kind": receipt.get("kind") if isinstance(receipt, dict) else None,
+               "body_digest": (receipt.get("body_digest")
+                               if isinstance(receipt, dict) else None),
+               "ok": bool(vr["ok"]), "body_digest_ok": bool(vr["body_digest_ok"]),
+               "ledger_status": vr["ledger"]["status"]}
+    check = {"check": check_name, "ledger_status": summary["ledger_status"]}
+    if vr["ok"]:
+        check["verdict"] = V.VERIFIED
+    else:
+        check.update({"verdict": V.BROKEN, "finding": (
+            f"{READINGS_RECEIPT} fails receipt verify: "
+            f"{'; '.join(vr['notes']) or 'ledger ' + str(summary['ledger_status'])}")})
+    return summary, check
+
+
+def _fold_readings(out: Path, receipt: Path, ledger: Path | None) -> tuple[dict, dict]:
+    """Copy the receipt (and its ledger) in; return (manifest block, check)."""
+    block = {"receipt": READINGS_RECEIPT, "source": receipt.name,
+             "ledger": READINGS_LEDGER if ledger is not None else None}
+    if not receipt.is_file():
+        block.update({"kind": None, "body_digest": None, "ok": None,
+                      "ledger_status": None})
+        return block, {"check": "second-read receipt verify",
+                       "verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+                           "a second-read comparison receipt", str(receipt), "missing",
+                           "the receipt named with --readings was not found")}
+    (out / READINGS_RECEIPT).write_bytes(receipt.read_bytes())
+    if ledger is not None:
+        if not ledger.is_file():
+            block.update({"kind": None, "body_digest": None, "ok": None,
+                          "ledger_status": None, "ledger": None})
+            return block, {"check": "second-read receipt verify",
+                           "verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+                               "the ledger the receipt was issued into", str(ledger),
+                               "missing",
+                               "the ledger named with --readings-ledger was not found, "
+                               "so the receipt's row could not be looked for")}
+        (out / READINGS_LEDGER).write_bytes(ledger.read_bytes())
+    summary, check = readings_check(out, with_ledger=ledger is not None)
+    block.update(summary)
+    if ledger is None:
+        block["ledger_note"] = ("no --readings-ledger given: the receipt's body digest "
+                                "was checked, its ledger row was not")
+    return block, check
 
 
 def _fold_deal(out: Path, ledger: Path, deal_id: str, buyer, seller) -> tuple[dict, dict]:
@@ -635,6 +727,19 @@ def _write_readme(out: Path, res: dict, window: list[dict], *,
             f"{c['could_not_look']} the gate could not judge",
             f"- The outside rows, verbatim: {MANDATE_ROWS}",
         ]
+    rb = res.get("readings")
+    if rb:
+        lines += [
+            "",
+            "## The second read",
+            "",
+            f"- Comparison receipt: {READINGS_RECEIPT} (from {rb['source']}), kind "
+            f"{rb.get('kind') or 'not read'}",
+            f"- receipt verify: {'passes' if rb.get('ok') else 'does not pass'}; ledger "
+            f"{rb.get('ledger_status') or 'not read'}",
+            "- Two readers agreeing measures how a sentence reads, not whether a claim "
+            "is true.",
+        ]
     verdict_text = _VERDICT_WORDS.get(res["verdict"], _VERDICT_WORDS[V.COULD_NOT_LOOK])
     if dl and res["verdict"] == V.BROKEN and str(res.get("finding", "")).startswith("deal "):
         verdict_text = (f"BROKEN. The two tapes of deal {dl['id']} do not agree: "
@@ -675,7 +780,8 @@ def _write_readme(out: Path, res: dict, window: list[dict], *,
 def _write_manifest(out: Path, res: dict, integrity: dict, audit_manifest: dict,
                     window: list[dict], unplaced: list[int],
                     checks: list[dict], *, aat: dict | None = None,
-                    deal: dict | None = None, mandate: dict | None = None) -> dict:
+                    deal: dict | None = None, mandate: dict | None = None,
+                    readings: dict | None = None) -> dict:
     """Write manifest.json LAST, over every other file in the pack.
 
     The three counts are of the checks this build ran (the records chain with
@@ -724,6 +830,8 @@ def _write_manifest(out: Path, res: dict, integrity: dict, audit_manifest: dict,
         manifest["deal"] = deal
     if mandate is not None:
         manifest["mandate"] = mandate
+    if readings is not None:
+        manifest["readings"] = readings
     (out / MANIFEST).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     # The manifest's own hash, written after it. It catches an edit to the
     # manifest alone; a rewriter who also recomputes this line is caught only

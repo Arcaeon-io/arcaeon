@@ -115,6 +115,10 @@ the lane (A, B or C) of the work and the commit ids that carry it.
   sha256, outside rows verbatim) and a manifest `mandate` block; verify rebuilds the section
   from `records.jsonl`. A file no loaded row names, or a session ending outside the window,
   is exit 3.
+- **`evidence-pack --readings RECEIPT [--readings-ledger L]` (lane D: K067).** Adds
+  `readings_receipt.json` (and `readings_receipt.ledger.jsonl`) and a manifest `readings`
+  block; `receipt verify` runs on the copy at build and on every pack verify (fails is
+  BROKEN, unreadable or missing is exit 3).
 
 ## 0.9.1 (2026-09-25)
 
