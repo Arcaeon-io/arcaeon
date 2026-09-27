@@ -2214,6 +2214,29 @@
       "type": "string",
       "maxLength": 64
      },
+     "criterion": {
+      "type": "string",
+      "maxLength": 10485760
+     },
+     "claim_sha256": {
+      "type": "string",
+      "maxLength": 64
+     },
+     "model": {
+      "type": "string",
+      "maxLength": 256
+     },
+     "near_match_id": {
+      "type": "string",
+      "maxLength": 256
+     },
+     "rationale": {
+      "type": "string",
+      "maxLength": 10485760
+     },
+     "keep_text": {
+      "type": "boolean"
+     },
      "reading": {
       "type": "string",
       "enum": [
@@ -2256,10 +2279,7 @@
    },
    "second_read_compare_request": {
     "type": "object",
-    "required": [
-     "a",
-     "b"
-    ],
+    "required": [],
     "properties": {
      "a": {
       "type": "string",
@@ -2268,6 +2288,26 @@
      "b": {
       "type": "string",
       "maxLength": 4096
+     },
+     "content_a": {
+      "type": "string",
+      "maxLength": 10485760,
+      "description": "the file's text (JSONL), for an agent with no file access"
+     },
+     "content_b": {
+      "type": "string",
+      "maxLength": 10485760,
+      "description": "the file's text (JSONL), for an agent with no file access"
+     },
+     "content_a_b64": {
+      "type": "string",
+      "maxLength": 10485760,
+      "description": "the file's bytes, base64"
+     },
+     "content_b_b64": {
+      "type": "string",
+      "maxLength": 10485760,
+      "description": "the file's bytes, base64"
      }
     }
    },
