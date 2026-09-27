@@ -171,6 +171,17 @@ def build_gaps(records: list[dict], refused: list[dict], skipped: list[int]) -> 
     return gaps
 
 
+def gaps_sidecar_bytes(export_name: str, aat_chain: dict, source_chain: dict,
+                       gaps: list[dict]) -> bytes:
+    """The exact bytes of an export's gaps sidecar, so a verifier can rebuild it."""
+    sidecar = {"format": AAT_FORMAT,
+               "scope": "a subset of draft-sharif-agent-audit-trail-05 fields; not "
+                        "AAT-conformant",
+               "which_chain": WHICH_CHAIN, "export": export_name,
+               "aat_chain": aat_chain, "source_chain": source_chain, "gaps": gaps}
+    return (json.dumps(sidecar, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+
+
 def chain_records(records: list[dict]) -> tuple[list[bytes], str | None, list[dict]]:
     """Give each record its AAT `prev_hash` and its JCS line.
 
@@ -358,13 +369,8 @@ def export_aat(ledger: str | Path, out: str | Path) -> dict:
                          "head": head},
            "refused": refused, "which_chain": WHICH_CHAIN,
            "gaps_file": str(gp), "gaps": len(gaps)}
-    sidecar = {"format": AAT_FORMAT,
-               "scope": "a subset of draft-sharif-agent-audit-trail-05 fields; not "
-                        "AAT-conformant",
-               "which_chain": WHICH_CHAIN, "export": out.name,
-               "aat_chain": res["aat_chain"], "source_chain": res["source_chain"],
-               "gaps": gaps}
-    gp.write_bytes((json.dumps(sidecar, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
+    gp.write_bytes(gaps_sidecar_bytes(out.name, res["aat_chain"], res["source_chain"],
+                                      gaps))
     if word == V.BROKEN:
         res["finding"] = f"the source ledger's chain breaks at {vr.first_break}"
     elif word == V.COULD_NOT_LOOK:

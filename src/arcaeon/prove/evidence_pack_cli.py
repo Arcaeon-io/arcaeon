@@ -3,7 +3,7 @@
 
     arcaeon evidence-pack --ledger L --out DIR [--agent ID] [--from TS] [--to TS]
                           [--witness STORE --namespace NS]
-                          [--system-id ID] [--provider NAME] [--json]
+                          [--system-id ID] [--provider NAME] [--format aat] [--json]
     arcaeon evidence-pack verify PACK [--json]
 
 Exit codes as every verb: 0 VERIFIED, 1 BROKEN, 2 bad usage, 3 COULD NOT LOOK.
@@ -33,6 +33,10 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     p.add_argument("--namespace", default=None, help="the witness namespace to check")
     p.add_argument("--system-id", default="", help="the system's id, for the summary")
     p.add_argument("--provider", default="", help="the provider's name, for the summary")
+    p.add_argument("--format", dest="formats", action="append", default=[],
+                   choices=("aat",),
+                   help="also write the records as agent-audit-trail JSONL (aat.jsonl "
+                        "and aat_gaps.json, checked on verify)")
     p.add_argument("--json", action="store_true", help="print the result as JSON")
     return p
 
@@ -48,7 +52,8 @@ def main(argv: list[str] | None = None, *, prog: str = "arcaeon evidence-pack") 
     try:
         res = build_pack(a.ledger, a.out, system_id=a.system_id, provider=a.provider,
                          witness=a.witness, witness_namespace=a.namespace,
-                         agent=a.agent, since=a.since, until=a.until)
+                         agent=a.agent, since=a.since, until=a.until,
+                         formats=tuple(a.formats))
     except PackUsageError as e:
         print(f"{prog}: {e}", file=sys.stderr)
         return V.EXIT_USAGE

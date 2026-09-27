@@ -60,6 +60,13 @@ BROKEN "pin beyond head"; one the pack claims to predate is COULD NOT LOOK
 "bounded" (its build time is its own word); pins that cannot be tied to
 these records are COULD NOT LOOK "name_not_found", never VERIFIED.
 
+AAT (K064): a pack built with --format aat lists `aat` in its manifest.
+Verify recomputes aat.jsonl from records.jsonl (the same mapping, the same
+JCS chain) and compares it byte for byte, reruns the chain over the file as
+it stands, checks its head against the manifest, and rebuilds aat_gaps.json's
+entries. Any difference is BROKEN naming the file. A pack without `aat` in
+its manifest has no AAT files to check (a planted one is unlisted, step 1).
+
 The overall verdict is the worst step: BROKEN outranks COULD NOT LOOK, which
 outranks VERIFIED. COULD NOT LOOK never exits 0.
 
@@ -158,6 +165,75 @@ def _step_manifest_hash(pack: Path, manifest: dict) -> dict:
         res.update({"verdict": V.BROKEN, "finding": (
             "manifest.json's sha256 differs from manifest.sha256: the manifest was "
             "changed after it was written")})
+        return res
+    res["verdict"] = V.VERIFIED
+    return res
+
+
+def _step_aat(pack: Path, manifest: dict) -> dict:
+    """Recompute the AAT export from records.jsonl and compare (K064)."""
+    from arcaeon.prove.aat_export import (AAT_CHAIN_ALGORITHM, build_gaps, chain_records,
+                                          gaps_sidecar_bytes, map_row, verify_aat_bytes)
+    from arcaeon.record.ledger import verify_file
+    from arcaeon.prove.evidence_pack import _lines
+
+    check = "aat export"
+    claim = manifest.get("aat")
+    if claim is None:
+        return {"check": check, "verdict": V.VERIFIED,
+                "note": "this pack was built without --format aat"}
+    if not isinstance(claim, dict) or not all(
+            isinstance(claim.get(k), str) for k in ("file", "gaps_file")):
+        return {"check": check, "verdict": V.BROKEN,
+                "finding": "manifest incomplete: `aat` names no file and gaps_file"}
+    if any(Path(claim[k]).name != claim[k] for k in ("file", "gaps_file")):
+        return {"check": check, "verdict": V.BROKEN,
+                "finding": "the manifest's `aat` names a file outside the pack folder"}
+    aat, gaps_p = pack / claim["file"], pack / claim["gaps_file"]
+    records = pack / "records.jsonl"
+    for p in (aat, gaps_p, records):
+        if not p.is_file():
+            return _cnl(check, p.name, str(pack), "missing",
+                        f"the pack has no {p.name}, so the AAT export could not be "
+                        "recomputed")
+    raw = aat.read_bytes()
+    problems = []
+    run = verify_aat_bytes(raw)
+    if not run["ok"]:
+        problems.append(f"{aat.name}: {run['finding']}")
+    recs, skipped = [], []
+    for n, line in enumerate(_lines(records.read_bytes()), start=1):
+        try:
+            row = json.loads(line.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            skipped.append(n)
+            continue
+        if not isinstance(row, dict):
+            skipped.append(n)
+            continue
+        recs.append(map_row(row, line=n))
+    lines, head, refused = chain_records(recs)
+    want = b"".join(b + b"\n" for b in lines)
+    if raw != want:
+        got = _lines(raw)
+        at = next((i for i, (a, b) in enumerate(zip(got, lines), start=1) if a != b),
+                  min(len(got), len(lines)) + 1)
+        problems.append(f"{aat.name} differs from the export recomputed from "
+                        f"records.jsonl, first at line {at}")
+    if claim.get("head") != head:
+        problems.append(f"{aat.name}: the manifest's aat head {claim.get('head')} is not "
+                        f"the recomputed head {head}")
+    vr = verify_file(records)
+    side = gaps_sidecar_bytes(
+        aat.name, {"algorithm": AAT_CHAIN_ALGORITHM, "records": len(lines), "head": head},
+        {"ok": vr.ok, "rows": vr.rows, "first_break": vr.first_break},
+        build_gaps(recs, refused, skipped))
+    if gaps_p.read_bytes() != side:
+        problems.append(f"{gaps_p.name} differs from the gaps list recomputed from "
+                        "records.jsonl")
+    res = {"check": check, "records": len(lines), "head": head}
+    if problems:
+        res.update({"verdict": V.BROKEN, "finding": "; ".join(problems)})
         return res
     res["verdict"] = V.VERIFIED
     return res
@@ -661,7 +737,8 @@ def _step_pins(pack: Path, manifest: dict, *, witness=None, remote: bool = False
 #: returns one check dict with a `verdict` word. The pins step (_step_pins)
 #: runs after these, since it takes verify's --witness / --remote options.
 STEPS: list[Callable[[Path, dict], dict]] = [_step_hashes, _step_chain, _step_window,
-                                              _step_build, _step_manifest_hash]
+                                              _step_build, _step_manifest_hash,
+                                              _step_aat]
 
 
 def verify_pack(pack: str | Path, *, witness: str | Path | None = None,

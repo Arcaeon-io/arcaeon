@@ -36,6 +36,10 @@ README = "README.md"
 #: The manifest's own hash, beside it (K06xR review 2): `sha256sum -c` format,
 #: "<64 hex>  manifest.json". It cannot sit inside the manifest it hashes.
 MANIFEST_SHA = "manifest.sha256"
+#: With --format aat (K064): the whole records.jsonl as draft-sharif-agent-
+#: audit-trail records, and the fields it leaves out.
+AAT_FILE = "aat.jsonl"
+AAT_GAPS_FILE = "aat_gaps.json"
 #: What a pack does not show, printed verbatim in README.md: the bullets of
 #: spec section 6 ("What must not be claimed"), word for word. Kept here, one
 #: list, so the page and any test read the same words.
@@ -152,7 +156,7 @@ def build_pack(ledger: str | Path, out: str | Path, *,
                system_id: str = "", provider: str = "",
                witness: Any = None, witness_namespace: str | None = None,
                agent: str | None = None, since: str | None = None,
-               until: str | None = None) -> dict:
+               until: str | None = None, formats: tuple[str, ...] = ()) -> dict:
     """Build an evidence pack from `ledger` into the empty folder `out`.
 
     Returns a result dict with `verdict` (one arcaeon.verdict word), an integer
@@ -163,6 +167,11 @@ def build_pack(ledger: str | Path, out: str | Path, *,
     `agent`, `since`, `until` select the window (see select_window) written to
     `window.jsonl`. An empty window is COULD NOT LOOK, `reason_word: "empty"`:
     the pack was built, and it holds nothing for that agent and window.
+
+    `formats` may name "aat": the whole records.jsonl is then also written as
+    aat.jsonl (the agent-audit-trail subset, with its own JCS chain beside our
+    original `chain`) plus aat_gaps.json, both hashed in the manifest and
+    recomputed from records.jsonl by `evidence-pack verify`.
     """
     from arcaeon.prove.audit import export_bundle
 
@@ -171,6 +180,9 @@ def build_pack(ledger: str | Path, out: str | Path, *,
     if out.exists() and (not out.is_dir() or any(out.iterdir())):
         raise PackUsageError(f"{out} exists and is not an empty folder; "
                              "a pack is written into a new or empty folder")
+    unknown = sorted(set(formats) - {"aat"})
+    if unknown:
+        raise PackUsageError(f"unknown --format {unknown}; the one extra format is aat")
     t_from, t_to = parse_when(since), parse_when(until)
     if t_from is not None and t_to is not None and t_from > t_to:
         raise PackUsageError(f"--from {since!r} is after --to {until!r}")
@@ -205,10 +217,20 @@ def build_pack(ledger: str | Path, out: str | Path, *,
             f"rows for agent {agent!r} from {since!r} to {until!r}", "records.jsonl",
             "empty", "no row in the ledger matches that agent and window"))
     checks = _checks(integrity, window, unplaced, agent, since, until)
+    aat = None
+    if "aat" in formats:
+        from arcaeon.prove.aat_export import (AAT_CHAIN_ALGORITHM, WHICH_CHAIN,
+                                              export_aat)
+        ex = export_aat(out / "records.jsonl", out / AAT_FILE)
+        aat = {"file": AAT_FILE, "gaps_file": AAT_GAPS_FILE,
+               "source": "records.jsonl", "records": ex["records"],
+               "algorithm": AAT_CHAIN_ALGORITHM, "head": ex["aat_chain"]["head"],
+               "gaps": ex["gaps"], "which_chain": WHICH_CHAIN}
     _write_cnl(out, checks)
     _write_readme(out, res, window, system_id=system_id, provider=provider)
     audit_manifest = json.loads((out / MANIFEST).read_text(encoding="utf-8"))
-    _write_manifest(out, res, integrity, audit_manifest, window, unplaced, checks)
+    _write_manifest(out, res, integrity, audit_manifest, window, unplaced, checks,
+                    aat=aat)
     res["files"] = sorted(p.name for p in out.iterdir() if p.is_file())
     return res
 
@@ -384,7 +406,7 @@ def _write_readme(out: Path, res: dict, window: list[dict], *,
 
 def _write_manifest(out: Path, res: dict, integrity: dict, audit_manifest: dict,
                     window: list[dict], unplaced: list[int],
-                    checks: list[dict]) -> dict:
+                    checks: list[dict], *, aat: dict | None = None) -> dict:
     """Write manifest.json LAST, over every other file in the pack.
 
     The three counts are of the checks this build ran (the records chain with
@@ -427,6 +449,8 @@ def _write_manifest(out: Path, res: dict, integrity: dict, audit_manifest: dict,
         "counts": counts,
         "audit_export": audit_manifest,
     }
+    if aat is not None:
+        manifest["aat"] = aat
     (out / MANIFEST).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     # The manifest's own hash, written after it. It catches an edit to the
     # manifest alone; a rewriter who also recomputes this line is caught only
