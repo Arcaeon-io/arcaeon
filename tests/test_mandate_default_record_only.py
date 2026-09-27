@@ -79,13 +79,73 @@ def _stdio(tmp_path: Path, mandate: Path, enforce: bool) -> Result:
     return Result(*_answer(replies[0]), _rows(ledger))
 
 
+class _EchoUpstream:
+    """Loopback HTTP JSON-RPC stub: answers a tools/call with its `text`."""
+
+    def __init__(self):
+        import http.server
+        import threading
+
+        class H(http.server.BaseHTTPRequestHandler):
+            protocol_version = "HTTP/1.1"
+
+            def log_message(self, *a):
+                pass
+
+            def do_POST(self):
+                msg = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+                text = msg["params"]["arguments"]["text"]
+                body = json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": {
+                    "content": [{"type": "text", "text": text}]}}).encode()
+                self.send_response_only(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
+        self.httpd.daemon_threads = True
+        self.url = f"http://127.0.0.1:{self.httpd.server_address[1]}/mcp"
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+
+    def close(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+def _http_forward(tmp_path: Path, mandate: Path, enforce: bool) -> Result:
+    import http.client
+    from arcaeon.record.adapter import http_forward as HF
+    ledger = tmp_path / "http.seam.jsonl"
+    up = _EchoUpstream()
+    try:
+        try:
+            srv = HF.build_forward_server(up.url, ledger_path=ledger, mandate_path=mandate,
+                                          mandate_enforce=enforce).start()
+        except HF.MandateUnreadable:
+            return Result(None, None, _rows(ledger))
+        try:
+            frame = {"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": CALL}
+            c = http.client.HTTPConnection("127.0.0.1", srv.port, timeout=30)
+            c.request("POST", "/", body=json.dumps(frame).encode(),
+                      headers={"Content-Type": "application/json"})
+            reply = json.loads(c.getresponse().read())
+            c.close()
+        finally:
+            srv.close()
+    finally:
+        up.close()
+    return Result(*_answer(reply), _rows(ledger))
+
+
 SURFACES = {
     "stdio_proxy": _stdio,
+    "http_forward": _http_forward,   # K071
 }
 
 # Surfaces whose enforce mode refuses to start on an unreadable mandate
 # (nothing reaches the tool, and there is no per-call reply to read).
-ENFORCE_REFUSES_UNREADABLE = {"stdio_proxy"}
+ENFORCE_REFUSES_UNREADABLE = {"stdio_proxy", "http_forward"}
 
 
 def _mandate(tmp_path: Path, kind: str) -> Path:
@@ -144,4 +204,4 @@ def test_enforce_on_an_unreadable_mandate_forwards_nothing(tmp_path, surface):
 def test_every_mandate_surface_is_in_the_guard():
     """A surface that grows a mandate parameter without joining SURFACES
     escapes this guard. The ones known to take one are listed here."""
-    assert {"stdio_proxy"} <= set(SURFACES)
+    assert {"stdio_proxy", "http_forward"} <= set(SURFACES)

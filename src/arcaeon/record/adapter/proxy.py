@@ -1056,9 +1056,6 @@ def main(argv: list[str] | None = None,
         ap.error("--mandate-enforce needs --mandate PATH")
     if args.http_forward is not None:
         from .http_forward import check_upstream, run_http_forward
-        if args.mandate is not None:
-            ap.error("--mandate applies to the stdio proxy only; --http-forward "
-                     "does not check mandates yet")
         if command:
             ap.error("--http-forward takes no server command: it forwards to the URL")
         try:
@@ -1070,7 +1067,8 @@ def main(argv: list[str] | None = None,
             tape_path=args.tape, side=args.side, tape_namespace=args.tape_namespace,
             server=args.server, session=args.session, raw=args.raw,
             max_frame=args.max_frame, upstream_timeout=args.upstream_timeout,
-            pin_witness=args.pin_witness, tape_pair=args.tape_pair)
+            pin_witness=args.pin_witness, tape_pair=args.tape_pair,
+            mandate_path=args.mandate, mandate_enforce=args.mandate_enforce)
     if args.listen is not None:
         ap.error("--listen only applies with --http-forward")
     if not command:

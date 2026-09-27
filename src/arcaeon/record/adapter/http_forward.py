@@ -59,12 +59,25 @@ its own listener.
 The tape never costs a call: every observation is inside a try, failures are
 counted and reported in `session_end`, and the relay goes on.
 
+THE MANDATE GATE (K071)
+-----------------------
+With `mandate_path`, every `tools/call` in a POST body is checked against that
+mandate by the same `_MandateWatch` the stdio proxy uses, so the rows are the
+same: `mandate_outside` and `mandate_could_not_look`, in the same chain.
+RECORD-ONLY by default: the request is forwarded first and judged second, and
+an outside call still reaches the upstream. Only `mandate_enforce=True` holds a
+POST back: a body carrying any call the gate did not find inside is answered
+by the listener itself (HTTP 200, the JSON-RPC error code -32001 per request,
+the stdio proxy's own reply) and never forwarded. Enforce with a mandate that
+cannot be read refuses to start (`MandateUnreadable`; the CLI exits 3).
+
 Stdlib only (`http.server`, `http.client`, `zlib`).
 """
 from __future__ import annotations
 
 import contextlib
 import http.client
+import json
 import os
 import re
 import signal
@@ -79,8 +92,8 @@ from ._version import IMPL, VERSION
 from .observer import DEFAULT_MAX_FRAME, SeamObserver
 from .tape import WITNESS_KEY_ENV, TapeWriter, pin_at_session_end
 
-__all__ = ["SEAM_HTTP", "KEEP_OPEN_STATUSES", "ForwardServer", "build_forward_server",
-           "run_http_forward"]
+__all__ = ["SEAM_HTTP", "KEEP_OPEN_STATUSES", "ForwardServer", "MandateUnreadable",
+           "build_forward_server", "run_http_forward"]
 
 SEAM_HTTP = "mcp-http"
 
@@ -91,6 +104,11 @@ SEAM_HTTP = "mcp-http"
 KEEP_OPEN_STATUSES = frozenset({202})
 
 CHUNK = 65536
+
+
+class MandateUnreadable(RuntimeError):
+    """Enforce was asked for and the mandate could not be read: nothing to
+    enforce, so the listener does not start (COULD NOT LOOK, exit 3)."""
 
 #: One connection's business, never forwarded (RFC 9110 7.6.1). `host` and
 #: `content-length` are set by this hop for its own connection; `expect` is
@@ -111,6 +129,8 @@ def _connection_named(items) -> frozenset:
         if k.lower() == "connection":
             out.update(t.strip().lower() for t in (v or "").split(",") if t.strip())
     return frozenset(out)
+
+NL = chr(10).encode()
 
 _EOL = re.compile(rb"\r\n|\r|\n")
 
@@ -305,6 +325,8 @@ class _Handler(BaseHTTPRequestHandler):
         scope = self.headers.get("Mcp-Session-Id") or None
         srv.count("exchanges")
         with srv.in_flight():
+            if srv.mandate_blocks(self, method, body, scope):
+                return
             self._forward(method, body, scope)
 
     def _forward(self, method: str, body: bytes, scope) -> None:
@@ -326,6 +348,7 @@ class _Handler(BaseHTTPRequestHandler):
         # The request has crossed (or failed to cross) this side: open its calls
         # now, before waiting on the answer, so the index order is send order.
         opened = srv.observe_request(method, body, scope)
+        srv.observe_mandate(method, body)
         resp = None
         if err is None:
             try:
@@ -440,7 +463,7 @@ class ForwardServer(ThreadingHTTPServer):
 
     def __init__(self, listen_addr, upstream: str, *, observer: SeamObserver,
                  tape, max_frame: int, upstream_timeout: float, pin_witness=None,
-                 tape_path=None, tape_namespace=None, tape_pair=None):
+                 tape_path=None, tape_namespace=None, tape_pair=None, mandate=None):
         super().__init__(listen_addr, _Handler)
         u = urlsplit(upstream)
         self.upstream_scheme = u.scheme
@@ -462,6 +485,8 @@ class ForwardServer(ThreadingHTTPServer):
         self._idle = threading.Condition(self._lock)
         self._inflight = 0
         self._fault = os.environ.get(_fault_env())
+        #: proxy._MandateWatch, or None when no mandate was given.
+        self.mandate = mandate
 
     # -- helpers the handler calls ---------------------------------------
 
@@ -533,6 +558,103 @@ class ForwardServer(ThreadingHTTPServer):
             self.count("observe_failures")
             return []
 
+    # -- the mandate gate (K071) --------------------------------------------
+
+    def _judge_body(self, body: bytes):
+        """(msgs, was_list, judged) for one POST body. `judged` maps a message
+        index to the gate's (verdict, reason, extra) for each tools/call."""
+        from .observer import _parse
+        try:
+            parsed = json.loads(body.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError, RecursionError):
+            return [], False, {}
+        msgs = _parse(body)
+        judged = {i: self.mandate.judge(m) for i, m in enumerate(msgs)
+                  if m.get("method") == "tools/call"}
+        return msgs, isinstance(parsed, list), judged
+
+    def _record_oversize(self, action: str) -> None:
+        self.mandate.record({}, "could_not_look",
+                            f"a request body over {self.max_frame} bytes cannot be judged",
+                            {"rule": "frame", "looked_for": "a complete frame",
+                             "where": "the POST body", "reason_word": "bounded"},
+                            action)
+
+    def observe_mandate(self, method: str, body: bytes) -> None:
+        """Record-only: judge a POST body that was already sent upstream. Never
+        raises and never changes what was forwarded."""
+        w = self.mandate
+        if (w is None or w.enforce or method != "POST" or not body
+                or self._ended is not None):
+            return
+        try:
+            if len(body) > self.max_frame:
+                self._record_oversize("forwarded")
+                return
+            msgs, _, judged = self._judge_body(body)
+            for i, (v, why, extra) in judged.items():
+                w.record(msgs[i], v, why, extra, "forwarded")
+        except Exception:
+            self.count("observe_failures")
+
+    def mandate_blocks(self, handler, method: str, body: bytes, scope) -> bool:
+        """Enforce only: LOOK, then forward. True when the listener answered the
+        agent itself and the request must not go upstream. A body holding any
+        tools/call the gate did not find inside is held back whole, as the
+        stdio proxy holds back a whole frame."""
+        w = self.mandate
+        if (w is None or not w.enforce or method != "POST" or not body
+                or self._ended is not None):
+            return False
+        if len(body) > self.max_frame:
+            self._record_oversize("blocked")
+            self._plain_reply(handler, 413, b"arcaeon-adapter: request body too large "
+                                            b"for the mandate gate to judge" + NL)
+            return True
+        msgs, was_list, judged = self._judge_body(body)
+        if not any(v[0] != "inside" for v in judged.values()):
+            for i, (v, why, extra) in judged.items():
+                w.record(msgs[i], v, why, extra, "forwarded")
+            return False
+        from .proxy import _block_reply
+        for i, (v, why, extra) in judged.items():
+            w.record(msgs[i], v, why, extra, "blocked")
+        reply = _block_reply(msgs, was_list, {i: (v, str(why)) for i, (v, why, _)
+                                              in judged.items() if v != "inside"})
+        opened = self.observe_request(method, body, scope)   # the attempt
+        if reply is None:
+            self._plain_reply(handler, 202, b"")
+            self.close_calls(opened, "blocked_by_mandate")
+            return True
+        try:
+            handler.send_response_only(200)
+            handler.send_header("Content-Type", "application/json")
+            handler.send_header("Content-Length", str(len(reply)))
+            handler.end_headers()
+            handler.wfile.write(reply)
+            handler.wfile.flush()
+        except OSError:
+            self.count("relay_errors")
+            handler.close_connection = True
+        try:
+            self.observer.observe_server_frame(reply, scope)  # ...paired with its answer
+        except Exception:
+            self.count("observe_failures")
+        return True
+
+    @staticmethod
+    def _plain_reply(handler, code: int, raw: bytes) -> None:
+        try:
+            handler.send_response_only(code)
+            if raw:
+                handler.send_header("Content-Type", "text/plain; charset=utf-8")
+            handler.send_header("Content-Length", str(len(raw)))
+            handler.end_headers()
+            if raw:
+                handler.wfile.write(raw)
+        except OSError:
+            handler.close_connection = True
+
     def observe_answers(self, watcher, step, piece: bytes, scope) -> None:
         if self._ended is not None:
             return
@@ -602,7 +724,8 @@ class ForwardServer(ThreadingHTTPServer):
             tape_calls=tape.calls if tape else None,
             tape_failures=(obs.tape_failures + tape.write_failures) or None
             if tape else None,
-            tape_pin=tape_pin)
+            tape_pin=tape_pin,
+            **(self.mandate.session_end_fields() if self.mandate is not None else {}))
         self._ended = end
         return end
 
@@ -635,10 +758,18 @@ def build_forward_server(upstream: str, listen: str = "127.0.0.1:0", *, ledger_p
                          server: str | None = None, session: str | None = None,
                          raw: bool = False, max_frame: int = DEFAULT_MAX_FRAME,
                          upstream_timeout: float = 300.0, pin_witness=None,
-                         tape_pair=None) -> ForwardServer:
+                         tape_pair=None, mandate_path=None,
+                         mandate_enforce: bool = False) -> ForwardServer:
     """Bind the listener, open the seam log and the tape, write `session_begin`.
     Raises ValueError on a bad URL or listen address and OSError when the
-    address cannot be bound, before anything is written."""
+    address cannot be bound, before anything is written.
+
+    With `mandate_path`, every tools/call is checked against that mandate,
+    record-only unless `mandate_enforce` (see the module docstring). Enforce
+    with an unreadable or missing mandate writes the session's two rows and
+    raises `MandateUnreadable`."""
+    if mandate_enforce and mandate_path is None:
+        raise ValueError("mandate_enforce needs a mandate_path")
     from .proxy import _redact_argv, _digest
     check_upstream(upstream)
     addr = _parse_listen(listen)
@@ -650,6 +781,14 @@ def build_forward_server(upstream: str, listen: str = "127.0.0.1:0", *, ledger_p
                         upstream_timeout=upstream_timeout, pin_witness=pin_witness,
                         tape_path=tape_path, tape_namespace=tape_namespace,
                         tape_pair=tape_pair)
+    watch = None
+    if mandate_path is not None:
+        # lazy: a listener without a mandate never imports the gate
+        from . import mandate_gate
+        from .proxy import _MandateWatch
+        watch = _MandateWatch(mandate_gate.load(mandate_path), obs,
+                              enforce=mandate_enforce)
+        srv.mandate = watch
     safe, redactions = _redact_argv([upstream])
     obs.session_begin(
         adapter_version=VERSION, ledger_backend=backend(), transport="http-forward",
@@ -657,7 +796,15 @@ def build_forward_server(upstream: str, listen: str = "127.0.0.1:0", *, ledger_p
         upstream_digest=_digest(upstream), listen=srv.url, cwd=os.getcwd(), pid=os.getpid(),
         raw_payloads=raw, fault_injected=srv._fault or None,
         tape=str(tape_path) if tape else None, tape_side=side if tape else None,
-        tape_namespace=tape_namespace if tape else None)
+        tape_namespace=tape_namespace if tape else None,
+        mandate_mode=watch.mode if watch else None,
+        **(watch.gate.fingerprint() if watch else {}))
+    if watch is not None and watch.enforce and not watch.gate.ok:
+        srv.server_close()
+        obs.session_end(reason="mandate_unreadable", exit_code=3,
+                        error=f"mandate {watch.gate.status}: {watch.gate.error}")
+        raise MandateUnreadable(f"--mandate-enforce and the mandate {watch.gate.status}: "
+                                f"{watch.gate.error}")
     if srv._fault:
         sys.stderr.write(f"arcaeon-adapter: WARNING {_fault_env()}={srv._fault} is set; "
                          f"this process is DELIBERATELY CORRUPTING relayed bytes. "
@@ -671,6 +818,10 @@ def run_http_forward(upstream: str, listen: str, ledger_path, **kw) -> int:
     listener could not start (that attempt is still bracketed in the seam log)."""
     try:
         srv = build_forward_server(upstream, listen, ledger_path=ledger_path, **kw)
+    except MandateUnreadable as e:
+        sys.stderr.write(f"arcaeon-adapter: refusing to start: {e}" + chr(10))
+        sys.stderr.flush()
+        return 3
     except OSError as e:
         from .proxy import _redact_argv
         sys.stderr.write(f"arcaeon-adapter: cannot listen on {listen}: {e}\n")
