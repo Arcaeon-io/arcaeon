@@ -19,6 +19,14 @@ names in records.jsonl, and the window's line numbers must be the ones the
 manifest lists. An edited window row whose manifest hash was fixed is BROKEN
 naming the line: the window is a view of the records, never a second copy.
 
+Build-time findings (K059R): an untouched pack whose BUILD reached COULD NOT
+LOOK (an empty window, rows whose time could not be read, a witness that
+could not be reached) must never verify clean. So verify reads
+could_not_look.json and the manifest's `counts`: the number of entries must
+equal `counts.could_not_look` (an emptied file with its hash fixed is BROKEN,
+"counts mismatch"), a build that recorded a BROKEN check stays BROKEN, and
+any entry makes the pack COULD NOT LOOK, exit 3, with every reason listed.
+
 The overall verdict is the worst step: BROKEN outranks COULD NOT LOOK, which
 outranks VERIFIED. COULD NOT LOOK never exits 0.
 
@@ -192,10 +200,69 @@ def _step_window(pack: Path, manifest: dict) -> dict:
     return res
 
 
+CNL_FILE = "could_not_look.json"
+_CNL_FIELDS = ("looked_for", "where", "reason_word", "reason")
+
+
+def _step_build(pack: Path, manifest: dict) -> dict:
+    """What the build itself could not look at, and whether the pack still says so."""
+    check = "build-time findings"
+    p = pack / CNL_FILE
+    if not p.is_file():
+        return _cnl(check, CNL_FILE, str(pack), "missing",
+                    "the pack has no could_not_look.json, so what the build could not "
+                    "look at is unknown")
+    try:
+        entries = json.loads(p.read_text(encoding="utf-8"))
+        if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
+            raise ValueError("not a JSON list of objects")
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        return _cnl(check, CNL_FILE, str(pack), "unreadable",
+                    f"could_not_look.json could not be read as a list of entries ({e})")
+    counts = manifest.get("counts")
+    if not isinstance(counts, dict) or not isinstance(counts.get("could_not_look"), int):
+        return _cnl(check, "the build's verdict counts", MANIFEST, "unreadable",
+                    "manifest.json has no `counts.could_not_look` to check the file against")
+    res = {"check": check, "entries": entries, "manifest_counts": counts}
+    problems = []
+    if len(entries) != counts["could_not_look"]:
+        problems.append(f"counts mismatch: could_not_look.json holds {len(entries)} "
+                        f"entr{'y' if len(entries) == 1 else 'ies'}, the manifest's "
+                        f"counts.could_not_look is {counts['could_not_look']}")
+    checks = manifest.get("checks")
+    if isinstance(checks, list):
+        by_word = {w: sum(isinstance(c, dict) and c.get("verdict") == w for c in checks)
+                   for w in (V.VERIFIED, V.BROKEN, V.COULD_NOT_LOOK)}
+        claimed = {V.VERIFIED: counts.get("verified"), V.BROKEN: counts.get("broken"),
+                   V.COULD_NOT_LOOK: counts.get("could_not_look")}
+        if by_word != claimed:
+            problems.append("counts mismatch: the manifest's `checks` list does not add "
+                            "up to its `counts`")
+    if problems:
+        res.update({"verdict": V.BROKEN, "finding": "; ".join(problems)})
+        return res
+    if (counts.get("broken") or 0) > 0 or manifest.get("verdict") == V.BROKEN:
+        res.update({"verdict": V.BROKEN, "finding": (
+            f"the build recorded {counts.get('broken') or 0} BROKEN check(s); "
+            "integrity.json names the break")})
+        return res
+    if entries:
+        first = entries[0]
+        rw = first.get("reason_word")
+        res.update({"verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            first.get("looked_for"), first.get("where"),
+            rw if rw in V.REASON_WORDS else "unreadable",
+            f"the build could not look at {len(entries)} thing(s); first: "
+            f"{first.get('reason')}")})
+        return res
+    res["verdict"] = V.VERIFIED
+    return res
+
+
 #: The verify steps, in order. Each takes (pack folder, loaded manifest) and
 #: returns one check dict with a `verdict` word.
 STEPS: list[Callable[[Path, dict], dict]] = [_step_hashes, _step_chain,
-                                              _step_window]
+                                              _step_window, _step_build]
 
 
 def verify_pack(pack: str | Path) -> dict:
@@ -233,9 +300,19 @@ def verify_pack(pack: str | Path) -> dict:
     if word == V.BROKEN:
         res["finding"] = "; ".join(f"{c['check']}: {c['finding']}" for c in checks
                                    if c["verdict"] == V.BROKEN)
-    elif word == V.COULD_NOT_LOOK:
+    if word != V.VERIFIED:
+        # every reason, the build's own entries included, so exit 3 says why
+        reasons = []
+        for c in checks:
+            if c["verdict"] == V.COULD_NOT_LOOK and c["check"] != "build-time findings":
+                reasons.append({"check": c["check"], **{k: c[k] for k in _CNL_FIELDS}})
+            for e in c.get("entries") or []:
+                reasons.append({"check": e.get("check", "build"),
+                                **{k: e.get(k) for k in _CNL_FIELDS}})
+        res["could_not_look"] = reasons
+    if word == V.COULD_NOT_LOOK:
         first = next(c for c in checks if c["verdict"] == V.COULD_NOT_LOOK)
-        res.update({k: first[k] for k in ("looked_for", "where", "reason_word", "reason")})
+        res.update({k: first[k] for k in _CNL_FIELDS})
     return res
 
 
@@ -260,6 +337,8 @@ def main(argv: list[str] | None = None, *,
         elif res.get("reason"):
             line += f" ({res['reason_word']}: {res['reason']})"
         print(line)
+        for r in res.get("could_not_look") or []:
+            print(f"  {V.COULD_NOT_LOOK} [{r['reason_word']}] {r['check']}: {r['reason']}")
     return res["exit"]
 
 
