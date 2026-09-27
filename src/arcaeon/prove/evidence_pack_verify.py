@@ -53,6 +53,12 @@ could_not_look.json must equal the COULD NOT LOOK entries of `checks`. The
 window is re-selected from records.jsonl with the manifest's own agent and
 bounds; an empty window, or agent rows whose time could not be read, that the
 pack does not list as COULD NOT LOOK is BROKEN (the pack hides its finding).
+With `--witness` and no pin listed, the pin file is searched for this ledger
+(a namespace named by `--namespace`, or one whose pin matches records.jsonl
+at its row): a pin past the pack's head, taken before the pack was built, is
+BROKEN "pin beyond head"; one the pack claims to predate is COULD NOT LOOK
+"bounded" (its build time is its own word); pins that cannot be tied to
+these records are COULD NOT LOOK "name_not_found", never VERIFIED.
 
 The overall verdict is the worst step: BROKEN outranks COULD NOT LOOK, which
 outranks VERIFIED. COULD NOT LOOK never exits 0.
@@ -517,7 +523,103 @@ def _check_local(pack: Path, pin: dict, witness) -> dict:
         "the pin the pack says it was checked against")}
 
 
-def _step_pins(pack: Path, manifest: dict, *, witness=None, remote: bool = False) -> dict:
+def _when(text):
+    from arcaeon.prove.evidence_pack import PackUsageError, parse_when
+    try:
+        return parse_when(text) if isinstance(text, str) else None
+    except PackUsageError:
+        return None
+
+
+def _unlisted_pins(pack: Path, manifest: dict, witness, namespace: str | None) -> dict:
+    """A pack that lists no pin, checked against the pin file anyway.
+
+    The pack's own files cannot name its namespace once pins are stripped
+    from them, so this ledger's namespace is `namespace` when given, else any
+    namespace in the pin file one of whose pins matches records.jsonl at its
+    row. In that namespace: a pin at or below the head that records.jsonl
+    does not hold is BROKEN; a pin past the head is BROKEN "pin beyond head"
+    when it was taken before the pack was built, COULD NOT LOOK "bounded"
+    when the pack's (self-stated) build time predates it. Pins that cannot
+    be tied to these records are COULD NOT LOOK "name_not_found".
+    """
+    from arcaeon.record.ledger import Ledger, chain_at
+    from arcaeon.record.ledger.witness import WitnessStore
+
+    wp = Path(witness)
+    looked = "pins for this ledger in the pin file"
+    if not wp.is_file():
+        return {"verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            looked, str(wp), "missing", "the pin file named by --witness was not found")}
+    store = WitnessStore(wp)
+    if store.verify().get("ok") is False:
+        return {"verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            f"an intact pin file", str(wp), "unreadable",
+            "the pin file fails its own chain, so no pin in it can vouch for anything")}
+    records = pack / "records.jsonl"
+    head_rows = Ledger(records).head().rows if records.is_file() else 0
+    names = sorted({r.get("namespace") for r in _pin_rows(wp)
+                    if isinstance(r.get("namespace"), str)})
+    if namespace is not None:
+        mine = [namespace]
+    else:
+        mine = [ns for ns in names
+                if any(isinstance(h.get("rows"), int) and h["rows"] <= head_rows
+                       and chain_at(records, h["rows"]) == h.get("chain")
+                       for h in store.history(ns))]
+    if not mine:
+        if not names:
+            return {"verdict": V.VERIFIED}
+        return {"verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            looked, str(wp), "name_not_found",
+            f"the pack lists no pin and the pin file holds pins for {names}, none of "
+            "which could be tied to these records; if one is this ledger's, pass it "
+            "with --namespace")}
+    built = _when(manifest.get("built_at"))
+    problems, predates = [], []
+    for ns in mine:
+        for h in store.history(ns):
+            rows, chain = h.get("rows"), h.get("chain")
+            if not isinstance(rows, int):
+                continue
+            if rows <= head_rows:
+                if chain_at(records, rows) != chain:
+                    problems.append(f"the witness pinned {ns!r} at row {rows} with chain "
+                                    f"{chain}; records.jsonl does not hold it")
+                continue
+            taken = _when(h.get("received_at")) or _when(h.get("as_of"))
+            # built_at has whole seconds; a pin in the same second is not later
+            if (built is not None and taken is not None
+                    and taken.replace(microsecond=0) > built):
+                predates.append((ns, rows))
+            else:
+                problems.append(f"pin beyond head: the witness pinned {ns!r} at row "
+                                f"{rows}, past this pack's head at row {head_rows}, and "
+                                "the pack lists no pin")
+    if problems:
+        return {"verdict": V.BROKEN, "namespaces": mine, "finding": "; ".join(problems)}
+    if predates:
+        return {"verdict": V.COULD_NOT_LOOK, "namespaces": mine, **V.could_not_look(
+            f"rows past row {head_rows} pinned for {mine}", str(wp), "bounded",
+            f"the witness holds pins past this pack's head {predates}; the pack says it "
+            "was built before them, and its build time is its own word")}
+    return {"verdict": V.VERIFIED, "namespaces": mine}
+
+
+def _pin_rows(wp: Path) -> list[dict]:
+    rows = []
+    for line in wp.read_bytes().splitlines():
+        try:
+            r = json.loads(line.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            continue
+        if isinstance(r, dict):
+            rows.append(r)
+    return rows
+
+
+def _step_pins(pack: Path, manifest: dict, *, witness=None, remote: bool = False,
+               namespace: str | None = None) -> dict:
     """Check each pin inside the pack, then against the witness itself."""
     check = "pins"
     ip = pack / "integrity.json"
@@ -533,6 +635,10 @@ def _step_pins(pack: Path, manifest: dict, *, witness=None, remote: bool = False
         res.update({"verdict": V.BROKEN, "finding": "; ".join(problems)})
         return res
     if not listed:
+        if witness is not None:
+            res.update(_unlisted_pins(pack, manifest, witness, namespace))
+            if res["verdict"] != V.VERIFIED:
+                return res
         res.update({"verdict": V.VERIFIED, "note": (
             "no pin is listed, so the tail of the records was not witnessed")})
         return res
@@ -559,13 +665,15 @@ STEPS: list[Callable[[Path, dict], dict]] = [_step_hashes, _step_chain, _step_wi
 
 
 def verify_pack(pack: str | Path, *, witness: str | Path | None = None,
-                remote: bool = False) -> dict:
+                remote: bool = False, namespace: str | None = None) -> dict:
     """Verify the pack folder `pack`. Returns `verdict`, integer `exit`,
     `pack`, `checks` (one per step) and, when BROKEN, `finding` naming what
     broke. Never raises on a damaged or absent pack: that is a verdict.
 
     `witness` is a local pin file to check local pins against; `remote`
-    allows one read of the public witness per remote pin (step 4)."""
+    allows one read of the public witness per remote pin (step 4);
+    `namespace` names this ledger's namespace in the pin file when the pack
+    lists no pin of its own."""
     pack = Path(pack)
     base = {"pack": str(pack)}
     if not pack.is_dir():
@@ -592,7 +700,8 @@ def verify_pack(pack: str | Path, *, witness: str | Path | None = None,
                 "checks": [c], **{k: c[k] for k in ("looked_for", "where", "reason_word",
                                                    "reason")}}
     checks = [step(pack, manifest) for step in STEPS]
-    checks.append(_step_pins(pack, manifest, witness=witness, remote=remote))
+    checks.append(_step_pins(pack, manifest, witness=witness, remote=remote,
+                             namespace=namespace))
     word = _worst([c["verdict"] for c in checks])
     res = {**base, "verdict": word, "exit": V.EXIT_BY_WORD[word], "checks": checks}
     if word == V.BROKEN:
@@ -622,6 +731,9 @@ def _parser(prog: str) -> argparse.ArgumentParser:
                    help="the local pin file to check the pack's local pins against")
     p.add_argument("--remote", action="store_true",
                    help="read each remote pin from the public witness (network)")
+    p.add_argument("--namespace", default=None,
+                   help="this ledger's namespace in the pin file, checked even when "
+                        "the pack lists no pin")
     p.add_argument("--json", action="store_true", help="print the result as JSON")
     return p
 
@@ -629,7 +741,8 @@ def _parser(prog: str) -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None, *,
          prog: str = "arcaeon evidence-pack verify") -> int:
     a = _parser(prog).parse_args(argv)
-    res = verify_pack(a.pack, witness=a.witness, remote=a.remote)
+    res = verify_pack(a.pack, witness=a.witness, remote=a.remote,
+                      namespace=a.namespace)
     if a.json:
         print(json.dumps(res, indent=2))
     else:
