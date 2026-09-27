@@ -104,6 +104,24 @@ A tape failure never costs a call or its receipt; failures are counted in
 health. A missing tool tape then reads COULD NOT LOOK in reconcile, which is
 the truth.
 
+THE MANDATE GATE (`--mandate`, K072)
+------------------------------------
+With `--mandate PATH`, every JSON-RPC `tools/call` in a request body is checked
+against that mandate by the stdio proxy's own `_MandateWatch`
+(`arcaeon.record.adapter.proxy`), so the rows are the same:
+`mandate_outside` and `mandate_could_not_look`, each naming the tool, the rule
+and the args digest, in a seam-format log of their own (`--mandate-log`,
+default `<ledger>.mandate.jsonl`) bracketed by `session_begin` (which pins the
+mandate file's sha256) and `session_end` (the counts). The receipt ledger is
+untouched. RECORD-ONLY by default: the request is forwarded and receipted
+first and judged second, so an outside call still reaches the upstream and
+gets its receipt. Only `--mandate-enforce` holds a request back: a body with
+any call the gate did not find inside is answered here (HTTP 200, JSON-RPC
+error -32001 per request), is never forwarded, and so gets no receipt and no
+tool-tape row (the tool never saw it). Enforce with a mandate that cannot be
+read refuses to start (exit 3). The gate is imported lazily: a proxy without
+`--mandate` never loads it.
+
 Stdlib only, plus arcaeon-receipt and arcaeon-ledger (already required by
 `call.py`). No third-party HTTP library. The tape needs `arcaeon-adapter`
 (optional; see above).
@@ -130,7 +148,8 @@ from arcaeon.record.ledger import Ledger, verify_file
 from . import call
 from .core import build_receipt
 
-__all__ = ["main", "build_server", "CallProxyHandler", "ReceiptStore"]
+__all__ = ["main", "build_server", "CallProxyHandler", "ReceiptStore",
+           "MandateUnreadable"]
 
 #: RFC 7230 6.1 hop-by-hop headers -- never forwarded either direction. A
 #: reverse proxy terminates and re-establishes the connection on each side,
@@ -514,6 +533,96 @@ def _read_chunked(rfile) -> bytes:
 
 
 # --------------------------------------------------------------------------
+# the mandate gate (see module docstring, "THE MANDATE GATE")
+# --------------------------------------------------------------------------
+
+class MandateUnreadable(RuntimeError):
+    """--mandate-enforce and the mandate could not be read: nothing to enforce,
+    so the proxy does not start (COULD NOT LOOK, exit 3)."""
+
+
+class _CallMandate:
+    """The gate around `_forward()`. Record-only unless `enforce`. Rows go to a
+    seam-format log through the stdio proxy's `_MandateWatch`, so the two
+    surfaces write the same rows. Never raises into the request path in
+    record-only mode."""
+
+    SEAM = "call-proxy"
+
+    def __init__(self, mandate_path, log_path, *, enforce: bool, server: str):
+        from arcaeon.record.adapter import mandate_gate
+        from arcaeon.record.adapter._ledger import backend, open_ledger
+        from arcaeon.record.adapter._version import IMPL, VERSION
+        from arcaeon.record.adapter.observer import SeamObserver
+        from arcaeon.record.adapter.proxy import _MandateWatch
+        self.log_path = str(log_path)
+        self.obs = SeamObserver(open_ledger(self.log_path).append, server=server,
+                                impl=IMPL, seam=self.SEAM)
+        self.watch = _MandateWatch(mandate_gate.load(mandate_path), self.obs,
+                                   enforce=enforce)
+        self.failures = 0
+        self._ended = None
+        self._end_lock = threading.Lock()
+        self.obs.session_begin(adapter_version=VERSION, ledger_backend=backend(),
+                               transport="call-proxy", mandate_mode=self.watch.mode,
+                               **self.watch.gate.fingerprint())
+
+    @property
+    def enforce(self) -> bool:
+        return self.watch.enforce
+
+    def judge(self, body: bytes):
+        """(msgs, was_list, judged) for one request body; `judged` maps a message
+        index to (verdict, reason, extra) for each tools/call in it."""
+        from arcaeon.record.adapter.observer import _parse
+        if not body:
+            return [], False, {}
+        try:
+            parsed = json.loads(body.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError, RecursionError):
+            return [], False, {}
+        msgs = _parse(body)
+        judged = {i: self.watch.judge(m) for i, m in enumerate(msgs)
+                  if m.get("method") == "tools/call"}
+        return msgs, isinstance(parsed, list), judged
+
+    def observe(self, body: bytes) -> None:
+        """Record-only: judge a body that was already forwarded."""
+        if self._ended is not None:
+            return
+        try:
+            msgs, _, judged = self.judge(body)
+            for i, (v, why, extra) in judged.items():
+                self.watch.record(msgs[i], v, why, extra, "forwarded")
+        except Exception:
+            self.failures += 1
+
+    def block_reply(self, body: bytes):
+        """Enforce: the JSON-RPC error bytes to answer with, b"" when the body
+        is blocked but carries nothing answerable, or None to forward it."""
+        from arcaeon.record.adapter.proxy import _block_reply
+        msgs, was_list, judged = self.judge(body)
+        if not any(v[0] != "inside" for v in judged.values()):
+            for i, (v, why, extra) in judged.items():
+                self.watch.record(msgs[i], v, why, extra, "forwarded")
+            return None
+        for i, (v, why, extra) in judged.items():
+            self.watch.record(msgs[i], v, why, extra, "blocked")
+        reply = _block_reply(msgs, was_list, {i: (v, str(why)) for i, (v, why, _)
+                                              in judged.items() if v != "inside"})
+        return b"" if reply is None else reply
+
+    def close(self, reason: str = "shutdown", exit_code=None) -> dict:
+        with self._end_lock:
+            if self._ended is None:
+                self._ended = self.obs.session_end(
+                    reason=reason, exit_code=exit_code,
+                    observe_failures=self.failures or None,
+                    **self.watch.session_end_fields())
+            return self._ended
+
+
+# --------------------------------------------------------------------------
 # the HTTP handler
 # --------------------------------------------------------------------------
 
@@ -538,6 +647,7 @@ class CallProxyHandler(BaseHTTPRequestHandler):
     store: "Optional[ReceiptStore]" = None
     tape: "Optional[_ToolTape]" = None
     tape_off_reason = "no --tape configured"
+    mandate: "Optional[_CallMandate]" = None
 
     def log_message(self, fmt, *args):  # noqa: A003 -- stdlib override
         pass  # the ledger is the record; stderr chatter is not
@@ -618,6 +728,20 @@ class CallProxyHandler(BaseHTTPRequestHandler):
             self.send_error(400, "could not read request body")
             return
 
+        if self.mandate is not None and self.mandate.enforce and method == "POST":
+            reply = self.mandate.block_reply(body)
+            if reply is not None:
+                # Enforce, held back: never forwarded, so no receipt and no
+                # tool-tape row. The agent gets the proxy's own answer.
+                self.send_response(200 if reply else 202)
+                if reply:
+                    self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(reply)))
+                self.end_headers()
+                if reply:
+                    self.wfile.write(reply)
+                return
+
         request = {"method": method, "url": self._upstream_url(),
                    "headers": dict(self.headers.items()), "body": body}
         scope = self.headers.get("Mcp-Session-Id") or None
@@ -647,6 +771,8 @@ class CallProxyHandler(BaseHTTPRequestHandler):
             resp_body_for_tape = resp_body
         if self.tape is not None:
             self.tape.close(opened, resp_body_for_tape, resp_header_items, status, scope)
+        if self.mandate is not None and not self.mandate.enforce and method == "POST":
+            self.mandate.observe(body)   # record-only: forwarded first, judged second
 
         digest = receipt["body_digest"]
         if self.store is not None:
@@ -724,10 +850,20 @@ def build_server(*, listen: str, upstream: str, seller: str, ledger_path,
                  raw_payloads: bool = False, receipts_dir=None,
                  upstream_timeout: float = 30.0, tape_path=None,
                  tape_namespace: Optional[str] = None,
-                 tape_side: str = "tool") -> ThreadingHTTPServer:
+                 tape_side: str = "tool", mandate_path=None,
+                 mandate_enforce: bool = False,
+                 mandate_log=None) -> ThreadingHTTPServer:
     """Build (but do not start) the proxy server. Split out from `main` so
     tests can construct one directly, on an ephemeral port, without going
-    through argv or `serve_forever`."""
+    through argv or `serve_forever`.
+
+    With `mandate_path`, every tools/call is checked against it, record-only
+    unless `mandate_enforce`; rows go to `mandate_log` (default
+    `<ledger>.mandate.jsonl`). `server.mandate_close()` writes the log's
+    `session_end`. Enforce over an unreadable mandate raises
+    `MandateUnreadable` after writing the log's two rows."""
+    if mandate_enforce and mandate_path is None:
+        raise ValueError("--mandate-enforce needs --mandate PATH")
     host, _, port_s = listen.rpartition(":")
     host = host or "127.0.0.1"
     port = int(port_s)
@@ -745,6 +881,17 @@ def build_server(*, listen: str, upstream: str, seller: str, ledger_path,
             tape_off = f"--tape set but the tape writer is not installed ({why}); pip install arcaeon-adapter"
         else:
             tape = _ToolTape(writer_cls(tape_path, side=tape_side, namespace=tape_namespace))
+    mandate = None
+    if mandate_path is not None:
+        mandate = _CallMandate(mandate_path,
+                               mandate_log or f"{ledger_path}.mandate.jsonl",
+                               enforce=mandate_enforce,
+                               server=seller or f"{up.hostname}:{upstream_port}")
+        if mandate.enforce and not mandate.watch.gate.ok:
+            g = mandate.watch.gate
+            mandate.close("mandate_unreadable", exit_code=3)
+            raise MandateUnreadable(f"--mandate-enforce and the mandate {g.status}: "
+                                    f"{g.error}")
     handler = type("BoundCallProxyHandler", (CallProxyHandler,), {
         "upstream_scheme": up.scheme,
         "upstream_host": up.hostname,
@@ -758,11 +905,15 @@ def build_server(*, listen: str, upstream: str, seller: str, ledger_path,
         "store": store,
         "tape": tape,
         "tape_off_reason": tape_off,
+        "mandate": mandate,
     })
     server = ThreadingHTTPServer((host, port), handler)
     server.daemon_threads = True
     server.tape = tape
     server.tape_status = tape.status() if tape is not None else {"on": False, "reason": tape_off}
+    server.mandate = mandate
+    server.mandate_close = (mandate.close if mandate is not None
+                            else (lambda *a, **k: None))
     return server
 
 
@@ -794,7 +945,20 @@ def main(argv: Optional[list] = None) -> int:
                          "still runs and says the tape is off")
     ap.add_argument("--tape-namespace", default=None,
                     help="witness namespace this tape is pinned under (recorded in each row)")
+    ap.add_argument("--mandate", default=None, metavar="PATH",
+                    help="check every MCP tools/call against this mandate JSON (see "
+                         "docs/MANDATE_GATE.md). RECORD-ONLY by default: an outside "
+                         "call is still forwarded and receipted, and gets a "
+                         "mandate_outside row in --mandate-log.")
+    ap.add_argument("--mandate-enforce", action="store_true",
+                    help="with --mandate: BLOCK a call outside the mandate (JSON-RPC "
+                         "error; never forwarded). OFF by default. A missing or "
+                         "unreadable mandate then refuses to start (exit 3).")
+    ap.add_argument("--mandate-log", default=None, metavar="PATH",
+                    help="where the mandate rows go (default <ledger>.mandate.jsonl)")
     args = ap.parse_args(argv)
+    if args.mandate_enforce and args.mandate is None:
+        ap.error("--mandate-enforce needs --mandate PATH")
 
     if args.raw_payloads:
         sys.stderr.write(
@@ -811,7 +975,13 @@ def main(argv: Optional[list] = None) -> int:
                               witness=not args.no_witness, raw_payloads=args.raw_payloads,
                               receipts_dir=args.receipts_dir,
                               upstream_timeout=args.upstream_timeout,
-                              tape_path=args.tape, tape_namespace=args.tape_namespace)
+                              tape_path=args.tape, tape_namespace=args.tape_namespace,
+                              mandate_path=args.mandate,
+                              mandate_enforce=args.mandate_enforce,
+                              mandate_log=args.mandate_log)
+    except MandateUnreadable as e:
+        print(f"arcaeon-receipt call-proxy: refusing to start: {e}", file=sys.stderr)
+        return 3
     except ValueError as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
@@ -831,6 +1001,7 @@ def main(argv: Optional[list] = None) -> int:
         server.server_close()
         if server.tape is not None:
             server.tape.writer.flush()  # any call still open is written unanswered
+        server.mandate_close()
     return 0
 
 

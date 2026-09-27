@@ -138,14 +138,46 @@ def _http_forward(tmp_path: Path, mandate: Path, enforce: bool) -> Result:
     return Result(*_answer(reply), _rows(ledger))
 
 
+def _call_proxy(tmp_path: Path, mandate: Path, enforce: bool) -> Result:
+    import http.client
+    import threading
+    from arcaeon.record.receipt import call_proxy
+    log = tmp_path / "call.mandate.jsonl"
+    up = _EchoUpstream()
+    try:
+        try:
+            srv = call_proxy.build_server(
+                listen="127.0.0.1:0", upstream=up.url.rsplit("/", 1)[0], seller="guard",
+                ledger_path=tmp_path / "calls.log.jsonl", witness=False,
+                mandate_path=mandate, mandate_enforce=enforce, mandate_log=log)
+        except call_proxy.MandateUnreadable:
+            return Result(None, None, _rows(log))
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            frame = {"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": CALL}
+            c = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=30)
+            c.request("POST", "/mcp", body=json.dumps(frame).encode(),
+                      headers={"Content-Type": "application/json"})
+            reply = json.loads(c.getresponse().read())
+            c.close()
+        finally:
+            srv.shutdown()
+            srv.server_close()
+            srv.mandate_close()
+    finally:
+        up.close()
+    return Result(*_answer(reply), _rows(log))
+
+
 SURFACES = {
     "stdio_proxy": _stdio,
     "http_forward": _http_forward,   # K071
+    "call_proxy": _call_proxy,       # K072
 }
 
 # Surfaces whose enforce mode refuses to start on an unreadable mandate
 # (nothing reaches the tool, and there is no per-call reply to read).
-ENFORCE_REFUSES_UNREADABLE = {"stdio_proxy", "http_forward"}
+ENFORCE_REFUSES_UNREADABLE = {"stdio_proxy", "http_forward", "call_proxy"}
 
 
 def _mandate(tmp_path: Path, kind: str) -> Path:
@@ -204,4 +236,4 @@ def test_enforce_on_an_unreadable_mandate_forwards_nothing(tmp_path, surface):
 def test_every_mandate_surface_is_in_the_guard():
     """A surface that grows a mandate parameter without joining SURFACES
     escapes this guard. The ones known to take one are listed here."""
-    assert {"stdio_proxy", "http_forward"} <= set(SURFACES)
+    assert {"stdio_proxy", "http_forward", "call_proxy"} <= set(SURFACES)
