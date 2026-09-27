@@ -7,6 +7,9 @@ the same document. Every other format is GENERATED FROM THAT DOCUMENT, never
 hand-written, through arcaeon.adapters.tool_specs (free check routes only):
 
   claude   Claude tool use: a list of {name, description, input_schema}
+  openai   OpenAI function calling (Responses API shape): a list of
+           {type: "function", name, description, parameters}; the Chat
+           Completions shape nests the last three under `function`
 
 `--out` writes the text to a file instead (UTF-8, LF), the way
 docs/openapi.json and docs/schemas/*.json are made; a drift test holds each
@@ -23,7 +26,7 @@ from pathlib import Path
 
 from arcaeon import verdict as V
 
-FORMATS = ("openapi", "claude")
+FORMATS = ("openapi", "claude", "openai")
 
 
 def _dumps(obj) -> str:
@@ -37,13 +40,25 @@ def claude_tools(doc: dict | None = None) -> list[dict]:
             for s in tool_specs(doc=doc)]
 
 
+def openai_functions(doc: dict | None = None) -> list[dict]:
+    """OpenAI function tools, one per free check route. Not strict mode: the
+    request schemas leave optional fields optional."""
+    from arcaeon.adapters import tool_specs
+    return [{"type": "function", "name": s.name, "description": s.description,
+             "parameters": s.parameters}
+            for s in tool_specs(doc=doc)]
+
+
+_BUILDERS = {"claude": claude_tools, "openai": openai_functions}
+
+
 def render(fmt: str) -> str:
     """The exact text `arcaeon schema --format FMT` prints."""
     from arcaeon.serve import openapi
     if fmt == "openapi":
         return openapi.dumps()
     doc = openapi.build()
-    return _dumps({"claude": claude_tools}[fmt](doc))
+    return _dumps(_BUILDERS[fmt](doc))
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -53,7 +68,8 @@ def _parser() -> argparse.ArgumentParser:
                     "`arcaeon serve` answers at /openapi.json), or as the tool schemas "
                     "a model framework reads, generated from that document.")
     ap.add_argument("--format", choices=FORMATS, default="openapi",
-                    help="openapi (the default); claude: Claude tool-use definitions")
+                    help="openapi (the default); claude: Claude tool-use definitions; "
+                         "openai: OpenAI function tools")
     ap.add_argument("--out", default=None, metavar="FILE",
                     help="write the document to FILE instead of printing it")
     return ap
