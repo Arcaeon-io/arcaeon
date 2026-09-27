@@ -34,6 +34,11 @@ A failed call raises `ReaderCallError` with a `reason_word` from
 `unreadable` when the answer came back in a shape we cannot read). A failed
 call never becomes a reading: the caller writes nothing for that claim.
 
+PRESETS (`reader_from_spec`, the CLI's `--reader`). `ollama:<model>` is the
+OpenAI-compatible reader at `OLLAMA_BASE_URL` (`http://127.0.0.1:11434/v1`,
+no key), provider `ollama`. `openai_compat:<model>` needs a `base_url`;
+`anthropic:<model>` and `gemini:<model>` need a `key_env`.
+
 Stdlib only (`urllib`, imported when a call is made).
 """
 from __future__ import annotations
@@ -48,7 +53,8 @@ from arcaeon.prove.readings import (READING_WORDS, build_reading, normalize_crit
                                     sha256_text)
 
 __all__ = ["PROMPT_TEMPLATE", "PROMPT_TEMPLATE_SHA256", "DEFAULT_TIMEOUT", "ReaderError",
-           "ReaderCallError", "Reader", "build_prompt", "parse_answer", "post_json"]
+           "ReaderCallError", "Reader", "build_prompt", "parse_answer", "post_json",
+           "OLLAMA_BASE_URL", "PRESETS", "reader_from_spec"]
 
 #: The frozen question. Changing one byte changes PROMPT_TEMPLATE_SHA256,
 #: which every row carries, so a reading taken under another template shows.
@@ -197,3 +203,55 @@ class Reader:
                             prompt_sha256=sha256_text(prompt))
         row["prompt_template_sha256"] = PROMPT_TEMPLATE_SHA256
         return row
+
+
+#: Ollama's OpenAI-compatible endpoint on this machine (loopback only).
+OLLAMA_BASE_URL = "http://127.0.0.1:11434/v1"
+
+#: `--reader` prefixes: prefix -> (module, class name, fixed base_url or None).
+PRESETS = {
+    "ollama": ("arcaeon.prove.readers.openai_compat", "OpenAICompatReader", OLLAMA_BASE_URL),
+    "openai_compat": ("arcaeon.prove.readers.openai_compat", "OpenAICompatReader", None),
+    "anthropic": ("arcaeon.prove.readers.anthropic", "AnthropicReader", None),
+    "gemini": ("arcaeon.prove.readers.gemini", "GeminiReader", None),
+}
+
+
+def reader_from_spec(spec: str, *, base_url: str | None = None, key_env: str | None = None,
+                     reader_id: str | None = None, timeout: float = DEFAULT_TIMEOUT) -> Reader:
+    """A reader from a `--reader` spec such as `ollama:qwen2.5-coder:3b`.
+
+    The text before the FIRST colon is the preset; everything after it is the
+    model name (so model tags with colons pass through whole). `ollama:` fixes
+    the base URL to OLLAMA_BASE_URL (a `base_url` given with it is refused, so
+    a spec never quietly points somewhere else). Raises ReaderError.
+    """
+    import importlib
+    if not isinstance(spec, str) or ":" not in spec:
+        raise ReaderError(f"reader spec must look like <preset>:<model>, got {spec!r}; "
+                          f"presets: {', '.join(PRESETS)}")
+    preset, model = spec.split(":", 1)
+    if preset not in PRESETS:
+        raise ReaderError(f"unknown reader preset {preset!r}; presets: {', '.join(PRESETS)}")
+    if not model.strip():
+        raise ReaderError(f"reader spec {spec!r} names no model")
+    mod, cls_name, fixed = PRESETS[preset]
+    cls = getattr(importlib.import_module(mod), cls_name)
+    kw: dict = {"model": model, "reader_id": reader_id, "timeout": timeout}
+    if fixed is not None:
+        if base_url is not None and base_url.rstrip("/") != fixed:
+            raise ReaderError(f"{preset}: always reads at {fixed}; use openai_compat: for another host")
+        kw.update(base_url=fixed, provider=preset)
+        if key_env:
+            kw["key_env"] = key_env
+    elif cls_name == "OpenAICompatReader":
+        if not base_url:
+            raise ReaderError("openai_compat: needs a base_url (--base-url)")
+        kw.update(base_url=base_url, key_env=key_env)
+    else:
+        if not key_env:
+            raise ReaderError(f"{preset}: needs key_env (--key-env, the variable holding the key)")
+        kw["key_env"] = key_env
+        if base_url:
+            kw["base_url"] = base_url
+    return cls(**kw)
