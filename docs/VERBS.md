@@ -726,7 +726,38 @@ working.
 
 ## `serve`
 
-TODO(K004)
+Answers: how does a model or framework that speaks HTTP, not MCP, use
+arcaeon? Starts the local HTTP/JSON API: one route per check, each answering
+with the same JSON the verb's own output carries plus an integer `exit`. It
+binds 127.0.0.1 only; any other `--host` is refused, because putting the
+server on a network is a deploy decision, not a flag. The URL is printed on
+start, and `~/.arcaeon/serve.json` (or `$ARCAEON_HOME/serve.json`) names the
+pid and port for as long as the server runs.
+
+**Usage**
+
+```text
+usage: arcaeon serve [-h] [--host HOST] [--port PORT]
+```
+
+A verdict never rides in the HTTP status: VERIFIED, BROKEN and COULD NOT
+LOOK all come back as 200 with `exit` 0, 1 or 3 in the body. The status
+codes are for the request itself: 400 bad usage (not JSON, a field the
+route refuses, a Host header that is not this loopback address), 404 no
+such route, 405 the wrong method, 413 a body over 10 MB.
+
+**Exit codes:** 0 the server stopped cleanly (Ctrl+C). 2 bad usage,
+including `--host` anything but 127.0.0.1. 3 the server could not start
+(the port is taken).
+
+```console
+$ arcaeon serve --port 0
+arcaeon serve: listening on http://127.0.0.1:54817 (loopback only; Ctrl+C stops)
+$ curl -s http://127.0.0.1:54817/health
+{
+ "ok": true
+}
+```
 
 ## `connect`
 

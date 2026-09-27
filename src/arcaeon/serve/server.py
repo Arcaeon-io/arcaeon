@@ -1,0 +1,262 @@
+# SPDX-License-Identifier: MIT
+"""The HTTP server: stdlib ThreadingHTTPServer over the route table.
+
+LOOPBACK ONLY. The server binds 127.0.0.1 and nothing else; make_server()
+refuses any other host, and so does `arcaeon serve --host`. Putting it on a
+network is a deploy decision, not a flag. Requests whose Host header names
+anything but this loopback address are refused too (400), so a web page
+elsewhere cannot reach it through a DNS name that points at 127.0.0.1.
+
+Status codes (section 0 of the batch): 200 whenever a verdict was reached,
+MATCHED, BROKEN and COULD NOT LOOK alike, with the CLI's JSON plus `exit`.
+400 bad usage (not JSON, a field the route's schema refuses, a bad Host),
+404 no such route (or a declared route whose handler is not built yet),
+405 a known path with another method, 413 a body over MAX_BODY. A verdict
+never rides in the HTTP status. A handler that raises is COULD NOT LOOK
+(exit 3) in a 200 body, naming the exception class only: the CLI's rule.
+
+The request log goes to stderr as method, path (query string dropped) and
+status. It never carries a header or a body, so a token cannot reach it.
+
+`run()` writes <ARCAEON_HOME or ~/.arcaeon>/serve.json (pid, port, url) once
+the socket is bound, and removes it on a clean exit if it is still ours.
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from urllib.parse import urlsplit
+
+from arcaeon import verdict as V
+from arcaeon.serve import DEFAULT_PORT, MAX_BODY
+from arcaeon.serve import routes as R
+
+LOOPBACK = "127.0.0.1"
+REFUSE_HOST = "exposing the server is a deploy decision"
+SERVE_JSON = "serve.json"
+#: A too-large body up to this size is read and dropped before the 413, so a
+#: client still writing its body receives the answer instead of a reset.
+_DRAIN_LIMIT = 4 * MAX_BODY
+
+
+class HostRefused(ValueError):
+    """A bind address other than loopback was asked for."""
+
+
+def health(body: dict | None = None) -> dict:
+    """GET /health: the server is up. Open (no token), no side effects."""
+    return {"ok": True}
+
+
+def _json_bytes(obj) -> bytes:
+    return json.dumps(obj, ensure_ascii=False, indent=1).encode("utf-8")
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "arcaeon-serve"
+    sys_version = ""
+    protocol_version = "HTTP/1.1"
+
+    # --- plumbing ----------------------------------------------------------
+    def log_message(self, fmt, *args):  # noqa: D401  the stdlib hook
+        """Silenced: log_request below writes the one line we keep."""
+
+    def log_request(self, code="-", size="-"):
+        path = urlsplit(self.path).path
+        try:
+            print(f"arcaeon serve: {self.command} {path} {int(code)}", file=sys.stderr,
+                  flush=True)
+        except (ValueError, TypeError, OSError):
+            pass
+
+    def _send(self, status: int, payload, *, content_type="application/json; charset=utf-8",
+              headers: dict | None = None) -> None:
+        data = payload if isinstance(payload, bytes) else (
+            payload.encode("utf-8") if isinstance(payload, str) else _json_bytes(payload))
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        for k, v in (headers or {}).items():
+            self.send_header(k, v)
+        if self.close_connection:
+            self.send_header("Connection", "close")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(data)
+
+    def _error(self, status: int, msg: str, **extra) -> None:
+        body = {"error": msg, **extra}
+        if status == 400:
+            body.setdefault("exit", V.EXIT_USAGE)
+        self._send(status, body)
+
+    def _host_ok(self) -> bool:
+        host = (self.headers.get("Host") or "").strip().lower()
+        port = self.server.server_address[1]
+        return host in {f"127.0.0.1:{port}", f"localhost:{port}", "127.0.0.1", "localhost"}
+
+    def _drain(self, n: int) -> None:
+        left = min(n, _DRAIN_LIMIT)
+        while left > 0:
+            chunk = self.rfile.read(min(left, 1 << 16))
+            if not chunk:
+                break
+            left -= len(chunk)
+
+    def _read_body(self):
+        """(body dict or None, error already sent?)."""
+        raw_len = self.headers.get("Content-Length")
+        if self.headers.get("Transfer-Encoding"):
+            self.close_connection = True
+            self._error(400, "send the body with a Content-Length, not chunked")
+            return None, True
+        if raw_len is None:
+            return {}, False
+        try:
+            n = int(raw_len)
+            if n < 0:
+                raise ValueError
+        except ValueError:
+            self.close_connection = True
+            self._error(400, "Content-Length is not a length")
+            return None, True
+        if n > MAX_BODY:
+            self.close_connection = True
+            if n <= _DRAIN_LIMIT:
+                self._drain(n)
+            self._send(413, {"error": f"the body is over {MAX_BODY // (1024 * 1024)} MB",
+                             "limit": MAX_BODY})
+            return None, True
+        if n == 0:
+            return {}, False
+        raw = self.rfile.read(n)
+        try:
+            return json.loads(raw.decode("utf-8")), False
+        except (UnicodeDecodeError, ValueError):
+            self._error(400, "the body is not UTF-8 JSON")
+            return None, True
+
+    # --- dispatch -----------------------------------------------------------
+    def _dispatch(self) -> None:
+        path = urlsplit(self.path).path
+        if not self._host_ok():
+            self.close_connection = True
+            self._error(400, "this server answers only on its loopback address")
+            return
+        route = R.find(self.command, path)
+        if route is None:
+            allowed = R.methods_for(path)
+            if allowed:
+                self._send(405, {"error": f"{self.command} is not allowed on {path}",
+                                 "allow": allowed}, headers={"Allow": ", ".join(allowed)})
+            else:
+                self._error(404, f"no route {path}")
+            return
+        if not self._authorized(route):
+            return
+        body, sent = self._read_body() if self.command == "POST" else ({}, False)
+        if sent:
+            return
+        problem = R.validate(route, body)
+        if problem:
+            self._error(400, problem)
+            return
+        try:
+            fn = route.resolve()
+        except (ImportError, AttributeError):
+            self._error(404, f"{path} is declared but not built in this checkout")
+            return
+        try:
+            result = fn(body)
+        except Exception as e:  # noqa: BLE001  never a traceback, never a green
+            result = {"verdict": V.COULD_NOT_LOOK, "exit": V.EXIT_COULD_NOT_LOOK,
+                      "error": f"could not finish: {type(e).__name__} [internal_error]"}
+        if isinstance(result, str):
+            self._send(200, result, content_type="text/html; charset=utf-8")
+        else:
+            self._send(200, result)
+
+    def _authorized(self, route: R.Route) -> bool:
+        """Token check hook (K005 fills it in). True: carry on."""
+        check = getattr(self.server, "authorize", None)
+        return True if check is None else bool(check(self, route))
+
+    def do_GET(self):     # noqa: N802  stdlib names
+        self._dispatch()
+
+    def do_POST(self):    # noqa: N802
+        self._dispatch()
+
+    def do_PUT(self):     # noqa: N802
+        self._dispatch()
+
+    def do_DELETE(self):  # noqa: N802
+        self._dispatch()
+
+    def do_PATCH(self):   # noqa: N802
+        self._dispatch()
+
+
+class Server(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = False       # a second server on a busy port fails loud
+
+    @property
+    def url(self) -> str:
+        return f"http://{LOOPBACK}:{self.server_address[1]}"
+
+
+def make_server(host: str = LOOPBACK, port: int = DEFAULT_PORT) -> Server:
+    """A bound, not yet serving, server. Any host but 127.0.0.1 is refused."""
+    if host != LOOPBACK:
+        raise HostRefused(f"refusing --host {host}: {REFUSE_HOST}; "
+                          f"arcaeon serve binds {LOOPBACK} only")
+    return Server((LOOPBACK, port), Handler)
+
+
+def serve_json_path() -> Path:
+    from arcaeon import journal
+    return journal.home() / SERVE_JSON
+
+
+def write_serve_json(server: Server) -> Path:
+    p = serve_json_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_name(p.name + f".{os.getpid()}.tmp")
+    tmp.write_text(json.dumps({"pid": os.getpid(), "port": server.server_address[1],
+                               "url": server.url}, indent=1) + "\n", encoding="utf-8")
+    os.replace(tmp, p)
+    return p
+
+
+def remove_serve_json() -> None:
+    """Remove serve.json only if it still names this process."""
+    p = serve_json_path()
+    try:
+        if json.loads(p.read_text(encoding="utf-8")).get("pid") == os.getpid():
+            p.unlink()
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
+def run(server: Server, *, ready: threading.Event | None = None, out=None) -> None:
+    """Serve until interrupted or shut down; serve.json lives exactly that long."""
+    out = out or sys.stdout
+    write_serve_json(server)
+    try:
+        print(f"arcaeon serve: listening on {server.url} (loopback only; Ctrl+C stops)",
+              file=out, flush=True)
+        if ready is not None:
+            ready.set()
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+        remove_serve_json()
