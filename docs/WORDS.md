@@ -37,6 +37,13 @@ other, and a person has to decide which one is right.
 file it knows how to read. It is a could-not-look, not a clean grade: nothing
 was graded, so nothing was cleared.
 
+**COMPARED.** Two readings ledgers (`second-read compare A B`) were both read
+and lined up, claim by claim, against one frozen sentence. It means "both
+ledgers were read and lined up", never "the claims are true". Claims the two
+readers answered differently are filed as DISAGREED beside it, with both
+readings and both reader ids; two readers agreeing measures how ambiguous the
+sentence was for them, not whether a claim holds.
+
 ## Reason words
 
 A COULD NOT LOOK answer carries one of these in `reason_word`, next to

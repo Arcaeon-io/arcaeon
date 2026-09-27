@@ -66,8 +66,8 @@ __all__ = ["COMPARE_FORMAT", "COMPARED", "AGREED", "DISAGREED", "MISSING", "COUL
 
 COMPARE_FORMAT = "arcaeon-readings-compare/1"
 
-#: The comparison completed and every claim was lined up.
-COMPARED = "COMPARED"
+#: The comparison completed and every claim was lined up (arcaeon.verdict).
+COMPARED = _v.COMPARED
 AGREED = "AGREED"
 DISAGREED = "DISAGREED"
 MISSING = _v.MISSING
@@ -84,7 +84,7 @@ SAME_READER_REASON = "the same reader on both sides"
 #: Below this many claims read, the counts are printed and marked not yet informative.
 INFORMATIVE_AT = 20
 
-EXIT_CODES = {COMPARED: _v.EXIT_GOOD, MISSING: _v.EXIT_BAD, BROKEN: _v.EXIT_BAD,
+EXIT_CODES = {COMPARED: _v.exit_for(_v.COMPARED), MISSING: _v.EXIT_BAD, BROKEN: _v.EXIT_BAD,
               COULD_NOT_LOOK: _v.EXIT_COULD_NOT_LOOK}
 
 LIMITS = (

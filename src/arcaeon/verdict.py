@@ -3,7 +3,9 @@
 
 THE WORDS. A record check answers VERIFIED, BROKEN or COULD NOT LOOK. A
 completeness check (reconcile) answers MATCHED, MISSING, ALTERED or COULD NOT
-LOOK. A source grader that found nothing it can grade answers NO GRADEABLE
+LOOK. A readings compare (`second-read compare`) answers COMPARED when both
+ledgers were read and lined up (disagreement is filed, not failed), or
+MISSING, BROKEN or COULD NOT LOOK. A source grader that found nothing it can grade answers NO GRADEABLE
 FILES, which is a could-not-look, not a pass.
 
 THE EXIT CODES, the same for every `arcaeon` verb:
@@ -32,7 +34,8 @@ LOOK, and `arcaeon.prove.reconcile.main(argv)` honours `--legacy-exit` itself.
 from __future__ import annotations
 
 __all__ = ["VERIFIED", "BROKEN", "COULD_NOT_LOOK", "MATCHED", "MISSING", "ALTERED",
-           "NO_GRADEABLE_FILES", "COULD_NOT_LOOK_TOKEN", "WORDS", "EXIT_GOOD", "EXIT_BAD", "EXIT_USAGE",
+           "NO_GRADEABLE_FILES", "COMPARED", "COULD_NOT_LOOK_TOKEN", "WORDS", "COMPARE_WORDS",
+           "EXIT_BY_COMPARE_WORD", "EXIT_GOOD", "EXIT_BAD", "EXIT_USAGE",
            "EXIT_COULD_NOT_LOOK", "EXIT_BY_WORD", "LEGACY", "LEGACY_EXIT_FLAG",
            "exit_for", "unify", "pop_legacy_flag", "REASON_WORDS", "could_not_look"]
 
@@ -43,6 +46,9 @@ MATCHED = "MATCHED"
 MISSING = "MISSING"
 ALTERED = "ALTERED"
 NO_GRADEABLE_FILES = "NO GRADEABLE FILES"
+#: A readings compare completed: both ledgers were read and lined up. It is a
+#: word about two readers and one frozen sentence, never about the claims.
+COMPARED = "COMPARED"
 
 #: The machine spelling reconcile's JSON (and the hosted reconcile service)
 #: has always carried in its `verdict` field. Same word, same exit code.
@@ -50,6 +56,11 @@ COULD_NOT_LOOK_TOKEN = "COULD_NOT_LOOK"
 
 #: Every verdict word, in the order a reader meets them.
 WORDS = (VERIFIED, BROKEN, COULD_NOT_LOOK, MATCHED, MISSING, ALTERED, NO_GRADEABLE_FILES)
+
+#: The readings compare's own word. Kept out of WORDS (the record and
+#: completeness words) so the older tables that enumerate WORDS stay as they
+#: are; `exit_for` and docs/WORDS.md cover it all the same.
+COMPARE_WORDS = (COMPARED,)
 
 EXIT_GOOD = 0
 EXIT_BAD = 1
@@ -67,6 +78,11 @@ EXIT_BY_WORD = {
     COULD_NOT_LOOK_TOKEN: EXIT_COULD_NOT_LOOK,
     NO_GRADEABLE_FILES: EXIT_COULD_NOT_LOOK,
 }
+
+#: COMPARED exits 0: the comparison completed. A DISAGREED claim inside it is
+#: filed with both readings, not failed. MISSING, BROKEN and COULD NOT LOOK
+#: from a compare use EXIT_BY_WORD above.
+EXIT_BY_COMPARE_WORD = {COMPARED: EXIT_GOOD}
 
 #: What each moved tool's own exit codes meant, translated into the table above.
 #: Keyed by `arcaeon` verb, then by subcommand where the old tool's codes
@@ -102,6 +118,8 @@ LEGACY_EXIT_FLAG = "--legacy-exit"
 def exit_for(word: str) -> int:
     """The exit code for a verdict word. An unknown word is COULD NOT LOOK:
     a verdict this table cannot read must never gate green."""
+    if word in EXIT_BY_COMPARE_WORD:
+        return EXIT_BY_COMPARE_WORD[word]
     return EXIT_BY_WORD.get(word, EXIT_COULD_NOT_LOOK)
 
 
