@@ -5,6 +5,10 @@ so it is the same on any machine: the file line's state word (exists, not
 there yet, on another machine) depends on the host and is compared as
 <state>, and the token path as <ARCAEON_HOME>/serve.token. UPDATE_GOLDEN=1
 rewrites them.
+
+A client in WRITE_GOLDEN (K022, K023) also carries the --write merge into a
+config that already holds another server: the change list and the whole
+file text, which is the same on every OS.
 """
 from __future__ import annotations
 
@@ -18,10 +22,22 @@ import pytest
 
 from arcaeon.connect import catalog as C
 from arcaeon.connect import cli
+from arcaeon.connect import write as W
 
 GOLDEN = Path(__file__).resolve().parent / "golden"
 FAKE_HOMES = (("windows", r"C:\Users\u"), ("macos", "/Users/u"), ("linux", "/fake/u"))
 NOTHING = "nothing written (add --write to apply)"
+WRITE_GOLDEN = ("claude-desktop", "claude-code", "cursor")
+SEED = '{\n  "theme": "dark",\n  "KEY": {\n    "other": {"command": "other-server"}\n  }\n}\n'
+
+
+def _write_section(name: str) -> str:
+    e = C.get(name)
+    new, changed = W.merge_text(SEED.replace("KEY", e.key), e.key, cli.ENTRY_NAME,
+                                cli.server_entry(e))
+    lines = ["## --write into a config holding one other server (every OS)"]
+    lines += [f"changed: {c['key']} ({c['change']})" for c in changed]
+    return "\n".join(lines) + "\n" + new
 
 
 @pytest.fixture(autouse=True)
@@ -47,6 +63,8 @@ def _golden_text(capsys, name, arcaeon_home) -> str:
         out = out.replace(str(arcaeon_home / "serve.token"), "<ARCAEON_HOME>/serve.token")
         out = re.sub(r"(?m)^(file: .*)  \([a-z ]+\)$", r"\1  (<state>)", out)
         parts.append(f"## --os {os_name}, home {home}\n" + out)
+    if name in WRITE_GOLDEN:
+        parts.append(_write_section(name))
     return "\n".join(parts)
 
 

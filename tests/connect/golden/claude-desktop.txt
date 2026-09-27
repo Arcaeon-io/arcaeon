@@ -54,3 +54,18 @@ would merge (only the 'arcaeon' entry; every other key stays):
   }
 }
 nothing written (add --write to apply)
+
+## --write into a config holding one other server (every OS)
+changed: mcpServers.arcaeon (added)
+{
+  "theme": "dark",
+  "mcpServers": {
+    "other": {"command": "other-server"},
+    "arcaeon": {
+      "command": "arcaeon",
+      "args": [
+        "mcp"
+      ]
+    }
+  }
+}
