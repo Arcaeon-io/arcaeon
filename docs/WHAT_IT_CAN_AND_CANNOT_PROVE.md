@@ -69,6 +69,27 @@ These are the README's limits, word for word.
 - Keeping the pack for any length of time is the holder's job, not the job of
   whoever runs the hosted witness.
 
+### Three kinds of sentence on page one
+
+Every sentence on an evidence pack's README.md ends in one bracket that says
+what bears it. README.json, beside it, lists each sentence id, the sha256 of
+its text and its class, and `arcaeon evidence-pack verify --json` prints how
+many of each the page holds.
+
+- **[bytes]**: a hash over frozen content proves it. The manifest hashes and
+  the records chain are this kind. Anyone can recompute them from the files.
+- **[order]**: only a commitment made before the act proves it. The witness
+  pin, and the build time read against the pin time, are this kind. Without a
+  pin nothing in the pack bears it.
+- **[asserted]**: no field in the pack carries it. The operator's statement of
+  the window and the system, the completeness of the could not look list, and
+  that any row is true are this kind. It is the builder's word.
+
+A line holding two sentences carries the weaker class. The class each
+sentence may carry is fixed in the code, not in the pack, so a pack that
+moves a sentence to a stronger class, or leaves one untagged, is BROKEN and
+names the sentence.
+
 ### The second reader (`second-read`)
 
 - It does not show whether a claim holds. Two readers reading one sentence

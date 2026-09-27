@@ -58,6 +58,16 @@ script can branch on the cause without reading the sentence.
 - `network`: the request to the hosted witness never completed, so the answer is unknown, not no.
 - `redirect_refused`: the endpoint answered with a redirect to another address. It was not followed and the key was not sent there, so there is no answer to record.
 
+## Bearer words
+
+Every sentence on an evidence pack's first page ends in one of these, in
+square brackets, naming what bears it. The full definitions are in
+[What it can and cannot prove](WHAT_IT_CAN_AND_CANNOT_PROVE.md).
+
+- `bytes`: a hash over frozen content proves it, the manifest hashes and the chain.
+- `order`: only a commitment made before the act proves it, the witness pin and the build time against the pin time.
+- `asserted`: no field carries it, the operator's own statement of the window and the system, the completeness of the could not look list, that any row is true.
+
 ## Many logs at once
 
 A summary over many logs keeps these words side by side: so many VERIFIED, so
