@@ -668,7 +668,21 @@ def _reconcile(tape_a, tape_b, *, pins=None, pin_path=None) -> Reconciliation:
 def main(argv: list[str]) -> int:
     """`reconcile <tape_a> <tape_b> [--pin PIN] [--legacy-exit]`. Prints JSON,
     returns the exit code from arcaeon.verdict (COULD NOT LOOK = 3), or the
-    pre-0.9 code (COULD NOT LOOK = 2) with --legacy-exit."""
+    pre-0.9 code (COULD NOT LOOK = 2) with --legacy-exit.
+
+    `--kind readings` hands the two paths to the readings compare
+    (`arcaeon.prove.readings_compare`, the `second-read compare` object and
+    exit codes). `--kind tapes`, or no `--kind`, is the tape reconcile below."""
+    if "--kind" in argv:
+        argv = list(argv)
+        k = argv.index("--kind")
+        kind = argv[k + 1] if k + 1 < len(argv) else None
+        if kind not in KINDS:
+            print(f"usage: arcaeon reconcile --kind {{{'|'.join(KINDS)}}} <a> <b>")
+            return _v.EXIT_USAGE
+        del argv[k:k + 2]
+        if kind == "readings":
+            return _readings_main(argv)
     args, legacy = _v.pop_legacy_flag(argv)
     pin = None
     if "--pin" in args:
@@ -684,6 +698,22 @@ def main(argv: list[str]) -> int:
     r = reconcile(args[0], args[1], pin_path=pin)
     print(json.dumps(r.to_dict(), indent=1))
     return LEGACY_EXIT_CODES[r.verdict] if legacy else r.exit_code
+
+
+#: What `--kind` may name: two tapes of the same calls (the default), or two
+#: readings ledgers of the same claims (K035).
+KINDS = ("tapes", "readings")
+
+
+def _readings_main(argv: list[str]) -> int:
+    """`reconcile --kind readings <a> <b>`: the readings compare, as JSON."""
+    if "--pin" in argv or _v.LEGACY_EXIT_FLAG in argv or len(argv) != 2:
+        print("usage: arcaeon reconcile --kind readings <ledger_a> <ledger_b>")
+        return _v.EXIT_USAGE
+    from arcaeon.prove.readings_compare import compare
+    res = compare(argv[0], argv[1])
+    print(json.dumps(res, indent=1))
+    return res["exit"]
 
 
 # -- the supersedes walk -----------------------------------------------------
