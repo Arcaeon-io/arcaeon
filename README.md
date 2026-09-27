@@ -39,6 +39,29 @@ The heavy parts are extras. Add only what you use:
 pip install "arcaeon[mcp]"
 ```
 
+Other ways in, same package:
+
+```console
+pipx install "arcaeon[mcp]"
+```
+
+`pipx` keeps arcaeon in a space of its own, apart from your other Python
+packages, and still puts `arcaeon` on your path.
+
+```console
+uvx arcaeon demo
+```
+
+`uvx` (from uv) runs it once without keeping an install: the demo logs two
+rows, changes one word and shows the BROKEN line.
+
+```console
+py -m pip install --user arcaeon
+```
+
+On Windows, when `pip` is not found, the `py` launcher that comes with Python
+installs it for your user alone, no administrator needed.
+
 ## A 60-second first run
 
 Log two rows, check them, change one word of history, check again. The lines
