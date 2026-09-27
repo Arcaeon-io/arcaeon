@@ -300,6 +300,8 @@ class _MandateWatch:
         if verdict == "could_not_look":
             fields.update(looked_for=extra.get("looked_for"), where=extra.get("where"),
                           reason_word=extra.get("reason_word"))
+        if extra.get("judged_reason"):
+            fields["judged_reason"] = extra["judged_reason"]
         if extra.get("evt") == "mandate_cap_exceeded":
             fields.update(amount=extra.get("spend_amount"),
                           session_spent_before=extra.get("session_spent_before"),
@@ -312,8 +314,18 @@ class _MandateWatch:
         with self.obs._lock:
             self.obs._row(evt, **fields)
 
+    def record_unparsed(self, action: str, where: str) -> None:
+        """A request the gate could not parse: never inside, always a row.
+        Record-only it was forwarded; under enforce it is refused."""
+        self.record({}, "could_not_look", UNPARSED_REASON,
+                    {"rule": "frame", "looked_for": "a JSON-RPC request", "where": where,
+                     "reason_word": "unreadable", "judged_reason": "unparsed"}, action)
+
     def observe(self, frame: bytes) -> None:
         """Record-only: judge a copy of an already-forwarded client frame."""
+        if _unparsed(frame):
+            self.record_unparsed("forwarded", "client stdin")
+            return
         for msg in _parse(frame):
             if msg.get("method") == "tools/call":
                 v, why, extra = self.judge(msg)
@@ -333,6 +345,34 @@ class _MandateWatch:
 #: JSON-RPC error code the proxy answers a blocked call with. In the -32000 to
 #: -32099 band JSON-RPC 2.0 reserves for implementation-defined server errors.
 MANDATE_BLOCK_CODE = -32001
+
+#: The reason a request the gate could not parse is rowed (and, under enforce,
+#: refused) with. Before this, such a request carried no tools/call the gate
+#: could see, so it went through unjudged and unrowed, around enforce.
+UNPARSED_REASON = "the request is not JSON the gate can read, so no call in it could be judged"
+
+
+def _unparsed(body: bytes) -> bool:
+    """True when `body` has content that is not JSON. Whitespace is not a
+    request, so it is not unparsed."""
+    txt = body.strip() if body else b""
+    if not txt:
+        return False
+    try:
+        json.loads(txt.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, RecursionError):
+        return True
+    return False
+
+
+def _unparsed_reply() -> bytes:
+    """The JSON-RPC error an unparsed request is refused with under enforce
+    (id null: there was no id the gate could read)."""
+    return json.dumps({"jsonrpc": "2.0", "id": None, "error": {
+        "code": MANDATE_BLOCK_CODE,
+        "message": f"blocked by mandate (could not look): {UNPARSED_REASON}",
+        "data": {"mandate": "could_not_look", "judged_reason": "unparsed"}}},
+        ensure_ascii=False).encode("utf-8") + b"\n"
 
 
 class _AlignedWriter:
@@ -433,6 +473,12 @@ def _gated_relay(src, dst, watch, observe, out: _AlignedWriter, *, obs,
             except (ValueError, UnicodeDecodeError, RecursionError):
                 parsed = None
             msgs = _parse(frame) if parsed is not None else []
+            if parsed is None:
+                # Not JSON: nothing in it can be judged. On stdio it still goes
+                # through byte-identical under enforce (tests/test_mandate_gate.py
+                # test_enforce_inside_only_stream_is_byte_identical holds that
+                # contract), but it is never unrowed: the row says it went by.
+                watch.record_unparsed("forwarded", "client stdin")
         judged = {}
         for i, msg in enumerate(msgs):
             if msg.get("method") == "tools/call":

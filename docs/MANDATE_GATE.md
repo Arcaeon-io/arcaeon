@@ -93,6 +93,8 @@ Every `tools/call` gets one of:
 |---|---|---|
 | outside call | forwarded; `mandate_outside` row, `action: forwarded` | not forwarded; the agent gets a JSON-RPC error (code -32001); `mandate_outside` row, `action: blocked` |
 | could-not-look call | forwarded; `mandate_could_not_look` row | not forwarded; JSON-RPC error; row, `action: blocked` |
+| request that is not JSON (HTTP surfaces) | forwarded; `mandate_could_not_look` row, `judged_reason: unparsed` | not forwarded; JSON-RPC error with id null; row, `action: blocked` |
+| line that is not JSON (stdio) | forwarded; row, `judged_reason: unparsed` | forwarded byte-identical (nothing in it is a call); row, `action: forwarded` |
 | mandate file missing or unreadable | the proxy starts; every call gets a `mandate_could_not_look` row; nothing is ever blocked | the proxy refuses to start and exits 3 (COULD NOT LOOK) |
 
 Enforce mode holds each client frame until its newline arrives, so it can look

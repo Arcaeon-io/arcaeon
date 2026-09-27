@@ -591,6 +591,10 @@ class ForwardServer(ThreadingHTTPServer):
             if len(body) > self.max_frame:
                 self._record_oversize("forwarded")
                 return
+            from .proxy import _unparsed
+            if _unparsed(body):
+                w.record_unparsed("forwarded", "the POST body")
+                return
             msgs, _, judged = self._judge_body(body)
             for i, (v, why, extra) in judged.items():
                 w.record(msgs[i], v, why, extra, "forwarded")
@@ -610,6 +614,23 @@ class ForwardServer(ThreadingHTTPServer):
             self._record_oversize("blocked")
             self._plain_reply(handler, 413, b"arcaeon-adapter: request body too large "
                                             b"for the mandate gate to judge" + NL)
+            return True
+        from .proxy import _unparsed, _unparsed_reply
+        if _unparsed(body):
+            # Not JSON: nothing in it can be judged, so enforce refuses it
+            # rather than forward it unjudged and unrowed.
+            w.record_unparsed("blocked", "the POST body")
+            reply = _unparsed_reply()
+            try:
+                handler.send_response_only(200)
+                handler.send_header("Content-Type", "application/json")
+                handler.send_header("Content-Length", str(len(reply)))
+                handler.end_headers()
+                handler.wfile.write(reply)
+                handler.wfile.flush()
+            except OSError:
+                self.count("relay_errors")
+                handler.close_connection = True
             return True
         msgs, was_list, judged = self._judge_body(body)
         if not any(v[0] != "inside" for v in judged.values()):

@@ -591,6 +591,10 @@ class _CallMandate:
         if self._ended is not None:
             return
         try:
+            from arcaeon.record.adapter.proxy import _unparsed
+            if _unparsed(body):
+                self.watch.record_unparsed("forwarded", "the POST body")
+                return
             msgs, _, judged = self.judge(body)
             for i, (v, why, extra) in judged.items():
                 self.watch.record(msgs[i], v, why, extra, "forwarded")
@@ -600,7 +604,11 @@ class _CallMandate:
     def block_reply(self, body: bytes):
         """Enforce: the JSON-RPC error bytes to answer with, b"" when the body
         is blocked but carries nothing answerable, or None to forward it."""
-        from arcaeon.record.adapter.proxy import _block_reply
+        from arcaeon.record.adapter.proxy import _block_reply, _unparsed, _unparsed_reply
+        if _unparsed(body):
+            # Not JSON: nothing in it can be judged, so enforce refuses it.
+            self.watch.record_unparsed("blocked", "the POST body")
+            return _unparsed_reply()
         msgs, was_list, judged = self.judge(body)
         if not any(v[0] != "inside" for v in judged.values()):
             for i, (v, why, extra) in judged.items():
