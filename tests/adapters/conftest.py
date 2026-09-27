@@ -65,3 +65,30 @@ def fake_module(monkeypatch):
             setattr(sys.modules[".".join(parts[:-1])], parts[-1], mod)
         return mod
     return install
+
+
+class _FakeFieldInfo:
+    def __init__(self, default, description=None):
+        self.default, self.description = default, description
+
+
+def _fake_create_model(name, **fields):
+    """Enough of pydantic.create_model for the adapter tests: a class whose
+    model_json_schema() lists the properties and the required ones."""
+    def model_json_schema(cls):
+        req = [k for k, (_, f) in cls.__arcaeon_fields__.items() if f.default is ...]
+        return {"title": name, "type": "object",
+                "properties": {k: {} for k in cls.__arcaeon_fields__}, "required": req}
+    return type(name, (), {"__arcaeon_fields__": dict(fields),
+                           "model_json_schema": classmethod(model_json_schema)})
+
+
+@pytest.fixture()
+def pydantic_mod(fake_module):
+    """Real pydantic when installed (every framework that needs a model
+    depends on it); a minimal fake otherwise, so the adapter tests always run."""
+    try:
+        import pydantic
+        return pydantic
+    except ImportError:
+        return fake_module("pydantic", Field=_FakeFieldInfo, create_model=_fake_create_model)
