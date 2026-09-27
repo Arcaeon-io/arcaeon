@@ -155,3 +155,78 @@ def test_bad_usage_is_400(srv):
     s2, _ = post(srv, "/v1/evidence-pack", {"ledger": "ledger.jsonl", "out": "p",
                                             "formats": ["nope"]})
     assert (s1, s2) == (400, 400)
+
+
+# --- K066 to K068 fields over HTTP: mandate, receipt (--readings), zip, built_at ---
+
+STAMP = "2026-09-27T12:00:00Z"
+
+
+def test_new_fields_reach_the_verb_argv(monkeypatch):
+    seen = []
+    monkeypatch.setattr(h_core, "run_verb",
+                        lambda verb, argv: seen.append((verb, argv)) or (0, "{}", ""))
+    HE.build({"ledger": "L", "out": "O", "mandate": "M", "receipt": "R", "zip": True,
+              "built_at": STAMP})
+    assert seen[0] == ("evidence-pack", ["--ledger", "L", "--out", "O", "--mandate", "M",
+                                         "--readings", "R", "--built-at", STAMP, "--zip",
+                                         "--json"])
+
+
+def test_zip_built_twice_over_http_is_byte_identical_and_verifies(srv, root):
+    import hashlib
+    for out in ("z1", "z2"):
+        status, got = post(srv, "/v1/evidence-pack", {"ledger": "ledger.jsonl", "out": out,
+                                                     "zip": True, "built_at": STAMP})
+        assert status == 200 and got["exit"] == 0, got
+    a, b = (hashlib.sha256((root / f"{n}.zip").read_bytes()).hexdigest()
+            for n in ("z1", "z2"))
+    assert a == b == got["zip_sha256"]
+    status, v = post(srv, "/v1/evidence-pack/verify", {"pack": "z1.zip"})
+    rc, want = cli("evidence-pack", "verify", str(root / "z1.zip"), "--json")
+    assert status == 200 and v["exit"] == rc == 0 and v == {**want, "exit": rc}
+
+
+def test_mandate_and_receipt_over_http(srv, root):
+    from arcaeon.record.receipt.core import build_receipt, save_receipt
+    (root / "mandate.json").write_text('{"allowed_acts": ["echo"]}', encoding="utf-8")
+    rc = build_receipt("second_read_compare", {"a": {"rows": 1}, "b": {"rows": 1}},
+                       [{"name": "compare", "read": 1, "disagreed": 0}],
+                       {"proves": ["the counts"], "does_not_prove": ["truth of a claim"]},
+                       ledger_path=root / "receipts.jsonl", namespace="sr",
+                       witness=False, anchor=False, issued_at=STAMP)
+    save_receipt(rc, root / "compare.receipt.json")
+    status, got = post(srv, "/v1/evidence-pack", {
+        "ledger": "ledger.jsonl", "out": "pm", "mandate": "mandate.json",
+        "receipt": "compare.receipt.json"})
+    # this ledger holds no mandate_loaded row, so the mandate cannot be tied: exit 3
+    assert status == 200 and got["exit"] == 3 and got["verdict"] == "COULD NOT LOOK", got
+    assert got["readings"]["ok"] is True and got["mandate"]["counts"]["outside"] == 0
+    assert (root / "pm" / "mandate_rows.json").is_file()
+    assert (root / "pm" / "readings_receipt.json").is_file()
+    status, v = post(srv, "/v1/evidence-pack/verify", {"pack": "pm"})
+    assert status == 200 and v["exit"] == 3
+
+
+def test_new_path_fields_are_fenced_and_unfenced_ones_refused(srv, root, tmp_path):
+    (tmp_path / "outside.json").write_text("{}", encoding="utf-8")
+    for body in ({"mandate": "../outside.json"}, {"receipt": "../outside.json"}):
+        status, got = post(srv, "/v1/evidence-pack",
+                           {"ledger": "ledger.jsonl", "out": "pf", **body})
+        assert status == 400 and "outside the served root" in got["error"], body
+    for body in ({"readings": "../outside.json"}, {"readings_ledger": "x"},
+                 {"deal": "d-1", "buyer": "../b.jsonl"}):
+        status, got = post(srv, "/v1/evidence-pack",
+                           {"ledger": "ledger.jsonl", "out": "pf", **body})
+        assert status == 400 and "not taken over HTTP" in got["error"], body
+    assert not (root / "pf").exists()
+
+
+def test_zip_of_the_root_itself_is_refused(srv, root):
+    status, got = post(srv, "/v1/evidence-pack", {"ledger": "ledger.jsonl", "out": ".",
+                                                 "zip": True})
+    assert status == 400, got
+    assert not (root.parent / (root.name + ".zip")).exists()
+    status, _ = post(srv, "/v1/evidence-pack", {"ledger": "ledger.jsonl", "out": "q",
+                                               "zip": "yes"})
+    assert status == 400

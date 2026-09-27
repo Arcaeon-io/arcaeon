@@ -105,11 +105,13 @@ WITNESS_TOOLS = ("witness_pin", "witness_renew")
 DEAL_TOOLS = ("deal_mandate", "deal_commit", "deal_dispute")
 MANDATE_TOOLS = ("mandate_check",)
 SECOND_READ_TOOLS = ("second_read_submit", "second_read_compare")
+EVIDENCE_TOOLS = ("evidence_pack_build", "evidence_pack_verify")
 PAID_TOOLS = WITNESS_TOOLS
 STATUS_TOOL = "arcaeon_status"
 
 ALL_TOOLS = sorted([*LEDGER_TOOLS.values(), *VET_TOOLS.values(), *WITNESS_TOOLS,
-                    *DEAL_TOOLS, *MANDATE_TOOLS, *SECOND_READ_TOOLS, STATUS_TOOL])
+                    *DEAL_TOOLS, *MANDATE_TOOLS, *SECOND_READ_TOOLS, *EVIDENCE_TOOLS,
+                    STATUS_TOOL])
 FREE_TOOLS = [n for n in ALL_TOOLS if n not in PAID_TOOLS]
 
 
@@ -445,6 +447,58 @@ def _second_read_compare(args: dict) -> dict:
     return _plain(compare(args["a"], args["b"]))
 
 
+# --- the evidence pack (K069) ---------------------------------------------
+# Import only: the answers are arcaeon.prove.evidence_pack.build_pack and
+# arcaeon.prove.evidence_pack_verify.verify_pack, the functions `arcaeon
+# evidence-pack` and `evidence-pack verify` (and POST /v1/evidence-pack,
+# /v1/evidence-pack/verify) run. Bad usage (a non-empty out folder, a bad
+# time) is a tool error; every verdict, COULD NOT LOOK included, is an
+# answer with its exit, never a success by default.
+
+_PACK_STR = ("agent", "since", "until", "witness", "namespace", "system_id", "provider",
+             "deal", "buyer", "seller", "mandate", "readings", "readings_ledger",
+             "built_at")
+
+
+def _evidence_pack_build(args: dict) -> dict:
+    from arcaeon.prove.evidence_pack import PackUsageError, build_pack  # lazy
+    for name in _PACK_STR:
+        if args.get(name) is not None and not isinstance(args[name], str):
+            raise ValueError(f"`{name}` must be a string")
+    formats = args.get("formats")
+    if formats is not None and (not isinstance(formats, list)
+                                or not all(isinstance(f, str) for f in formats)):
+        raise ValueError("`formats` must be a list of format names")
+    if not isinstance(args.get("zip", False), bool):
+        raise ValueError("`zip` must be true or false")
+    try:
+        res = build_pack(
+            args["ledger"], args["out"], system_id=args.get("system_id") or "",
+            provider=args.get("provider") or "", witness=args.get("witness"),
+            witness_namespace=args.get("namespace"), agent=args.get("agent"),
+            since=args.get("since"), until=args.get("until"),
+            formats=tuple(formats or ()), deal=args.get("deal"),
+            deal_buyer=args.get("buyer"), deal_seller=args.get("seller"),
+            mandate=args.get("mandate"), readings=args.get("readings"),
+            readings_ledger=args.get("readings_ledger"), built_at=args.get("built_at"),
+            zip_out=bool(args.get("zip", False)))
+    except PackUsageError as e:  # bad usage is the caller's to fix: a tool error
+        raise ValueError(str(e)) from None
+    return _plain(res)
+
+
+def _evidence_pack_verify(args: dict) -> dict:
+    from arcaeon.prove.evidence_pack_verify import verify_pack  # lazy
+    for name in ("witness", "namespace"):
+        if args.get(name) is not None and not isinstance(args[name], str):
+            raise ValueError(f"`{name}` must be a string")
+    if not isinstance(args.get("remote", False), bool):
+        raise ValueError("`remote` must be true or false")
+    return _plain(verify_pack(args["pack"], witness=args.get("witness"),
+                              remote=bool(args.get("remote", False)),
+                              namespace=args.get("namespace")))
+
+
 def _server_class():
     """The SDK's server class under whichever name the installed version uses
     (2.x: MCPServer; 1.x: FastMCP). Same probe mcp-vet ships."""
@@ -708,6 +762,60 @@ def build_server():
         args = {"a": a, "b": b}
         outcome = _attempt(_second_read_compare, args)
         return _record_call("second_read_compare", args, outcome)
+
+    # --- the evidence pack -----------------------------------------------------
+
+    @_tool(
+        name="evidence_pack_build",
+        description=(
+            "Build an evidence pack: one folder for one agent and one time window, "
+            "evidence toward the EU AI Act logging duties and not a claim of "
+            "compliance with them. ledger is the JSONL ledger, out a new or empty "
+            "folder. Optional: agent (matches a row's agent or system_id), since / "
+            "until (ISO 8601), witness + namespace (a pin file), system_id, provider, "
+            "formats ([\"aat\"]), deal with buyer or seller, mandate (the mandate "
+            "file), readings (a second-read receipt) with readings_ledger, zip (also "
+            "write out.zip, byte-identical for the same input and built_at), built_at "
+            "(YYYY-MM-DDTHH:MM:SSZ). Answers verdict VERIFIED, BROKEN or COULD NOT "
+            "LOOK with exit 0, 1 or 3 and the files written; COULD NOT LOOK is never "
+            "exit 0."),
+    )
+    def evidence_pack_build(ledger: str, out: str, agent: str | None = None,
+                            since: str | None = None, until: str | None = None,
+                            witness: str | None = None, namespace: str | None = None,
+                            system_id: str | None = None, provider: str | None = None,
+                            formats: list[str] | None = None, deal: str | None = None,
+                            buyer: str | None = None, seller: str | None = None,
+                            mandate: str | None = None, readings: str | None = None,
+                            readings_ledger: str | None = None, zip: bool = False,
+                            built_at: str | None = None) -> dict:
+        args = {"ledger": ledger, "out": out, "agent": agent, "since": since,
+                "until": until, "witness": witness, "namespace": namespace,
+                "system_id": system_id, "provider": provider, "formats": formats,
+                "deal": deal, "buyer": buyer, "seller": seller, "mandate": mandate,
+                "readings": readings, "readings_ledger": readings_ledger, "zip": zip,
+                "built_at": built_at}
+        outcome = _attempt(_evidence_pack_build, args)
+        return _record_call("evidence_pack_build", args, outcome)
+
+    @_tool(
+        name="evidence_pack_verify",
+        description=(
+            "Verify an evidence pack someone handed you: pack is the folder or the "
+            ".zip. Rehashes every file against manifest.json, reruns the records "
+            "chain, checks the window rows against their records lines, rebuilds "
+            "what the pack claims (AAT, mandate rows, the second-read receipt), then "
+            "the pins: witness is a local pin file, namespace this ledger's name in "
+            "it, remote true reads remote pins from the public witness (network; "
+            "unreachable is COULD NOT LOOK, reason network). Answers VERIFIED, "
+            "BROKEN (with the finding naming the file or row) or COULD NOT LOOK, "
+            "exit 0, 1 or 3. Reads only."),
+    )
+    def evidence_pack_verify(pack: str, witness: str | None = None,
+                             namespace: str | None = None, remote: bool = False) -> dict:
+        args = {"pack": pack, "witness": witness, "namespace": namespace, "remote": remote}
+        outcome = _attempt(_evidence_pack_verify, args)
+        return _record_call("evidence_pack_verify", args, outcome)
 
     # --- what is in here, and what costs money ----------------------------
 
