@@ -16,7 +16,7 @@ a browser in with a one-time code instead:
    Without either it is 401 with a page saying how to get a fresh link.
 4. A form POST let in on the cookie must carry `Origin` equal to this
    server's own origin (auth.origin_ok, K108), else 403 and the form is not
-   read. Bearer-token calls are not checked.
+   parsed (its bytes are drained so the 403 arrives). Bearer calls are not checked.
 
 Every page answer carries `Content-Security-Policy: default-src 'self'` (plus
 no framing, forms to this origin only, no base tag), so a page loads nothing
@@ -186,7 +186,8 @@ class DashboardHandler(S.Handler):
             self._redeem(query["t"][-1])
             return
         if not self._page_authorized():
-            self.close_connection = True          # an unread form stays unread
+            self.close_connection = True          # the form is dropped unparsed
+            self._discard_body()
             self._page(401, _common().unauthorized())
             return
         if path.startswith(STATIC_PREFIX):
@@ -196,6 +197,7 @@ class DashboardHandler(S.Handler):
         methods = getattr(mod, "METHODS", ("GET",))
         if self.command not in methods:
             self.close_connection = True
+            self._discard_body()
             self._page(405, _common().simple_page(
                 "Not here", f"{self.command} is not answered on this page."),
                 headers={"Allow": ", ".join(methods)})
@@ -203,7 +205,8 @@ class DashboardHandler(S.Handler):
         form: dict = {}
         if self.command == "POST":
             if not self._origin_ok():
-                self.close_connection = True      # the form stays unread
+                self.close_connection = True      # the form is dropped unparsed
+                self._discard_body()
                 self._page(403, _common().simple_page(
                     "Not accepted", _common().esc(auth.ORIGIN_REFUSED) + "."))
                 return
@@ -237,6 +240,20 @@ class DashboardHandler(S.Handler):
         if auth.presented(self.headers) is not None:
             return auth.check(token, self.headers) is None
         return sessions(self.server).valid(self._cookie_sid())
+
+    def _discard_body(self) -> None:
+        """Read and drop a declared body (never parsed) before a refusal, so
+        the client gets the answer instead of a reset (WinError 10053) when the
+        connection closes with its bytes still unread. A chunked body or a bad
+        or oversized length is left alone; the connection closes anyway."""
+        if self.headers.get("Transfer-Encoding"):
+            return
+        try:
+            n = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            return
+        if 0 < n <= MAX_BODY:
+            self._drain(n)
 
     def _origin_ok(self) -> bool:
         """K108: a POST let in on the session cookie must come from this

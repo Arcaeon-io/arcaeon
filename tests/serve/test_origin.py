@@ -76,6 +76,16 @@ def test_every_posting_page_is_guarded(session):
         assert r.status == 403, path
 
 
+def test_a_refused_big_form_still_gets_its_403(session):
+    """The refusal drains the declared body before it answers, so a client
+    still sending gets the 403 page, not a reset (WinError 10053)."""
+    srv, ck = session
+    for path in PAGES_THAT_POST:
+        r = P.post_form(srv, path, {"x": "y" * (1 << 20)}, cookie=ck,
+                        origin="http://evil.example")
+        assert r.status == 403 and "did not come from this dashboard" in r.text, path
+
+
 def test_bearer_token_calls_are_unaffected(session):
     srv, _ck = session
     bearer = {"Authorization": f"Bearer {P.TOKEN}"}

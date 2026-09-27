@@ -20,7 +20,7 @@ session cookie, and a browser sends cookies wherever a page tells it to post.
 So a POST the dashboard accepts on its cookie must carry `Origin` equal to
 the origin the server answers on (`served_origins`: http://127.0.0.1:<port>
 and http://localhost:<port>); a missing, `null` or other Origin is refused
-with 403 before the form is read. SameSite=Strict already keeps the cookie
+with 403 before the form is parsed. SameSite=Strict already keeps the cookie
 off cross-site posts; this is the second lock, and it holds in a browser that
 ignores SameSite. A call carrying the bearer token (an agent) is not checked:
 a web page cannot attach that header without the token, and agents send no
