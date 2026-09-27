@@ -14,6 +14,11 @@ Step 2 (K057): rerun the chain check on records.jsonl and compare its head
 catches an edit whose manifest hash was fixed to hide it: the file hash then
 agrees, and the chain does not. A break is BROKEN naming the ledger line.
 
+Step 3 (K058): every row in window.jsonl must be byte-equal to the line it
+names in records.jsonl, and the window's line numbers must be the ones the
+manifest lists. An edited window row whose manifest hash was fixed is BROKEN
+naming the line: the window is a view of the records, never a second copy.
+
 The overall verdict is the worst step: BROKEN outranks COULD NOT LOOK, which
 outranks VERIFIED. COULD NOT LOOK never exits 0.
 
@@ -132,9 +137,62 @@ def _step_chain(pack: Path, manifest: dict) -> dict:
     return res
 
 
+def _step_window(pack: Path, manifest: dict) -> dict:
+    """Check every window.jsonl row is byte-equal to its records.jsonl line."""
+    from arcaeon.prove.evidence_pack import _lines
+
+    check = "window rows equal their records lines"
+    window = pack / "window.jsonl"
+    records = pack / "records.jsonl"
+    for p in (window, records):
+        if not p.is_file():
+            return _cnl(check, p.name, str(pack), "missing",
+                        f"the pack has no {p.name}, so the window rows could not be "
+                        "compared with the records")
+    rec_lines = _lines(records.read_bytes())
+    differ, unreadable, seen = [], [], []
+    for n, line in enumerate(_lines(window.read_bytes()), start=1):
+        try:
+            w = json.loads(line.decode("utf-8"))
+            ln, raw = w["line"], w["raw"]
+            if not isinstance(ln, int) or isinstance(ln, bool) or not isinstance(raw, str):
+                raise ValueError("line must be an integer and raw a string")
+        except (UnicodeDecodeError, ValueError, KeyError, TypeError):
+            unreadable.append(n)
+            continue
+        seen.append(ln)
+        if not 1 <= ln <= len(rec_lines) or raw.encode("utf-8") != rec_lines[ln - 1]:
+            differ.append(ln)
+    res = {"check": check, "rows_checked": len(seen), "differ_lines": differ,
+           "unreadable_window_rows": unreadable}
+    listed = (manifest.get("window") or {}).get("lines")
+    problems = []
+    if differ:
+        problems.append("window.jsonl rows differ from records.jsonl at ledger line"
+                        f"{'s' if len(differ) > 1 else ''} "
+                        f"{', '.join(str(d) for d in differ)}")
+    if unreadable:
+        problems.append(f"window.jsonl rows {unreadable} are not "
+                        '{"line": N, "raw": ...} objects')
+    if isinstance(listed, list) and listed != seen:
+        problems.append(f"window.jsonl names ledger lines {seen}, the manifest "
+                        f"lists {listed}")
+    if problems:
+        res.update({"verdict": V.BROKEN, "finding": "; ".join(problems)})
+        return res
+    if not isinstance(listed, list):
+        res.update({"verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            "the window's ledger line numbers", MANIFEST, "unreadable",
+            "manifest.json has no `window.lines` list to compare the window against")})
+        return res
+    res["verdict"] = V.VERIFIED
+    return res
+
+
 #: The verify steps, in order. Each takes (pack folder, loaded manifest) and
 #: returns one check dict with a `verdict` word.
-STEPS: list[Callable[[Path, dict], dict]] = [_step_hashes, _step_chain]
+STEPS: list[Callable[[Path, dict], dict]] = [_step_hashes, _step_chain,
+                                              _step_window]
 
 
 def verify_pack(pack: str | Path) -> dict:
