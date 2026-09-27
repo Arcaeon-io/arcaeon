@@ -1,0 +1,436 @@
+## --list, home /home/kh4
+client          transport         confirmed  config file
+claude-desktop  stdio-mcp         NO         /home/kh4/.config/Claude/claude_desktop_config.json
+claude-code     stdio-mcp         yes        /home/kh4/.claude.json
+cursor          stdio-mcp         yes        /home/kh4/.cursor/mcp.json
+windsurf        stdio-mcp         yes        /home/kh4/.config/devin/mcp_config.json
+vscode          stdio-mcp         NO         /home/kh4/.config/Code/User/mcp.json
+gemini-cli      stdio-mcp         yes        /home/kh4/.gemini/settings.json
+chatgpt         remote-connector  yes        (none: nothing to write)
+generic-http    http-openapi      yes        (none: nothing to write)
+confirmed NO: the client's docs did not state that path; check it before --write
+
+## connect claude-desktop
+arcaeon connect claude-desktop  (Claude Desktop, stdio-mcp, linux)
+file: /home/kh4/.config/Claude/claude_desktop_config.json  (not there yet)
+confirmed: NO, the client's docs did not state this path; check it before --write
+source: https://modelcontextprotocol.io/quickstart/user (read 2026-09-27)
+note: the page names the macOS and Windows files only; there is no Linux build it documents
+would merge (only the 'arcaeon' entry; every other key stays):
+{
+  "mcpServers": {
+    "arcaeon": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "arcaeon[mcp]",
+        "arcaeon",
+        "mcp"
+      ]
+    }
+  }
+}
+nothing written (add --write to apply)
+
+## connect claude-code
+arcaeon connect claude-code  (Claude Code, stdio-mcp, linux)
+file: /home/kh4/.claude.json  (not there yet)
+confirmed: yes
+source: https://code.claude.com/docs/en/mcp (read 2026-09-27)
+note: user scope; a project's own .mcp.json takes the same mcpServers key
+would merge (only the 'arcaeon' entry; every other key stays):
+{
+  "mcpServers": {
+    "arcaeon": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "arcaeon[mcp]",
+        "arcaeon",
+        "mcp"
+      ]
+    }
+  }
+}
+nothing written (add --write to apply)
+
+## connect cursor
+arcaeon connect cursor  (Cursor, stdio-mcp, linux)
+file: /home/kh4/.cursor/mcp.json  (not there yet)
+confirmed: yes
+source: https://cursor.com/docs/context/mcp (read 2026-09-27)
+note: global file; a project's .cursor/mcp.json takes the same key
+would merge (only the 'arcaeon' entry; every other key stays):
+{
+  "mcpServers": {
+    "arcaeon": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "arcaeon[mcp]",
+        "arcaeon",
+        "mcp"
+      ]
+    }
+  }
+}
+nothing written (add --write to apply)
+
+## connect windsurf
+arcaeon connect windsurf  (Windsurf (Cascade), stdio-mcp, linux)
+file: /home/kh4/.config/devin/mcp_config.json  (not there yet)
+confirmed: yes
+source: https://docs.windsurf.com/windsurf/cascade/mcp (read 2026-09-27)
+note: the Windsurf page now redirects to docs.devin.ai/desktop/cascade/mcp, which gives these paths; builds from before the move read ~/.codeium/windsurf/mcp_config.json
+would merge (only the 'arcaeon' entry; every other key stays):
+{
+  "mcpServers": {
+    "arcaeon": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "arcaeon[mcp]",
+        "arcaeon",
+        "mcp"
+      ]
+    }
+  }
+}
+nothing written (add --write to apply)
+
+## connect vscode
+arcaeon connect vscode  (VS Code (Copilot agent mode), stdio-mcp, linux)
+file: /home/kh4/.config/Code/User/mcp.json  (not there yet)
+confirmed: NO, the client's docs did not state this path; check it before --write
+source: https://code.visualstudio.com/docs/copilot/customization/mcp-servers (read 2026-09-27)
+note: the page confirms the `servers` key and a user-profile mcp.json, but reaches it through `MCP: Open User Configuration`, not by path; a workspace's .vscode/mcp.json takes the same key
+would merge (only the 'arcaeon' entry; every other key stays):
+{
+  "servers": {
+    "arcaeon": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "arcaeon[mcp]",
+        "arcaeon",
+        "mcp"
+      ]
+    }
+  }
+}
+nothing written (add --write to apply)
+
+## connect gemini-cli
+arcaeon connect gemini-cli  (Gemini CLI, stdio-mcp, linux)
+file: /home/kh4/.gemini/settings.json  (not there yet)
+confirmed: yes
+source: https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md (read 2026-09-27)
+note: user settings; a project's .gemini/settings.json takes the same key
+would merge (only the 'arcaeon' entry; every other key stays):
+{
+  "mcpServers": {
+    "arcaeon": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "arcaeon[mcp]",
+        "arcaeon",
+        "mcp"
+      ]
+    }
+  }
+}
+nothing written (add --write to apply)
+
+## connect chatgpt
+arcaeon connect chatgpt  (ChatGPT, remote-connector, linux)
+confirmed: yes
+source: https://developers.openai.com/plugins/deploy/connect-chatgpt (read 2026-09-27)
+note: the page also names a Secure MCP Tunnel, which arcaeon does not set up
+ChatGPT reaches outside tools through remote connectors or GPT Actions, and both need a public HTTPS address.
+arcaeon serve binds 127.0.0.1 only (loopback), so it is not one.
+GPT Action manifest: docs/schemas/gpt_action_openapi.json in the source tree, or `arcaeon schema --format gpt-action --out gpt_action.json`; its server url is a placeholder to replace.
+needs a public URL, which is a deploy decision
+nothing written (add --write to apply)
+
+## connect generic-http
+arcaeon connect generic-http  (Any HTTP / OpenAPI framework, http-openapi, linux)
+confirmed: yes
+source: https://spec.openapis.org/oas/v3.1.0 (read 2026-09-27)
+note: no file to change: point the framework at GET /openapi.json on a running `arcaeon serve`
+url: http://127.0.0.1:8787  (the default port; start it with `arcaeon serve`)
+openapi: http://127.0.0.1:8787/openapi.json
+token: <ARCAEON_HOME>/serve.token  (`arcaeon serve --print-token` prints it; send it as `Authorization: Bearer <token>`)
+nothing written (add --write to apply)
+
+## round trip claude-desktop  (--path: the docs did not state this path)
+$ connect claude-desktop --write  -> exit 0
+arcaeon connect claude-desktop --write
+file: <HOME>/.config/Claude/claude_desktop_config.json
+backup: <HOME>/.config/Claude/claude_desktop_config.json.arcaeon-bak-<STAMP>  (a byte-for-byte copy; `arcaeon connect claude-desktop --undo` puts it back)
+changed: mcpServers.arcaeon (added)
+written
+file after --write:
+{
+  "theme": "dark",
+  "mcpServers": {
+    "filesystem": {"command": "npx", "args": ["-y", "@kh4/fs", "/data"]},
+    "search": {
+      "command": "search-server",
+      "env": {"LEVEL": "2"}
+    },
+    "arcaeon": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "arcaeon[mcp]",
+        "arcaeon",
+        "mcp"
+      ]
+    }
+  }
+}
+$ connect claude-desktop --check  -> exit 0
+arcaeon connect claude-desktop --check
+file: <HOME>/.config/Claude/claude_desktop_config.json
+state: present  (command 'uvx' resolves)
+$ connect claude-desktop --write  -> exit 0
+arcaeon connect claude-desktop --write
+file: <HOME>/.config/Claude/claude_desktop_config.json
+the 'arcaeon' entry is already there, the same; nothing written
+$ connect claude-desktop --undo  -> exit 0
+arcaeon connect claude-desktop --undo
+file: <HOME>/.config/Claude/claude_desktop_config.json
+restored: <HOME>/.config/Claude/claude_desktop_config.json.arcaeon-bak-<STAMP>  (the backup is consumed)
+backups left: 0
+$ connect claude-desktop --check  -> exit 1
+arcaeon connect claude-desktop --check
+file: <HOME>/.config/Claude/claude_desktop_config.json
+state: absent  (no arcaeon entry)
+
+## round trip claude-code
+$ connect claude-code --write  -> exit 0
+arcaeon connect claude-code --write
+file: <HOME>/.claude.json
+backup: <HOME>/.claude.json.arcaeon-bak-<STAMP>  (a byte-for-byte copy; `arcaeon connect claude-code --undo` puts it back)
+changed: mcpServers.arcaeon (added)
+written
+file after --write:
+{
+  "theme": "dark",
+  "mcpServers": {
+    "filesystem": {"command": "npx", "args": ["-y", "@kh4/fs", "/data"]},
+    "search": {
+      "command": "search-server",
+      "env": {"LEVEL": "2"}
+    },
+    "arcaeon": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "arcaeon[mcp]",
+        "arcaeon",
+        "mcp"
+      ]
+    }
+  }
+}
+$ connect claude-code --check  -> exit 0
+arcaeon connect claude-code --check
+file: <HOME>/.claude.json
+state: present  (command 'uvx' resolves)
+$ connect claude-code --write  -> exit 0
+arcaeon connect claude-code --write
+file: <HOME>/.claude.json
+the 'arcaeon' entry is already there, the same; nothing written
+$ connect claude-code --undo  -> exit 0
+arcaeon connect claude-code --undo
+file: <HOME>/.claude.json
+restored: <HOME>/.claude.json.arcaeon-bak-<STAMP>  (the backup is consumed)
+backups left: 0
+$ connect claude-code --check  -> exit 1
+arcaeon connect claude-code --check
+file: <HOME>/.claude.json
+state: absent  (no arcaeon entry)
+
+## round trip cursor
+$ connect cursor --write  -> exit 0
+arcaeon connect cursor --write
+file: <HOME>/.cursor/mcp.json
+backup: <HOME>/.cursor/mcp.json.arcaeon-bak-<STAMP>  (a byte-for-byte copy; `arcaeon connect cursor --undo` puts it back)
+changed: mcpServers.arcaeon (added)
+written
+file after --write:
+{
+  "theme": "dark",
+  "mcpServers": {
+    "filesystem": {"command": "npx", "args": ["-y", "@kh4/fs", "/data"]},
+    "search": {
+      "command": "search-server",
+      "env": {"LEVEL": "2"}
+    },
+    "arcaeon": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "arcaeon[mcp]",
+        "arcaeon",
+        "mcp"
+      ]
+    }
+  }
+}
+$ connect cursor --check  -> exit 0
+arcaeon connect cursor --check
+file: <HOME>/.cursor/mcp.json
+state: present  (command 'uvx' resolves)
+$ connect cursor --write  -> exit 0
+arcaeon connect cursor --write
+file: <HOME>/.cursor/mcp.json
+the 'arcaeon' entry is already there, the same; nothing written
+$ connect cursor --undo  -> exit 0
+arcaeon connect cursor --undo
+file: <HOME>/.cursor/mcp.json
+restored: <HOME>/.cursor/mcp.json.arcaeon-bak-<STAMP>  (the backup is consumed)
+backups left: 0
+$ connect cursor --check  -> exit 1
+arcaeon connect cursor --check
+file: <HOME>/.cursor/mcp.json
+state: absent  (no arcaeon entry)
+
+## round trip windsurf
+$ connect windsurf --write  -> exit 0
+arcaeon connect windsurf --write
+file: <HOME>/.config/devin/mcp_config.json
+backup: <HOME>/.config/devin/mcp_config.json.arcaeon-bak-<STAMP>  (a byte-for-byte copy; `arcaeon connect windsurf --undo` puts it back)
+changed: mcpServers.arcaeon (added)
+written
+file after --write:
+{
+  "theme": "dark",
+  "mcpServers": {
+    "filesystem": {"command": "npx", "args": ["-y", "@kh4/fs", "/data"]},
+    "search": {
+      "command": "search-server",
+      "env": {"LEVEL": "2"}
+    },
+    "arcaeon": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "arcaeon[mcp]",
+        "arcaeon",
+        "mcp"
+      ]
+    }
+  }
+}
+$ connect windsurf --check  -> exit 0
+arcaeon connect windsurf --check
+file: <HOME>/.config/devin/mcp_config.json
+state: present  (command 'uvx' resolves)
+$ connect windsurf --write  -> exit 0
+arcaeon connect windsurf --write
+file: <HOME>/.config/devin/mcp_config.json
+the 'arcaeon' entry is already there, the same; nothing written
+$ connect windsurf --undo  -> exit 0
+arcaeon connect windsurf --undo
+file: <HOME>/.config/devin/mcp_config.json
+restored: <HOME>/.config/devin/mcp_config.json.arcaeon-bak-<STAMP>  (the backup is consumed)
+backups left: 0
+$ connect windsurf --check  -> exit 1
+arcaeon connect windsurf --check
+file: <HOME>/.config/devin/mcp_config.json
+state: absent  (no arcaeon entry)
+
+## round trip vscode  (--path: the docs did not state this path)
+$ connect vscode --write  -> exit 0
+arcaeon connect vscode --write
+file: <HOME>/.config/Code/User/mcp.json
+backup: <HOME>/.config/Code/User/mcp.json.arcaeon-bak-<STAMP>  (a byte-for-byte copy; `arcaeon connect vscode --undo` puts it back)
+changed: servers.arcaeon (added)
+written
+file after --write:
+{
+  "theme": "dark",
+  "servers": {
+    "filesystem": {"command": "npx", "args": ["-y", "@kh4/fs", "/data"]},
+    "search": {
+      "command": "search-server",
+      "env": {"LEVEL": "2"}
+    },
+    "arcaeon": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "arcaeon[mcp]",
+        "arcaeon",
+        "mcp"
+      ]
+    }
+  }
+}
+$ connect vscode --check  -> exit 0
+arcaeon connect vscode --check
+file: <HOME>/.config/Code/User/mcp.json
+state: present  (command 'uvx' resolves)
+$ connect vscode --write  -> exit 0
+arcaeon connect vscode --write
+file: <HOME>/.config/Code/User/mcp.json
+the 'arcaeon' entry is already there, the same; nothing written
+$ connect vscode --undo  -> exit 0
+arcaeon connect vscode --undo
+file: <HOME>/.config/Code/User/mcp.json
+restored: <HOME>/.config/Code/User/mcp.json.arcaeon-bak-<STAMP>  (the backup is consumed)
+backups left: 0
+$ connect vscode --check  -> exit 1
+arcaeon connect vscode --check
+file: <HOME>/.config/Code/User/mcp.json
+state: absent  (no arcaeon entry)
+
+## round trip gemini-cli
+$ connect gemini-cli --write  -> exit 0
+arcaeon connect gemini-cli --write
+file: <HOME>/.gemini/settings.json
+backup: <HOME>/.gemini/settings.json.arcaeon-bak-<STAMP>  (a byte-for-byte copy; `arcaeon connect gemini-cli --undo` puts it back)
+changed: mcpServers.arcaeon (added)
+written
+file after --write:
+{
+  "theme": "dark",
+  "mcpServers": {
+    "filesystem": {"command": "npx", "args": ["-y", "@kh4/fs", "/data"]},
+    "search": {
+      "command": "search-server",
+      "env": {"LEVEL": "2"}
+    },
+    "arcaeon": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "arcaeon[mcp]",
+        "arcaeon",
+        "mcp"
+      ]
+    }
+  }
+}
+$ connect gemini-cli --check  -> exit 0
+arcaeon connect gemini-cli --check
+file: <HOME>/.gemini/settings.json
+state: present  (command 'uvx' resolves)
+$ connect gemini-cli --write  -> exit 0
+arcaeon connect gemini-cli --write
+file: <HOME>/.gemini/settings.json
+the 'arcaeon' entry is already there, the same; nothing written
+$ connect gemini-cli --undo  -> exit 0
+arcaeon connect gemini-cli --undo
+file: <HOME>/.gemini/settings.json
+restored: <HOME>/.gemini/settings.json.arcaeon-bak-<STAMP>  (the backup is consumed)
+backups left: 0
+$ connect gemini-cli --check  -> exit 1
+arcaeon connect gemini-cli --check
+file: <HOME>/.gemini/settings.json
+state: absent  (no arcaeon entry)
