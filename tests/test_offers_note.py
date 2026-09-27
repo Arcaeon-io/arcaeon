@@ -55,14 +55,44 @@ def _evidence_pack(cat: dict) -> dict:
 
 
 def test_the_package_prices_the_sealed_pack_as_decided():
-    """K125 decision (2026-09-27): 50 credits, free through 2026-10-31 with the
-    price shown, the local pack free forever, no release date."""
+    """K125b decision (2026-09-27 8:30 AM): 50 credits, no free window by
+    calendar, a one-time registration grant (its count is under council and
+    stated once, in the site's products.yaml), the local pack free forever,
+    no release date."""
     pack = _evidence_pack(json.loads(PACKAGE.read_text(encoding="utf-8")))
     assert pack["pricing"]["credits"] == 50
-    assert pack["pricing"]["free_until"] == "2026-10-31"
+    assert "free_until" not in pack["pricing"]
+    grant = _grant(json.loads(PACKAGE.read_text(encoding="utf-8")))
+    assert pack["pricing"]["on_registration"] == grant["statement"]
     assert pack["price_usd"] == 0
     assert pack["status"] == "in the next release"
     assert "free forever" in pack["pricing"]["note"]
+    assert "free through" not in PACKAGE.read_text(encoding="utf-8").lower()
+
+
+def _grant(cat: dict) -> dict:
+    hw = next(p for p in cat["products"] if p.get("id") == "hosted-witness")
+    return hw["registration_grant"]
+
+
+def test_the_package_carries_the_registration_grant():
+    """K125b: the hosted witness grants credits one time per new key. The
+    count is read from the file, never typed here: it is under council."""
+    grant = _grant(json.loads(PACKAGE.read_text(encoding="utf-8")))
+    assert isinstance(grant["credits"], int) and grant["credits"] > 0
+    assert grant["once"] is True
+    assert grant["statement"] == f"{grant['credits']} credits, one time, per verified email"
+    assert "no date promised" in grant["status"]
+
+
+def test_the_registration_grant_matches_the_site():
+    site = _site_offers()
+    if site is None:
+        pytest.skip("no site checkout: set ARCAEON_SITE_ROOT (or keep one at "
+                    "../<any>/projects/arcaeon_site) to compare the grants")
+    ours = _grant(json.loads(PACKAGE.read_text(encoding="utf-8")))
+    theirs = _grant(json.loads(site.read_text(encoding="utf-8")))
+    assert ours == theirs
 
 
 def test_the_evidence_pack_entry_matches_the_site_entry():

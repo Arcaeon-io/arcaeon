@@ -130,7 +130,8 @@ def upgrade_message(tool: str, free_tools: list[str] | None = None) -> str:
 # 50 credits), and credits are bought in the hosted-witness packs. So the one
 # link this prints is the smallest credit pack's checkout, read from the
 # offers.json it was handed (not from MINI_PACK above), next to the pack's own
-# status and free window. It opens nothing and charges nothing.
+# status and the registration grant (K125b: credits, one time, on
+# registration; no free window by calendar). It opens nothing and charges nothing.
 
 EVIDENCE_PACK_ID = "arcaeon-evidence-pack"
 
@@ -150,15 +151,12 @@ def evidence_pack_lines(offers: dict, today=None) -> list[str]:
     pricing = entry.get("pricing") or {}
     credits = pricing.get("credits")
     each = pricing.get("credit_usd_at_mini_rate")
-    free_until = pricing.get("free_until")
-    today = today or _dt.date.today()
-    in_free_window = bool(free_until) and today.isoformat() <= free_until
+    on_registration = pricing.get("on_registration")
+    del today  # kept for callers; the price no longer depends on the date (K125b)
 
     price = f"{credits} credits"
     if each is not None:
         price += f" (${each:.2f} at the mini rate)"
-    if in_free_window:
-        price += f", free through {free_until}, price shown"
 
     mini = None
     for product in offers.get("products", []):
@@ -175,8 +173,8 @@ def evidence_pack_lines(offers: dict, today=None) -> list[str]:
         f"price: {price}",
         "the local pack is free forever, on your own machine, with no account.",
     ]
-    if in_free_window:
-        lines.append(f"nothing to buy before {free_until}.")
+    if on_registration:
+        lines.append(f"every new key: {on_registration}.")
     if mini:
         lines.append(f"credits are bought in packs; the smallest is mini, "
                      f"${mini.get('price_usd')}: {mini['checkout']}")

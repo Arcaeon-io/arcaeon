@@ -144,6 +144,13 @@
    "status": "live",
    "description": "pin your ledger head with a party you can't advance; free tier + one paid tier live",
    "price_usd": 0,
+   "registration_grant": {
+    "credits": 500,
+    "once": true,
+    "statement": "500 credits, one time, per verified email",
+    "status": "in the next release, no date promised",
+    "note": "Every new key comes with 500 credits, one time, per verified email: an agent may start the signup, and the human clicks the link. A credit is one pin; the sealed evidence pack is 50 credits; more credits come in the Mini pack, $5 for 1,000. Build and verify on your own machine needs no account. There is no free window by calendar, and the monthly free pins are retired for new keys. Decided under the 8/14 pricing authority; reason in memory/PRICING_DECISION_2026-09-17.md, decision 2026-09-27 8:47 AM."
+   },
    "endpoint": "https://witness.arcaeon.io",
    "status_page": "https://witness.arcaeon.io/status",
    "public_record": "https://github.com/dan8433-user/arcaeon-witness-pins",
@@ -235,8 +242,8 @@
     "unit": "one sealed pack (one agent, one time window) with remote pins and a hosted verify code",
     "credits": 50,
     "credit_usd_at_mini_rate": 0.25,
-    "free_until": "2026-10-31",
-    "note": "The local pack is free forever: build and verify on your own machine with no account. The 50 credits buy the hosted witness pins inside the pack and the hosted verify code a stranger can check without you. Free through 2026-10-31, price shown. Decided under the 8/14 pricing authority; reason in memory/PRICING_DECISION_2026-09-17.md addendum 2026-09-27."
+    "on_registration": "500 credits, one time, per verified email",
+    "note": "The local pack is free forever: build and verify on your own machine needs no account. Every new key comes with 500 credits, one time, per verified email; a credit is one pin. The 50 credits buy the hosted witness pins inside the pack and the hosted verify code a stranger can check without you. There is no free window by calendar. Decided under the 8/14 pricing authority; reason in memory/PRICING_DECISION_2026-09-17.md, decision 2026-09-27 8:47 AM."
    },
    "claims": [
     "what was written in the window was not changed after pinning",
