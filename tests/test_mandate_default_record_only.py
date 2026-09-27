@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -175,6 +176,42 @@ SURFACES = {
     "call_proxy": _call_proxy,       # K072
 }
 
+#: The registry: surface name -> the module (under src/) that builds it. Every
+#: module the scan below finds taking a mandate must appear here, and every
+#: name here must have a runner in SURFACES, or the guard fails (K070R).
+SURFACE_MODULES = {
+    "stdio_proxy": "arcaeon/record/adapter/proxy.py",
+    "http_forward": "arcaeon/record/adapter/http_forward.py",
+    "call_proxy": "arcaeon/record/receipt/call_proxy.py",
+}
+
+#: What marks a module as a mandate surface: it builds the shared watch, or it
+#: carries an enforce switch. A new surface gets one or the other.
+_SURFACE_MARK = re.compile(r"(?<!class )\b_MandateWatch\(|\bmandate_enforce\b")
+
+
+def discover_mandate_surfaces(src_root: Path) -> set:
+    """Every module under `src_root` that takes a mandate, as a posix path
+    relative to `src_root`. Derived from the source, so a new surface cannot
+    join the package without joining this list."""
+    found = set()
+    for f in src_root.rglob("*.py"):
+        if "__pycache__" in f.parts:
+            continue
+        try:
+            text = f.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if _SURFACE_MARK.search(text):
+            found.add(f.relative_to(src_root).as_posix())
+    return found
+
+
+def uncovered_surfaces(src_root: Path, registry: dict, runners: dict) -> set:
+    """Modules that take a mandate but have no registered, runnable guard."""
+    covered = {mod for name, mod in registry.items() if name in runners}
+    return discover_mandate_surfaces(src_root) - covered
+
 # Surfaces whose enforce mode refuses to start on an unreadable mandate
 # (nothing reaches the tool, and there is no per-call reply to read).
 ENFORCE_REFUSES_UNREADABLE = {"stdio_proxy", "http_forward", "call_proxy"}
@@ -196,7 +233,13 @@ def _mandate(tmp_path: Path, kind: str) -> Path:
 @pytest.mark.parametrize("kind", ["outside", "unreadable", "missing"])
 @pytest.mark.parametrize("surface", sorted(SURFACES))
 def test_failing_check_still_goes_through_when_enforce_is_off(tmp_path, surface, kind):
-    r = SURFACES[surface](tmp_path, _mandate(tmp_path, kind), False)
+    _assert_record_only(surface, SURFACES[surface](tmp_path, _mandate(tmp_path, kind), False),
+                        kind)
+
+
+def _assert_record_only(surface: str, r: Result, kind: str) -> None:
+    """The guard itself: a failing check with enforce off still went through
+    and left exactly one row naming the failure."""
     assert r.error is None, f"{surface}: record-only withheld a call: {r.error}"
     assert r.answer == "guard", f"{surface}: the tool's own answer never came back"
     failed = [x for x in r.rows if x.get("evt") in FAIL_EVENTS]
@@ -234,6 +277,36 @@ def test_enforce_on_an_unreadable_mandate_forwards_nothing(tmp_path, surface):
 
 
 def test_every_mandate_surface_is_in_the_guard():
-    """A surface that grows a mandate parameter without joining SURFACES
-    escapes this guard. The ones known to take one are listed here."""
-    assert {"stdio_proxy", "http_forward", "call_proxy"} <= set(SURFACES)
+    """Derived, not listed: every module that takes a mandate has a registry
+    entry and a runner, so a new surface cannot escape this guard."""
+    assert set(SURFACE_MODULES) <= set(SURFACES), "a registered surface has no runner"
+    missing = uncovered_surfaces(Path(SRC), SURFACE_MODULES, SURFACES)
+    assert not missing, f"mandate surfaces with no record-only guard: {sorted(missing)}"
+    assert set(SURFACE_MODULES.values()) <= discover_mandate_surfaces(Path(SRC)),         "a registry entry names a module that no longer takes a mandate"
+
+
+def test_a_new_surface_not_in_the_registry_fails_the_guard(tmp_path):
+    root = tmp_path / "src"
+    (root / "arcaeon" / "record" / "adapter").mkdir(parents=True)
+    (root / "arcaeon" / "record" / "adapter" / "proxy.py").write_text(
+        "class _MandateWatch:\n    pass\nw = _MandateWatch(None)\n", encoding="utf-8")
+    (root / "arcaeon" / "new_door.py").write_text(
+        "def run(mandate_path=None, mandate_enforce=True):\n    pass\n", encoding="utf-8")
+    (root / "arcaeon" / "bystander.py").write_text("x = 1\n", encoding="utf-8")
+    reg = {"stdio_proxy": "arcaeon/record/adapter/proxy.py"}
+    assert uncovered_surfaces(root, reg, {"stdio_proxy": _stdio}) == {"arcaeon/new_door.py"}
+    # a registry name without a runner does not count as covered either
+    assert "arcaeon/record/adapter/proxy.py" in uncovered_surfaces(root, reg, {})
+
+
+def test_a_surface_that_blocks_by_default_fails_the_guard():
+    """A fake surface whose default withholds the outside call: the guard's
+    own check must reject it."""
+    blocked_row = {"evt": "mandate_outside", "action": "blocked", "mandate_mode": "enforce",
+                   "tool": "echo"}
+    fake = Result(None, {"code": -32001, "message": "blocked"}, [blocked_row])
+    with pytest.raises(AssertionError):
+        _assert_record_only("fake_blocking_surface", fake, "outside")
+    silent = Result("guard", None, [])          # forwarded, but left no row
+    with pytest.raises(AssertionError):
+        _assert_record_only("fake_silent_surface", silent, "outside")
