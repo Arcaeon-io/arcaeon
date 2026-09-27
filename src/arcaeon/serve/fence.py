@@ -24,7 +24,8 @@ OUTSIDE = "outside the served root"
 #: Request fields that name a file or directory. `ns`, `agent`, `reader_id`
 #: and the like are names, not paths, and are not fenced.
 PATH_FIELDS = ("ledger", "witness", "tape_a", "tape_b", "pin", "path", "out",
-               "receipt", "pack", "mandate", "a", "b")
+               "receipt", "pack", "mandate", "a", "b", "buyer", "seller",
+               "readings_ledger")
 
 
 class OutsideRoot(ValueError):

@@ -11,10 +11,11 @@ already fenced every path (ledger, out, pack, witness) to the served root.
   `["aat"]`), `mandate` (the mandate file, K066), `receipt` (a second-read
   comparison receipt, the CLI's --readings, K067), `zip` (true also writes
   `<out>.zip`, K068) and `built_at` (YYYY-MM-DDTHH:MM:SSZ). `mandate` and
-  `receipt` are fenced path fields. Not taken over HTTP: `--deal` with
-  `--buyer` / `--seller` and `--readings-ledger`, since those are paths the
-  fence does not name yet; a body that sends them is refused, never run
-  with the path unfenced.
+  `receipt` are fenced path fields. `deal` (a deal id) with `buyer` /
+  `seller` (tapes) and `readings_ledger` (the ledger the receipt was issued
+  into) are taken too (K069b): the fence names buyer, seller and
+  readings_ledger, so they are resolved under the root like every other
+  path. `readings` is refused: over HTTP the receipt field is `receipt`.
 - `/v1/evidence-pack/verify`: `pack`; optional `witness`, `namespace`, and
   `remote` (true reads the pack's remote pins from the public witness: the
   network, and an unreachable witness is COULD NOT LOOK, reason network).
@@ -26,11 +27,13 @@ from arcaeon.serve import h_core
 
 _OPT = (("agent", "--agent"), ("since", "--from"), ("until", "--to"),
         ("witness", "--witness"), ("namespace", "--namespace"),
-        ("system_id", "--system-id"), ("provider", "--provider"))
+        ("system_id", "--system-id"), ("provider", "--provider"),
+        ("deal", "--deal"), ("buyer", "--buyer"), ("seller", "--seller"),
+        ("readings_ledger", "--readings-ledger"))
 
 
-#: Fields that would name a path the served-root fence does not cover.
-_UNFENCED = ("buyer", "seller", "readings", "readings_ledger", "deal")
+#: Refused over HTTP: `readings` is the CLI's flag name; the body's field is `receipt`.
+_UNFENCED = ("readings",)
 
 
 def build(body: dict) -> dict:

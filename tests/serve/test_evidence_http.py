@@ -210,16 +210,36 @@ def test_mandate_and_receipt_over_http(srv, root):
 
 def test_new_path_fields_are_fenced_and_unfenced_ones_refused(srv, root, tmp_path):
     (tmp_path / "outside.json").write_text("{}", encoding="utf-8")
-    for body in ({"mandate": "../outside.json"}, {"receipt": "../outside.json"}):
+    for body in ({"mandate": "../outside.json"}, {"receipt": "../outside.json"},
+                 {"deal": "d-1", "buyer": "../b.jsonl"},
+                 {"deal": "d-1", "seller": "../b.jsonl"},
+                 {"receipt": "r.json", "readings_ledger": "../outside.json"}):
         status, got = post(srv, "/v1/evidence-pack",
                            {"ledger": "ledger.jsonl", "out": "pf", **body})
         assert status == 400 and "outside the served root" in got["error"], body
-    for body in ({"readings": "../outside.json"}, {"readings_ledger": "x"},
-                 {"deal": "d-1", "buyer": "../b.jsonl"}):
-        status, got = post(srv, "/v1/evidence-pack",
-                           {"ledger": "ledger.jsonl", "out": "pf", **body})
-        assert status == 400 and "not taken over HTTP" in got["error"], body
+    status, got = post(srv, "/v1/evidence-pack",
+                       {"ledger": "ledger.jsonl", "out": "pf", "readings": "r.json"})
+    assert status == 400 and "not taken over HTTP" in got["error"]
     assert not (root / "pf").exists()
+
+
+def test_deal_and_readings_ledger_reach_the_verb_argv_fenced(srv, root, monkeypatch):
+    """K069b: buyer, seller and readings_ledger are fenced path fields now, so
+    a deal with its tapes and the receipt's ledger are taken over HTTP."""
+    seen = []
+    monkeypatch.setattr(h_core, "run_verb",
+                        lambda verb, argv: seen.append((verb, argv)) or (0, "{}", ""))
+    status, got = post(srv, "/v1/evidence-pack", {
+        "ledger": "ledger.jsonl", "out": "pd", "deal": "d-1", "buyer": "b.jsonl",
+        "seller": "sub/s.jsonl", "receipt": "r.json", "readings_ledger": "r.ledger.jsonl"})
+    assert status == 200 and got["exit"] == 0, got
+    argv = seen[0][1]
+    at = {flag: argv[argv.index(flag) + 1] for flag in
+          ("--deal", "--buyer", "--seller", "--readings-ledger")}
+    assert at["--deal"] == "d-1"
+    for flag, rel in (("--buyer", "b.jsonl"), ("--seller", "sub/s.jsonl"),
+                      ("--readings-ledger", "r.ledger.jsonl")):
+        assert Path(at[flag]) == (root / rel).resolve(), flag
 
 
 def test_zip_of_the_root_itself_is_refused(srv, root):

@@ -249,6 +249,59 @@
     "until": {
      "type": "string",
      "maxLength": 64
+    },
+    "witness": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "namespace": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "system_id": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "provider": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "formats": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "mandate": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "receipt": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "zip": {
+     "type": "boolean"
+    },
+    "built_at": {
+     "type": "string",
+     "maxLength": 20
+    },
+    "deal": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "buyer": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "seller": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "readings_ledger": {
+     "type": "string",
+     "maxLength": 4096
     }
    }
   }
@@ -268,6 +321,10 @@
      "maxLength": 4096
     },
     "witness": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "namespace": {
      "type": "string",
      "maxLength": 4096
     },
