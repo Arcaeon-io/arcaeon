@@ -997,7 +997,28 @@ $ arcaeon schema --format openapi | py -c "import json,sys; d=json.load(sys.stdi
 
 ## `open`
 
-TODO(K107)
+Answers: how do I see what arcaeon has on this machine without typing
+commands? `arcaeon open` opens the local dashboard in a browser: a running
+`arcaeon serve` found through serve.json, else one it starts here on
+127.0.0.1. The browser gets a sign-in link with a one-time code; the code
+becomes an HttpOnly cookie and is no good a second time. `--no-browser`
+prints the link instead of opening it.
+
+**Usage**
+
+```text
+usage: arcaeon open [-h] [--no-browser] [--port PORT] [--root DIR]
+```
+
+A server it starts keeps serving until it is stopped (Ctrl+C).
+
+**Exit codes:** 0 opened, or the link printed. 2 bad usage (a port out of
+range, a `--root` that is not a directory). 3 COULD NOT LOOK: a running
+server would not give a sign-in code, or no server could be started.
+
+```console
+$ arcaeon open --no-browser
+```
 
 ## `status`
 
