@@ -61,7 +61,10 @@ def _step_hashes(pack: Path, manifest: dict) -> dict:
     if not isinstance(listed, dict) or not listed:
         return _cnl(check, "a file list with sha256 values", MANIFEST, "unreadable",
                     "manifest.json has no `files` table to check against")
-    on_disk = {p.name for p in pack.iterdir() if p.is_file() and p.name != MANIFEST}
+    # Walk the WHOLE folder, not just its top level: a file planted in a
+    # subfolder is in the pack and nothing vouches for it, so it is unlisted.
+    on_disk = {p.relative_to(pack).as_posix() for p in pack.rglob("*")
+               if p.is_file()} - {MANIFEST}
     changed, missing = [], []
     for name in sorted(listed):
         p = pack / name

@@ -85,3 +85,21 @@ def test_missing_ledger_message_names_no_folder(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "None" not in out
     assert out.startswith("COULD NOT LOOK: no evidence pack written (missing:")
+
+
+def test_nested_unlisted_file_is_broken(pack):
+    """A file planted in a subfolder is in the pack; nothing vouches for it."""
+    (pack / "extra" / "deeper").mkdir(parents=True)
+    (pack / "extra" / "deeper" / "forged.jsonl").write_text("{}\n", encoding="utf-8")
+    res = verify_pack(pack)
+    assert res["verdict"] == V.BROKEN and res["exit"] == 1
+    assert res["checks"][0]["unlisted"] == ["extra/deeper/forged.jsonl"]
+    assert "extra/deeper/forged.jsonl" in res["finding"]
+
+
+def test_nested_file_named_like_a_listed_one_is_still_unlisted(pack):
+    (pack / "sub").mkdir()
+    (pack / "sub" / "records.jsonl").write_bytes((pack / "records.jsonl").read_bytes())
+    res = verify_pack(pack)
+    assert res["verdict"] == V.BROKEN
+    assert res["checks"][0]["unlisted"] == ["sub/records.jsonl"]
