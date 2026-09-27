@@ -11,6 +11,7 @@ any version on PyPI; `pip install arcaeon` does not have them.
 
 ### Plug-in batch (branch plugin-2026-09-27)
 
+- **OA4.** `connect --write` on a config removed by another program mid-write answers COULD NOT LOOK, exit 3, new reason word `target_vanished`, and leaves nothing behind; it raised FileNotFoundError before.
 - **OA3.** The dashboard's origin guard drops a default port both ways, so on `--port 80` the `Origin: http://127.0.0.1` a browser sends is its own; every non-default port still needs the exact port.
 - **OA2.** A reader whose endpoint redirects to a malformed Location (a bad port, a bad IPv6 host) is refused like any redirect: COULD NOT LOOK `redirect_refused`, reason "redirect refused: ...", the run continues and the key is not sent.
 - **OA1.** Pack verify: a file the manifest lists that is gone from the pack is BROKEN, exit 1, naming the file (was COULD NOT LOOK, exit 3), and deleting could_not_look.json no longer hides "manifest incomplete".

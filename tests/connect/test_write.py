@@ -206,3 +206,50 @@ def test_two_writes_keep_two_backups_newest_last(capsys):
     baks = W.backups(f)
     assert [b.read_bytes() for b in baks] == [
         b'{"mcpServers": {}}', b'{"mcpServers": {"arcaeon": {"command": "changed"}}}']
+
+
+# --- OA4: the file vanishes mid-write ------------------------------------------------
+
+def _vanish_setup(tmp_path):
+    d = tmp_path / "cfg"
+    d.mkdir()
+    f = d / "mcp.json"
+    f.write_text(TWO_SERVERS, encoding="utf-8")
+    other = d / "keep.txt"
+    other.write_bytes(b"untouched")
+    return d, f, other
+
+
+def _assert_vanished(res, d, f, other):
+    assert res["verdict"] == "COULD NOT LOOK" and res["exit"] == 3
+    assert res["reason_word"] == "target_vanished" and res["written"] is False
+    assert sorted(p.name for p in d.iterdir()) == ["keep.txt"]   # no backup, tmp or sidecar
+    assert other.read_bytes() == b"untouched" and not f.exists()
+
+
+def test_file_removed_between_the_read_and_the_replace_is_target_vanished(tmp_path,
+                                                                         monkeypatch):
+    d, f, other = _vanish_setup(tmp_path)
+    real = os.replace
+
+    def replace(src, dst):
+        if Path(dst) == f:
+            f.unlink()                   # another program removes the target
+            raise FileNotFoundError(2, "No such file or directory", str(dst))
+        return real(src, dst)
+    monkeypatch.setattr(W.os, "replace", replace)
+    res = W.write(f, "mcpServers", "arcaeon", {"command": "arcaeon"})
+    _assert_vanished(res, d, f, other)
+
+
+def test_file_removed_right_after_the_first_read_is_target_vanished(tmp_path, monkeypatch):
+    d, f, other = _vanish_setup(tmp_path)
+    real = W.merge_text
+
+    def merge(*a, **k):
+        out = real(*a, **k)
+        f.unlink()
+        return out
+    monkeypatch.setattr(W, "merge_text", merge)
+    res = W.write(f, "mcpServers", "arcaeon", {"command": "arcaeon"})
+    _assert_vanished(res, d, f, other)

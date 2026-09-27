@@ -246,9 +246,24 @@ def _read(file: Path) -> str | None:
         raise Unreadable("it is not UTF-8 text") from None
 
 
+def _vanished(file: Path) -> dict:
+    return _cnl(file, "target_vanished", f"{file} disappeared while arcaeon was writing "
+                                         "it (another program removed it); nothing written")
+
+
+def _bytes_now(file: Path) -> bytes | None:
+    """The file's bytes, or None when it cannot be read (gone, locked)."""
+    try:
+        return file.read_bytes()
+    except OSError:
+        return None
+
+
 def write(file, key: str, name: str, value) -> dict:
     """Back up, then merge `value` as `file[key][name]`. Never raises for a
-    file problem: an unreadable or unwritable file is COULD NOT LOOK."""
+    file problem: an unreadable or unwritable file is COULD NOT LOOK, and a
+    file removed by another program mid-write is COULD NOT LOOK
+    `target_vanished` with nothing written and nothing of ours left behind."""
     file = Path(file)
     try:
         text = _read(file)
@@ -267,7 +282,13 @@ def write(file, key: str, name: str, value) -> dict:
                 return out
         except (ValueError, AttributeError):
             pass
-    raw_before = file.read_bytes() if text is not None else None
+    try:
+        raw_before = file.read_bytes() if text is not None else None
+    except FileNotFoundError:
+        return _vanished(file)                   # OA4: gone since _read, nothing made yet
+    except OSError as e:
+        return _cnl(file, "unreadable", f"{file} could not be read "
+                                        f"({e.strerror or type(e).__name__})")
     created: list[str] = []
     backup = tmp = side = None
     try:
@@ -312,8 +333,16 @@ def write(file, key: str, name: str, value) -> dict:
                     os.rmdir(d)
                 except OSError:
                     pass
-        elif backup is not None and backup.exists() and file.read_bytes() == raw_before:
-            backup.unlink()
+        else:
+            now = _bytes_now(file)
+            if now is None and not file.exists():
+                # OA4: another program removed the file mid-write; our backup
+                # would let a later undo bring it back, so it goes too
+                if backup is not None and backup.exists():
+                    backup.unlink()
+                return _vanished(file)
+            if backup is not None and backup.exists() and now == raw_before:
+                backup.unlink()
         return _cnl(file, "unwritable", f"{file} could not be written "
                                         f"({e.strerror or type(e).__name__}); nothing changed")
     out.update(written=True, backup=str(backup),
