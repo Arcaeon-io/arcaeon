@@ -1088,3 +1088,49 @@ def test_can_cannot_tamper_proof_only_in_a_negation():
 def test_first_five_and_can_cannot_link_each_other_and_words_md():
     assert "](WHAT_IT_CAN_AND_CANNOT_PROVE.md)" in FIRST_FIVE
     assert "](WORDS.md)" in FIRST_FIVE and "](WORDS.md)" in CAN_CANNOT
+
+
+# --- docs/design: specs for the later faces (K111, K112) ---------------------------------
+
+#: Spec documents for faces that are designed before they are coded. Each must
+#: exist, say it goes through Claude Design first, and make no forbidden claim.
+DESIGN_SPECS = ("docs/design/PHONE_SCREENS_SPEC.md",)
+
+_DESIGN_FORBIDDEN = ["tamper-proof", "independent witness", "compliant", "ai act ready",
+                     "guarantee", "multi-witness", "court", "regulator", "truth", "is true",
+                     "—", "–"]
+
+
+def _design_text(name: str) -> str:
+    p = ROOT / name
+    assert p.is_file(), f"{name} is missing"
+    return p.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("name", DESIGN_SPECS)
+def test_design_spec_exists_and_says_design_first(name):
+    text = _design_text(name)
+    first = next(line for line in text.splitlines() if line.strip() and not line.startswith("#"))
+    assert "design through claude design before code" in first.lower(), first
+
+
+@pytest.mark.parametrize("name", DESIGN_SPECS)
+@pytest.mark.parametrize("phrase", _DESIGN_FORBIDDEN)
+def test_design_spec_makes_no_forbidden_claim(name, phrase):
+    assert phrase not in _design_text(name).lower(), (name, phrase)
+
+
+@pytest.mark.parametrize("name", DESIGN_SPECS)
+def test_design_spec_holds_the_never_green_rule(name):
+    text = " ".join(_design_text(name).split())
+    assert "COULD NOT LOOK is never green" in text, name
+    assert "no native" in text.lower(), name
+
+
+def test_phone_spec_names_what_a_phone_cannot_see_and_account_only_data():
+    text = _design_text("docs/design/PHONE_SCREENS_SPEC.md")
+    for heading in ("## The one rule that shapes every screen: a phone cannot see the local ledgers",
+                    "## Account-only data", "## What the phone must never show",
+                    "## The never-green rule"):
+        assert heading in text, heading
+    assert "Not visible from this phone" in text
