@@ -14,7 +14,8 @@ THE ROW (format `arcaeon-reading/1`), one JSON object per ledger line:
     claim_id         the caller's id for the claim (a non-empty string)
     claim_sha256     sha256 hex of the claim text as the reader saw it
     criterion_sha256 sha256 hex of the frozen criterion sentence (see below)
-    reader           {id, provider, model, endpoint_host}
+    reader           {id, provider, model, endpoint_host}; `id` is stored in its
+                     CANONICAL form (see canonical_reader_id)
     reading          one of READING_WORDS
     near_match_id    optional: the id the reader said this claim almost matched
     rationale_sha256 sha256 hex of the reader's rationale, or null if none given
@@ -22,6 +23,12 @@ THE ROW (format `arcaeon-reading/1`), one JSON object per ledger line:
     prompt_sha256    sha256 hex of the exact prompt sent, or null (a person, or
                      an agent filing its own reading, sent no prompt of ours)
     ts               ISO-8601 UTC time the reading was taken
+
+THE READER ID's canonical form is `canonical_reader_id(id)`: Unicode NFKC,
+surrounding whitespace stripped, then casefolded. `Agent-A`, ` agent-a ` and
+`AGENT-A` are one reader. The builder stores the canonical form, and the
+comparer canonicalizes again when it reads (a row written by hand, or before
+this rule, cannot pass as a second reader by changing case).
 
 Rows go through the ordinary ledger append (`arcaeon.record.ledger.Ledger`),
 so they are chained and `arcaeon verify` checks them like any other row.
@@ -42,6 +49,7 @@ import argparse
 import hashlib
 import re
 import sys
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -53,7 +61,7 @@ from arcaeon.record.row import loads as _loads
 __all__ = ["READING_FORMAT", "CRITERION_FORMAT", "READING_WORDS", "READER_FIELDS",
            "ReadingError", "UnknownCriterionError", "sha256_text", "build_reading",
            "write_reading", "build_criterion", "freeze_criterion", "normalize_criterion",
-           "load_readings", "criterion_main"]
+           "load_readings", "criterion_main", "canonical_reader_id"]
 
 READING_FORMAT = "arcaeon-reading/1"
 CRITERION_FORMAT = "arcaeon-criterion/1"
@@ -94,6 +102,11 @@ def _hex64(name: str, value: Any, *, optional: bool = False) -> str | None:
     return value
 
 
+def canonical_reader_id(value: str) -> str:
+    """The canonical form of a reader id: NFKC, stripped, casefolded."""
+    return unicodedata.normalize("NFKC", value).strip().casefold()
+
+
 def _reader(reader: Any) -> dict:
     if not isinstance(reader, dict):
         raise ReadingError("reader must be an object with keys " + ", ".join(READER_FIELDS))
@@ -106,6 +119,8 @@ def _reader(reader: Any) -> dict:
         if key in ("id", "provider"):
             if not isinstance(val, str) or not val.strip():
                 raise ReadingError(f"reader.{key} must be a non-empty string")
+            if key == "id":
+                val = canonical_reader_id(val)
         elif val is not None and not isinstance(val, str):
             raise ReadingError(f"reader.{key} must be a string or null")
         out[key] = val

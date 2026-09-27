@@ -57,7 +57,7 @@ import re
 from pathlib import Path
 
 from arcaeon import verdict as _v
-from arcaeon.prove.readings import load_readings
+from arcaeon.prove.readings import canonical_reader_id, load_readings
 from arcaeon.record.ledger import verify_file
 
 __all__ = ["COMPARE_FORMAT", "COMPARED", "AGREED", "DISAGREED", "MISSING", "COULD_NOT_LOOK",
@@ -188,8 +188,14 @@ def _pair(claim_id: str, ra: dict | None, rb: dict | None, a: Path, b: Path) -> 
     return entry
 
 
+def _canon(value) -> str:
+    return canonical_reader_id(value) if isinstance(value, str) else ""
+
+
 def _independence(va: dict, vb: dict) -> str:
-    if va["reader_id"] == vb["reader_id"]:
+    # canonical form (NFKC, stripped, casefolded): ids that differ only by case
+    # are one reader, even in a row that was written by hand
+    if _canon(va["reader_id"]) == _canon(vb["reader_id"]):
         return SAME_READER
     pa = (va["provider"] or "").strip().casefold()
     pb = (vb["provider"] or "").strip().casefold()
