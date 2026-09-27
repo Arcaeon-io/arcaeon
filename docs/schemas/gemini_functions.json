@@ -1,0 +1,471 @@
+[
+ {
+  "name": "log",
+  "description": "arcaeon: append one JSON row to a ledger; returns the new chain value. Returns JSON with an integer `exit`: 0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK (not a pass).",
+  "parameters": {
+   "type": "object",
+   "required": [
+    "ledger"
+   ],
+   "properties": {
+    "ledger": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "fields": {
+     "type": "object",
+     "description": "the row's fields"
+    },
+    "row": {
+     "type": "object",
+     "description": "a whole row, instead of fields"
+    }
+   }
+  }
+ },
+ {
+  "name": "verify",
+  "description": "arcaeon: check a ledger's chain: VERIFIED / BROKEN / COULD NOT LOOK. Returns JSON with an integer `exit`: 0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK (not a pass).",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "ledger": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "content": {
+     "type": "string",
+     "maxLength": 10485760,
+     "description": "the file's text (JSONL), for an agent with no file access"
+    },
+    "content_b64": {
+     "type": "string",
+     "maxLength": 10485760,
+     "description": "the file's bytes, base64"
+    },
+    "strict": {
+     "type": "boolean"
+    },
+    "witness": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "ns": {
+     "type": "string",
+     "maxLength": 4096
+    }
+   }
+  }
+ },
+ {
+  "name": "reconcile",
+  "description": "arcaeon: two tapes and a counter: MATCHED / MISSING / ALTERED / COULD NOT LOOK. Returns JSON with an integer `exit`: 0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK (not a pass).",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "kind": {
+     "type": "string",
+     "enum": [
+      "tapes",
+      "readings"
+     ]
+    },
+    "tape_a": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "tape_b": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "content_a": {
+     "type": "string",
+     "maxLength": 10485760,
+     "description": "the file's text (JSONL), for an agent with no file access"
+    },
+    "content_b": {
+     "type": "string",
+     "maxLength": 10485760,
+     "description": "the file's text (JSONL), for an agent with no file access"
+    },
+    "content_a_b64": {
+     "type": "string",
+     "maxLength": 10485760,
+     "description": "the file's bytes, base64"
+    },
+    "content_b_b64": {
+     "type": "string",
+     "maxLength": 10485760,
+     "description": "the file's bytes, base64"
+    },
+    "pin": {
+     "type": "string",
+     "maxLength": 4096
+    }
+   }
+  }
+ },
+ {
+  "name": "audit_verify",
+  "description": "arcaeon: verify an audit log or an exported bundle. Returns JSON with an integer `exit`: 0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK (not a pass).",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "path": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "content": {
+     "type": "string",
+     "maxLength": 10485760,
+     "description": "the file's text (JSONL), for an agent with no file access"
+    },
+    "content_b64": {
+     "type": "string",
+     "maxLength": 10485760,
+     "description": "the file's bytes, base64"
+    }
+   }
+  }
+ },
+ {
+  "name": "audit_export",
+  "description": "arcaeon: export a ledger as an audit bundle into a directory under the served root. Returns JSON with an integer `exit`: 0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK (not a pass).",
+  "parameters": {
+   "type": "object",
+   "required": [
+    "ledger",
+    "out"
+   ],
+   "properties": {
+    "ledger": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "out": {
+     "type": "string",
+     "maxLength": 4096
+    }
+   }
+  }
+ },
+ {
+  "name": "receipt_verify",
+  "description": "arcaeon: verify a portable receipt. Returns JSON with an integer `exit`: 0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK (not a pass).",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "receipt": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "content": {
+     "type": "string",
+     "maxLength": 10485760,
+     "description": "the file's text (JSONL), for an agent with no file access"
+    },
+    "content_b64": {
+     "type": "string",
+     "maxLength": 10485760,
+     "description": "the file's bytes, base64"
+    }
+   }
+  }
+ },
+ {
+  "name": "status",
+  "description": "arcaeon: what arcaeon did lately here: last run per verb, open COULD NOT LOOKs. Returns JSON with an integer `exit`: 0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK (not a pass)."
+ },
+ {
+  "name": "pin",
+  "description": "arcaeon: record a ledger head in a local witness file under the served root (remote pin is the paid lane). Returns JSON with an integer `exit`: 0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK (not a pass).",
+  "parameters": {
+   "type": "object",
+   "required": [
+    "ledger"
+   ],
+   "properties": {
+    "ledger": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "witness": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "ns": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "remote": {
+     "type": "boolean"
+    }
+   }
+  }
+ },
+ {
+  "name": "evidence_pack",
+  "description": "arcaeon: build an evidence pack for a ledger and a time window. Returns JSON with an integer `exit`: 0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK (not a pass).",
+  "parameters": {
+   "type": "object",
+   "required": [
+    "ledger",
+    "out"
+   ],
+   "properties": {
+    "ledger": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "out": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "agent": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "since": {
+     "type": "string",
+     "maxLength": 64
+    },
+    "until": {
+     "type": "string",
+     "maxLength": 64
+    }
+   }
+  }
+ },
+ {
+  "name": "evidence_pack_verify",
+  "description": "arcaeon: verify an evidence pack: every file rehashed, the chain, the window, the pins. Returns JSON with an integer `exit`: 0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK (not a pass).",
+  "parameters": {
+   "type": "object",
+   "required": [
+    "pack"
+   ],
+   "properties": {
+    "pack": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "witness": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "remote": {
+     "type": "boolean",
+     "description": "also read the pack's remote pins (network; unreachable is COULD NOT LOOK, reason network)"
+    }
+   }
+  }
+ },
+ {
+  "name": "export_aat",
+  "description": "arcaeon: write a ledger out in the agent-audit-trail format. Returns JSON with an integer `exit`: 0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK (not a pass).",
+  "parameters": {
+   "type": "object",
+   "required": [
+    "ledger",
+    "out"
+   ],
+   "properties": {
+    "ledger": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "out": {
+     "type": "string",
+     "maxLength": 4096
+    }
+   }
+  }
+ },
+ {
+  "name": "mandate_check",
+  "description": "arcaeon: check a call against a mandate (record-only: says inside or outside, blocks nothing). Returns JSON with an integer `exit`: 0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK (not a pass).",
+  "parameters": {
+   "type": "object",
+   "required": [
+    "mandate"
+   ],
+   "properties": {
+    "mandate": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "fields": {
+     "type": "object"
+    }
+   }
+  }
+ },
+ {
+  "name": "readings",
+  "description": "arcaeon: submit one reader's reading of a claim, chained into a readings ledger. Returns JSON with an integer `exit`: 0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK (not a pass).",
+  "parameters": {
+   "type": "object",
+   "required": [
+    "ledger",
+    "reader_id",
+    "claim_id",
+    "reading"
+   ],
+   "properties": {
+    "ledger": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "reader_id": {
+     "type": "string",
+     "maxLength": 256
+    },
+    "provider": {
+     "type": "string",
+     "maxLength": 256
+    },
+    "claim_id": {
+     "type": "string",
+     "maxLength": 256
+    },
+    "claim": {
+     "type": "string",
+     "maxLength": 10485760
+    },
+    "criterion_sha256": {
+     "type": "string",
+     "maxLength": 64
+    },
+    "criterion": {
+     "type": "string",
+     "maxLength": 10485760
+    },
+    "claim_sha256": {
+     "type": "string",
+     "maxLength": 64
+    },
+    "model": {
+     "type": "string",
+     "maxLength": 256
+    },
+    "near_match_id": {
+     "type": "string",
+     "maxLength": 256
+    },
+    "rationale": {
+     "type": "string",
+     "maxLength": 10485760
+    },
+    "keep_text": {
+     "type": "boolean"
+    },
+    "reading": {
+     "type": "string",
+     "enum": [
+      "yes",
+      "no",
+      "undetermined"
+     ]
+    }
+   }
+  }
+ },
+ {
+  "name": "second_read_compare",
+  "description": "arcaeon: line up two readings ledgers: COMPARED / MISSING / BROKEN / COULD NOT LOOK. Returns JSON with an integer `exit`: 0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK (not a pass).",
+  "parameters": {
+   "type": "object",
+   "properties": {
+    "a": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "b": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "content_a": {
+     "type": "string",
+     "maxLength": 10485760,
+     "description": "the file's text (JSONL), for an agent with no file access"
+    },
+    "content_b": {
+     "type": "string",
+     "maxLength": 10485760,
+     "description": "the file's text (JSONL), for an agent with no file access"
+    },
+    "content_a_b64": {
+     "type": "string",
+     "maxLength": 10485760,
+     "description": "the file's bytes, base64"
+    },
+    "content_b_b64": {
+     "type": "string",
+     "maxLength": 10485760,
+     "description": "the file's bytes, base64"
+    }
+   }
+  }
+ },
+ {
+  "name": "handshake_propose",
+  "description": "arcaeon: propose terms to another agent; each side keeps its own ledger. Returns JSON with an integer `exit`: 0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK (not a pass).",
+  "parameters": {
+   "type": "object",
+   "required": [
+    "ledger",
+    "terms"
+   ],
+   "properties": {
+    "ledger": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "terms": {
+     "type": "object"
+    }
+   }
+  }
+ },
+ {
+  "name": "handshake_accept",
+  "description": "arcaeon: countersign proposed terms. Returns JSON with an integer `exit`: 0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK (not a pass).",
+  "parameters": {
+   "type": "object",
+   "required": [
+    "ledger",
+    "proposal"
+   ],
+   "properties": {
+    "ledger": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "proposal": {
+     "type": "object"
+    }
+   }
+  }
+ },
+ {
+  "name": "handshake_verify",
+  "description": "arcaeon: line up both sides' ledgers: AGREED TERMS / DIFFERENT TERMS / MISSING / COULD NOT LOOK. Returns JSON with an integer `exit`: 0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK (not a pass).",
+  "parameters": {
+   "type": "object",
+   "required": [
+    "a",
+    "b"
+   ],
+   "properties": {
+    "a": {
+     "type": "string",
+     "maxLength": 4096
+    },
+    "b": {
+     "type": "string",
+     "maxLength": 4096
+    }
+   }
+  }
+ }
+]

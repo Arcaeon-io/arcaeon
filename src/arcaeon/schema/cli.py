@@ -10,6 +10,10 @@ hand-written, through arcaeon.adapters.tool_specs (free check routes only):
   openai   OpenAI function calling (Responses API shape): a list of
            {type: "function", name, description, parameters}; the Chat
            Completions shape nests the last three under `function`
+  gemini   Gemini function declarations: a list of {name, description,
+           parameters?}, the parameters cut to the OpenAPI subset Gemini's
+           Schema reads (one type per node, `nullable` for a null type, no
+           empty `required`, no `parameters` on a route that takes none)
 
 `--out` writes the text to a file instead (UTF-8, LF), the way
 docs/openapi.json and docs/schemas/*.json are made; a drift test holds each
@@ -26,7 +30,7 @@ from pathlib import Path
 
 from arcaeon import verdict as V
 
-FORMATS = ("openapi", "claude", "openai")
+FORMATS = ("openapi", "claude", "openai", "gemini")
 
 
 def _dumps(obj) -> str:
@@ -49,7 +53,49 @@ def openai_functions(doc: dict | None = None) -> list[dict]:
             for s in tool_specs(doc=doc)]
 
 
-_BUILDERS = {"claude": claude_tools, "openai": openai_functions}
+#: The Schema fields Gemini's function declarations read; others are dropped.
+GEMINI_SCHEMA_KEYS = frozenset({
+    "type", "format", "description", "nullable", "enum", "properties", "required",
+    "items", "minItems", "maxItems", "minLength", "maxLength", "minimum", "maximum"})
+
+
+def gemini_schema(schema: dict) -> dict:
+    """A JSON schema cut to what a Gemini function declaration accepts."""
+    out: dict = {}
+    for k, v in schema.items():
+        if k not in GEMINI_SCHEMA_KEYS:
+            continue
+        if k == "type" and isinstance(v, list):
+            real = [t for t in v if t != "null"]
+            v = real[0] if real else "string"
+            if "null" in schema["type"]:
+                out["nullable"] = True
+        elif k == "properties":
+            v = {name: gemini_schema(sub) for name, sub in v.items()}
+        elif k == "items":
+            v = gemini_schema(v)
+        elif k == "required":
+            v = list(v)
+            if not v:
+                continue
+        out[k] = v
+    return out
+
+
+def gemini_functions(doc: dict | None = None) -> list[dict]:
+    """Gemini function declarations, one per free check route."""
+    from arcaeon.adapters import tool_specs
+    out = []
+    for s in tool_specs(doc=doc):
+        decl = {"name": s.name, "description": s.description}
+        if s.parameters.get("properties"):
+            decl["parameters"] = gemini_schema(s.parameters)
+        out.append(decl)
+    return out
+
+
+_BUILDERS = {"claude": claude_tools, "openai": openai_functions,
+             "gemini": gemini_functions}
 
 
 def render(fmt: str) -> str:
@@ -69,7 +115,8 @@ def _parser() -> argparse.ArgumentParser:
                     "a model framework reads, generated from that document.")
     ap.add_argument("--format", choices=FORMATS, default="openapi",
                     help="openapi (the default); claude: Claude tool-use definitions; "
-                         "openai: OpenAI function tools")
+                         "openai: OpenAI function tools; gemini: Gemini function "
+                         "declarations")
     ap.add_argument("--out", default=None, metavar="FILE",
                     help="write the document to FILE instead of printing it")
     return ap

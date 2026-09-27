@@ -126,6 +126,7 @@ the lane (A, B or C) of the work and the commit ids that carry it.
   the zip. `audit.export_bundle` gains `generated_at=` for the export's three stamps.
 - **`schema --format claude` (plug-in batch lane B: K081).** New format for the `schema` verb: a JSON list of `{name, description, input_schema}` Claude tool-use definitions, one per free check route (`arcaeon.adapters.tool_specs`, K080), generated from the OpenAPI document. Committed as `docs/schemas/claude_tools.json` with a drift test. `--format openapi` output is unchanged. Additive.
 - **`schema --format openai` (lane B: K082).** New format for the `schema` verb: a JSON list of OpenAI function tools in the Responses API shape, `{type: "function", name, description, parameters}`, one per free check route, generated from the OpenAPI document (the Chat Completions shape nests the last three under `function`). Committed as `docs/schemas/openai_functions.json` with a drift test. Additive.
+- **`schema --format gemini` (lane B: K083).** New format for the `schema` verb: a JSON list of Gemini function declarations `{name, description, parameters?}`, one per free check route, generated from the OpenAPI document; parameters are cut to the Gemini Schema subset (`arcaeon.schema.cli.GEMINI_SCHEMA_KEYS`, one type per node, `nullable` for a null type), and a route with no parameters has none. Committed as `docs/schemas/gemini_functions.json` with a drift test. Additive.
 
 ## 0.9.1 (2026-09-25)
 
