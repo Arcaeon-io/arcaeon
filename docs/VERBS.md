@@ -516,8 +516,11 @@ The receipt proves what was dropped, never that dropping it was wise.
 
 Answers: did a second model, reading the same claims against the same
 frozen sentence, come out where the first one did? `arcaeon second-read
-<criterion|compare> ...`: `criterion` freezes one criterion sentence into a
-readings ledger (every reading cites its sha256); `compare A B` lines up two
+<criterion|compare|submit|ask> ...`: `criterion` freezes one criterion
+sentence into a readings ledger (every reading cites its sha256); `submit`
+files your own reading of one claim (the door for any AI or person, the
+same as `POST /v1/readings`); `ask` puts a claims file to one reader, one
+reading per claim, as a dry run unless `--send`; `compare A B` lines up two
 readings ledgers claim by claim and files each disagreement with both
 readings. COMPARED means both ledgers were read and lined up, never that
 the claims are true.
