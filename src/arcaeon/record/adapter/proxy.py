@@ -80,6 +80,7 @@ No network calls at runtime. Stdlib only, plus `arcaeon-ledger` when installed
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -254,6 +255,14 @@ class _MandateWatch:
     `mandate_outside` row; a call the gate could not judge gets a
     `mandate_could_not_look` row; an inside call is counted, not rowed. See
     docs/MANDATE_GATE.md.
+
+    Which mandate, and any change (K076): right after `session_begin`, a
+    `mandate_loaded` row names the file and its sha256 (when one loaded). Before each judged
+    call the file is hashed again; if its bytes moved, a `mandate_changed`
+    row carries both hashes. The gate keeps judging against the mandate it
+    loaded at start: the row says the file moved, it does not reload it.
+    Every surface that builds this watch gets both rows, because the hook
+    rides the observer's own `session_begin`.
     """
 
     def __init__(self, gate, obs: SeamObserver, *, enforce: bool = False):
@@ -265,8 +274,78 @@ class _MandateWatch:
         self.blocked = 0
         self.cap_exceeded = 0
         self._lock = threading.Lock()
+        self._seen_sha256 = getattr(gate, "file_sha256", None)
+        self.changes = 0
+        self._hook_session_begin()
+
+    def _hook_session_begin(self) -> None:
+        """Write `mandate_loaded` right after the session's first row, on
+        whichever surface calls `obs.session_begin`."""
+        begin = getattr(self.obs, "session_begin", None)
+        if begin is None:
+            return
+
+        def session_begin(**fields):
+            row = begin(**fields)
+            if not self.gate.ok:
+                # Nothing was loaded: session_begin already names the status
+                # and error, and a file that appears later is a mandate_changed.
+                return row
+            try:
+                self._row("mandate_loaded", mandate=self.gate.path,
+                          mandate_status=self.gate.status,
+                          mandate_error=self.gate.error,
+                          mandate_file_sha256=self.gate.file_sha256,
+                          mandate_body_digest=self.gate.body_digest,
+                          who=self.gate.who, mandate_mode=self.mode)
+            except Exception:
+                pass            # a pin row never stops the session
+            return row
+        self.obs.session_begin = session_begin
+
+    def _row(self, evt: str, **fields) -> None:
+        with self.obs._lock:
+            self.obs._row(evt, **fields)
+
+    def _file_now(self) -> tuple[str | None, str]:
+        """(sha256 of the mandate file's bytes now, or None; its status)."""
+        path = self.gate.path
+        if path is None:
+            return None, "missing"
+        try:
+            data = Path(path).read_bytes()
+        except FileNotFoundError:
+            return None, "missing"
+        except OSError:
+            return None, "unreadable"
+        return hashlib.sha256(data).hexdigest(), "present"
+
+    def check_file(self, msg: dict | None = None) -> None:
+        """Hash the mandate file again; row a change. Never raises."""
+        try:
+            now, status = self._file_now()
+            with self._lock:
+                before = self._seen_sha256
+                if now == before:
+                    return
+                self._seen_sha256 = now
+                self.changes += 1
+            params = (msg or {}).get("params")
+            params = params if isinstance(params, dict) else {}
+            rid = (msg or {}).get("id")
+            tool = params.get("name")
+            self._row("mandate_changed", mandate=self.gate.path,
+                      from_sha256=before, to_sha256=now, file_status=status,
+                      judged_against_sha256=self.gate.file_sha256,
+                      tool=tool if isinstance(tool, str) else None,
+                      rpc_id=(_render_id(rid) if rid is not None
+                              and not isinstance(rid, (dict, list)) else None),
+                      mandate_mode=self.mode)
+        except Exception:
+            pass
 
     def judge(self, msg: dict):
+        self.check_file(msg)
         params = msg.get("params")
         return self.gate.detail(params if params is not None else {})
 
@@ -337,6 +416,7 @@ class _MandateWatch:
                 "mandate_could_not_look": self.counts["could_not_look"],
                 "mandate_blocked": self.blocked or None,
                 "mandate_cap_exceeded": self.cap_exceeded or None,
+                "mandate_changes": self.changes or None,
                 "mandate_spent": (str(self.gate.spent)
                                   if getattr(self.gate, "total_cap", None) is not None
                                   else None)}
