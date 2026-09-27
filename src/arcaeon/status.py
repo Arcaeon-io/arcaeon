@@ -138,17 +138,26 @@ def summarize(rows: list[dict]) -> dict:
 
 
 def balance_sentence(out: dict) -> str:
-    """One plain sentence for a /api/balance answer (credits and free tier)."""
+    """One plain sentence for a /api/balance answer.
+
+    A key whose plan reports a monthly cap keeps the old monthly count. A plan
+    with no cap, or a payload with no plan field at all, shows credits only:
+    new keys get a one-time registration grant, not a monthly allowance
+    (decision 2026-09-27 8:47 AM PT).
+    """
     credits = out.get("credit_balance", out.get("balance"))
-    parts = []
-    if isinstance(credits, (int, float)):
-        parts.append(f"{credits:g} credits left")
+    has_credits = isinstance(credits, (int, float))
     ft = out.get("free_tier")
-    if isinstance(ft, dict) and ft.get("used") is not None:
-        cap = ft.get("cap")
-        parts.append(f"{ft['used']} of {cap if cap is not None else 'unlimited'} "
-                     f"free pins used this month")
-    return ", ".join(parts) if parts else "balance read, but it carried no credit count"
+    ft = ft if isinstance(ft, dict) else {}
+    plan = ft.get("plan", out.get("plan"))
+    cap = ft.get("cap")
+    if plan is not None and cap is not None and ft.get("used") is not None:
+        parts = [f"{credits:g} credits left"] if has_credits else []
+        parts.append(f"{ft['used']} of {cap} free pins used this month")
+        return ", ".join(parts)
+    if has_credits:
+        return f"{credits:g} credits on the key"
+    return "balance read, but it carried no credit count"
 
 
 def check_balance() -> dict:

@@ -34,8 +34,8 @@ that silently ships less than it bundles is the failure mode; it fails loudly
 instead.
 
 THE PAID LANE. Exactly two tools spend money on our side, and both are gated on
-ARCAEON_KEY. With no key they return a plain sentence naming the free tier, the
-$5 pack and the link — the refusal is a product surface, not an exception.
+ARCAEON_KEY. With no key they return a plain sentence naming the registration
+grant (500 credits, one time, per verified email), the $5 pack and the link — the refusal is a product surface, not an exception.
 
 THE LICENSE GATE (idea I-daniel-17), OFF BY DEFAULT. A second, optional gate
 sits in front of the same two tools and answers a different question: not "does
@@ -623,7 +623,7 @@ def build_server():
             "the hosted witness, a party you cannot advance — the only thing that "
             "catches TRUNCATION, which a hash chain alone cannot. Returns the "
             "stored pin, the public commit, and the history URL. Without a key it "
-            "returns a plain note with the free tier and the $5 pack; it never "
+            "returns a plain note with the registration grant and the $5 pack; it never "
             "silently does nothing. Proves no-truncation only relative to what the "
             "witness saw and only as recently as the last pin: the pin gap IS the "
             "security parameter."),
@@ -641,7 +641,7 @@ def build_server():
             "exactly (a mismatch is refused, 409 renewal_head_mismatch) — a renewal "
             "moves the cadence deadline and can never launder a re-mint or erase a "
             "deadline that was already missed. Without a key it returns a plain "
-            "note with the free tier and the $5 pack."),
+            "note with the registration grant and the $5 pack."),
     )
     def witness_renew(namespace: str, rows: int, chain: str):
         args = {"namespace": namespace, "rows": rows, "chain": chain}
@@ -858,8 +858,8 @@ def _status_payload() -> dict:
             "Everything except witness_* is free forever and needs no key; "
             "the witness LIBRARY is self-hostable free too, the paid part is "
             "us hosting it.",
-            "The witness free tier is 100 pins/month, no card — email "
-            "hello@arcaeon.io for a key.",
+            "Every new key comes with 500 credits, one time, per verified "
+            "email; registration is at https://arcaeon.io/pricing.",
             "Auth is bearer-key only (auth_level bearer-stage0): a leaked key "
             "can pin and renew in your name. Owner-signature auth is designed, "
             "not built.",

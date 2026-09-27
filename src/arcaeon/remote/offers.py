@@ -25,11 +25,40 @@ MINI_PACK = {
     "checkout": "https://buy.stripe.com/aFa4gAb10ead3xy35f0RG08",
 }
 
-# The free tier is real and is NOT a trial: 100 pins/month, no card. It is named
-# in the upgrade message on purpose -- a paywall that hides the free door is
-# selling something the catalog says is free.
-FREE_TIER = {"plan": "free", "price_usd": 0, "pins_per_month": 100,
-             "how": "email hello@arcaeon.io or ask Nora for a key"}
+# The registration grant (decision 2026-09-27 8:47 AM PT) replaced the old
+# "100 pins a month" free tier for new keys: every new key comes with a one-time
+# grant of credits per verified email. It is read from the bundled offers.json
+# (hosted-witness -> registration_grant), not retyped here, so the number lives
+# in one place. It is named in the upgrade message on purpose -- a paywall that
+# hides the free door is selling something the catalog says is free.
+PRICING_URL = "https://arcaeon.io/pricing"
+
+
+def _load_registration_grant() -> dict | None:
+    import json
+    from pathlib import Path
+
+    try:
+        cat = json.loads(Path(__file__).with_name("offers.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    for prod in cat.get("products", []):
+        if prod.get("id") == "hosted-witness":
+            grant = prod.get("registration_grant")
+            return dict(grant) if isinstance(grant, dict) else None
+    return None
+
+
+REGISTRATION_GRANT = _load_registration_grant()
+
+
+def registration_sentence() -> str:
+    """The one sentence naming the free door, ASCII only, no dashes."""
+    if REGISTRATION_GRANT and REGISTRATION_GRANT.get("statement"):
+        return (f"Every new key comes with {REGISTRATION_GRANT['statement']}; "
+                f"registration is at {PRICING_URL}.")
+    return f"Registration and the current offer: {PRICING_URL}."
+
 
 WITNESS_ENDPOINT = "https://witness.arcaeon.io"
 
@@ -108,8 +137,7 @@ def upgrade_message(tool: str, free_tools: list[str] | None = None) -> str:
         f"It pins your ledger head with the hosted witness ({WITNESS_ENDPOINT}): a party "
         "you cannot advance, which is the only thing that catches truncation.",
         "",
-        f"Free tier: {FREE_TIER['pins_per_month']} pins/month, no card. "
-        f"To get one: {FREE_TIER['how']}.",
+        registration_sentence(),
         f"Entry pack: ${MINI_PACK['price_usd']} for {MINI_PACK['pins']:,} pins "
         f"(${MINI_PACK['price_per_pin_usd']}/pin): {MINI_PACK['checkout']}",
         "",

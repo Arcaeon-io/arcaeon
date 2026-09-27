@@ -84,11 +84,23 @@ def test_balance_with_a_key(home, monkeypatch, capsys):
     from arcaeon import remote
     monkeypatch.setenv("ARCAEON_KEY", "wk_fake_status_key_123")
     monkeypatch.setattr(remote, "_request", lambda *a, **k: (200, {
-        "ok": True, "credit_balance": 42, "free_tier": {"used": 3, "cap": 100}}))
+        "ok": True, "credit_balance": 42,
+        "free_tier": {"plan": "free", "used": 3, "cap": 100}}))
     assert status.main([]) == 0
     out = capsys.readouterr().out
     assert "balance: 42 credits left, 3 of 100 free pins used this month" in out
     assert "wk_fake_status_key_123" not in out
+
+
+def test_balance_sentence_follows_the_plan():
+    """Decision 2026-09-27 8:47 AM PT: a monthly cap is shown only for a plan
+    that reports one; no cap, or no plan field, shows credits only."""
+    f = status.balance_sentence
+    assert f({"credit_balance": 7, "free_tier": {"plan": "free", "used": 1, "cap": 100}})         == "7 credits left, 1 of 100 free pins used this month"
+    assert f({"credit_balance": 500, "free_tier": {"plan": "registered", "used": 0, "cap": None}})         == "500 credits on the key"
+    assert f({"credit_balance": 42, "free_tier": {"used": 3, "cap": 100}}) == "42 credits on the key"
+    assert f({"credit_balance": 42}) == "42 credits on the key"
+    assert f({}) == "balance read, but it carried no credit count"
 
 
 def test_balance_unreachable_is_could_not_look(home, monkeypatch, capsys):
