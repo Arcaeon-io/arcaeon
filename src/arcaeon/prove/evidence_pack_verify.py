@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: MIT
 """`arcaeon evidence-pack verify PACK`: check an evidence pack someone handed you.
 
-    arcaeon evidence-pack verify PACK [--json]
+    arcaeon evidence-pack verify PACK [--witness PINS] [--remote] [--json]
 
 Step 1 (K056): rehash every file the manifest lists and compare. A changed
 byte is BROKEN naming the file; a listed file that is gone is COULD NOT LOOK
@@ -26,6 +26,22 @@ could_not_look.json and the manifest's `counts`: the number of entries must
 equal `counts.could_not_look` (an emptied file with its hash fixed is BROKEN,
 "counts mismatch"), a build that recorded a BROKEN check stays BROKEN, and
 any entry makes the pack COULD NOT LOOK, exit 3, with every reason listed.
+
+Step 4 (K060): pins. First, inside the pack: the manifest's pin list must
+agree with integrity.json's witness block (and witness.json), the manifest's
+chain_head row count with integrity.json's, and records.jsonl must still hold
+each pinned head at its row (a tail cut below a pin, or a rewrite, is BROKEN).
+Then against the witness itself, never the pack's copy of it. A local pin is
+checked against the pin file named by `--witness`, as `arcaeon pin` writes
+it: the file's own chain must hold, and it must hold the exact pin the pack
+names (not merely a latest pin, which a later pin would move); with no pin
+file given it is COULD NOT LOOK, "missing". A remote pin is read from the public witness through
+`arcaeon.remote.check_head`, only with `--remote`; without it, or with no
+network, it is COULD NOT LOOK `reason_word: "network"`, never VERIFIED. A pack
+with no pin at all passes this step with `pins_checked: 0`: the tail was not
+witnessed, which the README says in its does-not-show list. What no step can
+catch is a pack whose every file was rewritten together with no pin to hold
+it; only a witness the rewriter cannot reach does that.
 
 The overall verdict is the worst step: BROKEN outranks COULD NOT LOOK, which
 outranks VERIFIED. COULD NOT LOOK never exits 0.
@@ -259,16 +275,193 @@ def _step_build(pack: Path, manifest: dict) -> dict:
     return res
 
 
+_REMOTE_KEYS = ("commit", "commit_url", "raw_record_url")
+
+
+def _ref(pin: dict) -> tuple:
+    return (pin.get("namespace"), pin.get("rows"), pin.get("chain"))
+
+
+def _load_json(p: Path):
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError):
+        return None
+
+
+def _in_pack_pins(pack: Path, manifest: dict, integrity: dict) -> list[str]:
+    """What the pack's own files say about its pins, cross-checked. Returns
+    one finding per disagreement (empty when they agree)."""
+    from arcaeon.prove.evidence_pack import _pins
+    from arcaeon.record.ledger import chain_at
+
+    problems = []
+    wb = integrity.get("witness") if isinstance(integrity.get("witness"), dict) else {}
+    listed = manifest.get("pins")
+    if not isinstance(listed, list) or not all(isinstance(x, dict) for x in listed):
+        return ["manifest.json has no readable `pins` list"]
+    expected = _pins(wb)
+    if sorted(map(_ref, listed), key=repr) != sorted(map(_ref, expected), key=repr):
+        problems.append(f"the manifest lists pins {[list(_ref(x)) for x in listed]}, "
+                        f"integrity.json's witness block records "
+                        f"{[list(_ref(x)) for x in expected]}")
+    wj = pack / "witness.json"
+    if wj.is_file():
+        w = _load_json(wj)
+        if not isinstance(w, dict):
+            problems.append("witness.json is not a JSON object")
+        else:
+            for k in ("namespace", "witness_rows", "witness_chain"):
+                if w.get(k) != wb.get(k):
+                    problems.append(f"witness.json {k} {w.get(k)!r} differs from "
+                                    f"integrity.json's {wb.get(k)!r}")
+    head = manifest.get("chain_head") or {}
+    if (isinstance(integrity.get("rows"), int) and isinstance(head.get("rows"), int)
+            and integrity["rows"] != head["rows"]):
+        problems.append(f"row count mismatch: integrity.json says {integrity['rows']} "
+                        f"rows, the manifest's chain_head says {head['rows']}")
+    records = pack / "records.jsonl"
+    for x in listed:
+        ns, rows, chain = _ref(x)
+        if not isinstance(rows, int) or not records.is_file():
+            continue
+        now = chain_at(records, rows)
+        if now != chain:
+            problems.append(f"records.jsonl does not hold the head pinned for {ns!r} "
+                            f"(row {rows}: pinned {chain}, records say {now})")
+    return problems
+
+
+def _is_remote(wb: dict, pin: dict) -> bool:
+    return wb.get("kind") == "remote_url" or any(pin.get(k) for k in _REMOTE_KEYS)
+
+
+def _check_remote(pin: dict, remote: bool) -> dict:
+    ns, rows, chain = _ref(pin)
+    base = {"namespace": ns, "rows": rows, "chain": chain, "where": "remote"}
+    looked = f"the public pin for {ns!r} at row {rows}"
+    if not remote:
+        return {**base, "verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            looked, "the hosted witness", "network",
+            "a remote pin is read only when asked (--remote); unread, it is not verified")}
+    from arcaeon import remote as R
+    out = R.check_head(ns, rows, chain)
+    if not isinstance(out, dict):
+        out = {"status": 0, "error": "no answer"}
+    where = out.get("endpoint") or "the hosted witness"
+    if out.get("status") == 0:
+        return {**base, "verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            looked, where, "network",
+            f"the public witness could not be reached ({out.get('error')})")}
+    if not out.get("ok"):
+        rw = "name_not_found" if out.get("status") == 404 else "unreadable"
+        return {**base, "verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            looked, where, rw,
+            f"the public witness answered {out.get('status')}: {out.get('error')}")}
+    if out.get("witnessed") is True:
+        return {**base, "verdict": V.VERIFIED,
+                "raw_record_url": out.get("raw_record_url")}
+    if out.get("witnessed") is False:
+        return {**base, "verdict": V.BROKEN, "finding": (
+            f"the public witness does not hold the head the pack says was pinned "
+            f"for {ns!r} (rows {rows}, chain {chain})")}
+    return {**base, "verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+        f"`witnessed` in the public witness's answer for {ns!r}", where, "unreadable",
+        "the answer did not say whether this head is witnessed")}
+
+
+def _check_local(pack: Path, pin: dict, witness) -> dict:
+    from arcaeon.record.ledger import Ledger
+    from arcaeon.record.ledger.witness import WitnessStore, verify_against_witness
+
+    ns, rows, chain = _ref(pin)
+    base = {"namespace": ns, "rows": rows, "chain": chain, "where": "local"}
+    if witness is None or not Path(witness).is_file():
+        return {**base, "verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            f"the local pin file holding {ns!r}",
+            str(witness) if witness is not None else "--witness (not given)", "missing",
+            "a pin is checked against the witness itself, not the pack's copy of it; "
+            "pass the pin file with --witness")}
+    store = WitnessStore(witness)
+    # The pin file's own chain first, as `arcaeon pin` and the export check it:
+    # agreeing with an edited pin file proves nothing.
+    self_check = store.verify()
+    if self_check.get("ok") is False:
+        return {**base, "verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            f"an intact pin file holding {ns!r}", str(witness), "unreadable",
+            f"the pin file fails its own chain ({self_check.get('first_break')}), "
+            "so no pin in it can vouch for anything")}
+    history = store.history(ns)
+    if not history:
+        return {**base, "verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            f"a pin for {ns!r}", str(witness), "name_not_found",
+            "the pin file holds no pin for this namespace")}
+    # The exact pin the pack names, not merely the latest: a pack exported
+    # before a later pin is not truncated, it is older.
+    hit = next((h for h in history if h.get("rows") == rows and h.get("chain") == chain),
+               None)
+    later = history[-1].get("rows")
+    res = {**base, "pin_file_latest_rows": later}
+    if hit is not None:
+        # records.jsonl holding this head at this row was checked in the pack
+        # step; the pin file holding it is checked here.
+        via = verify_against_witness(store, ns, Ledger(pack / "records.jsonl"))
+        return {**res, "verdict": V.VERIFIED, "as_of": hit.get("as_of"),
+                "against_latest_pin": via.verdict}
+    return {**res, "verdict": V.BROKEN, "finding": (
+        f"the pin file holds no pin for {ns!r} at rows {rows} with chain {chain}, "
+        "the pin the pack says it was checked against")}
+
+
+def _step_pins(pack: Path, manifest: dict, *, witness=None, remote: bool = False) -> dict:
+    """Check each pin inside the pack, then against the witness itself."""
+    check = "pins"
+    ip = pack / "integrity.json"
+    integrity = _load_json(ip)
+    if not isinstance(integrity, dict):
+        return _cnl(check, "integrity.json", str(pack),
+                    "unreadable" if ip.is_file() else "missing",
+                    "integrity.json holds the witness block the pins are checked against")
+    problems = _in_pack_pins(pack, manifest, integrity)
+    listed = manifest.get("pins") if isinstance(manifest.get("pins"), list) else []
+    res = {"check": check, "pins_checked": len(listed)}
+    if problems:
+        res.update({"verdict": V.BROKEN, "finding": "; ".join(problems)})
+        return res
+    if not listed:
+        res.update({"verdict": V.VERIFIED, "note": (
+            "no pin is listed, so the tail of the records was not witnessed")})
+        return res
+    wb = integrity.get("witness") or {}
+    results = [_check_remote(x, remote) if _is_remote(wb, x) else
+               _check_local(pack, x, witness) for x in listed]
+    res["pins"] = results
+    word = _worst([r["verdict"] for r in results])
+    res["verdict"] = word
+    if word == V.BROKEN:
+        res["finding"] = "; ".join(r["finding"] for r in results
+                                   if r["verdict"] == V.BROKEN)
+    elif word == V.COULD_NOT_LOOK:
+        first = next(r for r in results if r["verdict"] == V.COULD_NOT_LOOK)
+        res.update({k: first[k] for k in _CNL_FIELDS})
+    return res
+
+
 #: The verify steps, in order. Each takes (pack folder, loaded manifest) and
-#: returns one check dict with a `verdict` word.
+#: returns one check dict with a `verdict` word. The pins step (_step_pins)
+#: runs after these, since it takes verify's --witness / --remote options.
 STEPS: list[Callable[[Path, dict], dict]] = [_step_hashes, _step_chain,
                                               _step_window, _step_build]
 
 
-def verify_pack(pack: str | Path) -> dict:
+def verify_pack(pack: str | Path, *, witness: str | Path | None = None,
+                remote: bool = False) -> dict:
     """Verify the pack folder `pack`. Returns `verdict`, integer `exit`,
     `pack`, `checks` (one per step) and, when BROKEN, `finding` naming what
-    broke. Never raises on a damaged or absent pack: that is a verdict."""
+    broke. Never raises on a damaged or absent pack: that is a verdict.
+
+    `witness` is a local pin file to check local pins against; `remote`
+    allows one read of the public witness per remote pin (step 4)."""
     pack = Path(pack)
     base = {"pack": str(pack)}
     if not pack.is_dir():
@@ -295,6 +488,7 @@ def verify_pack(pack: str | Path) -> dict:
                 "checks": [c], **{k: c[k] for k in ("looked_for", "where", "reason_word",
                                                    "reason")}}
     checks = [step(pack, manifest) for step in STEPS]
+    checks.append(_step_pins(pack, manifest, witness=witness, remote=remote))
     word = _worst([c["verdict"] for c in checks])
     res = {**base, "verdict": word, "exit": V.EXIT_BY_WORD[word], "checks": checks}
     if word == V.BROKEN:
@@ -320,6 +514,10 @@ def _parser(prog: str) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=prog, description="Verify an evidence pack: rehash "
                                 "every file against its manifest, rerun the chain.")
     p.add_argument("pack", help="the evidence pack folder")
+    p.add_argument("--witness", default=None,
+                   help="the local pin file to check the pack's local pins against")
+    p.add_argument("--remote", action="store_true",
+                   help="read each remote pin from the public witness (network)")
     p.add_argument("--json", action="store_true", help="print the result as JSON")
     return p
 
@@ -327,7 +525,7 @@ def _parser(prog: str) -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None, *,
          prog: str = "arcaeon evidence-pack verify") -> int:
     a = _parser(prog).parse_args(argv)
-    res = verify_pack(a.pack)
+    res = verify_pack(a.pack, witness=a.witness, remote=a.remote)
     if a.json:
         print(json.dumps(res, indent=2))
     else:
