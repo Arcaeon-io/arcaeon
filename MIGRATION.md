@@ -2,9 +2,36 @@
 
 ## Unreleased
 
-Not in any release yet. These are committed on main and will ship in the next
-version; until then `pip install arcaeon` does not have them. Each item names
-the lane (A, B or C) of the work and the commit ids that carry it.
+Nothing yet.
+
+## 0.10.0 (2026-09-27)
+
+The plug-in batch. Nothing was removed or renamed.
+
+New verbs and doors, one line each:
+
+- `arcaeon serve`: the local HTTP/JSON API, 127.0.0.1 only, token-gated; every HTTP body carries `exit`.
+- `arcaeon connect <client>`: shows, and with `--write` merges, the `arcaeon` entry into a client's config; `--undo`, `--check`, `--list`.
+- `arcaeon second-read`: `submit`, `ask`, `run` and `compare` second readings of claims.
+- `arcaeon evidence-pack`: build one folder of evidence over a ledger, and `evidence-pack verify` it.
+- `arcaeon mandate`: `lint`, `explain` and `check` a mandate file.
+- `arcaeon export --format agent-audit-trail`: the ledger as agent audit trail records.
+- `arcaeon open`: the local dashboard, signed in with a one-time code.
+- `arcaeon mcp --http`: the MCP server over streamable HTTP on loopback, with the serve token.
+- Adapters: `arcaeon.adapters` (LangChain, LlamaIndex, CrewAI, AutoGen, OpenAI Agents SDK) and `arcaeon schema --format openapi|claude|openai|gemini|gpt-action`.
+- Clients: the Python `arcaeon.client` and the JavaScript `clients/js/arcaeon.mjs`.
+- Also new: `arcaeon schema`, `arcaeon doctor`, `arcaeon demo`, `arcaeon status`, `verify --witness`, `log --field`, and `proxy --mandate`.
+
+What behaves differently from 0.9.1:
+
+- `stamp` and `credits`: a request that never completes is COULD NOT LOOK, exit 3 (was exit 1); `stamp` on a missing or unreadable file is exit 3 (was exit 2).
+- `arcaeon audit verify <directory>` reads the bundle's `records.jsonl` (it printed FAIL with Permission denied before).
+- Every verb run appends one line to `~/.arcaeon/activity.jsonl`; `ARCAEON_JOURNAL=0` turns it off.
+- COULD NOT LOOK results also carry `looked_for`, `where` and `reason_word` beside `reason`.
+- The MCP connector lists 19 tools.
+
+The detail, item by item. Each item names the lane of the work and the commit
+ids that carry it.
 
 - **`arcaeon mcp --http [--port N]` (plug-in batch heavy track, KH8: 61b9aa6).** The same MCP server `arcaeon mcp` runs on stdio, over streamable HTTP at `http://127.0.0.1:<port>/mcp` (default port 8788; 0 picks one and the listening line prints it). Loopback only; a Host header naming anything else is 400 like `arcaeon serve`; every request needs the serve token (`Authorization: Bearer` or `X-Arcaeon-Token`), else 401. Needs the `[mcp]` extra; without it `--http` prints COULD NOT LOOK naming the extra and exits 3. A remote-only client reaches it through a tunnel the user runs, which must present the loopback Host; no tunnel or public URL ships.
 - **Ten verbs registered ahead of their code (plug-in batch lane A, K001: 0cc7b44).** `serve`, `connect`, `schema`, `second-read`, `evidence-pack`, `export`, `mandate`, `doctor`, `demo`, `open` are in `arcaeon --help` and `arcaeon.cli.LAZY_VERBS`. A verb whose module is not in the install prints `arcaeon <verb>: not built in this checkout` and exits 2. `tools/release_check.py` fails while any is unbuilt or any `TODO(K` marker is left in docs/VERBS.md.
