@@ -21,7 +21,8 @@ from typing import Any
 from arcaeon import verdict as V
 
 __all__ = ["build_pack", "select_window", "parse_when", "PackUsageError",
-           "PACK_SCHEMA", "MANIFEST", "CNL_FILE", "OPERATOR_AT_T"]
+           "PACK_SCHEMA", "MANIFEST", "CNL_FILE", "README", "DOES_NOT_SHOW",
+           "OPERATOR_AT_T"]
 
 #: The evidence-pack manifest schema. 1 is the first (K053).
 PACK_SCHEMA = 1
@@ -29,6 +30,23 @@ PACK_SCHEMA = 1
 MANIFEST = "manifest.json"
 #: Every COULD NOT LOOK the build reached, one entry each; `[]` when none (K054).
 CNL_FILE = "could_not_look.json"
+#: The one-page reader's note inside the pack (K055).
+README = "README.md"
+#: What a pack does not show, printed verbatim in README.md. Kept here, one
+#: list, so the page and any test read the same words.
+DOES_NOT_SHOW = (
+    "That the agent behaved well. The records say what was written, true or not.",
+    "That nothing was left unwritten. A row that was never logged is not in the "
+    "chain, and no chain can name it.",
+    "That the most recent rows were not cut off, unless a pin is listed in "
+    "manifest.json. A pin fixes the head as it stood when it was taken.",
+    "Who wrote each row. Authorship is data in the row, not a signature.",
+    "Who operated the witness when each pin was taken. The manifest says "
+    "UNKNOWN, and it stays unknown until a custody record is published.",
+    "A second, unrelated party. The witness is self-asserted: the manifest "
+    "names its kind and says so.",
+    "That the system meets the EU AI Act. This pack is not a claim of compliance.",
+)
 #: Who operated the witness at pin time. UNKNOWN until a custody record
 #: is published and anchored (spec section 6): never a guess.
 OPERATOR_AT_T = "UNKNOWN"
@@ -167,6 +185,7 @@ def build_pack(ledger: str | Path, out: str | Path, *,
             "empty", "no row in the ledger matches that agent and window"))
     checks = _checks(integrity, window, unplaced, agent, since, until)
     _write_cnl(out, checks)
+    _write_readme(out, res, window, system_id=system_id, provider=provider)
     audit_manifest = json.loads((out / MANIFEST).read_text(encoding="utf-8"))
     _write_manifest(out, res, integrity, audit_manifest, window, unplaced, checks)
     res["files"] = sorted(p.name for p in out.iterdir() if p.is_file())
@@ -247,6 +266,99 @@ def _write_cnl(out: Path, checks: list[dict]) -> list[dict]:
                if c["verdict"] == V.COULD_NOT_LOOK]
     (out / CNL_FILE).write_text(json.dumps(entries, indent=2) + "\n", encoding="utf-8")
     return entries
+
+
+_VERDICT_WORDS = {
+    V.VERIFIED: "VERIFIED. The records chain checked out from its first row to its "
+                "last, and every check this build ran reached an answer.",
+    V.BROKEN: "BROKEN. The records chain does not check out: at least one row was "
+              "changed, removed or reordered after it was written. integrity.json "
+              "names the first break.",
+    V.COULD_NOT_LOOK: "COULD NOT LOOK. At least one check could not reach an answer, "
+                      "so this pack shows nothing either way on it. could_not_look.json "
+                      "says what was looked for, where, and why.",
+}
+
+
+def _write_readme(out: Path, res: dict, window: list[dict], *,
+                  system_id: str = "", provider: str = "") -> str:
+    """Write README.md, one page: the agent, the window, the verdict in words,
+    what the pack does not show, and the two commands to check it. Written
+    before the manifest, so it is hashed there."""
+    w = res["window"]
+    seen: list[str] = []
+    for r in window:
+        try:
+            row = json.loads(r["raw"])
+        except ValueError:
+            continue
+        for k in ("agent", "system_id"):
+            v = row.get(k)
+            if isinstance(v, str) and v and v not in seen:
+                seen.append(v)
+    agent_line = (f"`{w['agent']}` (matched on a row's `agent` or `system_id`)"
+                  if w["agent"] else "every agent in the ledger (no --agent given)")
+    lines = [
+        "# Evidence pack",
+        "",
+        "This folder is evidence toward the logging duties in the EU AI Act for one "
+        "agent and one window of time. It shows what was written, and that it was "
+        "not changed after it was written or pinned.",
+        "",
+        "## The agent",
+        "",
+        f"- Agent: {agent_line}",
+        f"- Names seen in the window's rows: "
+        f"{', '.join('`' + n + '`' for n in seen) if seen else 'none'}",
+    ]
+    if system_id:
+        lines.append(f"- System id given at build: `{system_id}`")
+    if provider:
+        lines.append(f"- Provider given at build: {provider}")
+    rows = w["rows"]
+    span = (f"ledger lines {w['first_line']} to {w['last_line']}" if rows else "no lines")
+    lines += [
+        "",
+        "## The window",
+        "",
+        f"- From: {w['from'] or 'the first row'}",
+        f"- To: {w['to'] or 'the last row'}",
+        f"- Rows: {rows} ({span}); each is in window.jsonl with its ledger line number",
+    ]
+    if w.get("unplaced_lines"):
+        lines.append(f"- Rows whose time could not be read, left out: lines "
+                     f"{w['unplaced_lines']}")
+    lines += [
+        "",
+        "## The verdict",
+        "",
+        _VERDICT_WORDS.get(res["verdict"], _VERDICT_WORDS[V.COULD_NOT_LOOK]),
+        "",
+        "## What this pack does not show",
+        "",
+    ]
+    lines += [f"- {b}" for b in DOES_NOT_SHOW]
+    lines += [
+        "",
+        "## How to check it yourself",
+        "",
+        "Rehash every file against manifest.json and rerun the chain:",
+        "",
+        "```text",
+        "arcaeon evidence-pack verify .",
+        "```",
+        "",
+        "Check the records chain on its own, with nothing from this pack but the file:",
+        "",
+        "```text",
+        "arcaeon verify records.jsonl",
+        "```",
+        "",
+    ]
+    text = "\n".join(lines)
+    # bytes, so the page is LF on every OS and hashes the same everywhere
+    (out / README).write_bytes(text.encode("utf-8"))
+    return text
 
 
 def _write_manifest(out: Path, res: dict, integrity: dict, audit_manifest: dict,

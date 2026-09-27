@@ -55,6 +55,9 @@ the lane (A, B or C) of the work and the commit ids that carry it.
 - **could_not_look.json (lane D: K054).** Every pack now holds `could_not_look.json`: one
   entry per COULD NOT LOOK (`check`, `looked_for`, `where`, `reason_word`, `reason`), `[]`
   when there are none, hashed in the manifest. Its length equals `counts.could_not_look`.
+- **The pack README (lane D: K055).** Every pack now holds a one-page `README.md`: the
+  agent, the window, the verdict in words, what the pack does not show
+  (`arcaeon.prove.evidence_pack.DOES_NOT_SHOW`), and the two commands to check it.
 
 ## 0.9.1 (2026-09-25)
 
