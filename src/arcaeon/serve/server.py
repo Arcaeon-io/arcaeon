@@ -12,7 +12,9 @@ MATCHED, BROKEN and COULD NOT LOOK alike, with the CLI's JSON plus `exit`.
 400 bad usage (not JSON, a field the route's schema refuses, a bad Host),
 404 no such route (or a declared route whose handler is not built yet),
 405 a known path with another method, 413 a body over MAX_BODY. A verdict
-never rides in the HTTP status. A handler that raises is COULD NOT LOOK
+never rides in the HTTP status. A handler whose answer is exit 2 (bad usage:
+a missing field, a path and content together, a kind not built) is 400
+with that body. A handler that raises is COULD NOT LOOK
 (exit 3) in a 200 body, naming the exception class only: the CLI's rule.
 
 The request log goes to stderr as method, path (query string dropped) and
@@ -200,6 +202,8 @@ class Handler(BaseHTTPRequestHandler):
                       "error": f"could not finish: {type(e).__name__} [internal_error]"}
         if isinstance(result, str):
             self._send(200, result, content_type="text/html; charset=utf-8")
+        elif isinstance(result, dict) and result.get("exit") == V.EXIT_USAGE:
+            self._send(400, result)          # bad usage is the request, not a verdict
         else:
             self._send(200, result)
 
