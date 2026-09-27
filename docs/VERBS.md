@@ -842,7 +842,9 @@ it by a drift test.
 **Usage**
 
 ```text
-usage: arcaeon schema [-h] [--format {openapi}] [--out FILE]
+usage: arcaeon schema [-h]
+                      [--format {openapi,claude,openai,gemini,gpt-action}]
+                      [--out FILE]
 ```
 
 `--out FILE` writes the document to a file (UTF-8, LF line endings) instead
