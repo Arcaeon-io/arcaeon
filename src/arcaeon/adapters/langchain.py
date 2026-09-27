@@ -45,7 +45,11 @@ def arcaeon_tools(client=None) -> list:
     `client`: an arcaeon.client.Client; None makes a default one (serve.json
     and serve.token) on the first call. Raises ImportError when langchain-core
     is not installed (`pip install langchain-core`)."""
-    from langchain_core.tools import StructuredTool
+    from arcaeon.adapters import missing
+    try:
+        from langchain_core.tools import StructuredTool
+    except ImportError as e:
+        raise missing("langchain", "langchain-core", e) from e
     from arcaeon.adapters import tool_specs
     tools = []
     for s in tool_specs(client):

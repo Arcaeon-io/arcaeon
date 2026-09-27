@@ -41,7 +41,11 @@ def arcaeon_tools(client=None) -> list:
     `client`: an arcaeon.client.Client; None makes a default one (serve.json
     and serve.token) on the first call. Raises ImportError when crewai is not
     installed (`pip install crewai`)."""
-    from crewai.tools import BaseTool
+    from arcaeon.adapters import missing
+    try:
+        from crewai.tools import BaseTool
+    except ImportError as e:
+        raise missing("crewai", "crewai", e) from e
     from arcaeon.adapters import tool_specs
     from arcaeon.adapters._pydantic import args_model
     return [_tool_class(BaseTool, s)(name=s.name, description=s.description,

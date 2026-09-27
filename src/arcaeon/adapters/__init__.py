@@ -30,7 +30,7 @@ import copy
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-__all__ = ["ToolSpec", "tool_specs", "free_operations", "EXIT_NOTE"]
+__all__ = ["ToolSpec", "tool_specs", "free_operations", "EXIT_NOTE", "missing"]
 
 #: Appended to every description, so a model reading only the tool list
 #: knows the verdict rides in the body and COULD NOT LOOK is not a pass.
@@ -38,6 +38,16 @@ EXIT_NOTE = ("Returns JSON with an integer `exit`: 0 good, 1 a bad finding, "
              "2 bad usage, 3 COULD NOT LOOK (not a pass).")
 
 _EMPTY = {"type": "object", "properties": {}}
+
+
+def missing(adapter: str, package: str, err: ImportError) -> ModuleNotFoundError:
+    """The error an adapter raises when its framework is not installed: one
+    line naming the package to install (still an ImportError)."""
+    e = ModuleNotFoundError(f"arcaeon.adapters.{adapter} needs {package}, which is not "
+                            f"installed: pip install {package}"
+                            f" (import of {err.name or 'it'} failed)")
+    e.name = err.name
+    return e
 
 
 @dataclass(frozen=True)

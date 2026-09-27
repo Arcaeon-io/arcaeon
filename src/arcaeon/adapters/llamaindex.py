@@ -44,7 +44,11 @@ def arcaeon_tools(client=None) -> list:
     `client`: an arcaeon.client.Client; None makes a default one (serve.json
     and serve.token) on the first call. Raises ImportError when
     llama-index-core is not installed (`pip install llama-index-core`)."""
-    from llama_index.core.tools import FunctionTool, ToolMetadata
+    from arcaeon.adapters import missing
+    try:
+        from llama_index.core.tools import FunctionTool, ToolMetadata
+    except ImportError as e:
+        raise missing("llamaindex", "llama-index-core", e) from e
     from arcaeon.adapters import tool_specs
     from arcaeon.adapters._pydantic import args_model
     tools = []

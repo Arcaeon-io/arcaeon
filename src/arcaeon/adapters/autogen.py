@@ -45,7 +45,11 @@ def arcaeon_tools(client=None) -> list:
     `client`: an arcaeon.client.Client; None makes a default one (serve.json
     and serve.token) on the first call. Raises ImportError when autogen-core
     is not installed (`pip install autogen-core`)."""
-    from autogen_core.tools import BaseTool
+    from arcaeon.adapters import missing
+    try:
+        from autogen_core.tools import BaseTool
+    except ImportError as e:
+        raise missing("autogen", "autogen-core", e) from e
     from arcaeon.adapters import tool_specs
     from arcaeon.adapters._pydantic import args_model
     return [_tool_class(BaseTool, s)(args_model(s), str, s.name, s.description)

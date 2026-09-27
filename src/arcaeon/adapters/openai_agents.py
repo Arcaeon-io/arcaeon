@@ -51,7 +51,11 @@ def arcaeon_tools(client=None) -> list:
     `client`: an arcaeon.client.Client; None makes a default one (serve.json
     and serve.token) on the first call. Raises ImportError when the SDK is not
     installed (`pip install openai-agents`)."""
-    from agents import FunctionTool
+    from arcaeon.adapters import missing
+    try:
+        from agents import FunctionTool
+    except ImportError as e:
+        raise missing("openai_agents", "openai-agents", e) from e
     from arcaeon.adapters import tool_specs
     return [FunctionTool(name=s.name, description=s.description,
                          params_json_schema=s.parameters,
