@@ -15,6 +15,23 @@ to the server, exactly as the agent sent it. The gate is the first feature in
 this package that could stop a customer's agent from working, so stopping is
 something you turn on, never something you get.
 
+## Where the gate runs
+
+Three surfaces take `--mandate PATH`, and all three judge calls with the same
+code (`_MandateWatch` in `arcaeon.record.adapter.proxy`), so the rows are the
+same on each:
+
+| surface | how to start it | where the mandate rows go |
+|---|---|---|
+| stdio proxy | `arcaeon proxy --ledger seam.jsonl --mandate mandate.json -- <server command...>` | the seam ledger, `--ledger` |
+| HTTP forward proxy | `arcaeon proxy --ledger seam.jsonl --mandate mandate.json --http-forward URL --listen 127.0.0.1:PORT` | the seam ledger, `--ledger` |
+| call_proxy (receipts) | `python -m arcaeon.record.receipt.call_proxy --upstream URL --mandate mandate.json` | a seam-format log of its own, `--mandate-log` (default `<ledger>.mandate.jsonl`); the receipt ledger is untouched |
+
+Every surface is record-only unless `--mandate-enforce` is passed.
+`tests/test_mandate_default_record_only.py` finds each surface by reading the
+source for `--mandate`, and fails if one forwards nothing, writes no row, or
+has no entry in its list.
+
 ## The mandate
 
 One JSON object. Every field is optional; a field left out constrains nothing.
@@ -97,6 +114,24 @@ Every `tools/call` gets one of:
 | line that is not JSON (stdio) | forwarded; row, `judged_reason: unparsed` | forwarded byte-identical (nothing in it is a call); row, `action: forwarded` |
 | mandate file missing or unreadable | the proxy starts; every call gets a `mandate_could_not_look` row; nothing is ever blocked | the proxy refuses to start and exits 3 (COULD NOT LOOK) |
 
+### Before you turn on `--mandate-enforce`
+
+Enforce stops your agent. A pattern that is one character wrong, a spend
+field under a name the gate does not read, or a window that closed yesterday
+turns into refused calls in the middle of real work, and the agent sees a
+JSON-RPC error it may not handle. So:
+
+1. Run record-only first, on real traffic, and read the `mandate_outside`
+   and `mandate_could_not_look` rows. Every one of them is a call enforce
+   would have refused.
+2. `arcaeon mandate lint` and `arcaeon mandate explain` the file, and
+   `arcaeon mandate check` the calls you expect.
+3. Only then add `--mandate-enforce`. With a mandate it cannot read, enforce
+   refuses to start (exit 3) rather than run with nothing to enforce.
+
+Enforce blocks only on the seam it sits on, and a changed mandate file is not
+picked up until the session restarts (the `mandate_changed` row says so).
+
 Enforce mode holds each client frame until its newline arrives, so it can look
 before it forwards. Record-only never holds anything: bytes go first and the
 check reads a copy, the same fidelity rule as the rest of the proxy.
@@ -131,14 +166,101 @@ Each outside call:
      "who": "purchasing-agent@acme", "mandate_file_sha256": "<hex>",
      "mandate_mode": "record-only", "action": "forwarded", ...seam fields}
 
+Right after `session_begin`, when a mandate loaded, a `mandate_loaded` row
+names the file (`mandate`, `mandate_status`, `mandate_file_sha256`,
+`mandate_body_digest`, `who`, `mandate_mode`). Before each judged call the file
+is hashed again; if its bytes moved, a `mandate_changed` row carries
+`from_sha256`, `to_sha256`, `file_status` and `judged_against_sha256`. The gate
+keeps judging against the mandate it loaded at start: the row says the file
+moved, it does not reload it. Restart the session to judge against the new
+file.
+
+A request the gate cannot parse gets a `mandate_could_not_look` row with
+`judged_reason: "unparsed"`, never a silent pass.
+
 `session_end` carries `mandate_inside`, `mandate_outside`,
-`mandate_could_not_look` and `mandate_blocked` counts when a mandate was given.
+`mandate_could_not_look` and `mandate_blocked` counts when a mandate was given,
+plus `mandate_cap_exceeded`, `mandate_changes` and `mandate_spent` when there
+was any.
+
+## Check a mandate before an agent runs under it
+
+`arcaeon mandate` reads the same file the gate reads and forwards, blocks and
+writes nothing. With the example above saved as `mandate.json`:
+
+```console
+$ arcaeon mandate lint mandate.json
+mandate.json: valid (tool shape, 0 problem(s), 0 warning(s))
+(exit 0)
+$ arcaeon mandate explain mandate.json
+This mandate speaks for purchasing-agent@acme. The gate records that name on every row; it does not check it, because it cannot see who is behind the agent.
+This agent may call search_*, get_quote and place_order.
+It may not call delete_* or refund, even where an allowed pattern also matches.
+One call may spend at most 60.00 USD, and only with acme-store.
+A call counts as a spend when its arguments carry total or amount.
+It holds from 2026-09-01T00:00:00Z until 2026-12-31T23:59:59Z.
+Record-only unless the proxy is started with --mandate-enforce: a call outside this mandate is still forwarded, and the ledger gets a row naming it.
+(exit 0)
+$ arcaeon mandate check mandate.json --field name=place_order --field total=19.00 --field currency=USD --field seller=acme-store --at 2026-10-01T12:00:00Z
+inside: spend: seller, currency, cap and window are inside the mandate
+(exit 0)
+$ arcaeon mandate check mandate.json --field name=refund --at 2026-10-01T12:00:00Z
+outside: tool 'refund' matches forbidden_acts pattern 'refund'
+(exit 1)
+$ arcaeon mandate check mandate.json --field name=place_order --field total=75.00 --field currency=USD --field seller=acme-store --at 2026-10-01T12:00:00Z
+outside: spend: total 75.00 is over the mandate's cap 60.00
+(exit 1)
+$ arcaeon mandate check mandate.json --field name=get_quote --at 2027-01-05T00:00:00Z
+outside: call at 2027-01-05T00:00:00Z is after the mandate's not_after 2026-12-31T23:59:59Z
+(exit 1)
+$ arcaeon mandate check missing.json --field name=get_quote
+could not look: the mandate could not be read: no file at missing.json
+(exit 3)
+```
+
+`(exit N)` is the exit code, not output. `lint` exits 2 on an invalid mandate
+and names each unknown key or bad type. `check` answers the gate's word:
+inside 0, outside 1, could_not_look 3. `--field KEY=VALUE` needs no JSON
+quoting (so it survives PowerShell); `KEY:=JSON` keeps a type. `--spent A`
+says what the session already spent, for `spend_cap.total`. `--json` prints
+the answer as one object.
+
+The same check over HTTP (`arcaeon serve`) and MCP answers the same object
+plus an integer `exit`:
+
+```http
+POST /v1/mandate/check
+{"mandate": "mandate.json", "fields": {"name": "refund"}, "at": "2026-10-01T12:00:00Z"}
+```
+
+```mcp
+mandate_check
+{"mandate": "mandate.json", "fields": {"name": "refund"}, "at": "2026-10-01T12:00:00Z"}
+```
+
+Both answer `"verdict": "outside"`, `"rule": "forbidden_acts"`, `"exit": 1`.
+A verdict never rides in the HTTP status: inside, outside and could not look
+all come back as 200. The MCP tool `mandate_check` is free and, like every
+connector tool, leaves one row in the connector's call record.
+
+## Counts in `arcaeon status`
+
+When a gated session ends, on any of the three surfaces, it adds one line to
+`~/.arcaeon/mandate_sessions.jsonl` (or under `$ARCAEON_HOME`; off with
+`ARCAEON_JOURNAL=0`): the session id, the mode, the mandate file's sha256 and
+the counts, never a path, a tool name or an argument. `arcaeon status` adds
+them up (`status --json` under `mandate`: `sessions`, `inside`, `outside`,
+`could_not_look`, `blocked`, `cap_exceeded`, `changes`). The seam ledger stays
+the record; the session id in each line is the one in that ledger's rows.
 
 ## What it does not prove
 
 - It does not prove the person behind `who` wrote or approved the mandate. It
   proves which file was in force (by hash) and what each call was checked
   against. Pair it with a deal mandate row, pinned by a witness, for when.
+- `arcaeon mandate check`, `POST /v1/mandate/check` and the MCP tool
+  `mandate_check` judge the call you describe to them. They do not see what an
+  agent actually sends; only a proxy on the seam does.
 - Without `spend_cap.total` the spend cap is per call, so ten calls at the cap
   each read inside. The total counts only what crossed this seam, in the one
   session: a new session starts at zero. Under `--mandate-enforce`, calls

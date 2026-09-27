@@ -408,3 +408,102 @@ def test_second_reader_quotes_np12_loss_condition_verbatim():
                                     "compliant", "guarantee", "\u2014", "\u2013"])
 def test_second_reader_makes_no_overclaim(phrase):
     assert phrase not in SECOND_READER.lower(), phrase
+
+
+# --- docs/MANDATE_GATE.md: every example runs (K079) ----------------------------------
+
+MANDATE_MD = (ROOT / "docs" / "MANDATE_GATE.md").read_text(encoding="utf-8")
+
+
+def _fenced(text: str, lang: str) -> list[str]:
+    return re.findall(r"^```" + lang + r"\n(.*?)^```", text, re.S | re.M)
+
+
+def _mandate_example(tmp_path) -> Path:
+    """The doc's first JSON block, saved as mandate.json, as the doc says."""
+    p = tmp_path / "mandate.json"
+    p.write_text(_fenced(MANDATE_MD, "json")[0], encoding="utf-8")
+    return p
+
+
+def _mandate_steps():
+    steps = []
+    for block in _fenced(MANDATE_MD, "console"):
+        for line in block.splitlines():
+            if line.startswith("$ "):
+                steps.append({"cmd": line[2:], "out": [], "exit": 0})
+            elif steps:
+                m = re.fullmatch(r"\(exit (\d+)\)", line.strip())
+                if m:
+                    steps[-1]["exit"] = int(m.group(1))
+                else:
+                    steps[-1]["out"].append(line)
+    return steps
+
+
+def test_mandate_doc_has_no_em_or_en_dash():
+    assert "—" not in MANDATE_MD and "–" not in MANDATE_MD
+
+
+def test_every_mandate_json_block_lints_valid():
+    from arcaeon.record import mandate_cli
+    import json
+    blocks = _fenced(MANDATE_MD, "json")
+    assert len(blocks) >= 2
+    for b in blocks:
+        res = mandate_cli.lint(json.loads(b))
+        assert res["valid"], (b, res["problems"])
+
+
+def test_mandate_doc_console_examples_print_what_the_doc_says(tmp_path, monkeypatch, capsys):
+    steps = _mandate_steps()
+    assert {s["exit"] for s in steps} == {0, 1, 3}, steps
+    assert any(s["cmd"].startswith("arcaeon mandate lint") for s in steps)
+    assert any(s["cmd"].startswith("arcaeon mandate explain") for s in steps)
+    _mandate_example(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("ARCAEON_HOME", str(tmp_path / "arc_home"))
+    for step in steps:
+        argv = shlex.split(step["cmd"])
+        assert argv[0] == "arcaeon", step["cmd"]
+        rc = cli.main(argv[1:])
+        got = capsys.readouterr()
+        assert rc == step["exit"], (step["cmd"], got.out, got.err)
+        assert (got.out + got.err).splitlines() == step["out"], (step["cmd"], got.out, got.err)
+
+
+def _mandate_request(lang: str) -> tuple[str, dict]:
+    import json
+    (block,) = _fenced(MANDATE_MD, lang)
+    first, body = block.strip().split("\n", 1)
+    return first.strip(), json.loads(body)
+
+
+def test_mandate_doc_http_example_answers_what_the_doc_says(tmp_path, monkeypatch):
+    from arcaeon.serve import h_mandate
+    _mandate_example(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    route, body = _mandate_request("http")
+    assert route == "POST /v1/mandate/check"
+    res = h_mandate.check(body)
+    assert (res["verdict"], res["rule"], res["exit"]) == ("outside", "forbidden_acts", 1)
+    assert '`"verdict": "outside"`, `"rule": "forbidden_acts"`, `"exit": 1`' in MANDATE_MD
+
+
+def test_mandate_doc_mcp_example_answers_what_the_doc_says(tmp_path, monkeypatch):
+    from arcaeon.mcp import server
+    _mandate_example(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    tool, args = _mandate_request("mcp")
+    assert tool == "mandate_check" and tool in server.ALL_TOOLS
+    res = server._mandate_check(args)
+    assert (res["verdict"], res["rule"], res["exit"]) == ("outside", "forbidden_acts", 1)
+
+
+def test_mandate_doc_names_every_surface_and_the_enforce_warning():
+    for must in ("--http-forward", "arcaeon.record.receipt.call_proxy", "--mandate-log",
+                 "spend_cap.total", "mandate_cap_exceeded", "mandate_loaded",
+                 "mandate_changed", "Before you turn on `--mandate-enforce`",
+                 "Enforce stops your agent", "mandate_sessions.jsonl",
+                 "tests/test_mandate_default_record_only.py"):
+        assert must in MANDATE_MD, must
