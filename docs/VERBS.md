@@ -955,14 +955,26 @@ nothing written (add --write to apply)
 
 ## `schema`
 
-Answers: what does the local HTTP API accept and return, for a program or
-framework that reads OpenAPI? Prints the OpenAPI 3.1 document built from the
-same route table `arcaeon serve` dispatches on, so it is the very document
-the server answers at `GET /openapi.json`: one operation per route with an
-`operationId`, each route's request and response schemas under
-`components.schemas`, and the bearer security scheme on every route but
-`/health` and `/openapi.json`. `docs/openapi.json` is this output, held to
-it by a drift test.
+Answers: what does the local HTTP API accept and return, in the shape my
+model or framework reads? `--format` picks one of five, every one built
+from the same route table `arcaeon serve` dispatches on:
+
+- `openapi` (the default): the OpenAPI 3.1 document the server answers at
+  `GET /openapi.json`: one operation per route with an `operationId`, each
+  route's request and response schemas under `components.schemas`, and the
+  bearer security scheme on every route but `/health` and `/openapi.json`.
+- `claude`: Claude tool use, a list of `{name, description, input_schema}`.
+- `openai`: OpenAI function calling, a list of `{type: "function", name,
+  description, parameters}`.
+- `gemini`: Gemini function declarations, the parameters cut to the schema
+  subset Gemini reads.
+- `gpt-action`: a GPT Action manifest, the OpenAPI document cut to the free
+  check routes, its server url a placeholder (a public url is a deploy
+  decision).
+
+Every format but `openapi` is generated from the OpenAPI document (free
+check routes only), never written by hand. `docs/openapi.json` and
+`docs/schemas/*.json` are this output, each held to it by a drift test.
 
 **Usage**
 
