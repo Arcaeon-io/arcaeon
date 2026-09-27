@@ -87,6 +87,23 @@ the lane (A, B or C) of the work and the commit ids that carry it.
 - **`evidence-pack verify` chain step (lane D: K057).** Verify also reruns the chain on
   `records.jsonl` and compares its head to the manifest's `chain_head`: an edit hidden by
   a fixed manifest hash is BROKEN with `break_line` naming the ledger line.
+- **AAT chain (lane D: K062 dd06239).** `arcaeon export --format agent-audit-trail` records
+  gain `prev_hash` (hex SHA-256 over the RFC 8785 JCS of the previous record, null at
+  genesis), and each line is now its record's JCS form. New stdlib module
+  `arcaeon.prove.jcs`. A value JCS cannot write exactly is left out and listed, never rounded.
+- **aat_gaps.json (lane D: K063 cf81832).** The export writes `<name>_gaps.json` beside
+  `<name>.jsonl` (refuses if it exists): `which_chain`, and one COULD NOT LOOK `bounded` entry
+  per field left out. The result gains `which_chain`, `aat_chain`, `refused`, `gaps_file`, `gaps`.
+- **Pack verify re-derives (lane D: K06xR1 7a46836, K06xR2 0acee96).** Every pack now writes
+  `manifest.sha256`; verify checks it (missing is exit 3, different is BROKEN). A manifest
+  without `checks` or `counts` is BROKEN "manifest incomplete"; an empty or unplaced window
+  the pack does not list is BROKEN. New `evidence-pack verify --namespace NS`; with
+  `--witness` and no pin listed, a pin past the head is BROKEN "pin beyond head".
+- **`evidence-pack --format aat` (lane D: K064 ec401d4).** Adds `aat.jsonl`, `aat_gaps.json`
+  and a manifest `aat` block; verify recomputes both from `records.jsonl`.
+- **`evidence-pack --deal ID --buyer B | --seller S` (lane D: K065 ef5a276).** Adds
+  `verdict.json`, `timeline.md`, `buyer.deal.jsonl`, `seller.deal.jsonl` and a manifest
+  `deal` block; the dispute is one more check (ALTERED is BROKEN, COULD NOT LOOK is exit 3).
 
 ## 0.9.1 (2026-09-25)
 
