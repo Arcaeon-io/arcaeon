@@ -866,3 +866,27 @@ def test_verify_rows_since_pin_absent_or_ambiguous(tmp_path, capsys):
     assert cli.main(["verify", str(p), "--ns", "one"]) == 2
     assert cli.main(["verify", str(p), "--witness"]) == 2
     capsys.readouterr()
+
+
+def test_audit_verify_accepts_a_bundle_directory(tmp_path, capsys):
+    """K010b: `audit verify <dir>` resolves an exported bundle to its
+    records.jsonl, as POST /v1/audit/verify does, instead of a
+    Permission denied FAIL; a directory without one is COULD NOT LOOK, exit 3."""
+    led = tmp_path / "a.jsonl"
+    assert cli.main(["log", str(led), '{"n": 1}']) == 0
+    assert cli.main(["log", str(led), '{"n": 2}']) == 0
+    out = tmp_path / "bundle"
+    assert cli.main(["audit", "export", str(led), str(out)]) == 0
+    capsys.readouterr()
+    rc_file = cli.main(["audit", "verify", str(out / "records.jsonl")])
+    by_file = capsys.readouterr().out
+    rc_dir = cli.main(["audit", "verify", str(out)])
+    by_dir = capsys.readouterr().out
+    assert rc_dir == rc_file == 0
+    assert by_dir == by_file and by_dir.startswith("VERIFIED")
+    empty = tmp_path / "not_a_bundle"
+    empty.mkdir()
+    assert cli.main(["audit", "verify", str(empty)]) == V.EXIT_COULD_NOT_LOOK
+    got = capsys.readouterr().out
+    assert got.startswith("COULD NOT LOOK") and "records.jsonl" in got
+    assert "Permission denied" not in got

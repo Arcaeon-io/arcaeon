@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 from functools import partial
 from pathlib import Path
@@ -719,9 +720,34 @@ def _reconcile(argv) -> int:
     return _run(reconcile.main, argv)
 
 
+AUDIT_BUNDLE_LOG = "records.jsonl"
+
+
+def _audit_bundle_dir(argv) -> tuple[list, str | None]:
+    """`audit verify <dir>`: an exported bundle directory means its records.jsonl,
+    the same resolution POST /v1/audit/verify makes (K010b). Returns the argv
+    to run and, for a directory with no records.jsonl, the directory itself."""
+    pos = [i for i, a in enumerate(argv) if not a.startswith("-")]
+    if len(pos) < 2 or argv[pos[0]] != "verify":
+        return argv, None
+    i = pos[1]
+    if not os.path.isdir(argv[i]):
+        return argv, None
+    inner = os.path.join(argv[i], AUDIT_BUNDLE_LOG)
+    if not os.path.isfile(inner):
+        return argv, argv[i]
+    return [*argv[:i], inner, *argv[i + 1:]], None
+
+
 def _audit(argv) -> int:
     from arcaeon.prove.audit import cli
     sub = next((a for a in argv if not a.startswith("-")), None)
+    argv, bare_dir = _audit_bundle_dir(list(argv))
+    if bare_dir is not None:
+        _, legacy = V.pop_legacy_flag(argv)
+        print(f"COULD NOT LOOK: {bare_dir} is a directory with no {AUDIT_BUNDLE_LOG} "
+              "(not an exported bundle). Nothing to verify and nothing to accuse.")
+        return V.unify("audit", 2, sub, legacy=legacy)
     return _translated("audit", partial(cli.main, prog="arcaeon audit"), argv, sub)
 
 
