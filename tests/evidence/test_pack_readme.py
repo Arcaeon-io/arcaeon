@@ -60,7 +60,10 @@ def test_verdict_broken_in_words(ledger, tmp_path):
 def test_does_not_show_bullets_verbatim(pack):
     text = _readme(pack[0])
     section = text.split("## What this pack does not show", 1)[1].split("\n## ", 1)[0]
-    bullets = [l[2:] for l in section.splitlines() if l.startswith("- ")]
+    tagged = [l[2:] for l in section.splitlines() if l.startswith("- ")]
+    # each bullet ends in its bearer class, the bullet itself stays verbatim
+    assert all(l.endswith(" [asserted]") for l in tagged)
+    bullets = [l[:-len(" [asserted]")] for l in tagged]
     assert bullets == list(README_DOES_NOT_SHOW)
     # the customer page spells out the internal references, nothing else moves
     assert "(P7)" not in text and "by us" not in text
