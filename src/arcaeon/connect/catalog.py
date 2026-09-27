@@ -25,12 +25,14 @@ nothing outside that directory is ever named.
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 __all__ = ["Entry", "CATALOG", "OSES", "HOME_ENV", "TRANSPORTS", "DEPLOY_LINE",
-           "GPT_ACTION_MANIFEST", "GPT_ACTION_COMMAND", "REMOTE_LINES", "names", "get",
+           "GPT_ACTION_MANIFEST", "GPT_ACTION_COMMAND", "REMOTE_LINES", "UVX_SPEC",
+           "launch_form", "names", "get",
            "current_os", "home", "config_path", "confirmed_for", "list_rows",
            "render_list"]
 
@@ -132,6 +134,23 @@ CATALOG: tuple[Entry, ...] = (
           note="no file to change: point the framework at GET /openapi.json on a "
                "running `arcaeon serve`"),
 )
+
+#: K025. The package spec uvx fetches: the base package plus the MCP extra.
+UVX_SPEC = "arcaeon[mcp]"
+
+
+def launch_form() -> dict:
+    """How a client starts the arcaeon MCP server (K025).
+
+    `uvx --from "arcaeon[mcp]" arcaeon mcp` when `uv` resolves on PATH (uvx
+    ships with it and fetches the package with its MCP extra). Otherwise the
+    absolute path of this Python, `-m arcaeon mcp`: a client started outside
+    the user's shell (Claude Desktop from the dock, an IDE from a menu) has
+    no PATH of the shell's, and an absolute interpreter still finds Python."""
+    if shutil.which("uv"):
+        return {"command": "uvx", "args": ["--from", UVX_SPEC, "arcaeon", "mcp"]}
+    return {"command": os.path.abspath(sys.executable), "args": ["-m", "arcaeon", "mcp"]}
+
 
 _BY_NAME = {e.name: e for e in CATALOG}
 assert len(_BY_NAME) == len(CATALOG), "one entry per client name"

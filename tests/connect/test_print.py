@@ -45,6 +45,9 @@ def _write_section(name: str) -> str:
 def _isolated(tmp_path, monkeypatch):
     monkeypatch.setenv("ARCAEON_HOME", str(tmp_path / "arcaeon-home"))
     monkeypatch.setenv("ARCAEON_JOURNAL", "0")
+    # K025: the goldens pin the uvx launch form (no machine's interpreter path)
+    monkeypatch.setattr(C.shutil, "which",
+                        lambda name, *a, **k: "/fake/bin/uv" if name == "uv" else None)
 
 
 def _out(capsys, *argv) -> tuple[int, str]:
@@ -114,7 +117,8 @@ def test_json_plan_names_the_file_and_the_merge(capsys, monkeypatch):
     d = json.loads(out)
     assert rc == 0 and d["written"] is False
     assert d["file"] == "/fake/u/.claude.json"
-    assert d["merge"] == {"mcpServers": {"arcaeon": {"command": "arcaeon", "args": ["mcp"]}}}
+    assert d["merge"] == {"mcpServers": {"arcaeon": {
+        "command": "uvx", "args": ["--from", "arcaeon[mcp]", "arcaeon", "mcp"]}}}
 
 
 def test_unconfirmed_path_says_so(capsys):

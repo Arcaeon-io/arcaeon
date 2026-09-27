@@ -9,8 +9,11 @@ would merge (only the 'arcaeon' entry; every other key stays):
   "servers": {
     "arcaeon": {
       "type": "stdio",
-      "command": "arcaeon",
+      "command": "uvx",
       "args": [
+        "--from",
+        "arcaeon[mcp]",
+        "arcaeon",
         "mcp"
       ]
     }
@@ -29,8 +32,11 @@ would merge (only the 'arcaeon' entry; every other key stays):
   "servers": {
     "arcaeon": {
       "type": "stdio",
-      "command": "arcaeon",
+      "command": "uvx",
       "args": [
+        "--from",
+        "arcaeon[mcp]",
+        "arcaeon",
         "mcp"
       ]
     }
@@ -49,8 +55,11 @@ would merge (only the 'arcaeon' entry; every other key stays):
   "servers": {
     "arcaeon": {
       "type": "stdio",
-      "command": "arcaeon",
+      "command": "uvx",
       "args": [
+        "--from",
+        "arcaeon[mcp]",
+        "arcaeon",
         "mcp"
       ]
     }
@@ -66,8 +75,11 @@ changed: servers.arcaeon (added)
     "other": {"command": "other-server"},
     "arcaeon": {
       "type": "stdio",
-      "command": "arcaeon",
+      "command": "uvx",
       "args": [
+        "--from",
+        "arcaeon[mcp]",
+        "arcaeon",
         "mcp"
       ]
     }

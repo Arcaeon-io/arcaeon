@@ -903,6 +903,11 @@ records. Where those docs did not state the path, the output says
 previews another machine (`~` or `%APPDATA%` stand in for its home).
 `ARCAEON_CONNECT_HOME` replaces the home directory, for trying it on a copy.
 
+The entry starts the server as `uvx --from "arcaeon[mcp]" arcaeon mcp` when
+`uv` is on PATH, else as this Python's absolute path with `-m arcaeon mcp`,
+so a client started outside your shell (from a dock or a menu) still finds
+Python.
+
 `--write` applies it on this machine. First it copies the file byte for
 byte to `<file>.arcaeon-bak-<UTC stamp>` (a file that was not there gets an
 `.absent` marker instead), then it splices in only the `arcaeon` entry:
@@ -935,8 +940,11 @@ would merge (only the 'arcaeon' entry; every other key stays):
 {
   "mcpServers": {
     "arcaeon": {
-      "command": "arcaeon",
+      "command": "uvx",
       "args": [
+        "--from",
+        "arcaeon[mcp]",
+        "arcaeon",
         "mcp"
       ]
     }

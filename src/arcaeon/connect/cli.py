@@ -49,8 +49,8 @@ ACTIONS = ("--write", "--undo", "--check")
 
 
 def launch_form() -> dict:
-    """How a client starts the arcaeon MCP server (K025 refines this)."""
-    return {"command": "arcaeon", "args": ["mcp"]}
+    """How a client starts the arcaeon MCP server: catalog.launch_form (K025)."""
+    return C.launch_form()
 
 
 def server_entry(entry: C.Entry) -> dict:

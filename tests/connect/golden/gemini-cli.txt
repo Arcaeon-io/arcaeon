@@ -8,8 +8,11 @@ would merge (only the 'arcaeon' entry; every other key stays):
 {
   "mcpServers": {
     "arcaeon": {
-      "command": "arcaeon",
+      "command": "uvx",
       "args": [
+        "--from",
+        "arcaeon[mcp]",
+        "arcaeon",
         "mcp"
       ]
     }
@@ -27,8 +30,11 @@ would merge (only the 'arcaeon' entry; every other key stays):
 {
   "mcpServers": {
     "arcaeon": {
-      "command": "arcaeon",
+      "command": "uvx",
       "args": [
+        "--from",
+        "arcaeon[mcp]",
+        "arcaeon",
         "mcp"
       ]
     }
@@ -46,8 +52,11 @@ would merge (only the 'arcaeon' entry; every other key stays):
 {
   "mcpServers": {
     "arcaeon": {
-      "command": "arcaeon",
+      "command": "uvx",
       "args": [
+        "--from",
+        "arcaeon[mcp]",
+        "arcaeon",
         "mcp"
       ]
     }
@@ -62,8 +71,11 @@ changed: mcpServers.arcaeon (added)
   "mcpServers": {
     "other": {"command": "other-server"},
     "arcaeon": {
-      "command": "arcaeon",
+      "command": "uvx",
       "args": [
+        "--from",
+        "arcaeon[mcp]",
+        "arcaeon",
         "mcp"
       ]
     }
