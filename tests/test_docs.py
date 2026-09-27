@@ -336,3 +336,75 @@ def test_readme_honest_limits_block():
     for must in ("Tamper-evident, not tamper-proof", "One witness, and we operate it",
                  "a clock, not a party", "custody record"):
         assert must in limits, must
+
+
+# --- docs/SECOND_READER.md (K045) ------------------------------------------------------
+
+SECOND_READER = (ROOT / "docs" / "SECOND_READER.md").read_text(encoding="utf-8")
+
+
+def _console_steps(text: str) -> list[dict]:
+    """Every `$` line of every ```console block, in order, with the lines and
+    exit code shown under it (`<...>` lines vary and are skipped)."""
+    steps: list[dict] = []
+    for block in re.findall(r"```console\n(.*?)```", text, re.S):
+        for line in block.splitlines():
+            if line.startswith("$ "):
+                steps.append({"cmd": line[2:], "expect": [], "exit": 0})
+            elif steps:
+                m = re.fullmatch(r"\(exit (\d+)\)", line.strip())
+                if m:
+                    steps[-1]["exit"] = int(m.group(1))
+                elif line.strip() in ("", "...") or re.fullmatch(r"<[^>]*>", line.strip()):
+                    continue
+                else:
+                    steps[-1]["expect"].append(line.strip())
+    return steps
+
+
+def test_second_reader_examples_run_and_print_what_the_doc_says(tmp_path):
+    steps = _console_steps(SECOND_READER)
+    assert len(steps) >= 8
+    assert any("second-read compare" in s["cmd"] for s in steps)
+    assert any("second-read run" in s["cmd"] and "--send" not in s["cmd"] for s in steps)
+    assert not any("--send" in s["cmd"] for s in steps), "doc examples never send a claim"
+    env = dict(os.environ, PYTHONPATH=str(SRC), PYTHONIOENCODING="utf-8")
+    for name in ("ARCAEON_KEY", "ARCAEON_WITNESS_URL", "ARCAEON_WITNESS_KEY"):
+        env.pop(name, None)
+    for step in steps:
+        argv = shlex.split(step["cmd"])
+        if argv[0] == "arcaeon":
+            argv = [sys.executable, "-m", "arcaeon", *argv[1:]]
+        elif argv[0] == "python":
+            argv = [sys.executable, *argv[1:]]
+        else:
+            pytest.fail(f"SECOND_READER step is not arcaeon or python: {step['cmd']}")
+        p = subprocess.run(argv, cwd=tmp_path, env=env, capture_output=True, text=True,
+                           encoding="utf-8", errors="replace", timeout=120)
+        assert p.returncode == step["exit"], (step["cmd"], p.stdout, p.stderr)
+        out_lines = {x.strip() for x in p.stdout.splitlines()}
+        for want in step["expect"]:
+            assert want in out_lines, (step["cmd"], want, p.stdout)
+
+
+def test_second_reader_says_what_it_does_not_show():
+    low = " ".join(SECOND_READER.split()).lower()
+    for must in ("whether a claim holds", "one family", "one vendor",
+                 "two readers agree on more than nine of ten rows under a sentence a third "
+                 "stranger then reads the other way", "np-12 is wrong", "sending a claim is a "
+                 "disclosure", "two integers"):
+        assert must in low, must
+    assert "## What it shows" in SECOND_READER and "## What it does not show" in SECOND_READER
+
+
+def test_second_reader_quotes_np12_loss_condition_verbatim():
+    quoted = ("two readers agree on more than nine of ten rows under a sentence a third "
+              "stranger then reads the other way. If that happens, the two-of-two bar was "
+              "measuring the readers' shared habits, not the sentence, and NP-12 is wrong.")
+    assert quoted in " ".join(SECOND_READER.split())
+
+
+@pytest.mark.parametrize("phrase", ["tamper-proof", "independent", "truth", "is true",
+                                    "compliant", "guarantee", "\u2014", "\u2013"])
+def test_second_reader_makes_no_overclaim(phrase):
+    assert phrase not in SECOND_READER.lower(), phrase
