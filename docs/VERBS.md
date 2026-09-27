@@ -563,7 +563,45 @@ change the exit.
 
 ## `evidence-pack`
 
-TODO(K051)
+Answers: can I hand one folder to an auditor, a buyer or a regulator's
+reviewer that holds the records for one agent and one time window, with
+everything they need to check it themselves? `arcaeon evidence-pack --ledger
+L --out DIR` writes that folder: the rows in the window, a manifest hashing
+every file, the chain check, and a plain summary. It is evidence toward the
+EU AI Act logging duties, never a claim of compliance. Optional parts:
+`--witness` and `--namespace` check the ledger's pins against a witness
+store; `--mandate` folds in the mandate gate's inside / outside /
+could-not-look counts and the outside rows; `--readings` includes a
+second-read comparison receipt (receipt verify runs on it at build and on
+every pack verify); `--deal` folds in one deal's dispute; `--format aat`
+also writes agent-audit-trail JSONL; `--zip` also writes `OUT.zip`, and with
+`--built-at` two builds of the same input are byte-identical.
+
+`arcaeon evidence-pack verify PACK` (a folder or the `.zip`) rehashes every
+file against the manifest and reruns the chain. `--witness` checks the
+local pins; `--remote` reads each remote pin from the public witness (the
+only part that uses the network, and only when asked; unread, a remote pin
+is not verified).
+
+**Usage**
+
+```text
+usage: arcaeon evidence-pack [-h] --ledger LEDGER --out OUT [--agent AGENT]
+                             [--from SINCE] [--to UNTIL] [--witness WITNESS]
+                             [--namespace NAMESPACE] [--system-id SYSTEM_ID]
+                             [--provider PROVIDER] [--format {aat}]
+                             [--deal DEAL] [--buyer BUYER] [--seller SELLER]
+                             [--mandate MANDATE] [--readings READINGS]
+                             [--readings-ledger READINGS_LEDGER] [--zip]
+                             [--built-at BUILT_AT] [--json]
+```
+
+**Exit codes:** 0 VERIFIED. 1 BROKEN. 2 bad usage. 3 COULD NOT LOOK.
+
+```console
+$ arcaeon evidence-pack --ledger calls.jsonl --out pack --zip --built-at 2026-09-27T00:00:00Z
+$ arcaeon evidence-pack verify pack.zip
+```
 
 ## `export`
 
@@ -1010,8 +1048,48 @@ $ arcaeon version --short
 
 ## `doctor`
 
-TODO(K115)
+Answers: is this install ready, and what would stop it working? `arcaeon
+doctor` prints one line per thing it looked at: the Python version, which
+extras are installed, whether ARCAEON_KEY is set (never its value), whether
+a local `arcaeon serve` answers, whether each AI client's config carries an
+`arcaeon` entry, and whether the activity journal can be written. It
+changes nothing: it reads files, asks `GET /health` only of a server on
+this machine, and opens and removes one temp file to prove the journal
+directory is writable.
+
+**Usage**
+
+```text
+usage: arcaeon doctor [--json]
+```
+
+**Exit codes:** 0 every check was read, whatever it found (a server that is
+not running or a client with no entry is a reading, not a fault). 3 COULD
+NOT LOOK: a check could not be looked at (a config file that does not
+parse, a serve.json naming a host off this machine, a server that neither
+answers nor refuses). Never green on 3.
+
+```console
+$ arcaeon doctor --json
+```
 
 ## `demo`
 
-TODO(K116)
+Answers: what does arcaeon actually do, in thirty seconds, on my own
+machine? `arcaeon demo` makes a temp folder, logs two rows to a ledger
+there, checks it (VERIFIED), changes one word on line 1 the way a quiet
+edit would, checks again (BROKEN, naming line 1), and removes the folder.
+No network, nothing left behind.
+
+**Usage**
+
+```text
+usage: arcaeon demo
+```
+
+**Exit codes:** 0 the demo showed what it says (VERIFIED, then BROKEN on
+line 1). 1 either check came back any other way. 2 bad usage.
+
+```console
+$ arcaeon demo
+```
