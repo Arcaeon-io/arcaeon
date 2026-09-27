@@ -62,6 +62,8 @@ def main(argv: list[str] | None = None) -> int:
     from arcaeon.serve import server as S
     try:
         srv = S.make_server(a.host, a.port, root=root, allow_paid=a.allow_paid)
+        from arcaeon.serve import dashboard
+        dashboard.mount(srv)
     except S.HostRefused as e:
         print(f"arcaeon serve: {e}", file=sys.stderr)
         return V.EXIT_USAGE

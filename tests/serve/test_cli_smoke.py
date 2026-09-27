@@ -93,6 +93,11 @@ def test_serve_subprocess_token_and_fence(tmp_path):
         status, body = _call(port, "/v1/verify", {"ledger": "l.jsonl"}, token)
         assert status == 200
         assert (body["verdict"], body["rows"], body["exit"]) == ("VERIFIED", 2, 0)
+        req = urllib.request.Request(f"http://127.0.0.1:{port}/",
+                                     headers={"Authorization": f"Bearer {token}"})
+        with urllib.request.urlopen(req, timeout=60) as r:    # K100b: dashboard mounted
+            assert r.status == 200 and r.headers["Content-Type"].startswith("text/html")
+            assert "Arcaeon on this machine" in r.read().decode("utf-8")
         assert token not in "".join(seen)          # never in the request log
     finally:
         proc.terminate()
