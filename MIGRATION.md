@@ -51,6 +51,9 @@ the lane (A, B or C) of the work and the commit ids that carry it.
   (`{line, raw}` per row) and replaces the export's `manifest.json` with `pack_schema` 1:
   `files` sha256, `chain_head`, `window`, `pins`, `witness`, `operator_at_t: "UNKNOWN"`,
   `checks`, `counts`, and the audit manifest kept whole under `audit_export`.
+- **could_not_look.json (lane D: K054).** Every pack now holds `could_not_look.json`: one
+  entry per COULD NOT LOOK (`check`, `looked_for`, `where`, `reason_word`, `reason`), `[]`
+  when there are none, hashed in the manifest. Its length equals `counts.could_not_look`.
 
 ## 0.9.1 (2026-09-25)
 

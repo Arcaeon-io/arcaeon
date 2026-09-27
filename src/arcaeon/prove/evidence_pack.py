@@ -21,12 +21,14 @@ from typing import Any
 from arcaeon import verdict as V
 
 __all__ = ["build_pack", "select_window", "parse_when", "PackUsageError",
-           "PACK_SCHEMA", "MANIFEST", "OPERATOR_AT_T"]
+           "PACK_SCHEMA", "MANIFEST", "CNL_FILE", "OPERATOR_AT_T"]
 
 #: The evidence-pack manifest schema. 1 is the first (K053).
 PACK_SCHEMA = 1
 #: The manifest's file name. Every OTHER file in the pack is hashed in it.
 MANIFEST = "manifest.json"
+#: Every COULD NOT LOOK the build reached, one entry each; `[]` when none (K054).
+CNL_FILE = "could_not_look.json"
 #: Who operated the witness at pin time. UNKNOWN until a custody record
 #: is published and anchored (spec section 6): never a guess.
 OPERATOR_AT_T = "UNKNOWN"
@@ -163,8 +165,10 @@ def build_pack(ledger: str | Path, out: str | Path, *,
         res.update(V.could_not_look(
             f"rows for agent {agent!r} from {since!r} to {until!r}", "records.jsonl",
             "empty", "no row in the ledger matches that agent and window"))
+    checks = _checks(integrity, window, unplaced, agent, since, until)
+    _write_cnl(out, checks)
     audit_manifest = json.loads((out / MANIFEST).read_text(encoding="utf-8"))
-    _write_manifest(out, res, integrity, audit_manifest, window, unplaced)
+    _write_manifest(out, res, integrity, audit_manifest, window, unplaced, checks)
     res["files"] = sorted(p.name for p in out.iterdir() if p.is_file())
     return res
 
@@ -191,8 +195,63 @@ def _pins(witness_block: dict) -> list[dict]:
     return [ref]
 
 
+def _word(w: Any) -> str:
+    return w if w in V.EXIT_BY_WORD else V.COULD_NOT_LOOK
+
+
+def _checks(integrity: dict, window: list[dict], unplaced: list[int],
+            agent: str | None, since: str | None, until: str | None) -> list[dict]:
+    """The checks this build ran, each with its verdict word. A COULD NOT LOOK
+    check also carries `looked_for`, `where`, `reason_word` and `reason`
+    (arcaeon.verdict.could_not_look), so could_not_look.json and the manifest
+    counts are read off one list and can never disagree."""
+    chain_word = _word(integrity.get("verdict"))
+    chain = {"check": "records chain and witness cross-check", "verdict": chain_word,
+             "finding": integrity.get("finding")}
+    if chain_word == V.COULD_NOT_LOOK:
+        rw = integrity.get("reason_word")
+        chain.update(V.could_not_look(
+            integrity.get("looked_for") or "an intact, checkable chain",
+            integrity.get("where") or "records.jsonl",
+            rw if rw in V.REASON_WORDS else "unreadable",
+            f"the records check could not reach a verdict (finding "
+            f"{integrity.get('finding')!r}); integrity.json has the detail"))
+    checks = [chain]
+    win = {"check": "window has rows",
+           "verdict": V.VERIFIED if window else V.COULD_NOT_LOOK}
+    if not window:
+        win.update(V.could_not_look(
+            f"rows for agent {agent!r} from {since!r} to {until!r}", "records.jsonl",
+            "empty", "no row in the ledger matches that agent and window"))
+    checks.append(win)
+    if unplaced:
+        # Rows for the agent whose `ts` could not be read while a time bound
+        # was set: left out of the window, and named here, never guessed in.
+        checks.append({"check": "every agent row placed in or out of the window",
+                       "verdict": V.COULD_NOT_LOOK,
+                       **V.could_not_look(
+                           f"a readable ts on ledger lines {unplaced}", "records.jsonl",
+                           "unreadable",
+                           "these rows match the agent but their time could not be "
+                           "read, so they are not in window.jsonl")})
+    return checks
+
+
+_CNL_KEYS = ("check", "looked_for", "where", "reason_word", "reason")
+
+
+def _write_cnl(out: Path, checks: list[dict]) -> list[dict]:
+    """Write could_not_look.json: one entry per COULD NOT LOOK check, `[]`
+    when there are none. Written before the manifest, so it is hashed there."""
+    entries = [{k: c[k] for k in _CNL_KEYS} for c in checks
+               if c["verdict"] == V.COULD_NOT_LOOK]
+    (out / CNL_FILE).write_text(json.dumps(entries, indent=2) + "\n", encoding="utf-8")
+    return entries
+
+
 def _write_manifest(out: Path, res: dict, integrity: dict, audit_manifest: dict,
-                    window: list[dict], unplaced: list[int]) -> dict:
+                    window: list[dict], unplaced: list[int],
+                    checks: list[dict]) -> dict:
     """Write manifest.json LAST, over every other file in the pack.
 
     The three counts are of the checks this build ran (the records chain with
@@ -204,13 +263,6 @@ def _write_manifest(out: Path, res: dict, integrity: dict, audit_manifest: dict,
 
     head = Ledger(out / "records.jsonl").head()
     wb = integrity.get("witness") or {}
-    chain_word = integrity.get("verdict") or V.COULD_NOT_LOOK
-    if chain_word not in V.EXIT_BY_WORD:
-        chain_word = V.COULD_NOT_LOOK
-    window_word = V.VERIFIED if window else V.COULD_NOT_LOOK
-    checks = [{"check": "records chain and witness cross-check", "verdict": chain_word,
-               "finding": integrity.get("finding")},
-              {"check": "window has rows", "verdict": window_word}]
     counts = {"verified": sum(c["verdict"] == V.VERIFIED for c in checks),
               "broken": sum(c["verdict"] == V.BROKEN for c in checks),
               "could_not_look": sum(c["verdict"] == V.COULD_NOT_LOOK for c in checks)}
