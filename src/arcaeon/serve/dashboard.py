@@ -64,6 +64,7 @@ PAGE_HEADERS = {"Content-Security-Policy": CSP, "X-Frame-Options": "DENY",
 #: plus METHODS, the methods it answers). Imported on first use.
 PAGES = {
     "/": "arcaeon.serve.pages.home",
+    "/status": "arcaeon.serve.pages.status",
 }
 
 #: The clock codes and sessions are timed by (tests move it).

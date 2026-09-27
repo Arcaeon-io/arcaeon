@@ -20,7 +20,7 @@ STATIC = Path(__file__).resolve().parents[1] / "static"
 
 esc = html.escape
 
-NAV_ITEMS = (("/", "Home"),)
+NAV_ITEMS = (("/", "Home"), ("/status", "Status"))
 
 LAYOUT = string.Template("""<!doctype html>
 <html lang="en">
@@ -92,3 +92,24 @@ def shown(text, root) -> str:
         s = re.sub(re.escape(form) + r"[\\/]+", "", s, flags=flags)
         s = re.sub(re.escape(form), ".", s, flags=flags)
     return s
+
+
+NUMBER_WORDS = ("No", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight",
+                "Nine", "Ten")
+
+
+def count_word(n: int) -> str:
+    """A count that opens a sentence: One, Two ... Ten, then digits."""
+    return NUMBER_WORDS[n] if 0 <= n < len(NUMBER_WORDS) else str(n)
+
+
+def verdict_block(word, exit_code=None, *, detail_html: str = "") -> str:
+    """The verdict word, its class (state-ok / state-bad / state-unknown, from
+    arcaeon.words.tone) and its plain sentence. COULD NOT LOOK is never ok."""
+    from arcaeon import words
+    if not (isinstance(word, str) and word):     # no word at all: never a pass
+        word, exit_code = "COULD NOT LOOK", None
+    t = words.tone(word, exit_code)
+    return (f'<div class="verdict state-{t}"><p class="verdict-word">{esc(word)}</p>'
+            f'<p class="verdict-sentence">{esc(words.sentence(word, exit_code))}</p>'
+            f"{detail_html}</div>")

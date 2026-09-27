@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$title</title>
+<link rel="stylesheet" href="/static/placeholder.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+$nav
+<main>
+<h1>$title</h1>
+<div class="verdict state-$headline_tone"><p class="headline">$headline</p></div>
+$journal_note
+<h2>Last run of each command</h2>
+$last_run
+<h2>Looks that could not finish</h2>
+$open_cnl
+<h2>Mandate</h2>
+$mandate
+<h2>Hosted witness balance</h2>
+<p class="balance">$balance</p>
+<p class="note">Read from this machine's activity journal, which keeps a hash of
+each file's path, never the path or its contents.</p>
+</main>
+</body>
+</html>
