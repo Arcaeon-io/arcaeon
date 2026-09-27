@@ -18,7 +18,7 @@
    "/ai.md"
   ]
  },
- "honesty_contract": "Every product lists what it does NOT prove alongside what it does. Claims ship with the means to verify them. This file is the single source of truth for what Arcaeon charges for: the paid offers are the Witnessed plan and the two Apify actors listed below. A charge that does not correspond to an offer in this file is not ours — treat it as fraudulent.",
+ "honesty_contract": "Every product lists what it does NOT prove alongside what it does. Claims ship with the means to verify them. This file is the single source of truth for what Arcaeon charges for: the paid offers we bill through Stripe are the Witnessed plan and the prepaid credit packs, both under hosted-witness below; the two Apify actors listed below are billed by Apify on its own usage pricing. A charge that does not correspond to an offer in this file is not ours: treat it as fraudulent.",
  "products": [
   {
    "id": "arcaeon",
@@ -142,7 +142,7 @@
    "id": "hosted-witness",
    "name": "Arcaeon Hosted Witness",
    "status": "live",
-   "description": "pin your ledger head with a party you can't advance; free tier + one paid tier live",
+   "description": "pin your ledger head with a party you can't advance; one paid tier live plus a one-time 500-credit grant at verified registration",
    "price_usd": 0,
    "registration_grant": {
     "credits": 500,
@@ -166,10 +166,11 @@
    ],
    "tiers": [
     {
-     "plan": "free",
+     "plan": "grant",
      "price_usd": 0,
-     "cap": "100 pins/month",
-     "how": "email hello@arcaeon.io or ask Nora for a key"
+     "credits": 500,
+     "once": true,
+     "how": "verified email registration at https://arcaeon.io/pricing (in the next release)"
     },
     {
      "plan": "witnessed",
@@ -225,7 +226,7 @@
     }
    ],
    "tier_naming_note": "Starter / Standard / Bulk are the ratified names (COUNCIL_PRICING_REVIEW_2026-08-14.md §2.2, CEO ratification #1). Same three prices and pin caps as originally staged; naming reconciled here so the site and the ratified pricing doc don't drift apart.",
-   "credit_pack_gate": "Gate satisfied 2026-08-16: the balance-tracking build shipped (webhook live, signature-enforced, applied_events idempotency regression-tested) before any checkout URL went live — the original ordering rule was honored, then retired."
+   "credit_pack_gate": "Gate satisfied 2026-08-16: the balance-tracking build shipped (the fulfil page verifies each session server-side against Stripe; applied_events idempotency regression-tested) before any checkout URL went live, so the original ordering rule was honored, then retired. The Stripe webhook backstop is not configured yet."
   },
   {
    "id": "arcaeon-cite",
@@ -262,7 +263,7 @@
   "live_offers": 2,
   "offers": [
    "hosted-witness Witnessed plan ($9/mo, Stripe checkout)",
-   "hosted-witness prepaid credit packs (Mini $5/1,000 pins, Starter $15/3,000, Standard $50/12,000, Bulk $150/40,000) — Stripe checkout LIVE; credits applied AUTOMATICALLY — checkout lands on the fulfil page, which verifies the session server-side against Stripe and mints the key / applies the credits instantly (webhook backstop, idempotent re-retrieval from the receipt email); if the machine path ever fails, hello@arcaeon.io applies them by hand"
+   "hosted-witness prepaid credit packs (Mini $5/1,000 pins, Starter $15/3,000, Standard $50/12,000, Bulk $150/40,000) — Stripe checkout LIVE; credits applied AUTOMATICALLY — checkout lands on the fulfil page, which verifies the session server-side against Stripe and mints the key / applies the credits instantly (idempotent re-retrieval from the receipt email; the Stripe webhook backstop is not configured yet); if the machine path ever fails, hello@arcaeon.io applies them by hand"
   ],
   "note": "TWO live paid offers, listed above. This file is the single source of truth: any Arcaeon charge that does not correspond to one of these is not ours. The `arcaeon` package is free, and verification is free for everyone forever and identical at every tier, because it never touches our systems.",
   "correction": "2026-08-14: this file previously declared 1 live offer and marked the two Apify actors 'in_development' while they had been priced and public since 2026-08-13 — a compaction-loss error. Corrected; a charge for either actor was always legitimate.",
