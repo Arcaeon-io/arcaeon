@@ -33,6 +33,18 @@ spend only if the server was started with allow_paid (`--allow-paid`) AND
 ARCAEON_KEY is set. A handler reads the flag through current_server(),
 never from the request body, so a request cannot grant itself the spend.
 
+Activity journal (K015): every call that reaches a handler appends one line
+to the journal `arcaeon status` reads, verb `serve:<route path>` (so
+`serve:/v1/verify`), the verdict word the answer carries (else the word for
+its exit code), its exit, and as target the sha256 the journal already uses
+for the first path field the request named (content-in calls have none).
+The open routes (/health, /openapi.json) are not journaled: a liveness probe
+looked at nothing, and polling it would bury the calls status reports. A
+request refused before a handler ran (401, 404, 405, 413, a schema 400) is
+not a call on anything and is not journaled either. ARCAEON_JOURNAL=0 writes
+nothing. A journal that cannot be written never changes a response: the
+append swallows every error, and so does the call around it.
+
 `run()` writes <ARCAEON_HOME or ~/.arcaeon>/serve.json (pid, port, url) once
 the socket is bound, and removes it on a clean exit if it is still ours.
 """
@@ -82,6 +94,31 @@ class HostRefused(ValueError):
 def health(body: dict | None = None) -> dict:
     """GET /health: the server is up. Open (no token), no side effects."""
     return {"ok": True}
+
+
+JOURNAL_PREFIX = "serve:"
+
+
+def journal_call(route: R.Route, body, result) -> None:
+    """One activity-journal line for an answered HTTP call (K015). Never raises."""
+    if route.open:
+        return
+    try:
+        from arcaeon import journal
+        rc = result.get("exit") if isinstance(result, dict) else V.EXIT_GOOD
+        if not isinstance(rc, int):
+            rc = V.EXIT_GOOD
+        word = result.get("verdict") if isinstance(result, dict) else None
+        verb = JOURNAL_PREFIX + route.path
+        if not isinstance(word, str) or not word:
+            word = journal.word_for(verb, rc)
+        target = None
+        if isinstance(body, dict):
+            target = next((body[f] for f in F.PATH_FIELDS
+                           if isinstance(body.get(f), str) and body[f]), None)
+        journal.append(verb, word, rc, target)
+    except Exception:  # noqa: BLE001  the journal never changes a response
+        pass
 
 
 def _json_bytes(obj) -> bytes:
@@ -219,6 +256,7 @@ class Handler(BaseHTTPRequestHandler):
                       "error": f"could not finish: {type(e).__name__} [internal_error]"}
         finally:
             _CURRENT.reset(tok)
+        journal_call(route, body, result)
         if isinstance(result, str):
             self._send(200, result, content_type="text/html; charset=utf-8")
         elif isinstance(result, dict) and result.get("exit") == V.EXIT_USAGE:
