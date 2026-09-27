@@ -148,11 +148,18 @@ def post_json(url: str, body: dict, headers: dict, timeout: float) -> Any:
             raw = resp.read()
     except urllib.error.HTTPError as e:
         if 300 <= e.code < 400:
-            loc = e.headers.get("Location") if e.headers is not None else None
-            to = (urlsplit(urljoin(url, loc)).hostname if loc else None) or "no Location host"
-            to_port = urlsplit(urljoin(url, loc)).port if loc else None
-            where = f"{to}:{to_port}" if to_port else to
-            raise ReaderCallError(f"{host} answered HTTP {e.code} redirecting to {where}; "
+            # OA2: parsing the Location runs inside this handler, where the
+            # sibling `except ... ValueError` below cannot catch it, so a bad
+            # port or host is caught here and refused like any redirect.
+            try:
+                loc = e.headers.get("Location") if e.headers is not None else None
+                parts = urlsplit(urljoin(url, loc)) if loc else None
+                to = (parts.hostname if parts else None) or "no Location host"
+                to_port = parts.port if parts else None
+                target = f"redirecting to {to}:{to_port}" if to_port else f"redirecting to {to}"
+            except ValueError as bad:
+                target = f"with a Location that could not be read ({bad})"
+            raise ReaderCallError(f"redirect refused: {host} answered HTTP {e.code} {target}; "
                                   "not followed, the key was not sent there",
                                   "redirect_refused") from None
         raise ReaderCallError(f"{host} answered HTTP {e.code}", "network") from None

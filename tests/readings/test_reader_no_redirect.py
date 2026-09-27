@@ -161,3 +161,38 @@ def test_the_opener_carries_an_empty_proxy_table_and_no_following_redirect_handl
     redirs = [h for h in op.handlers if isinstance(h, urllib.request.HTTPRedirectHandler)]
     assert len(redirs) == 1 and type(redirs[0]) is not urllib.request.HTTPRedirectHandler
     assert redirs[0].redirect_request(None, None, 302, "Found", {}, "http://x.invalid/") is None
+
+
+BAD_LOCATIONS = ["http://127.0.0.1:99999/x", "http://[::1]:bad/"]
+
+
+@pytest.mark.parametrize("kind", sorted(READERS))
+@pytest.mark.parametrize("location", BAD_LOCATIONS)
+def test_a_malformed_redirect_target_is_refused_not_a_crash(kind, location):
+    """OA2: a Location with a bad port raised a bare ValueError inside the
+    HTTPError handler; it is now the same refused redirect."""
+    with _Recorder(status=302, location=location) as first:
+        with pytest.raises(ReaderCallError) as e:
+            READERS[kind](first.url).read(claim_id="c1", claim_text="x",
+                                          criterion_text=SENTENCE)
+    assert e.value.reason_word == "redirect_refused"
+    assert str(e.value).startswith("redirect refused: ")
+    assert "could not be read" in str(e.value) and SECRET not in str(e.value)
+    assert len(first.requests) == 1
+
+
+@pytest.mark.parametrize("location", BAD_LOCATIONS)
+def test_a_malformed_redirect_is_could_not_look_and_the_run_continues(tmp_path, location):
+    from arcaeon.prove import readings_cli as CLI
+    claims = [{"claim_id": f"c{i}", "claim": f"claim {i}", "near_match_id": None}
+              for i in (1, 2)]
+    with _Recorder(status=302, location=location) as first:
+        res = CLI.ask(claims, READERS["openai_compat"](first.url), tmp_path / "r.jsonl",
+                      criterion_text=SENTENCE, send=True, retries=0)
+    assert res["exit"] == V.EXIT_COULD_NOT_LOOK
+    assert res["counts"] == {"claims": 2, "written": 0, "could_not_look": 2}
+    for c in res["could_not_look"]:
+        assert c["reason_word"] == "redirect_refused"
+        assert c["reason"].startswith("redirect refused: ") and SECRET not in c["reason"]
+    assert len(first.requests) == 2     # the second claim was still asked
+    assert all(r["path"] != "/x" for r in first.requests)
