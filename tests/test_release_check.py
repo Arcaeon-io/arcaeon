@@ -495,3 +495,160 @@ def test_main_exits_1_when_a_verb_is_unbuilt(monkeypatch, capsys, tmp_path):
     wheel.write_bytes(b"")
     assert rc.main(["--stub", "--wheel", str(wheel)]) == 1
     assert "FAIL    verbs: registered verb(s) with no module: serve" in capsys.readouterr().out
+
+
+# --- the plug-in surface (K142) ----------------------------------------------------
+
+import re  # noqa: E402
+import zipfile  # noqa: E402
+
+
+def _surface_names(out: str) -> dict[str, str]:
+    found = {}
+    for line in out.splitlines():
+        m = re.match(r"^(PASS|FAIL)\s+surface (.+?): ", line)
+        if m:
+            found[m.group(2)] = m.group(1)
+    return found
+
+
+def test_offline_prints_every_surface_check_with_pass_or_a_named_fail(capsys):
+    code = rc.main(["--offline"])
+    out = capsys.readouterr().out
+    found = _surface_names(out)
+    assert list(found) == [name for name, _ in rc.SURFACE_CHECKS], out
+    assert code == (1 if "FAIL" in found.values() else 0)
+    for line in out.splitlines():
+        assert line.startswith(("PASS    surface ", "FAIL    surface ")), line
+
+
+def test_offline_builds_no_house_and_installs_nothing(monkeypatch, capsys):
+    def boom(*a, **k):
+        raise AssertionError("offline touched the house")
+    monkeypatch.setattr(rc.House, "build", staticmethod(boom))
+    monkeypatch.setattr(rc, "install", boom)
+    monkeypatch.setattr(rc, "StubWitness", boom)
+    monkeypatch.setattr(rc, "surface_checks", lambda root=None: [("PASS", "x", "ok")])
+    assert rc.main(["--offline"]) == 0
+    assert capsys.readouterr().out == "PASS    surface x: ok\n"
+
+
+def test_offline_exits_1_on_any_surface_fail(monkeypatch, capsys):
+    monkeypatch.setattr(rc, "surface_checks",
+                        lambda root=None: [("PASS", "a", "ok"), ("FAIL", "b", "named")])
+    assert rc.main(["--offline"]) == 1
+    assert "FAIL    surface b: named" in capsys.readouterr().out
+
+
+def test_surface_lines_never_parse_as_a_publish_step_line():
+    publish = rc._load_publish()
+    for name, _ in rc.SURFACE_CHECKS:
+        for status in ("PASS", "FAIL"):
+            assert not publish.RC_LINE.match(rc.surface_line(status, name, "x"))
+
+
+def test_the_committed_openapi_and_schema_files_do_not_drift():
+    assert rc.check_openapi_drift(ROOT)[0] == "PASS"
+    assert rc.check_schema_drift(ROOT)[0] == "PASS"
+
+
+def test_a_stale_schema_file_is_a_fail_naming_it(tmp_path):
+    stale = tmp_path / "claude_tools.json"
+    stale.write_bytes((ROOT / "docs" / "schemas" / "claude_tools.json").read_bytes() + b" ")
+    missing = tmp_path / "gone.json"
+    probs = rc._drift(ROOT, [("claude", str(stale)), ("openai", str(missing))], sys.executable)
+    assert len(probs) == 2
+    assert "stale" in probs[0] and "claude_tools.json" in probs[0]
+    assert "missing" in probs[1]
+
+
+def test_unbuilt_verbs_and_headings_name_the_verb(tmp_path):
+    root = _verbs_root(tmp_path, built=False, doc="## `log`\n\ntext\n")
+    status, detail = rc.check_unbuilt_verbs(root)
+    assert status == "FAIL" and "serve (arcaeon.serve.cli)" in detail
+    status, detail = rc.check_verb_headings(root)
+    assert status == "FAIL" and "serve" in detail
+
+
+def test_built_verbs_with_headings_pass(tmp_path):
+    root = _verbs_root(tmp_path, built=True, doc="## `serve`\n\ntext\n")
+    assert rc.check_unbuilt_verbs(root)[0] == "PASS"
+    assert rc.check_verb_headings(root)[0] == "PASS"
+
+
+def test_a_todo_marker_anywhere_under_docs_or_src_is_named(tmp_path):
+    (tmp_path / "docs" / "sub").mkdir(parents=True)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "docs" / "sub" / "x.md").write_text("ok\nTODO(K123)\n", encoding="utf-8")
+    (tmp_path / "src" / "m.py").write_text("# TODO(design-system): not a K marker\n",
+                                           encoding="utf-8")
+    status, detail = rc.check_todo_markers(tmp_path)
+    assert status == "FAIL" and "docs/sub/x.md TODO(K123)" in detail
+    (tmp_path / "docs" / "sub" / "x.md").write_text("ok\n", encoding="utf-8")
+    assert rc.check_todo_markers(tmp_path)[0] == "PASS"
+
+
+def _pkg_root(tmp_path, *, deps="[]", manifest="prune tools\n", wheel_names=None):
+    (tmp_path / "pyproject.toml").write_text(
+        f'[project]\nname = "arcaeon"\nversion = "9.9.9"\ndependencies = {deps}\n\n'
+        '[tool.setuptools.packages.find]\nwhere = ["src"]\n', encoding="utf-8")
+    (tmp_path / "MANIFEST.in").write_text(manifest, encoding="utf-8")
+    if wheel_names is not None:
+        (tmp_path / "dist").mkdir()
+        with zipfile.ZipFile(tmp_path / "dist" / "arcaeon-9.9.9-py3-none-any.whl", "w") as z:
+            for n in wheel_names:
+                z.writestr(n, "x")
+    return tmp_path
+
+
+def test_tools_in_the_wheel_is_a_fail(tmp_path):
+    root = _pkg_root(tmp_path, wheel_names=["arcaeon/__init__.py", "tools/publish.py"])
+    status, detail = rc.check_tools_not_in_wheel(root)
+    assert status == "FAIL" and "tools/publish.py" in detail
+
+
+def test_a_manifest_that_keeps_tools_is_a_fail(tmp_path):
+    root = _pkg_root(tmp_path, manifest="prune tests\n")
+    status, detail = rc.check_tools_not_in_wheel(root)
+    assert status == "FAIL" and "prune tools" in detail
+
+
+def test_a_clean_wheel_passes_and_says_it_looked(tmp_path):
+    root = _pkg_root(tmp_path, wheel_names=["arcaeon/__init__.py"])
+    status, detail = rc.check_tools_not_in_wheel(root)
+    assert status == "PASS" and "no tools/ entry" in detail
+
+
+def test_import_weight_names_a_dependency_and_a_heavy_import(tmp_path, monkeypatch):
+    root = _pkg_root(tmp_path, deps='["requests"]')
+    (root / "src" / "arcaeon").mkdir(parents=True)
+    (root / "src" / "pydantic").mkdir()
+    (root / "src" / "pydantic" / "__init__.py").write_text("", encoding="utf-8")
+    (root / "src" / "arcaeon" / "__init__.py").write_text("import pydantic\n", encoding="utf-8")
+    monkeypatch.setattr(rc, "WEIGHT_MODULES", ("arcaeon",))
+    status, detail = rc.check_import_weight(root)
+    assert status == "FAIL"
+    assert "requests" in detail and "arcaeon imports pydantic" in detail
+
+
+def test_a_surface_check_that_raises_is_a_fail_not_a_pass(monkeypatch):
+    def boom(root):
+        raise RuntimeError("could not look")
+    monkeypatch.setattr(rc, "SURFACE_CHECKS", (("boom", boom),))
+    assert rc.surface_checks(ROOT) == [
+        ("FAIL", "boom", "the check itself raised RuntimeError: could not look")]
+
+
+def test_main_exits_1_when_a_surface_check_fails(monkeypatch, capsys, tmp_path):
+    """A surface FAIL decides the exit even when A, B, C and the verbs pass."""
+    monkeypatch.setattr(rc, "verbs_problems", lambda root=None: [])
+    monkeypatch.setattr(rc, "surface_checks", lambda root=None: [("FAIL", "schema drift", "x")])
+    monkeypatch.setattr(rc, "site_version_line", lambda v, root=None: "OK      site version: stub")
+    ok = rc.Check("A", "stub", "PASS", "ok")
+    monkeypatch.setattr(rc, "run_checks", lambda run: [ok, ok, ok])
+    monkeypatch.setattr(rc, "paid_path_gate", lambda checks, cwd=None: None)
+    monkeypatch.setattr(rc, "install", lambda house, **kw: Path(sys.executable))
+    wheel = tmp_path / "x.whl"
+    wheel.write_bytes(b"")
+    assert rc.main(["--stub", "--wheel", str(wheel)]) == 1
+    assert "FAIL    surface schema drift: x" in capsys.readouterr().out

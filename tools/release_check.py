@@ -64,6 +64,18 @@ neither changes the exit code.
 Second line out: the registered verbs (K001). A verb in cli.LAZY_VERBS whose
 module is not in src/, or a `TODO(K` marker still in docs/VERBS.md, is a FAIL
 (exit 1): a verb that answers "not built in this checkout" must not ship.
+
+Then the plug-in surface (K142), one `PASS` or `FAIL` line each, prefixed
+`surface`: docs/openapi.json and the docs/schemas/*.json files equal what
+`arcaeon schema` writes today; no registered verb without its module; no
+`TODO(K` marker left in docs/, src/ or README.md; `dependencies = []` and no
+framework, mcp or cryptography pulled in by importing the base and plug-in
+modules (each in a fresh interpreter, sockets refused); a docs/VERBS.md
+heading for every new verb; and tools/ kept out of the wheel. Any FAIL makes
+the exit 1.
+
+    py tools/release_check.py --offline            # only the surface lines; no house,
+                                                   # no wheel install, no witness
 """
 from __future__ import annotations
 
@@ -800,6 +812,257 @@ def verbs_line(problems: list[str]) -> str:
     return "OK      verbs: every registered verb has its module and a written section"
 
 
+# --- the plug-in surface (K142) ----------------------------------------------------
+
+#: `arcaeon schema --format F --out FILE` output that is committed, byte for byte.
+OPENAPI_FILE = ("openapi", "docs/openapi.json")
+SCHEMA_FILES = (("claude", "docs/schemas/claude_tools.json"),
+                ("openai", "docs/schemas/openai_functions.json"),
+                ("gemini", "docs/schemas/gemini_functions.json"),
+                ("gpt-action", "docs/schemas/gpt_action_openapi.json"))
+#: Where a `TODO(K` marker must not be left: a section or a line registered
+#: ahead of its code is not a release.
+TODO_SCAN = ("docs", "src", "README.md")
+TODO_SUFFIXES = {".md", ".py", ".json", ".html", ".css", ".js", ".mjs", ".txt", ".toml"}
+#: Imported by importing any base or plug-in module: none of these may be.
+HEAVY_IMPORTS = ("mcp", "tree_sitter", "tree_sitter_typescript", "cryptography", "nacl",
+                 "agents", "openai", "langchain", "langchain_core", "langgraph",
+                 "llama_index", "crewai", "autogen", "autogen_core", "autogen_agentchat",
+                 "pydantic")
+WEIGHT_MODULES = ("arcaeon", "arcaeon.cli", "arcaeon.serve", "arcaeon.client",
+                  "arcaeon.connect", "arcaeon.prove.readers", "arcaeon.adapters")
+_WEIGHT_PROBE = (
+    "import json, socket, sys, importlib\n"
+    "def _no(*a, **k):\n"
+    "    raise AssertionError('network touched at import time')\n"
+    "socket.socket.connect = _no\n"
+    "socket.create_connection = _no\n"
+    "importlib.import_module(sys.argv[1])\n"
+    "print(json.dumps(sorted({m.split('.')[0] for m in sys.modules} & set(sys.argv[2].split(',')))))\n")
+
+
+def _src_env(root: Path) -> dict:
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(root / "src")
+    env["ARCAEON_JOURNAL"] = "0"
+    return env
+
+
+def _drift(root: Path, pairs, python: str) -> list[str]:
+    """Each committed file that is not what `arcaeon schema` writes today,
+    or that could not be regenerated (named, never passed)."""
+    stale = []
+    with tempfile.TemporaryDirectory(prefix="arcaeon-rc-schema-") as tmp:
+        for fmt, rel in pairs:
+            out = Path(tmp) / (fmt + ".json")
+            try:
+                p = subprocess.run([python, "-m", "arcaeon", "schema", "--format", fmt,
+                                    "--out", str(out)], cwd=root, env=_src_env(root),
+                                   capture_output=True, text=True, timeout=120)
+            except (OSError, subprocess.TimeoutExpired) as e:
+                stale.append(f"{rel} (could not run schema --format {fmt}: {type(e).__name__})")
+                continue
+            if p.returncode != 0 or not out.is_file():
+                stale.append(f"{rel} (schema --format {fmt} exited {p.returncode})")
+                continue
+            try:
+                committed = (root / rel).read_bytes()
+            except OSError:
+                stale.append(f"{rel} (missing)")
+                continue
+            if committed != out.read_bytes():
+                stale.append(f"{rel} (stale; run py -m arcaeon schema --format {fmt} --out {rel})")
+    return stale
+
+
+def check_openapi_drift(root: Path = ROOT, python: str = sys.executable) -> tuple[str, str]:
+    stale = _drift(root, [OPENAPI_FILE], python)
+    if stale:
+        return "FAIL", "; ".join(stale)
+    return "PASS", f"{OPENAPI_FILE[1]} equals the route table's document"
+
+
+def check_schema_drift(root: Path = ROOT, python: str = sys.executable) -> tuple[str, str]:
+    stale = _drift(root, SCHEMA_FILES, python)
+    if stale:
+        return "FAIL", "; ".join(stale)
+    return "PASS", f"{len(SCHEMA_FILES)} committed schema files equal their generated text"
+
+
+def check_unbuilt_verbs(root: Path = ROOT) -> tuple[str, str]:
+    try:
+        table = lazy_verb_modules((root / CLI_PATH).read_text(encoding="utf-8"))
+    except OSError as e:
+        return "FAIL", f"cannot read {CLI_PATH} ({e.strerror or type(e).__name__})"
+    if table is None:
+        return "FAIL", f"{CLI_PATH} has no readable LAZY_VERBS table"
+    missing = [f"{v} ({m})" for v, m in table.items() if _module_file(root, m) is None]
+    if missing:
+        return "FAIL", "registered verb(s) with no module: " + ", ".join(missing)
+    return "PASS", f"all {len(table)} registered verbs have their module"
+
+
+def todo_markers(root: Path = ROOT) -> list[str]:
+    """`<file> TODO(K###)` for each marker left under TODO_SCAN."""
+    hits = []
+    for name in TODO_SCAN:
+        base = root / name
+        if base.is_file():
+            files = [base]
+        elif base.is_dir():
+            files = sorted(base.rglob("*"))
+        else:
+            files = []
+        for f in files:
+            if not f.is_file() or f.suffix not in TODO_SUFFIXES or "__pycache__" in f.parts:
+                continue
+            try:
+                text = f.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            for mark in sorted(set(re.findall(re.escape(TODO_MARK) + r"\d*\)?", text))):
+                hits.append(f"{f.relative_to(root).as_posix()} {mark}")
+    return hits
+
+
+def check_todo_markers(root: Path = ROOT) -> tuple[str, str]:
+    hits = todo_markers(root)
+    if hits:
+        return "FAIL", f"{len(hits)} marker(s) left: " + ", ".join(hits)
+    return "PASS", f"no {TODO_MARK} marker in {', '.join(TODO_SCAN)}"
+
+
+def weight_modules(root: Path = ROOT) -> list[str]:
+    adapters = root / "src" / "arcaeon" / "adapters"
+    extra = []
+    if adapters.is_dir():
+        extra = sorted("arcaeon.adapters." + p.stem for p in adapters.glob("*.py")
+                       if p.stem != "__init__")
+    return list(WEIGHT_MODULES) + extra
+
+
+def check_import_weight(root: Path = ROOT, python: str = sys.executable) -> tuple[str, str]:
+    problems = []
+    try:
+        deps = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))[
+            "project"].get("dependencies")
+    except (OSError, tomllib.TOMLDecodeError, KeyError) as e:
+        return "FAIL", f"cannot read pyproject.toml ({type(e).__name__})"
+    if deps != []:
+        problems.append(f"dependencies is {deps!r}, not []")
+    mods = weight_modules(root)
+    for mod in mods:
+        try:
+            p = subprocess.run([python, "-c", _WEIGHT_PROBE, mod, ",".join(HEAVY_IMPORTS)],
+                               cwd=root, env=_src_env(root), capture_output=True, text=True,
+                               timeout=120)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            problems.append(f"{mod} could not be probed ({type(e).__name__})")
+            continue
+        if p.returncode != 0:
+            last = (p.stderr or "").strip().splitlines()[-1:] or ["no output"]
+            problems.append(f"{mod} did not import ({last[0][:120]})")
+            continue
+        try:
+            heavy = json.loads(p.stdout.strip().splitlines()[-1])
+        except (ValueError, IndexError):
+            problems.append(f"{mod} probe printed no answer")
+            continue
+        if heavy:
+            problems.append(f"{mod} imports {', '.join(heavy)}")
+    if problems:
+        return "FAIL", "; ".join(problems)
+    return "PASS", (f"dependencies = []; {len(mods)} modules import no framework, "
+                    f"mcp or cryptography")
+
+
+def check_verb_headings(root: Path = ROOT) -> tuple[str, str]:
+    try:
+        table = lazy_verb_modules((root / CLI_PATH).read_text(encoding="utf-8"))
+        doc = (root / VERBS_DOC).read_text(encoding="utf-8")
+    except OSError as e:
+        return "FAIL", f"cannot read {e.filename or 'a file'} ({e.strerror or type(e).__name__})"
+    if table is None:
+        return "FAIL", f"{CLI_PATH} has no readable LAZY_VERBS table"
+    headings = set(re.findall(r"^## `([^`]+)`\s*$", doc, re.M))
+    missing = [v for v in table if v not in headings]
+    if missing:
+        return "FAIL", f"{VERBS_DOC} has no heading for: " + ", ".join(missing)
+    return "PASS", f"{VERBS_DOC} has a heading for each of the {len(table)} new verbs"
+
+
+def check_tools_not_in_wheel(root: Path = ROOT, version: str | None = None) -> tuple[str, str]:
+    """tools/ (and tests/) stay out of the wheel: packages come from src/ only,
+    MANIFEST.in prunes tools, and the local wheel for this version, when there
+    is one in dist/, has no tools/ entry. Opening the wheel is a local read."""
+    import zipfile
+    problems, evidence = [], []
+    try:
+        meta = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        return "FAIL", f"cannot read pyproject.toml ({type(e).__name__})"
+    find = meta.get("tool", {}).get("setuptools", {}).get("packages", {}).get("find", {})
+    if find.get("where") != ["src"]:
+        problems.append(f"packages.find where is {find.get('where')!r}, not ['src']")
+    else:
+        evidence.append("packages come from src/ only")
+    try:
+        manifest = (root / "MANIFEST.in").read_text(encoding="utf-8")
+    except OSError:
+        manifest = ""
+    if not re.search(r"^prune tools\s*$", manifest, re.M):
+        problems.append("MANIFEST.in does not prune tools")
+    else:
+        evidence.append("MANIFEST.in prunes tools")
+    version = version or meta.get("project", {}).get("version")
+    wheel = root / "dist" / f"arcaeon-{version}-py3-none-any.whl"
+    if wheel.is_file():
+        try:
+            with zipfile.ZipFile(wheel) as z:
+                bad = [n for n in z.namelist() if n.split("/")[0] in ("tools", "tests")]
+        except (OSError, zipfile.BadZipFile) as e:
+            problems.append(f"{wheel.name} unreadable ({type(e).__name__})")
+        else:
+            if bad:
+                problems.append(f"{wheel.name} holds {', '.join(bad[:5])}")
+            else:
+                evidence.append(f"{wheel.name} has no tools/ entry")
+    else:
+        evidence.append(f"no dist/{wheel.name} to open, config checked only")
+    if problems:
+        return "FAIL", "; ".join(problems)
+    return "PASS", "; ".join(evidence)
+
+
+SURFACE_CHECKS = (
+    ("openapi drift", check_openapi_drift),
+    ("schema drift", check_schema_drift),
+    ("unbuilt verbs", check_unbuilt_verbs),
+    ("TODO(K markers", check_todo_markers),
+    ("import weight", check_import_weight),
+    ("verb headings", check_verb_headings),
+    ("tools not in wheel", check_tools_not_in_wheel),
+)
+
+
+def surface_checks(root: Path = ROOT) -> list[tuple[str, str, str]]:
+    """(status, name, detail) for every surface check, in order. A check that
+    raises is a FAIL naming the exception: a check that could not look does
+    not pass."""
+    out = []
+    for name, fn in SURFACE_CHECKS:
+        try:
+            status, detail = fn(root)
+        except Exception as e:  # noqa: BLE001
+            status, detail = "FAIL", f"the check itself raised {type(e).__name__}: {e}"
+        out.append((status, name, detail))
+    return out
+
+
+def surface_line(status: str, name: str, detail: str) -> str:
+    return f"{status:<8}surface {name}: {detail}"
+
+
 # --- main ------------------------------------------------------------------------
 
 def _pyproject_version() -> str:
@@ -818,6 +1081,9 @@ def parse(argv):
     ap.add_argument("--env-file", dest="env_file", default=str(ROOT / ".env"))
     ap.add_argument("--stub", action="store_true", help="use the stub witness even if a key exists")
     ap.add_argument("--keep", action="store_true", help="keep the house for inspection")
+    ap.add_argument("--offline", action="store_true",
+                    help="only the plug-in surface checks (K142): no house, no install, "
+                         "no witness, nothing sent")
     return ap.parse_args(argv)
 
 
@@ -827,10 +1093,19 @@ def main(argv=None) -> int:
     except Exception:
         pass
     a = parse(argv)
+    if a.offline:
+        surface = surface_checks()
+        for status, name, detail in surface:
+            print(surface_line(status, name, detail), flush=True)
+        return 1 if any(s == "FAIL" for s, _, _ in surface) else 0
     version = a.version or _pyproject_version()
     print(site_version_line(_pyproject_version()), flush=True)
     verb_problems = verbs_problems()
     print(verbs_line(verb_problems), flush=True)
+    surface = surface_checks()
+    for status, name, detail in surface:
+        print(surface_line(status, name, detail), flush=True)
+    surface_failed = any(s == "FAIL" for s, _, _ in surface)
     key = None if a.stub else _load_publish().credential(a.key_name, Path(a.env_file))
     stub = StubWitness().start()
     stubbed = not key
@@ -865,7 +1140,8 @@ def main(argv=None) -> int:
         blocked = paid_path_gate(checks)
         if blocked:
             print(blocked, flush=True)
-        return 1 if blocked or verb_problems or any(x.status == "FAIL" for x in checks) else 0
+        return 1 if (blocked or verb_problems or surface_failed
+                     or any(x.status == "FAIL" for x in checks)) else 0
     except SetupFailed as e:
         print(f"FAIL    setup: {e}", flush=True)
         return 2
