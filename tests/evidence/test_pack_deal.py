@@ -128,3 +128,15 @@ def test_cli_deal(tapes, tmp_path):
                                    "--deal", "d-demo2", "--seller", str(seller)]) == 1
     assert evidence_pack_cli.main(["--ledger", str(buyer), "--out", str(tmp_path / "c3"),
                                    "--deal", "d-demo1"]) == 2
+
+
+def test_r3_deal_timeline_is_prose_hash_only(tapes, tmp_path):
+    """K06xR3: timeline.md is prose verify cannot re-derive, so the manifest
+    labels it hash-only and verify reports it so."""
+    buyer, seller = tapes
+    out = tmp_path / "p3"
+    build_pack(buyer, out, deal="d-demo1", deal_seller=seller)
+    assert _m(out)["prose"] == {"timeline.md": "not re-derived, hash only"}
+    res = verify_pack(out)
+    assert res["exit"] == 0, res.get("finding")
+    assert res["prose_not_rederived"] == {"timeline.md": "not re-derived, hash only"}

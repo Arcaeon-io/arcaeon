@@ -116,6 +116,16 @@ the lane (A, B or C) of the work and the commit ids that carry it.
   without `checks` or `counts` is BROKEN "manifest incomplete"; an empty or unplaced window
   the pack does not list is BROKEN. New `evidence-pack verify --namespace NS`; with
   `--witness` and no pin listed, a pin past the head is BROKEN "pin beyond head".
+- **Pack verify trusts no manifest field (lane D: K06xR3).** A new verify step re-derives
+  `independence` (anything past `self_asserted` is BROKEN "independence overclaimed"),
+  `operator_at_t` (anything but UNKNOWN is BROKEN "operator overclaimed"), `built_at` (before
+  the newest record is BROKEN; before a listed pin's `received_at` is exit 3 "bounded"),
+  integrity.json, README.md ("readme drift") and ARTICLE_12_SUMMARY.md ("summary drift").
+  The manifest's `witness.independence` now reads `self_asserted` for every witness (`none`
+  with no witness), and a new `prose` group labels `.md` files verify cannot re-derive
+  (`timeline.md`) "not re-derived, hash only". `build_pack` refuses `--namespace` without
+  `--witness`, and a `--built-at` before the newest record. `audit` gains
+  `derive_finding()` and `render_summary()`.
 - **`evidence-pack --format aat` (lane D: K064 ec401d4).** Adds `aat.jsonl`, `aat_gaps.json`
   and a manifest `aat` block; verify recomputes both from `records.jsonl`.
 - **`evidence-pack --deal ID --buyer B | --seller S` (lane D: K065 ef5a276).** Adds

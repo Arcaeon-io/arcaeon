@@ -47,8 +47,8 @@ Review 2 (K06xR): verify re-derives what it can from the pack itself and
 never takes the manifest's word for it. `manifest.sha256` (beside the
 manifest, "<hex>  manifest.json") must match the manifest's bytes: missing is
 COULD NOT LOOK "missing", different is BROKEN. It catches an edit to the
-manifest alone; a rewriter who recomputes it too is caught only by a pin. A
-manifest without `checks` or `counts` is BROKEN "manifest incomplete".
+manifest alone. A manifest without `checks` or `counts` is BROKEN "manifest
+incomplete".
 could_not_look.json must equal the COULD NOT LOOK entries of `checks`. The
 window is re-selected from records.jsonl with the manifest's own agent and
 bounds; an empty window, or agent rows whose time could not be read, that the
@@ -59,6 +59,28 @@ at its row): a pin past the pack's head, taken before the pack was built, is
 BROKEN "pin beyond head"; one the pack claims to predate is COULD NOT LOOK
 "bounded" (its build time is its own word); pins that cannot be tied to
 these records are COULD NOT LOOK "name_not_found", never VERIFIED.
+
+Review 3 (K06xR3): a rewriter who recomputes manifest.sha256 is not caught
+by it, so no field is taken on that hash. A pin binds the records; every
+other field is re-derived from the records and the pin at verify, never
+trusted; prose that cannot be re-derived is hash-only and labelled. So:
+`independence` must be the value re-derived from the witness kind
+(`self_asserted`, or `none` with no witness): no signed witness attestation
+exists yet, so anything stronger is BROKEN "independence overclaimed", in
+the manifest, integrity.json or witness.json (the export's own caveated
+self-declared label excepted). `operator_at_t` must be UNKNOWN (no custody
+record exists yet), else BROKEN "operator overclaimed". `built_at` earlier
+than the newest record is BROKEN; earlier than a listed pin's receipt by the
+witness's own clock is COULD NOT LOOK "bounded". README.md is re-rendered
+from the records and compared word for word (its does-not-show bullets from
+the constant), BROKEN "readme drift"; ARTICLE_12_SUMMARY.md is re-rendered
+from the records and the witness block, BROKEN "summary drift"; integrity.json
+and the export block are re-derived from records.jsonl. Any other prose file
+must sit in the manifest's `prose` group, reported "not re-derived, hash
+only". With a pin listed, the manifest's chain_head must be the pinned head
+or past it (at the pinned row, the same chain) and the manifest's records
+hash must be the one integrity.json and the file give, so the pin binds
+through the manifest to every re-derived field.
 
 AAT (K064): a pack built with --format aat lists `aat` in its manifest.
 Verify recomputes aat.jsonl from records.jsonl (the same mapping, the same
@@ -356,6 +378,284 @@ def _step_readings(pack: Path, manifest: dict) -> dict:
         res.update({"verdict": V.BROKEN, "finding": (
             f"the manifest's `readings` block records {recorded}, receipt verify gives "
             f"{summary}")})
+        return res
+    res["verdict"] = V.VERIFIED
+    return res
+
+
+_BASE_CHECKS = ("records chain and witness cross-check", "window has rows",
+                "every agent row placed in or out of the window")
+#: Independence labels that claim nothing; with no signed witness attestation
+#: in the pack (none exists yet), any other label is an overclaim.
+_NON_CLAIMS = ("self_asserted", "undeclared", "none")
+_SELF_DECLARED = "SELF-DECLARED BY THE WITNESS OBJECT"
+
+
+def _witness_notes() -> set:
+    from arcaeon.prove import audit as A
+    base = [A._NOTE_NONE, A._NOTE_LOCAL_FILE, A._NOTE_UNDECLARED, A._NOTE_REMOTE_URL,
+            A._NOTE_OTS]
+    caveat = ("SELF-DECLARED BY THE WITNESS OBJECT, not established by this tool "
+              "\u2014 verify the identifier yourself before relying on it. ")
+    return set(base) | {caveat + n for n in (A._NOTE_REMOTE_URL, A._NOTE_OTS)}
+
+
+def _nature_problems(where: str, block: dict) -> list[str]:
+    """The export's witness nature in `block`, checked against what can be
+    established: an independence label that claims more than the pack can
+    show is an overclaim; a note that is not one of the export's own is drift."""
+    problems = []
+    kind, ind = block.get("kind"), block.get("independence")
+    src = block.get("independence_source")
+    caveated = (ind == "externally_verifiable" and kind in ("remote_url", "opentimestamps")
+                and src == "self_declared_by_witness"
+                and str(block.get("note") or "").startswith(_SELF_DECLARED))
+    fixed = {"none": ("none", "no_witness"), "local_file": ("self_asserted",
+                                                            "established_by_type")}
+    if (ind not in _NON_CLAIMS and not caveated) or (
+            kind in fixed and (ind, src) != fixed[kind]):
+        problems.append(f"independence overclaimed: {where} says {ind!r} (source "
+                        f"{src!r}) for a {kind!r} witness; no signed witness attestation "
+                        "is in the pack, so it re-derives as "
+                        f"{fixed.get(kind, ('self_asserted',))[0]!r}")
+    if block.get("note") not in _witness_notes():
+        problems.append(f"witness note drift: {where}'s witness note is not one the "
+                        "export writes")
+    return problems
+
+
+def _rederive_pack_verdict(integrity: dict, has_window: bool, checks: list) -> dict:
+    """The build's own verdict, reached again the way build_pack reaches it:
+    the records word, an empty window, then every extra check folded in."""
+    from arcaeon.prove.evidence_pack import _fold_check
+
+    word = integrity.get("verdict")
+    word = word if word in V.EXIT_BY_WORD else V.COULD_NOT_LOOK
+    res = {"verdict": word, "exit": V.EXIT_BY_WORD[word],
+           "finding": integrity.get("finding")}
+    if not has_window and word != V.BROKEN:
+        res.update({"verdict": V.COULD_NOT_LOOK, "exit": V.EXIT_COULD_NOT_LOOK})
+    for c in checks:
+        if isinstance(c, dict) and c.get("check") not in _BASE_CHECKS and \
+                c.get("verdict") in V.EXIT_BY_WORD and \
+                (c["verdict"] != V.BROKEN or "finding" in c) and \
+                (c["verdict"] != V.COULD_NOT_LOOK or all(k in c for k in _CNL_FIELDS)):
+            _fold_check(res, c)
+    return res
+
+
+def _step_rederived(pack: Path, manifest: dict) -> dict:
+    """Every field and page of the pack that can be re-derived, re-derived
+    (K06xR3): none is taken on the manifest's word, since a holder who edits
+    the manifest can recompute manifest.sha256 too."""
+    from types import SimpleNamespace
+
+    from arcaeon.prove import audit as A
+    from arcaeon.prove.evidence_pack import (OPERATOR_AT_T, OPERATOR_AT_T_NOTE,
+                                             PROSE_HASH_ONLY, REDERIVED_PROSE,
+                                             PackUsageError, _STAMP, newest_ts,
+                                             parse_when, rederived_independence,
+                                             render_readme, select_window)
+    from arcaeon.record.ledger import verify_file
+
+    check = "re-derived fields and prose"
+    records, ip = pack / "records.jsonl", pack / "integrity.json"
+    integrity = _load_json(ip)
+    if not records.is_file() or not isinstance(integrity, dict):
+        missing = "records.jsonl" if not records.is_file() else "integrity.json"
+        return _cnl(check, missing, str(pack), "missing" if not (pack / missing).is_file()
+                    else "unreadable",
+                    f"the pack has no readable {missing}, so its fields could not be "
+                    "re-derived")
+    raw = records.read_bytes()
+    problems: list[str] = []
+    bounded: list[str] = []
+    wb = integrity.get("witness") if isinstance(integrity.get("witness"), dict) else {}
+    mw = manifest.get("witness") if isinstance(manifest.get("witness"), dict) else {}
+    kind = wb.get("kind")
+
+    # (a) independence, re-derived from the witness kind
+    if (mw.get("kind"), mw.get("identifier")) != (kind, wb.get("identifier")):
+        problems.append(f"the manifest's witness (kind {mw.get('kind')!r}, identifier "
+                        f"{mw.get('identifier')!r}) is not integrity.json's ({kind!r}, "
+                        f"{wb.get('identifier')!r})")
+    want_ind, want_src = rederived_independence(kind)
+    if (mw.get("independence"), mw.get("independence_source")) != (want_ind, want_src):
+        problems.append(f"independence overclaimed: the manifest says "
+                        f"{mw.get('independence')!r} (source "
+                        f"{mw.get('independence_source')!r}); no signed witness attestation "
+                        f"is in the pack, so it re-derives as {want_ind!r} ({want_src!r})")
+    problems += _nature_problems("integrity.json", wb)
+    wj = pack / "witness.json"
+    if wj.is_file():
+        w = _load_json(wj)
+        if isinstance(w, dict):
+            for k in ("kind", "identifier", "independence", "independence_source", "note"):
+                if w.get(k) != wb.get(k):
+                    problems.append(f"witness.json {k} {w.get(k)!r} differs from "
+                                    f"integrity.json's {wb.get(k)!r}")
+
+    # (b) operator_at_t: no custody record exists yet, so UNKNOWN
+    if manifest.get("operator_at_t") != OPERATOR_AT_T:
+        problems.append(f"operator overclaimed: the manifest names "
+                        f"{manifest.get('operator_at_t')!r} as operator_at_t; with no "
+                        f"custody record in the pack it is {OPERATOR_AT_T}")
+    if manifest.get("operator_at_t_note") != OPERATOR_AT_T_NOTE:
+        problems.append("operator note drift: operator_at_t_note is not the pack's own")
+
+    # (c) built_at: no earlier than the newest record; no earlier than a pin
+    built_s = manifest.get("built_at")
+    built = parse_when(built_s) if isinstance(built_s, str) and _STAMP.fullmatch(built_s) \
+        else None
+    if built is None:
+        problems.append(f"built_at {built_s!r} is not YYYY-MM-DDTHH:MM:SSZ")
+    else:
+        newest = newest_ts(raw)
+        if newest is not None and newest.replace(microsecond=0) > built:
+            problems.append(f"built_at {built_s} is before the newest record "
+                            f"({newest.isoformat()}): a pack is not built before what it "
+                            "holds")
+        for x in manifest.get("pins") if isinstance(manifest.get("pins"), list) else []:
+            if not isinstance(x, dict):
+                continue
+            taken = _when(x.get("received_at"))
+            if taken is not None and taken.replace(microsecond=0) > built:
+                bounded.append(f"built_at {built_s} is before the witness received the "
+                               f"pin it lists for {x.get('namespace')!r} "
+                               f"({x.get('received_at')})")
+
+    # (e) the pin binds the records, and through the manifest every field
+    head = manifest.get("chain_head") if isinstance(manifest.get("chain_head"), dict) else {}
+    rec_sha = hashlib.sha256(raw).hexdigest()
+    listed_files = manifest.get("files") if isinstance(manifest.get("files"), dict) else {}
+    vr = verify_file(records)
+    # Records that fail their own hash or chain are named by those steps, and
+    # nothing is re-derived from them: what they give is not what was packed.
+    records_bad = listed_files.get("records.jsonl") != rec_sha or vr.ok is False
+    if not records_bad and integrity.get("records_sha256") != rec_sha:
+        problems.append("records hash mismatch: records.jsonl, the manifest's files and "
+                        "integrity.json's records_sha256 do not all agree")
+    for x in manifest.get("pins") if isinstance(manifest.get("pins"), list) else []:
+        if not isinstance(x, dict) or not isinstance(x.get("rows"), int):
+            continue
+        if not isinstance(head.get("rows"), int) or head["rows"] < x["rows"] or (
+                head["rows"] == x["rows"] and head.get("chain") != x.get("chain")):
+            problems.append(f"the manifest's chain_head (rows {head.get('rows')}, chain "
+                            f"{head.get('chain')}) is not the head pinned for "
+                            f"{x.get('namespace')!r} (rows {x['rows']}, chain "
+                            f"{x.get('chain')}) or past it")
+
+    # integrity.json, the export block and the two pages, re-derived from
+    # records.jsonl (skipped when the records already fail, see above)
+    if not records_bad:
+        wv = (SimpleNamespace(verdict=wb.get("verdict"), detail=wb.get("detail"),
+                              witness_rows=wb.get("witness_rows"))
+              if "namespace" in wb else None)
+        finding = A.derive_finding(vr, wv)
+        for k, want in (("finding", finding), ("verdict", A.word_for_finding(finding)),
+                        ("rows", vr.rows), ("chain_ok", vr.ok), ("first_break", vr.first_break)):
+            if integrity.get(k) != want:
+                problems.append(f"integrity.json {k} {integrity.get(k)!r} is not the "
+                                f"{want!r} re-derived from records.jsonl")
+        if integrity.get("instrument_notes") is not None:
+            problems.append("integrity.json carries instrument notes, which a pack never "
+                            "writes")
+        rows, unreadable = A._read_rows(raw)
+        s = A._summ(rows)
+        ae = manifest.get("audit_export") if isinstance(manifest.get("audit_export"), dict) \
+            else {}
+        for k, want in (("record_count", len(rows)), ("unreadable_lines", unreadable),
+                        ("period_covered", {"from": s["first_ts"], "to": s["last_ts"]}),
+                        ("event_counts", s["counts"]),
+                        ("unknown_event_types", s["unknown_event_types"])):
+            if ae.get(k) != want:
+                problems.append(f"the manifest's audit_export {k} {ae.get(k)!r} is not the "
+                                f"{want!r} re-derived from records.jsonl")
+        stamp = ae.get("generated_at")
+        if integrity.get("checked_at") != stamp:
+            problems.append("integrity.json checked_at is not the export's generated_at")
+        tool = ae.get("tool") if isinstance(ae.get("tool"), str) else ""
+        system_id = ae.get("system_id") if isinstance(ae.get("system_id"), str) else ""
+        provider = ae.get("provider") if isinstance(ae.get("provider"), str) else ""
+
+        # (d) the prose: README.md and ARTICLE_12_SUMMARY.md re-rendered
+        summary = A.render_summary(
+            vr=vr, verdict=finding, wv=wv, witness_block=wb,
+            store_configured=kind not in (None, "none"),
+            witness_namespace=wb.get("namespace"), unreadable=unreadable,
+            instrument_notes=None, system_id=system_id, provider=provider,
+            rows_count=len(rows), s=s, stamp=stamp,
+            version=tool.partition("/")[2] or tool)
+        sp = pack / "ARTICLE_12_SUMMARY.md"
+        if not sp.is_file() or sp.read_bytes().replace(b"\r\n", b"\n") != summary.encode("utf-8"):
+            problems.append("summary drift: ARTICLE_12_SUMMARY.md is not the page re-rendered "
+                            "from records.jsonl and the witness block")
+        w = manifest.get("window") if isinstance(manifest.get("window"), dict) else {}
+        try:
+            agent = w.get("agent")
+            if agent is not None and not isinstance(agent, str):
+                raise PackUsageError("agent is not a string")
+            sel, unplaced = select_window(raw, agent=agent, since=parse_when(w.get("from")),
+                                          until=parse_when(w.get("to")))
+        except (PackUsageError, TypeError, AttributeError):
+            sel = None
+        if sel is None:
+            problems.append("readme drift: the manifest's window could not be read, so "
+                            "README.md could not be re-rendered")
+        else:
+            res = _rederive_pack_verdict(integrity, bool(sel), manifest.get("checks") or [])
+            if (manifest.get("verdict"), manifest.get("exit")) != (res["verdict"], res["exit"]):
+                problems.append(f"the manifest's verdict {manifest.get('verdict')!r} (exit "
+                                f"{manifest.get('exit')!r}) is not the {res['verdict']!r} "
+                                "re-derived from the records and the checks")
+            res["window"] = {"agent": agent, "from": w.get("from"), "to": w.get("to"),
+                             "rows": len(sel),
+                             "first_line": sel[0]["line"] if sel else None,
+                             "last_line": sel[-1]["line"] if sel else None,
+                             "unplaced_lines": unplaced}
+            for k in ("deal", "mandate", "readings"):
+                if manifest.get(k) is not None:
+                    res[k] = manifest[k]
+            try:
+                readme = render_readme(res, sel, system_id=system_id, provider=provider)
+            except (KeyError, TypeError, AttributeError):
+                readme = None
+            rp = pack / "README.md"
+            if readme is None or not rp.is_file() or rp.read_bytes() != readme.encode("utf-8"):
+                problems.append("readme drift: README.md is not the page re-rendered from the "
+                                "records (its does-not-show bullets from the constant)")
+    prose = manifest.get("prose", {})
+    if not isinstance(prose, dict) or any(v != PROSE_HASH_ONLY for v in prose.values()):
+        problems.append(f"the manifest's `prose` group must map each file to "
+                        f"{PROSE_HASH_ONLY!r}")
+        prose = {}
+    unlabelled = sorted(n for n in listed_files if n.endswith(".md")
+                        and n not in REDERIVED_PROSE and n not in prose)
+    if unlabelled:
+        problems.append(f"prose not labelled: {unlabelled} cannot be re-derived and the "
+                        "manifest's `prose` group does not say so")
+    stray = sorted(n for n in prose if n not in listed_files)
+    if stray:
+        problems.append(f"the manifest's `prose` group names files it does not hash: "
+                        f"{stray}")
+    res = {"check": check, "prose_hash_only": sorted(prose),
+           "note": (f"re-derived: independence, operator_at_t, built_at, the pinned "
+                    f"head, integrity.json, {', '.join(REDERIVED_PROSE)}; "
+                    + (f"{', '.join(sorted(prose))}: {PROSE_HASH_ONLY}; " if prose else "")
+                    + "system_id and provider are the builder's own words")}
+    if problems:
+        res.update({"verdict": V.BROKEN, "finding": "; ".join(problems)})
+        return res
+    if records_bad:
+        res.update({"verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            "records.jsonl as it was packed", "records.jsonl", "bounded",
+            "records.jsonl fails its own hash or chain, so integrity.json, README.md and "
+            "ARTICLE_12_SUMMARY.md were not re-derived from it")})
+        return res
+    if bounded:
+        res.update({"verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            "a build time no earlier than the pins the pack lists", MANIFEST, "bounded",
+            "; ".join(bounded) + "; the build time is the pack's own word")})
         return res
     res["verdict"] = V.VERIFIED
     return res
@@ -861,7 +1161,7 @@ def _step_pins(pack: Path, manifest: dict, *, witness=None, remote: bool = False
 STEPS: list[Callable[[Path, dict], dict]] = [_step_hashes, _step_chain, _step_window,
                                               _step_build, _step_manifest_hash,
                                               _step_aat, _step_mandate,
-                                              _step_readings]
+                                              _step_readings, _step_rederived]
 
 
 #: The most a pack zip may unpack to. A pack bigger than this is COULD NOT
@@ -974,6 +1274,10 @@ def verify_pack(pack: str | Path, *, witness: str | Path | None = None,
     if word == V.COULD_NOT_LOOK:
         first = next(c for c in checks if c["verdict"] == V.COULD_NOT_LOOK)
         res.update({k: first[k] for k in _CNL_FIELDS})
+    rd = next((c for c in checks if c["check"] == "re-derived fields and prose"), {})
+    # what a reader should know was checked against a hash and nothing more
+    res["prose_not_rederived"] = {n: "not re-derived, hash only"
+                                  for n in rd.get("prose_hash_only") or []}
     return res
 
 

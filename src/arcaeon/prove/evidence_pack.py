@@ -25,7 +25,8 @@ from arcaeon import verdict as V
 __all__ = ["build_pack", "select_window", "parse_when", "PackUsageError",
            "PACK_SCHEMA", "MANIFEST", "CNL_FILE", "README", "DOES_NOT_SHOW",
            "README_DOES_NOT_SHOW",
-           "OPERATOR_AT_T"]
+           "OPERATOR_AT_T", "OPERATOR_AT_T_NOTE", "PROSE_HASH_ONLY", "render_readme",
+           "newest_ts", "rederived_independence"]
 
 #: The evidence-pack manifest schema. 1 is the first (K053).
 PACK_SCHEMA = 1
@@ -98,6 +99,47 @@ README_DOES_NOT_SHOW = tuple(_for_readme(b) for b in DOES_NOT_SHOW)
 #: Who operated the witness at pin time. UNKNOWN until a custody record
 #: is published and anchored (spec section 6): never a guess.
 OPERATOR_AT_T = "UNKNOWN"
+OPERATOR_AT_T_NOTE = ("who operated the witness when each pin was taken is "
+                      "not known until a custody record is published and "
+                      "anchored")
+#: What verify reports for a prose file it cannot re-derive (K06xR3): the
+#: manifest's `prose` group names each one, so a reader knows its words were
+#: checked against a hash the holder could also have rewritten, and no more.
+PROSE_HASH_ONLY = "not re-derived, hash only"
+#: Prose files verify re-renders and compares word for word (K06xR3).
+REDERIVED_PROSE = ("README.md", "ARTICLE_12_SUMMARY.md")
+
+
+def rederived_independence(kind: Any) -> tuple[str, str]:
+    """(independence, independence_source) for a witness of `kind`, as the
+    pack states them and verify re-derives them (K06xR3). No signed witness
+    attestation exists yet, so nothing a witness says about itself makes it
+    independent: every witness reads `self_asserted`, and no witness `none`."""
+    if kind in (None, "none"):
+        return "none", "no_witness"
+    if kind == "local_file":
+        return "self_asserted", "established_by_type"
+    return "self_asserted", "conservative_default"
+
+
+def newest_ts(raw: bytes) -> datetime | None:
+    """The newest readable `ts` on any row of `raw`, or None when no row has
+    one. A pack cannot have been built before its newest record (K06xR3)."""
+    newest = None
+    for line in _lines(raw):
+        try:
+            row = json.loads(line.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError, RecursionError):
+            continue
+        if not isinstance(row, dict) or not isinstance(row.get("ts"), str):
+            continue
+        try:
+            ts = parse_when(row["ts"])
+        except PackUsageError:
+            continue
+        if ts is not None and (newest is None or ts > newest):
+            newest = ts
+    return newest
 
 
 class PackUsageError(ValueError):
@@ -253,6 +295,10 @@ def build_pack(ledger: str | Path, out: str | Path, *,
         raise PackUsageError("--buyer / --seller are only read with --deal")
     if readings_ledger is not None and readings is None:
         raise PackUsageError("--readings-ledger is only read with --readings")
+    if witness_namespace and witness is None:
+        # verify re-renders the summary from the pack, and a namespace with no
+        # witness leaves nothing in the pack to re-render it from (K06xR3)
+        raise PackUsageError("--namespace is only read with --witness")
     if built_at is not None and not (isinstance(built_at, str)
                                      and _STAMP.fullmatch(built_at)):
         raise PackUsageError(f"--built-at {built_at!r} is not YYYY-MM-DDTHH:MM:SSZ")
@@ -269,6 +315,12 @@ def build_pack(ledger: str | Path, out: str | Path, *,
     if not ledger.is_file():
         return _cnl_result(None, "a ledger file", str(ledger), "missing",
                            "the ledger named was not found, so there is nothing to pack")
+    if built_at is not None:
+        newest = newest_ts(ledger.read_bytes())
+        if newest is not None and newest.replace(microsecond=0) > parse_when(built_at):
+            raise PackUsageError(f"--built-at {built_at} is before the ledger's newest "
+                                 f"record ({newest.isoformat()}); a pack cannot be built "
+                                 "before what it holds")
 
     export_bundle(ledger, out, system_id=system_id, provider=provider,
                   witness=witness, witness_namespace=witness_namespace,
@@ -329,7 +381,8 @@ def build_pack(ledger: str | Path, out: str | Path, *,
         checks.append(r_check)
         _fold_check(res, r_check)
     _write_cnl(out, checks)
-    _write_readme(out, res, window, system_id=system_id, provider=provider)
+    (out / README).write_bytes(render_readme(res, window, system_id=system_id,
+                                             provider=provider).encode("utf-8"))
     audit_manifest = json.loads((out / MANIFEST).read_text(encoding="utf-8"))
     _write_manifest(out, res, integrity, audit_manifest, window, unplaced, checks,
                     aat=aat, deal=deal_block, mandate=mandate_block,
@@ -697,11 +750,13 @@ _VERDICT_WORDS = {
 }
 
 
-def _write_readme(out: Path, res: dict, window: list[dict], *,
+def render_readme(res: dict, window: list[dict], *,
                   system_id: str = "", provider: str = "") -> str:
-    """Write README.md, one page: the agent, the window, the verdict in words,
-    what the pack does not show, and the two commands to check it. Written
-    before the manifest, so it is hashed there."""
+    """README.md's text, one page: the agent, the window, the verdict in
+    words, what the pack does not show, and the two commands to check it.
+    Written before the manifest, so it is hashed there, as bytes, so the page
+    is LF on every OS. One function for build and verify: verify re-renders
+    it from the records and compares it word for word (K06xR3)."""
     w = res["window"]
     seen: list[str] = []
     for r in window:
@@ -813,10 +868,7 @@ def _write_readme(out: Path, res: dict, window: list[dict], *,
         "```",
         "",
     ]
-    text = "\n".join(lines)
-    # bytes, so the page is LF on every OS and hashes the same everywhere
-    (out / README).write_bytes(text.encode("utf-8"))
-    return text
+    return "\n".join(lines)
 
 
 def _write_manifest(out: Path, res: dict, integrity: dict, audit_manifest: dict,
@@ -856,13 +908,19 @@ def _write_manifest(out: Path, res: dict, integrity: dict, audit_manifest: dict,
                    "lines": [w["line"] for w in window],
                    "unplaced_lines": unplaced},
         "pins": _pins(wb),
-        "witness": {"kind": wb.get("kind"), "identifier": wb.get("identifier"),
-                    "independence": wb.get("independence"),
-                    "independence_source": wb.get("independence_source")},
+        # independence is re-derived, never copied from what a witness says of
+        # itself: no signed attestation exists yet, so it reads self_asserted
+        # (K06xR3). integrity.json keeps the export's own label and caveat.
+        "witness": dict(zip(("kind", "identifier", "independence",
+                             "independence_source"),
+                            (wb.get("kind"), wb.get("identifier"),
+                             *rederived_independence(wb.get("kind"))))),
         "operator_at_t": OPERATOR_AT_T,
-        "operator_at_t_note": ("who operated the witness when each pin was taken is "
-                               "not known until a custody record is published and "
-                               "anchored"),
+        "operator_at_t_note": OPERATOR_AT_T_NOTE,
+        # prose the pack writes that verify cannot re-derive: hash only, and
+        # labelled so (README.md and ARTICLE_12_SUMMARY.md are re-rendered)
+        "prose": {name: PROSE_HASH_ONLY for name in sorted(files)
+                  if name.endswith(".md") and name not in REDERIVED_PROSE},
         "checks": checks,
         "counts": counts,
         "audit_export": audit_manifest,
@@ -877,8 +935,9 @@ def _write_manifest(out: Path, res: dict, integrity: dict, audit_manifest: dict,
         manifest["readings"] = readings
     (out / MANIFEST).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     # The manifest's own hash, written after it. It catches an edit to the
-    # manifest alone; a rewriter who also recomputes this line is caught only
-    # by a pin, which is why the pins step exists.
+    # manifest alone. A pin binds the records; every other field is re-derived
+    # from the records and the pin at verify, never trusted; prose that cannot
+    # be re-derived is hash-only and labelled (the manifest's `prose` group).
     (out / MANIFEST_SHA).write_bytes(
         f"{_sha256_file(out / MANIFEST)}  {MANIFEST}\n".encode("ascii"))
     return manifest

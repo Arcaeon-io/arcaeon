@@ -96,7 +96,9 @@ def test_r2_untied_pins_are_exit_3_never_0(ledger, pins, tmp_path):
 def test_r2_pack_claiming_to_predate_the_pin_is_exit_3(ledger, pins, tmp_path):
     out = _cut_and_strip(ledger, tmp_path, keep=2)
     m = _m(out)
-    m["built_at"] = "2000-01-01T00:00:00Z"
+    # after the cut records (a build time before them is BROKEN, K06xR3) and
+    # before the pin was taken
+    m["built_at"] = "2026-09-02T00:00:00Z"
     _seal(out, m)
     res = verify_pack(out, witness=pins, namespace=NS)
     assert res["exit"] == 3 and res["reason_word"] == "bounded"
