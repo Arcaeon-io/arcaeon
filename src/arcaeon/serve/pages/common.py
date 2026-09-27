@@ -20,7 +20,7 @@ STATIC = Path(__file__).resolve().parents[1] / "static"
 
 esc = html.escape
 
-NAV_ITEMS = (("/", "Home"), ("/status", "Status"))
+NAV_ITEMS = (("/", "Home"), ("/status", "Status"), ("/verify", "Verify"))
 
 LAYOUT = string.Template("""<!doctype html>
 <html lang="en">
@@ -113,3 +113,73 @@ def verdict_block(word, exit_code=None, *, detail_html: str = "") -> str:
     return (f'<div class="verdict state-{t}"><p class="verdict-word">{esc(word)}</p>'
             f'<p class="verdict-sentence">{esc(words.sentence(word, exit_code))}</p>'
             f"{detail_html}</div>")
+
+
+#: Folders a file picker never walks into.
+SKIP_DIRS = frozenset({".git", "__pycache__", "node_modules", ".venv", "venv"})
+
+
+def list_files(fence, suffixes=(".jsonl",), limit: int = 500) -> list[str]:
+    """Root-relative paths (forward slashes) of files under the fenced root,
+    sorted, at most `limit`. Symlinked folders are not followed, and every
+    file must resolve inside the root: the fence decides, not the walk."""
+    if fence is None:
+        return []
+    out: list[str] = []
+    root = fence.root
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
+        for name in sorted(filenames):
+            if not name.lower().endswith(tuple(suffixes)):
+                continue
+            p = Path(dirpath) / name
+            try:
+                if not fence.inside(p.resolve()):
+                    continue
+            except (OSError, RuntimeError):
+                continue
+            out.append(p.relative_to(root).as_posix())
+            if len(out) >= limit:
+                return out
+    return out
+
+
+def fenced(fence, body: dict) -> tuple[dict | None, str | None]:
+    """(body with its path fields fenced and resolved, None), or (None, the
+    plain refusal). No fence: every path field is refused."""
+    from arcaeon.serve import fence as F
+    if fence is None:
+        if any(isinstance(body.get(f), str) and body.get(f) for f in F.PATH_FIELDS):
+            return None, "This server has no served root, so it opens no files."
+        return body, None
+    try:
+        return fence.apply(body), None
+    except F.OutsideRoot as e:
+        return None, (f"That path (`{e.field}`) is outside the folder this server "
+                      "answers for, so it was not opened.")
+
+
+def journal_as(method: str, path: str, body: dict, result) -> None:
+    """Journal a page's check as the JSON route it stands for (K015)."""
+    from arcaeon.serve import routes as R
+    from arcaeon.serve import server as S
+    route = R.find(method, path)
+    if route is not None:
+        S.journal_call(route, body, result)
+
+
+def result_details(res: dict, root, fields=("rows", "first_break", "reason_word",
+                                             "reason", "looked_for", "where", "error")) -> str:
+    """A small definition list of the answer's fields, paths shown root-relative."""
+    from arcaeon import words
+    items = []
+    for k in fields:
+        v = res.get(k)
+        if v is None or v == "" or v == []:
+            continue
+        text = shown(v, root)
+        if k == "reason_word":
+            why = words.reason_sentence(v)
+            text = f"{v}: {why}" if why else str(v)
+        items.append(f"<dt>{esc(k.replace('_', ' '))}</dt><dd>{esc(text)}</dd>")
+    return '<dl class="details">' + "".join(items) + "</dl>" if items else ""

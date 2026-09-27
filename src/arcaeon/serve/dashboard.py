@@ -65,6 +65,7 @@ PAGE_HEADERS = {"Content-Security-Policy": CSP, "X-Frame-Options": "DENY",
 PAGES = {
     "/": "arcaeon.serve.pages.home",
     "/status": "arcaeon.serve.pages.status",
+    "/verify": "arcaeon.serve.pages.verify",
 }
 
 #: The clock codes and sessions are timed by (tests move it).

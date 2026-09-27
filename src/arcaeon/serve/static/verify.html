@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$title</title>
+<link rel="stylesheet" href="/static/placeholder.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+$nav
+<main>
+<h1>$title</h1>
+<p>Checks that every row of a ledger still matches its chain, from the first
+row to the last. The answer is VERIFIED, BROKEN or COULD NOT LOOK, the same
+answer <code>arcaeon verify</code> gives.</p>
+$result
+<form method="post" action="/verify">
+<p>$picker</p>
+<p><label for="content">Or paste a ledger (one JSON row per line)</label></p>
+<p><textarea id="content" name="content" spellcheck="false"></textarea></p>
+<p><button type="submit">Check it</button></p>
+</form>
+<p class="note">A picked file must sit inside the folder this server answers
+for. Pasted text is checked from a temporary copy that is removed right after;
+nothing is saved.</p>
+</main>
+</body>
+</html>
