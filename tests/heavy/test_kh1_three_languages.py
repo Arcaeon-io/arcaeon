@@ -25,7 +25,7 @@ not run from this test, because `wsl -d Ubuntu-22.04` boots a VM that
 outlives the test and WSL's loopback is not Windows' loopback. By hand, from
 an Ubuntu-22.04 shell (python3 with pytest, curl, and node for the JS half):
 
-    cd /mnt/c/Users/USER/arcaeon-public
+    cd /mnt/c/<your checkout>/arcaeon-public
     PYTHONPATH=src python3 -m pytest tests/heavy/test_kh1_three_languages.py -q
     node --test clients/js
 
