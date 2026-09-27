@@ -23,7 +23,7 @@
   {
    "id": "arcaeon",
    "name": "arcaeon",
-   "version": "0.9.1",
+   "version": "0.10.0",
    "status": "shipped",
    "status_note": "version and status are synced from products.yaml (the one place they live) by `py site.py build`; publish day flips status to shipped there, not here",
    "price_usd": 0,
