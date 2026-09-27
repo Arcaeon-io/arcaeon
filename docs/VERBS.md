@@ -886,7 +886,7 @@ it knows with its transport and whether the path is confirmed.
 ```text
 usage: arcaeon connect --list [--json]
        arcaeon connect <client> [--os windows|macos|linux] [--json]
-       arcaeon connect <client> --write [--path FILE] [--json]
+       arcaeon connect <client> --write|--undo|--check [--path FILE] [--json]
 ```
 
 Clients: `claude-desktop`, `claude-code`, `cursor`, `windsurf`, `vscode`,
@@ -910,10 +910,17 @@ comments included) is COULD NOT LOOK `unreadable` and is never overwritten.
 A path marked `confirmed: NO` is refused (COULD NOT LOOK
 `path_unconfirmed`) unless `--path FILE` names the file.
 
-**Exit codes:** 0 printed, or written. 2 bad usage (no client, an unknown
-client or option, `--write` with `--os` for another machine). 3 COULD NOT
-LOOK: the file is unreadable, the path is unconfirmed, or the file could
-not be written; nothing was written.
+`--undo` moves the newest backup back over the file and consumes it (for a
+file `--write` created, it removes the file and any directory it made), so
+`--write` then `--undo` leaves the home byte-identical. `--check` reads only
+and answers `present`, `absent`, or `stale` (the entry is there but its
+command no longer resolves).
+
+**Exit codes:** 0 printed, written, undone, or `--check` found it present.
+1 `--check` found it absent or stale. 2 bad usage (no client, an unknown
+client or option, an action with `--os` for another machine). 3 COULD NOT
+LOOK: the file is unreadable, the path is unconfirmed, there is no backup
+to undo, or the file could not be written; nothing was changed.
 
 ```console
 $ arcaeon connect cursor --os linux

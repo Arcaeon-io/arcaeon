@@ -19,15 +19,13 @@ COULD NOT LOOK, when any check could not be looked at: a config file that
 does not parse, a serve.json naming a host off this machine, a server that
 neither answers nor refuses. Never a green on 3.
 
-The client check reads each file itself. When `arcaeon connect --check`
-(K021) lands, that is the one definition of present, absent and stale, and
-this reader should call it instead.
+The client check is `arcaeon connect --check` (connect.write.check, K021):
+one definition of present, absent and stale.
 """
 from __future__ import annotations
 
 import json
 import os
-import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -117,12 +115,6 @@ def check_serve() -> dict:
     return _check("serve", status, detail, **extra)
 
 
-def _command_resolves(cmd) -> bool:
-    if not isinstance(cmd, str) or not cmd:
-        return False
-    return Path(cmd).is_file() or shutil.which(cmd) is not None
-
-
 def check_client(entry) -> dict:
     """present, absent or stale for one client, read only. `stale`: the entry
     is there but its command no longer resolves on this machine."""
@@ -134,24 +126,17 @@ def check_client(entry) -> dict:
     path = C.config_path(entry)
     if not path:
         return _check(name, OK, "keeps no config file on this OS", state="n/a")
-    p = Path(path)
-    if not p.exists():
-        return _check(name, OK, f"absent: {path} is not there", state="absent")
-    try:
-        text = p.read_text(encoding="utf-8-sig")
-        data = json.loads(text) if text.strip() else {}
-    except (OSError, ValueError) as e:
-        why = "does not parse as JSON" if isinstance(e, ValueError) else "could not be read"
-        return _check(name, CNL, f"{path} {why}",
-                      **V.could_not_look("an arcaeon entry", path, "unreadable", f"the file {why}"))
-    block = data.get(entry.key) if isinstance(data, dict) else None
-    got = block.get("arcaeon") if isinstance(block, dict) else None
-    if not isinstance(got, dict):
-        return _check(name, OK, f"absent: {path} has no arcaeon entry", state="absent")
-    if _command_resolves(got.get("command")):
-        return _check(name, OK, f"present in {path}", state="present")
-    return _check(name, OK, f"stale: {path} names {got.get('command')!r}, "
-                  "which does not resolve here", state="stale")
+    from arcaeon.connect import write as W
+    r = W.check(path, entry.key, "arcaeon")
+    if r.get("verdict") == V.COULD_NOT_LOOK:
+        return _check(name, CNL, r["reason"], **V.could_not_look(
+            "an arcaeon entry", path, r["reason_word"], r["reason"]))
+    detail = {"present": f"present in {path}",
+              "absent": f"absent: {path} " + ("has no arcaeon entry" if r["exists"]
+                                              else "is not there"),
+              "stale": f"stale: {path} names {r.get('command')!r}, which does not "
+                       "resolve here"}[r["state"]]
+    return _check(name, OK, detail, state=r["state"])
 
 
 def check_clients() -> list[dict]:

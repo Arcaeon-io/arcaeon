@@ -3,7 +3,7 @@
 
     arcaeon connect --list [--json]
     arcaeon connect <client> [--os windows|macos|linux] [--json]
-    arcaeon connect <client> --write [--path FILE] [--json]
+    arcaeon connect <client> --write|--undo|--check [--path FILE] [--json]
 
 `connect <client>` prints the file it would change, the exact JSON it would
 merge into it, and `nothing written (add --write to apply)`. It writes
@@ -16,6 +16,12 @@ its home unless ARCAEON_CONNECT_HOME names one).
 prints the keys it changed and the backup path. A file that does not parse
 is COULD NOT LOOK, exit 3, `reason_word: "unreadable"`, never overwritten.
 `--path FILE` writes that file instead of the catalog's.
+
+`--undo` (K021) moves the newest backup back over the file, consuming it
+(for a file `--write` created, it removes the file and any directory the
+write made), so write then undo leaves the home byte-identical. `--check`
+reads only and says `present` (exit 0), `absent` or `stale` (exit 1; stale:
+the configured command no longer resolves), or COULD NOT LOOK (exit 3).
 
 A client whose docs did not state the path is printed with `confirmed: NO`,
 and `--write` refuses it (COULD NOT LOOK, exit 3, `reason_word:
@@ -33,13 +39,13 @@ from arcaeon.connect import write as W
 
 USAGE = ("usage: arcaeon connect --list [--json]\n"
          "       arcaeon connect <client> [--os windows|macos|linux] [--json]\n"
-         "       arcaeon connect <client> --write [--path FILE] [--json]\n"
+         "       arcaeon connect <client> --write|--undo|--check [--path FILE] [--json]\n"
          "clients: " + ", ".join(C.names()))
 NOTHING_WRITTEN = "nothing written (add --write to apply)"
 ENTRY_NAME = "arcaeon"
 DEFAULT_URL = "http://127.0.0.1:8787"
 DEPLOY_LINE = "needs a public URL, which is a deploy decision"
-ACTIONS = ("--write",)
+ACTIONS = ("--write", "--undo", "--check")
 
 
 def launch_form() -> dict:
@@ -160,6 +166,42 @@ def render_write(r: dict) -> str:
     return "\n".join(lines)
 
 
+def do_undo(entry: C.Entry, os_name: str, path: str | None) -> dict:
+    file = path or C.config_path(entry, os_name)
+    return {"client": entry.name, "os": os_name, "action": "undo", **W.undo(file)}
+
+
+def do_check(entry: C.Entry, os_name: str, path: str | None) -> dict:
+    file = path or C.config_path(entry, os_name)
+    return {"client": entry.name, "os": os_name, "action": "check",
+            "confirmed": path is not None or C.confirmed_for(entry, os_name),
+            **W.check(file, entry.key, ENTRY_NAME, server_entry(entry))}
+
+
+def render_other(r: dict) -> str:
+    lines = [f"arcaeon connect {r['client']} --{r['action']}", f"file: {r['file']}"]
+    if r.get("verdict") == V.COULD_NOT_LOOK:
+        lines.append(f"{V.COULD_NOT_LOOK} ({r['reason_word']}): {r['reason']}")
+        lines.append("nothing changed" if r["action"] == "undo" else "nothing checked")
+    elif r["action"] == "undo":
+        if r["backup_kind"] == "absent":
+            lines.append(f"removed the file: it was not there before --write "
+                         f"({r['restored']} consumed)")
+        else:
+            lines.append(f"restored: {r['restored']}  (the backup is consumed)")
+        lines.append(f"backups left: {r['backups_left']}")
+    else:
+        why = {"present": f"command {r.get('command')!r} resolves",
+               "absent": ("no arcaeon entry" if r["exists"] else "the file is not there"),
+               "stale": f"command {r.get('command')!r} does not resolve here"}[r["state"]]
+        if r["state"] == "present" and not r.get("matches", True):
+            why += "; differs from what --write would put there now"
+        lines.append(f"state: {r['state']}  ({why})")
+        if not r["confirmed"]:
+            lines.append("confirmed: NO, the client's docs did not state this path")
+    return "\n".join(lines)
+
+
 def _usage(msg: str) -> int:
     print(f"arcaeon connect: {msg}\n{USAGE}", file=sys.stderr)
     return V.EXIT_USAGE
@@ -217,7 +259,7 @@ def main(argv: list[str] | None = None) -> int:
         return _usage(f"{actions[0]} and {actions[1]} do not go together")
     if not actions:
         if path is not None:
-            return _usage("--path goes with --write")
+            return _usage("--path goes with --write, --undo or --check")
         p = plan(entry, os_name)
         print(json.dumps(p, indent=1) if as_json else render(p))
         return V.EXIT_GOOD
@@ -226,6 +268,10 @@ def main(argv: list[str] | None = None) -> int:
     if os_name != C.current_os():
         return _usage(f"{actions[0]} acts on this machine ({C.current_os()}) only; "
                       "--os is for previews")
-    r = do_write(entry, os_name, path)
-    print(json.dumps(r, indent=1) if as_json else render_write(r))
+    if actions[0] == "--write":
+        r = do_write(entry, os_name, path)
+        print(json.dumps(r, indent=1) if as_json else render_write(r))
+        return r["exit"]
+    r = (do_undo if actions[0] == "--undo" else do_check)(entry, os_name, path)
+    print(json.dumps(r, indent=1) if as_json else render_other(r))
     return r["exit"]
