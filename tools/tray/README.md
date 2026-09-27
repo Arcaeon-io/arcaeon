@@ -26,6 +26,6 @@ Without `--dry-run` it runs `arcaeon open` and returns its exit code. `--no-brow
 Only what the dashboard shows, and only from the local server:
 
 - the status sentence from `GET /v1/status`, in the words from `arcaeon.words`;
-- a dot for the last check: green only for a good verdict (VERIFIED, MATCHED), red for BROKEN or ALTERED, grey for COULD NOT LOOK, MISSING or anything stale. COULD NOT LOOK is never green.
+- a dot for the last check, colored by `arcaeon.words.tone`: green only for a good verdict inside its freshness window, red for BROKEN, MISSING or ALTERED, grey for COULD NOT LOOK, no reading, or anything stale. COULD NOT LOOK is never green.
 
 It must never show the token, the one-time code after it is used, file contents, full local paths, or anything from an account. The rules for every face are in `docs/design/HUD_TILES_SPEC.md`.

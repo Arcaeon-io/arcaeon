@@ -63,7 +63,7 @@ Account data says what the hosted witness recorded. It does not say anything abo
 
 ## The never-green rule
 
-Green means one thing: a good verdict (VERIFIED or MATCHED) that was read recently. Everything else is not green:
+Green means one thing: a good verdict (a word whose tone in `arcaeon.words` is ok: VERIFIED, MATCHED, COMPARED) that was read recently. Everything else is not green:
 
 - COULD NOT LOOK is never green, and never shown in the good color with a small warning beside it. It is grey with its reason word.
 - BROKEN, ALTERED and MISSING are red, with the sentence.

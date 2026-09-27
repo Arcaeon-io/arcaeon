@@ -1094,7 +1094,7 @@ def test_first_five_and_can_cannot_link_each_other_and_words_md():
 
 #: Spec documents for faces that are designed before they are coded. Each must
 #: exist, say it goes through Claude Design first, and make no forbidden claim.
-DESIGN_SPECS = ("docs/design/PHONE_SCREENS_SPEC.md",)
+DESIGN_SPECS = ("docs/design/PHONE_SCREENS_SPEC.md", "docs/design/HUD_TILES_SPEC.md")
 
 _DESIGN_FORBIDDEN = ["tamper-proof", "independent witness", "compliant", "ai act ready",
                      "guarantee", "multi-witness", "court", "regulator", "truth", "is true",
@@ -1134,3 +1134,33 @@ def test_phone_spec_names_what_a_phone_cannot_see_and_account_only_data():
                     "## The never-green rule"):
         assert heading in text, heading
     assert "Not visible from this phone" in text
+
+
+def _hud_tile_rows() -> list[list[str]]:
+    body = _section(_design_text("docs/design/HUD_TILES_SPEC.md"), "The tiles")
+    rows = [[c.strip() for c in line.strip().strip("|").split("|")]
+            for line in body.splitlines() if line.startswith("|")]
+    return [r for r in rows[2:] if r]
+
+
+def test_hud_every_tile_has_a_route_a_reading_and_a_time():
+    from arcaeon.serve import routes as R
+    rows = _hud_tile_rows()
+    assert len(rows) >= 8, rows
+    for tile, route, reading, when, window, faces in rows:
+        assert reading and when and window and faces, tile
+        m = re.fullmatch(r"`(GET|POST) (/[^`]*)`", route)
+        if m is None:
+            assert route.startswith("account side"), (tile, route)
+            continue
+        assert R.find(m.group(1), m.group(2)) is not None, (tile, route)
+
+
+def test_hud_stale_green_turns_grey_and_colors_come_from_words():
+    text = " ".join(_design_text("docs/design/HUD_TILES_SPEC.md").split())
+    assert "## A stale green turns grey" in _design_text("docs/design/HUD_TILES_SPEC.md")
+    assert "A green reading older than its tile's freshness window turns grey" in text
+    assert "`arcaeon.words.tone`" in text
+    for cls in ("state-ok", "state-bad", "state-unknown"):
+        assert cls in text, cls
+    assert "`POST /v1/seal` is not a tile" in text
