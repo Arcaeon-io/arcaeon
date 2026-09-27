@@ -9,6 +9,11 @@ byte is BROKEN naming the file; a listed file that is gone is COULD NOT LOOK
 BROKEN (nothing vouches for it). The manifest itself is not hashed (it holds
 the hashes), which is why later steps recompute what it claims from the files.
 
+Step 2 (K057): rerun the chain check on records.jsonl and compare its head
+(last chain value and row count) to the manifest's `chain_head`. This is what
+catches an edit whose manifest hash was fixed to hide it: the file hash then
+agrees, and the chain does not. A break is BROKEN naming the ledger line.
+
 The overall verdict is the worst step: BROKEN outranks COULD NOT LOOK, which
 outranks VERIFIED. COULD NOT LOOK never exits 0.
 
@@ -19,6 +24,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Callable
@@ -80,9 +86,55 @@ def _step_hashes(pack: Path, manifest: dict) -> dict:
     return res
 
 
+def _break_line(first_break: str | None) -> int | None:
+    m = re.match(r"line (\d+)\b", first_break or "")
+    return int(m.group(1)) if m else None
+
+
+def _step_chain(pack: Path, manifest: dict) -> dict:
+    """Rerun the chain on records.jsonl and compare its head to the manifest."""
+    from arcaeon.record.ledger import Ledger, verify_file
+
+    check = "records chain and head"
+    records = pack / "records.jsonl"
+    if not records.is_file():
+        return _cnl(check, "records.jsonl", str(pack), "missing",
+                    "the pack has no records.jsonl, so there is no chain to rerun")
+    claimed = manifest.get("chain_head")
+    if not isinstance(claimed, dict) or "chain" not in claimed:
+        return _cnl(check, "the chain head recorded at export", MANIFEST, "unreadable",
+                    "manifest.json has no `chain_head` to compare the chain against")
+    vr = verify_file(records)
+    res = {"check": check, "rows": vr.rows, "first_break": vr.first_break,
+           "breaks": vr.breaks, "manifest_chain": claimed.get("chain"),
+           "manifest_rows": claimed.get("rows")}
+    if vr.ok is False:
+        line = _break_line(vr.first_break)
+        res.update({"verdict": V.BROKEN, "break_line": line,
+                    "finding": f"records.jsonl chain breaks at {vr.first_break}"})
+        return res
+    if vr.ok is None:
+        scope = getattr(vr, "verified_scope", "") or ""
+        word = "empty" if scope == "empty" else "bounded"
+        res.update({"verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            "chain links for every record", f"records.jsonl (verified_scope={scope})",
+            word, "the chain check did not cover every row, so it reached no verdict")})
+        return res
+    head = Ledger(records).head()
+    res.update({"chain": head.chain})
+    if head.chain != claimed.get("chain") or head.rows != claimed.get("rows"):
+        res.update({"verdict": V.BROKEN, "finding": (
+            f"records.jsonl head (rows {head.rows}, chain {head.chain}) differs from "
+            f"the manifest's chain_head (rows {claimed.get('rows')}, chain "
+            f"{claimed.get('chain')})")})
+        return res
+    res["verdict"] = V.VERIFIED
+    return res
+
+
 #: The verify steps, in order. Each takes (pack folder, loaded manifest) and
 #: returns one check dict with a `verdict` word.
-STEPS: list[Callable[[Path, dict], dict]] = [_step_hashes]
+STEPS: list[Callable[[Path, dict], dict]] = [_step_hashes, _step_chain]
 
 
 def verify_pack(pack: str | Path) -> dict:
@@ -128,7 +180,7 @@ def verify_pack(pack: str | Path) -> dict:
 
 def _parser(prog: str) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog=prog, description="Verify an evidence pack: rehash "
-                                "every file against its manifest.")
+                                "every file against its manifest, rerun the chain.")
     p.add_argument("pack", help="the evidence pack folder")
     p.add_argument("--json", action="store_true", help="print the result as JSON")
     return p

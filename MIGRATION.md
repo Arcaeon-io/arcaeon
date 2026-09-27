@@ -64,6 +64,9 @@ the lane (A, B or C) of the work and the commit ids that carry it.
   lists: a changed byte or an unlisted file is BROKEN naming the file, a listed file that
   is gone is COULD NOT LOOK `missing`. A build on a missing ledger now prints "no
   evidence pack written" instead of "evidence pack at None".
+- **`evidence-pack verify` chain step (lane D: K057).** Verify also reruns the chain on
+  `records.jsonl` and compares its head to the manifest's `chain_head`: an edit hidden by
+  a fixed manifest hash is BROKEN with `break_line` naming the ledger line.
 
 ## 0.9.1 (2026-09-25)
 
