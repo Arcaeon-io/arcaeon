@@ -13,21 +13,29 @@ with the answer (record-only by default; see docs/MANDATE_GATE.md).
 A spend is judged by `arcaeon.record.deal.check_mandate`, imported, never
 copied: the proxy and the deal lane must never disagree about whether a
 purchase was inside the same mandate body.
+
+An optional `spend_cap.total` caps the whole session. The gate keeps the
+running total, but only a caller that forwarded a spend adds to it
+(`add_spend`): `evaluate` still writes nothing, so asking twice never counts
+twice. A spend that would take the total past the cap is outside, rule
+`spend_cap.total`, and the proxy writes it as `mandate_cap_exceeded`.
 """
 from __future__ import annotations
 
 import fnmatch
 import hashlib
 import json
+import threading
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from arcaeon.record.deal import check_mandate
+from arcaeon.record.deal import _amount, check_mandate
 from arcaeon.record.row import digest_bytes, digest_json
 
-__all__ = ["INSIDE", "OUTSIDE", "COULD_NOT_LOOK", "VERDICTS", "MandateGate", "load",
-           "evaluate"]
+__all__ = ["INSIDE", "OUTSIDE", "COULD_NOT_LOOK", "VERDICTS", "CAP_EXCEEDED_EVT",
+           "MandateGate", "load", "evaluate"]
 
 INSIDE = "inside"
 OUTSIDE = "outside"
@@ -37,6 +45,9 @@ VERDICTS = (INSIDE, OUTSIDE, COULD_NOT_LOOK)
 _AMOUNT_ARGS = ("total", "amount")
 _CURRENCY_ARGS = ("currency",)
 _MERCHANT_ARGS = ("seller", "merchant")
+
+#: The event a spend past `spend_cap.total` is written as (record-only by default).
+CAP_EXCEEDED_EVT = "mandate_cap_exceeded"
 
 
 def _now_iso() -> str:
@@ -89,8 +100,12 @@ def _normalize(obj: Any) -> dict:
     if cap is not None:
         if not isinstance(cap, dict):
             raise ValueError("spend_cap must be an object")
+        total = cap.get("total")
+        if total is not None and _amount(total) is None:
+            raise ValueError(f"spend_cap.total {total!r} is not a readable amount")
         m["spend_cap"] = {
             "amount": cap.get("amount"),
+            "total": total,
             "currency": cap.get("currency"),
             "merchant": cap.get("merchant"),
             "amount_args": _str_list(cap.get("amount_args"), "spend_cap.amount_args")
@@ -121,6 +136,23 @@ class MandateGate:
         self.file_sha256 = file_sha256
         self.file_digest = file_digest
         self.body_digest = body_digest
+        #: The session's running spend: the amounts `add_spend` was handed.
+        self.spent = Decimal(0)
+        self._spent_lock = threading.Lock()
+
+    @property
+    def total_cap(self) -> Any:
+        """`spend_cap.total` as written in the mandate, or None."""
+        return ((self.mandate or {}).get("spend_cap") or {}).get("total")
+
+    def add_spend(self, amount: Any) -> Decimal:
+        """Add one forwarded spend to the session total; returns the new total.
+        An amount that is not readable adds nothing."""
+        d = _amount(amount)
+        with self._spent_lock:
+            if d is not None:
+                self.spent += d
+            return self.spent
 
     @property
     def ok(self) -> bool:
@@ -188,17 +220,33 @@ class MandateGate:
             # A spend: the deal lane's own check, on the terms this call carries.
             currency = next((args[k] for k in cap["currency_args"] if k in args), None)
             seller = next((args[k] for k in cap["merchant_args"] if k in args), None)
+            per_call = cap.get("amount")
+            if per_call is None and cap.get("total") is not None:
+                per_call = cap.get("total")      # one call can never spend past the total
             body = {"merchant": cap.get("merchant"), "currency": cap.get("currency"),
-                    "cap": cap.get("amount"), "not_before": m.get("not_before"),
+                    "cap": per_call, "not_before": m.get("not_before"),
                     "not_after": m.get("not_after")}
             terms = {"seller": seller if cap.get("merchant") is not None else None,
                      "currency": currency if cap.get("currency") is not None else None,
                      "total": args[amount_key]}
             inside, why = check_mandate(body, terms, at)
+            spend = _amount(args[amount_key])
+            carry = {"spend_amount": str(spend)} if spend is not None else {}
+            if inside is True and cap.get("total") is not None:
+                total = _amount(cap["total"])
+                with self._spent_lock:
+                    before = self.spent
+                if before + spend > total:
+                    return OUTSIDE, (f"spend: {args[amount_key]} would take the session "
+                                     f"total from {before} to {before + spend}, over the "
+                                     f"mandate's total {cap['total']}"), {
+                        "rule": "spend_cap.total", "evt": CAP_EXCEEDED_EVT,
+                        "session_spent_before": str(before),
+                        "session_total_cap": str(cap["total"]), **carry}
             if inside is True:
-                return INSIDE, f"spend: {why}", {"rule": "spend_cap"}
+                return INSIDE, f"spend: {why}", {"rule": "spend_cap", **carry}
             if inside is False:
-                return OUTSIDE, f"spend: {why}", {"rule": "spend_cap"}
+                return OUTSIDE, f"spend: {why}", {"rule": "spend_cap", **carry}
             return COULD_NOT_LOOK, f"spend: {why}", {
                 "rule": "spend_cap",
                 "looked_for": getattr(why, "looked_for", amount_key),

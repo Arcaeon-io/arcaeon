@@ -263,6 +263,7 @@ class _MandateWatch:
         self.mode = "enforce" if enforce else "record-only"
         self.counts = {"inside": 0, "outside": 0, "could_not_look": 0}
         self.blocked = 0
+        self.cap_exceeded = 0
         self._lock = threading.Lock()
 
     def judge(self, msg: dict):
@@ -275,6 +276,13 @@ class _MandateWatch:
             self.counts[verdict] = self.counts.get(verdict, 0) + 1
             if action == "blocked":
                 self.blocked += 1
+            if extra.get("evt") == "mandate_cap_exceeded":
+                self.cap_exceeded += 1
+        # A forwarded spend ran, so it counts toward spend_cap.total (K073);
+        # a blocked one never reached the tool and does not.
+        spent = None
+        if action == "forwarded" and extra.get("spend_amount") is not None                 and hasattr(self.gate, "add_spend"):
+            spent = self.gate.add_spend(extra["spend_amount"])
         if verdict == "inside":
             return
         params = msg.get("params") if isinstance(msg.get("params"), dict) else {}
@@ -292,7 +300,13 @@ class _MandateWatch:
         if verdict == "could_not_look":
             fields.update(looked_for=extra.get("looked_for"), where=extra.get("where"),
                           reason_word=extra.get("reason_word"))
-        evt = "mandate_outside" if verdict == "outside" else "mandate_could_not_look"
+        if extra.get("evt") == "mandate_cap_exceeded":
+            fields.update(amount=extra.get("spend_amount"),
+                          session_spent_before=extra.get("session_spent_before"),
+                          session_spent=None if spent is None else str(spent),
+                          session_total_cap=extra.get("session_total_cap"))
+        evt = extra.get("evt") or ("mandate_outside" if verdict == "outside"
+                                   else "mandate_could_not_look")
         # The observer's own row writer, under its own lock: same chain, same
         # seq counter, same repair ladder as every tool_call row.
         with self.obs._lock:
@@ -309,7 +323,11 @@ class _MandateWatch:
         return {"mandate_inside": self.counts["inside"],
                 "mandate_outside": self.counts["outside"],
                 "mandate_could_not_look": self.counts["could_not_look"],
-                "mandate_blocked": self.blocked or None}
+                "mandate_blocked": self.blocked or None,
+                "mandate_cap_exceeded": self.cap_exceeded or None,
+                "mandate_spent": (str(self.gate.spent)
+                                  if getattr(self.gate, "total_cap", None) is not None
+                                  else None)}
 
 
 #: JSON-RPC error code the proxy answers a blocked call with. In the -32000 to

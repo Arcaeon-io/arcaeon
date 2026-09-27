@@ -35,7 +35,8 @@ One JSON object. Every field is optional; a field left out constrains nothing.
 | `who` | the principal this mandate speaks for. Recorded in every mandate row. The gate does not check it: the proxy cannot see who is behind the agent. |
 | `allowed_acts` | tool names the agent may call. Shell-style patterns (`search_*`). Absent or empty: any tool not forbidden. |
 | `forbidden_acts` | tool names the agent may not call. Checked first; a forbidden name is outside even when it is also allowed. |
-| `spend_cap` | `amount` (a string, the most one call may spend), `currency`, and optionally `merchant`. |
+| `spend_cap` | `amount` (a string, the most one call may spend), `currency`, and optionally `merchant` and `total`. |
+| `spend_cap.total` | optional: the most the whole session may spend (a string). See "The session total" below. |
 | `not_before`, `not_after` | the time window, ISO 8601. A call outside it is outside. |
 
 A **deal-lane mandate** works as-is. `{merchant, cap, currency, not_before,
@@ -54,6 +55,25 @@ are read from `currency_args` (default `currency`) and `merchant_args`
 `check_mandate`, imported, not copied: merchant, currency, cap and window, in
 that order, and the first rule broken is the reason. A call that carries no
 amount is not a spend and is checked against names and the window only.
+
+### The session total
+
+`spend_cap.total` (optional) caps the whole session, not one call:
+
+```json
+{"spend_cap": {"amount": "60.00", "total": "100.00", "currency": "USD"}}
+```
+
+The gate keeps a running total of the spends that were forwarded. A spend
+that is inside on its own terms but would take the total past `total` is
+outside, rule `spend_cap.total`, and is written as a `mandate_cap_exceeded`
+row carrying `amount`, `session_spent_before`, `session_spent` and
+`session_total_cap`. Record-only, the call is still forwarded and its amount
+still counts, so every later spend in the session is over too and gets its
+own row. Under `--mandate-enforce` it is blocked, and a blocked spend adds
+nothing to the total. The per-call `amount` check is unchanged and runs first;
+with `total` and no `amount`, one call may spend up to the total.
+`session_end` carries `mandate_cap_exceeded` (a count) and `mandate_spent`.
 
 ## The three answers
 
@@ -117,8 +137,11 @@ Each outside call:
 - It does not prove the person behind `who` wrote or approved the mandate. It
   proves which file was in force (by hash) and what each call was checked
   against. Pair it with a deal mandate row, pinned by a witness, for when.
-- The spend cap is per call. The gate keeps no running total, so ten calls at
-  the cap each read inside.
+- Without `spend_cap.total` the spend cap is per call, so ten calls at the cap
+  each read inside. The total counts only what crossed this seam, in the one
+  session: a new session starts at zero. Under `--mandate-enforce`, calls
+  sent together in one batch frame are each judged against the total as it
+  stood before that frame.
 - It reads tool names and arguments. A tool whose name says `get` and whose
   server spends money anyway is inside by name; the gate cannot see what a
   server does.
