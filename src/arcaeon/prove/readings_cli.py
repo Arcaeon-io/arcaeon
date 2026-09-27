@@ -3,6 +3,11 @@
 
     arcaeon second-read criterion FILE --ledger L [--supersedes SHA] [--json]
     arcaeon second-read compare A B [--json]
+    arcaeon second-read submit --ledger L --reader-id X --provider P --claim-id C
+                               (--claim-file F | --claim-sha256 SHA) --reading WORD
+                               [--criterion-sha256 SHA | --criterion-file F]
+                               [--model M] [--near-match-id ID]
+                               [--rationale-file F [--keep-text]] [--json]
 
 `compare` lines up two readings ledgers (see `arcaeon.prove.readings_compare`)
 and prints a human first line such as
@@ -16,6 +21,18 @@ disagreement is filed, not failed), MISSING 1, BROKEN 1, COULD NOT LOOK 3,
 bad usage 2. Nothing printed here says a claim holds: two readers agreeing
 measures how ambiguous the sentence was for them.
 
+`submit` is the interop door: another agent (or a person) files its OWN
+reading of a claim into a readings ledger, without us calling any model. The
+row is an ordinary `arcaeon-reading/1` row, chained like any other; its
+`prompt_sha256` and `reader.endpoint_host` are null (no prompt of ours was
+sent, no endpoint of ours was called). The reading cites a criterion frozen
+earlier in the ledger: the one named by `--criterion-sha256`, or the one whose
+text is in `--criterion-file` (frozen first if the ledger lacks it), or, with
+neither, the ledger's latest criterion row. Submit exit codes: 0 the row was
+filed, 2 bad usage, 3 COULD NOT LOOK (no such criterion in that ledger,
+`reason_word: "name_not_found"`). "Filed" says the row was written, never
+that the reading is right.
+
 Stdlib only.
 """
 from __future__ import annotations
@@ -23,10 +40,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
 from arcaeon import verdict as _v
 
-__all__ = ["main", "compare_main", "human_lines", "SUBCOMMANDS"]
+__all__ = ["main", "compare_main", "human_lines", "SUBCOMMANDS", "SUBMIT_FORMAT", "submit",
+           "submit_main"]
 
 _PROG = "arcaeon second-read"
 
@@ -87,6 +106,132 @@ def compare_main(argv: list[str] | None = None) -> int:
     return res["exit"]
 
 
+#: The result shape of one submit.
+SUBMIT_FORMAT = "arcaeon-reading-submit/1"
+
+
+def _latest_criterion(path: Path) -> str | None:
+    from arcaeon.record.ledger import Ledger
+    if not path.exists():
+        return None
+    last = None
+    for r in Ledger(path):
+        if isinstance(r, dict) and r.get("evt") == "criterion":
+            last = r.get("criterion_sha256")
+    return last
+
+
+def _usage_res(msg: str) -> dict:
+    return {"format": SUBMIT_FORMAT, "written": False, "error": msg, "exit": _v.EXIT_USAGE}
+
+
+def _no_criterion(looked_for: str, where: str, reason: str) -> dict:
+    return {"format": SUBMIT_FORMAT, "written": False, "exit": _v.EXIT_COULD_NOT_LOOK,
+            **_v.could_not_look(looked_for, where, "name_not_found", reason)}
+
+
+def submit(ledger, *, reader_id: str, provider: str, claim_id: str, reading: str,
+           claim_text: str | None = None, claim_sha256: str | None = None,
+           criterion_sha256: str | None = None, criterion_text: str | None = None,
+           model: str | None = None, near_match_id: str | None = None,
+           rationale: str | None = None, keep_text: bool = False) -> dict:
+    """File one reading that a caller took itself. Returns the result dict
+    (`exit` 0 filed, 2 bad usage, 3 COULD NOT LOOK); never raises on bad input."""
+    from arcaeon.prove import readings as R
+    path = Path(ledger)
+    for name, val in (("reader_id", reader_id), ("provider", provider), ("claim_id", claim_id)):
+        if not isinstance(val, str) or not val.strip():
+            return _usage_res(f"{name} must be a non-empty string")
+    if model is not None and not isinstance(model, str):
+        return _usage_res("model must be a string")
+    if claim_text is None and claim_sha256 is None:
+        return _usage_res("give the claim text or its claim_sha256")
+    if criterion_text is not None:
+        if not isinstance(criterion_text, str) or not R.normalize_criterion(criterion_text):
+            return _usage_res("criterion text is empty")
+        sha = R.sha256_text(R.normalize_criterion(criterion_text))
+        if criterion_sha256 is not None and criterion_sha256 != sha:
+            return _usage_res("criterion_sha256 does not match the sha256 of the criterion text")
+        criterion_sha256 = sha
+    if criterion_sha256 is None:
+        criterion_sha256 = _latest_criterion(path)
+        if criterion_sha256 is None:
+            return _no_criterion("a criterion row", str(path),
+                                 f"{path} has no frozen criterion; freeze one first "
+                                 "(second-read criterion FILE --ledger L)")
+    reader = {"id": reader_id, "provider": provider, "model": model, "endpoint_host": None}
+    frozen_now = False
+    try:
+        row = R.build_reading(claim_id=claim_id, claim_text=claim_text, claim_sha256=claim_sha256,
+                              criterion_sha256=criterion_sha256, reader=reader, reading=reading,
+                              near_match_id=near_match_id, rationale=rationale,
+                              keep_text=keep_text, prompt_sha256=None)
+        if criterion_text is not None and criterion_sha256 not in R._criteria_in(path):
+            R.freeze_criterion(path, criterion_text)
+            frozen_now = True
+        chain = R.write_reading(path, row)
+    except R.UnknownCriterionError:
+        return _no_criterion(f"criterion {criterion_sha256}", str(path),
+                             f"criterion {str(criterion_sha256)[:12]}... is not frozen in {path}")
+    except R.ReadingError as e:
+        return _usage_res(str(e))
+    return {"format": SUBMIT_FORMAT, "written": True, "ledger": str(path), "chain": chain,
+            "claim_id": row["claim_id"], "claim_sha256": row["claim_sha256"],
+            "criterion_sha256": row["criterion_sha256"], "criterion_frozen_now": frozen_now,
+            "reader": row["reader"], "reading": row["reading"],
+            "near_match_id": row.get("near_match_id"), "exit": _v.EXIT_GOOD}
+
+
+def _read_text(fname: str, what: str) -> str:
+    try:
+        return Path(fname).read_text(encoding="utf-8")
+    except OSError as e:
+        raise ValueError(f"cannot read {what} {fname} [{type(e).__name__}]") from None
+
+
+def submit_main(argv: list[str] | None = None) -> int:
+    """`second-read submit ...`: file a reading this caller took itself."""
+    p = argparse.ArgumentParser(prog=f"{_PROG} submit",
+                                description="file your own reading of one claim into a readings ledger")
+    p.add_argument("--ledger", required=True, help="the readings ledger to append to")
+    p.add_argument("--reader-id", required=True, help="who read it (your stable reader id)")
+    p.add_argument("--provider", required=True, help="the reader's provider, as you assert it")
+    p.add_argument("--claim-id", required=True, help="the claim's id")
+    g = p.add_mutually_exclusive_group(required=True)
+    g.add_argument("--claim-file", help="a file holding the claim text, read exactly as it is")
+    g.add_argument("--claim-sha256", help="the claim text's sha256, when the text is not shared")
+    p.add_argument("--reading", required=True, help="yes, no or undetermined")
+    c = p.add_mutually_exclusive_group()
+    c.add_argument("--criterion-sha256", help="the frozen criterion this reading cites")
+    c.add_argument("--criterion-file", help="the criterion text (frozen first if new here)")
+    p.add_argument("--model", default=None, help="the model, if a model read it")
+    p.add_argument("--near-match-id", default=None, help="the id this claim almost matched")
+    p.add_argument("--rationale-file", default=None, help="the reader's rationale (digest kept)")
+    p.add_argument("--keep-text", action="store_true", help="keep the rationale text in the row")
+    p.add_argument("--json", action="store_true", help="print the result as JSON")
+    args = p.parse_args(argv)
+    try:
+        claim_text = _read_text(args.claim_file, "claim file") if args.claim_file else None
+        crit = _read_text(args.criterion_file, "criterion file") if args.criterion_file else None
+        rat = _read_text(args.rationale_file, "rationale file") if args.rationale_file else None
+    except ValueError as e:
+        print(f"{_PROG} submit: {e}", file=sys.stderr)
+        return _v.EXIT_USAGE
+    res = submit(args.ledger, reader_id=args.reader_id, provider=args.provider,
+                 claim_id=args.claim_id, reading=args.reading, claim_text=claim_text,
+                 claim_sha256=args.claim_sha256, criterion_sha256=args.criterion_sha256,
+                 criterion_text=crit, model=args.model, near_match_id=args.near_match_id,
+                 rationale=rat, keep_text=args.keep_text)
+    if args.json:
+        print(json.dumps(res, ensure_ascii=False, sort_keys=True))
+    elif res["written"]:
+        print(f"reading filed: claim {res['claim_id']} read {res['reading']!r} by "
+              f"{res['reader']['id']} (chain {res['chain'][:16]})")
+    else:
+        print(f"{_PROG} submit: {res.get('reason') or res.get('error')}", file=sys.stderr)
+    return res["exit"]
+
+
 def _criterion(argv):
     from arcaeon.prove.readings import criterion_main
     return criterion_main(argv)
@@ -96,6 +241,7 @@ def _criterion(argv):
 SUBCOMMANDS = {
     "criterion": (_criterion, "freeze a criterion sentence into a readings ledger"),
     "compare": (compare_main, "line up two readings ledgers: COMPARED / MISSING / BROKEN / COULD NOT LOOK"),
+    "submit": (submit_main, "file your own reading of one claim (the door for any AI or person)"),
 }
 
 
