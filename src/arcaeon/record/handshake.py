@@ -22,7 +22,9 @@ words:
                    row's step_digest no longer matches the body it carries, or
                    the acceptance is not bound to the proposal row it lines up
                    with (field `proposal_hash`: it cites another row, or a
-                   position that holds a different row). Exit 1.
+                   position that holds a different row), or it cites another
+                   proposer ledger (field `proposer_ledger`: a matching row on
+                   a ledger whose first row is not the one it cites). Exit 1.
   MISSING          one half is not there: a proposal nobody accepted, an
                    acceptance with no proposal, an acceptance written on the
                    proposer's own ledger instead of the other side's, or an
@@ -40,9 +42,13 @@ through, so the row format is the deal lane's, unchanged:
   kind "deal.handshake.accept"   party "acceptor"  deal = handshake id
       shared = the proposal's shared body, copied, never rebuilt;
       beside it: agent (the acceptor's name), proposal_chain (the proposal
-      row's hash, its `chain`) and proposal_row (its position on the
-      proposer's ledger), both from the offer and both required: `verify`
-      holds the acceptance to exactly that row (KH7R).
+      row's hash, its `chain`), proposal_row (its position on the
+      proposer's ledger) and proposal_ledger (the proposer ledger's
+      identity: its first row's `chain`), all from the offer and all
+      required: `verify` holds the acceptance to exactly that row on exactly
+      that ledger (KH7R, KH7R2). Row content plus position alone is not
+      identity: a byte-identical row can sit at the same position on
+      another ledger.
 
 Because the rows are deal rows, `arcaeon deal show LEDGER --deal h-...` prints
 them. `deal dispute` on a handshake id answers COULD NOT LOOK (a handshake step
@@ -162,6 +168,23 @@ def _position(path: str | Path, chain: str) -> int | None:
     return at
 
 
+def _ledger_identity(path: str | Path) -> str | None:
+    """A ledger's identity: its first row's `chain`, which commits to that row
+    and to nothing before it (KH7R2). None for a ledger with no row."""
+    for raw in Path(path).read_text(encoding="utf-8", errors="replace").split("\n"):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            row = _loads(raw)
+        except ValueError:
+            continue
+        if isinstance(row, dict):
+            c = row.get("chain")
+            return c if isinstance(c, str) and c else None
+    return None
+
+
 def _is_row_number(v: Any) -> bool:
     return isinstance(v, int) and not isinstance(v, bool) and v > 0
 
@@ -180,7 +203,8 @@ def propose(ledger: str | Path, terms: dict, *, agent: str | None = None,
     row = _Side(ledger, "proposer", hid)._write("handshake.propose", shared, None, ts)
     return {"kind": PROPOSAL_KIND, "handshake": hid, "proposer": agent, "to": to,
             "terms": terms, "terms_digest": digest, "proposer_chain": row["chain"],
-            "proposer_row": _position(ledger, row["chain"]), "ts": row["ts"]}
+            "proposer_row": _position(ledger, row["chain"]),
+            "proposer_ledger": _ledger_identity(ledger), "ts": row["ts"]}
 
 
 def accept(ledger: str | Path, proposal: dict, *, agent: str | None = None,
@@ -188,7 +212,8 @@ def accept(ledger: str | Path, proposal: dict, *, agent: str | None = None,
     """Countersign an offer on the acceptor's own ledger. Refuses (ValueError)
     an offer that is not well formed, whose terms_digest does not match its
     terms, that names another agent in `to`, or that does not cite the
-    proposal row it came from (proposer_chain and proposer_row)."""
+    proposal row it came from (proposer_chain, proposer_row) and the ledger
+    that row is on (proposer_ledger)."""
     if not isinstance(proposal, dict):
         raise ValueError("the proposal must be a JSON object")
     if proposal.get("kind", PROPOSAL_KIND) != PROPOSAL_KIND:
@@ -214,14 +239,19 @@ def accept(ledger: str | Path, proposal: dict, *, agent: str | None = None,
     if not _is_row_number(proposal.get("proposer_row")):
         raise ValueError("the proposal carries no proposer_row: an acceptance must cite "
                          "the proposal row's position on the proposer's ledger")
+    if not isinstance(proposal.get("proposer_ledger"), str) or not proposal["proposer_ledger"]:
+        raise ValueError("the proposal carries no proposer_ledger: an acceptance must cite "
+                         "the proposer ledger its proposal row is on")
     private = {"agent": agent if agent is not None else to,
                "proposal_chain": proposal["proposer_chain"],
-               "proposal_row": proposal["proposer_row"]}
+               "proposal_row": proposal["proposer_row"],
+               "proposal_ledger": proposal["proposer_ledger"]}
     row = _Side(ledger, "acceptor", hid)._write("handshake.accept", shared, private, ts)
     return {"kind": ACCEPTANCE_KIND, "handshake": hid, "acceptor": private["agent"],
             "terms_digest": digest, "acceptor_chain": row["chain"],
             "proposer_chain": private["proposal_chain"],
-            "proposer_row": private["proposal_row"], "ts": row["ts"]}
+            "proposer_row": private["proposal_row"],
+            "proposer_ledger": private["proposal_ledger"], "ts": row["ts"]}
 
 
 # -- the verdict ---------------------------------------------------------------
@@ -318,22 +348,32 @@ def _self_ok(row: dict) -> bool:
 
 def _binding(P: _Read, np_: int, O: _Read, nq: int, q: dict) -> tuple | None:
     """None when the acceptance cites exactly the proposal row it is lined up
-    with (hash and position); else (word, reason)."""
+    with (hash and position) on exactly this proposer ledger (its identity);
+    else (word, reason, field)."""
     cited, at = q.get("proposal_chain"), q.get("proposal_row")
+    ledger = q.get("proposal_ledger")
     me = f"ledger {O.name} row {nq}"
+    if not isinstance(ledger, str) or not ledger:
+        return DIFFERENT_TERMS, (f"{me} does not cite the proposer ledger it accepts on (it "
+                                 f"needs proposal_ledger)"), "proposer_ledger"
+    if ledger != P.chains.get(1):
+        return DIFFERENT_TERMS, (f"{me} cites proposer ledger {ledger}, and ledger {P.name} "
+                                 f"is {P.chains.get(1)} (its first row's hash): a matching "
+                                 f"row on another ledger is not this proposal"), \
+            "proposer_ledger"
     if not isinstance(cited, str) or not _is_row_number(at):
         return DIFFERENT_TERMS, (f"{me} does not cite the proposal row it accepts (it needs "
-                                 f"proposal_chain and proposal_row)")
+                                 f"proposal_chain and proposal_row)"), "proposal_hash"
     if at not in P.chains:
         return MISSING, (f"{me} cites ledger {P.name} row {at}, and ledger {P.name} holds no "
-                         f"row {at}")
+                         f"row {at}"), "proposal_hash"
     if P.chains[at] != cited:
         return DIFFERENT_TERMS, (f"{me} cites proposal hash {cited} at ledger {P.name} row "
-                                 f"{at}, but that row's hash is {P.chains[at]}")
+                                 f"{at}, but that row's hash is {P.chains[at]}"), "proposal_hash"
     if at != np_:
         return DIFFERENT_TERMS, (f"{me} cites ledger {P.name} row {at}, not the proposal it "
                                  f"is lined up with (row {np_}): the acceptance belongs to "
-                                 f"another proposal")
+                                 f"another proposal"), "proposal_hash"
     return None
 
 
@@ -392,7 +432,7 @@ def _one(hid: str, a: _Read, b: _Read) -> dict:
         res["reason"] = (f"{hid}: {bad} carries a step_digest that does not match the terms "
                          f"it holds; the row was edited after it was written")
     elif bind:
-        res["verdict"], res["fields"] = bind[0], ["proposal_hash"]
+        res["verdict"], res["fields"] = bind[0], [bind[2]]
         res["reason"] = f"{hid}: {bind[1]}"
     elif broken:
         res["verdict"] = COULD_NOT_LOOK

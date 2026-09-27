@@ -336,3 +336,62 @@ def test_accept_refuses_an_offer_that_cites_no_proposal_row(tmp_path):
         with pytest.raises(ValueError, match="proposer_"):
             H.accept(tmp_path / "b.jsonl", bad, agent="agent-b")
     assert not (tmp_path / "b.jsonl").exists()
+
+
+# KH7R2: the acceptance is bound to the proposer ledger, not only row + position --
+
+def test_kh7r2_honest_acceptance_cites_the_proposer_ledger(tmp_path):
+    a, b = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
+    H.propose(a, {"earlier": True}, handshake="h-before")      # row 1: the identity
+    offer = H.propose(a, dict(TERMS), agent="agent-a", to="agent-b", handshake="h-led")
+    got = H.accept(b, offer, agent="agent-b")
+    first = C.rows(a)[0]["chain"]
+    (pb,) = C.rows(b)
+    assert offer["proposer_ledger"] == got["proposer_ledger"] == first
+    assert pb["proposal_ledger"] == first
+    assert H.verify(a, b, "h-led").verdict == H.AGREED_TERMS
+
+
+def test_kh7r2_matching_row_on_another_proposer_ledger_is_different_terms(tmp_path):
+    a, b = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
+    H.propose(a, {"setup": 1}, handshake="h-setup")            # row 1
+    offer = H.propose(a, dict(TERMS), agent="agent-a", to="agent-b", handshake="h-moved")
+    H.accept(b, offer, agent="agent-b")
+    assert H.verify(a, b, "h-moved").verdict == H.AGREED_TERMS
+    # another proposer ledger: its own row 1, then the proposal row byte for byte
+    # at the same position, so row content, position and cited hash all match
+    other = tmp_path / "other.jsonl"
+    H.propose(other, {"setup": 2}, handshake="h-other")
+    line2 = a.read_bytes().splitlines(keepends=True)[1]
+    other.write_bytes(other.read_bytes() + line2)
+    assert C.rows(other)[1] == C.rows(a)[1]
+    r = H.verify(other, b, "h-moved")
+    assert r.verdict == H.DIFFERENT_TERMS and r.exit_code == 1, r.to_dict()
+    assert r.results[0]["fields"] == ["proposer_ledger"]
+    assert "another ledger" in r.reason
+    # the same, rechained so the other ledger verifies on its own
+    C.write_rechained(other, C.rows(other))
+    assert verify_file(other).ok
+    r = H.verify(other, b, "h-moved")
+    assert r.verdict == H.DIFFERENT_TERMS and r.results[0]["fields"] == ["proposer_ledger"]
+
+
+def test_kh7r2_acceptance_citing_another_ledger_or_none_is_different_terms(tmp_path):
+    a, b, offer, _ = _pair(tmp_path, hid="h-cite")
+    rows = C.rows(b)
+    rows[0]["proposal_ledger"] = "0" * 64
+    C.write_rechained(b, rows)
+    r = H.verify(a, b, "h-cite")
+    assert r.verdict == H.DIFFERENT_TERMS and r.results[0]["fields"] == ["proposer_ledger"]
+    del rows[0]["proposal_ledger"]
+    C.write_rechained(b, rows)
+    r = H.verify(a, b, "h-cite")
+    assert r.verdict == H.DIFFERENT_TERMS and r.results[0]["fields"] == ["proposer_ledger"]
+
+
+def test_kh7r2_accept_refuses_an_offer_that_cites_no_proposer_ledger(tmp_path):
+    offer = H.propose(tmp_path / "a.jsonl", TERMS, agent="agent-a", to="agent-b")
+    for bad in (dict(offer, proposer_ledger=None), dict(offer, proposer_ledger="")):
+        with pytest.raises(ValueError, match="proposer_ledger"):
+            H.accept(tmp_path / "b.jsonl", bad, agent="agent-b")
+    assert not (tmp_path / "b.jsonl").exists()
