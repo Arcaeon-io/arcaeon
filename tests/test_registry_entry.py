@@ -143,3 +143,49 @@ def test_no_key_or_token_in_the_file():
 def test_the_secret_check_can_fail():
     planted = RAW.replace('"format": "string"', '"format": "' + "ghp_" + "a" * 36 + '"')
     assert any(re.search(shape, planted) for shape in SECRET_SHAPES)
+
+
+# K147: prepared for the next release, not published. The plug-in batch adds
+# verbs and a loopback HTTP door; none of that may leak into the registry
+# record as a new required setting or a claim the package does not keep.
+
+MCP_MAIN = (ROOT / "src" / "arcaeon" / "mcp" / "__main__.py").read_text(encoding="utf-8")
+HTTP_WORDS = re.compile(r"(?i)\b(http|streamable|remote|url)\b")
+
+
+def test_no_environment_variable_is_required():
+    for pkg in ENTRY["packages"]:
+        for env in pkg.get("environmentVariables", []):
+            assert env.get("isRequired") is False, env["name"]
+        for arg in pkg.get("packageArguments", []) + pkg.get("runtimeArguments", []):
+            assert not arg.get("isRequired"), arg
+
+
+def test_only_the_known_environment_variable_is_declared():
+    names = [e["name"] for p in ENTRY["packages"] for e in p.get("environmentVariables", [])]
+    assert names == ["ARCAEON_KEY"]
+
+
+def test_the_registry_door_is_stdio_and_no_remote_is_claimed():
+    # a remote needs a public URL, and that is a deploy decision (Daniel's)
+    assert "remotes" not in ENTRY
+    assert all(p["transport"] == {"type": "stdio"} for p in ENTRY["packages"])
+
+
+def _http_claim_errors(entry: dict, mcp_main: str) -> list:
+    """A title or description that names an HTTP door needs the --http flag."""
+    claims = HTTP_WORDS.search(entry["description"]) or HTTP_WORDS.search(entry.get("title", ""))
+    if claims and '"--http"' not in mcp_main:
+        return ["description names an HTTP door the package does not have"]
+    return []
+
+
+def test_description_mentions_http_only_if_the_door_exists():
+    assert _http_claim_errors(ENTRY, MCP_MAIN) == []
+
+
+def test_the_http_rule_can_fail():
+    bad = json.loads(RAW)
+    bad["description"] = "Arcaeon, over streamable HTTP."
+    assert _http_claim_errors(bad, "no such flag here")
+    assert _http_claim_errors(bad, MCP_MAIN) == []
