@@ -40,6 +40,9 @@ MANIFEST_SHA = "manifest.sha256"
 #: audit-trail records, and the fields it leaves out.
 AAT_FILE = "aat.jsonl"
 AAT_GAPS_FILE = "aat_gaps.json"
+#: With --deal ID (K065): what arcaeon.record.deal.pack writes, at the top of
+#: the pack beside the other files, each hashed in the manifest.
+DEAL_FILES = ("verdict.json", "timeline.md", "buyer.deal.jsonl", "seller.deal.jsonl")
 #: What a pack does not show, printed verbatim in README.md: the bullets of
 #: spec section 6 ("What must not be claimed"), word for word. Kept here, one
 #: list, so the page and any test read the same words.
@@ -156,7 +159,9 @@ def build_pack(ledger: str | Path, out: str | Path, *,
                system_id: str = "", provider: str = "",
                witness: Any = None, witness_namespace: str | None = None,
                agent: str | None = None, since: str | None = None,
-               until: str | None = None, formats: tuple[str, ...] = ()) -> dict:
+               until: str | None = None, formats: tuple[str, ...] = (),
+               deal: str | None = None, deal_buyer: str | Path | None = None,
+               deal_seller: str | Path | None = None) -> dict:
     """Build an evidence pack from `ledger` into the empty folder `out`.
 
     Returns a result dict with `verdict` (one arcaeon.verdict word), an integer
@@ -172,6 +177,13 @@ def build_pack(ledger: str | Path, out: str | Path, *,
     aat.jsonl (the agent-audit-trail subset, with its own JCS chain beside our
     original `chain`) plus aat_gaps.json, both hashed in the manifest and
     recomputed from records.jsonl by `evidence-pack verify`.
+
+    `deal` folds one deal's dispute in (roadmap N3) through
+    arcaeon.record.deal.pack: verdict.json, timeline.md and each side's deal
+    rows, listed in the manifest's `deal` block with the dispute verdict. The
+    two tapes are `deal_buyer` and `deal_seller`; the one left out is this
+    pack's ledger. The dispute is one more check: MATCHED counts as VERIFIED,
+    COULD NOT LOOK as COULD NOT LOOK (never exit 0), any other word as BROKEN.
     """
     from arcaeon.prove.audit import export_bundle
 
@@ -180,6 +192,14 @@ def build_pack(ledger: str | Path, out: str | Path, *,
     if out.exists() and (not out.is_dir() or any(out.iterdir())):
         raise PackUsageError(f"{out} exists and is not an empty folder; "
                              "a pack is written into a new or empty folder")
+    if deal is not None:
+        if not isinstance(deal, str) or not deal:
+            raise PackUsageError("--deal needs a deal id")
+        if deal_buyer is None and deal_seller is None:
+            raise PackUsageError("--deal needs the other side's tape: --buyer B or "
+                                 "--seller S (the one left out is --ledger)")
+    elif deal_buyer is not None or deal_seller is not None:
+        raise PackUsageError("--buyer / --seller are only read with --deal")
     unknown = sorted(set(formats) - {"aat"})
     if unknown:
         raise PackUsageError(f"unknown --format {unknown}; the one extra format is aat")
@@ -226,13 +246,59 @@ def build_pack(ledger: str | Path, out: str | Path, *,
                "source": "records.jsonl", "records": ex["records"],
                "algorithm": AAT_CHAIN_ALGORITHM, "head": ex["aat_chain"]["head"],
                "gaps": ex["gaps"], "which_chain": WHICH_CHAIN}
+    deal_block = None
+    if deal is not None:
+        deal_block, deal_check = _fold_deal(out, ledger, deal, deal_buyer, deal_seller)
+        checks.append(deal_check)
+        res["deal"] = deal_block
+        dw = deal_check["verdict"]
+        if dw == V.BROKEN and res["verdict"] != V.BROKEN:
+            res.update({"verdict": V.BROKEN, "exit": V.EXIT_BAD,
+                        "finding": deal_check["finding"]})
+            for k in ("looked_for", "where", "reason_word", "reason"):
+                res.pop(k, None)
+        elif dw == V.COULD_NOT_LOOK and res["verdict"] == V.VERIFIED:
+            res.update({"verdict": V.COULD_NOT_LOOK, "exit": V.EXIT_COULD_NOT_LOOK,
+                        **{k: deal_check[k] for k in ("looked_for", "where",
+                                                      "reason_word", "reason")}})
     _write_cnl(out, checks)
     _write_readme(out, res, window, system_id=system_id, provider=provider)
     audit_manifest = json.loads((out / MANIFEST).read_text(encoding="utf-8"))
     _write_manifest(out, res, integrity, audit_manifest, window, unplaced, checks,
-                    aat=aat)
+                    aat=aat, deal=deal_block)
     res["files"] = sorted(p.name for p in out.iterdir() if p.is_file())
     return res
+
+
+def _fold_deal(out: Path, ledger: Path, deal_id: str, buyer, seller) -> tuple[dict, dict]:
+    """Write one deal's pack into `out` and return (manifest block, check)."""
+    from arcaeon.record.deal import pack as deal_pack
+
+    buyer = Path(buyer) if buyer is not None else ledger
+    seller = Path(seller) if seller is not None else ledger
+    report, _ = deal_pack(deal_id, buyer, seller, out)
+    d = report.to_dict()
+    word = d["verdict"]
+    code = V.exit_for(word)
+    block = {"id": deal_id, "files": list(DEAL_FILES), "verdict": word,
+             "summary": d["summary"], "exit_code": code,
+             "buyer_tape": buyer.name, "seller_tape": seller.name,
+             "pack_ledger_is": ("buyer" if buyer == ledger else
+                                "seller" if seller == ledger else None),
+             "counts": d.get("counts") or {}}
+    check = {"check": f"deal {deal_id} dispute", "dispute_verdict": word}
+    if code == V.EXIT_GOOD:
+        check["verdict"] = V.VERIFIED
+    elif code == V.EXIT_COULD_NOT_LOOK:
+        rw = d.get("reason_word")
+        check.update({"verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            d.get("looked_for") or f"both tapes of deal {deal_id}",
+            d.get("where") or "verdict.json",
+            rw if rw in V.REASON_WORDS else "unreadable",
+            f"the deal dispute could not reach a verdict: {d['summary']}")})
+    else:
+        check.update({"verdict": V.BROKEN, "finding": f"deal {deal_id}: {d['summary']}"})
+    return block, check
 
 
 def _sha256_file(p: Path) -> str:
@@ -371,11 +437,26 @@ def _write_readme(out: Path, res: dict, window: list[dict], *,
     if w.get("unplaced_lines"):
         lines.append(f"- Rows whose time could not be read, left out: lines "
                      f"{w['unplaced_lines']}")
+    dl = res.get("deal")
+    if dl:
+        lines += [
+            "",
+            "## The deal",
+            "",
+            f"- Deal `{dl['id']}`, buyer tape {dl['buyer_tape']}, seller tape "
+            f"{dl['seller_tape']}",
+            f"- Dispute: {dl['summary']}",
+            f"- Files: {', '.join(dl['files'])} (timeline.md is for a person)",
+        ]
+    verdict_text = _VERDICT_WORDS.get(res["verdict"], _VERDICT_WORDS[V.COULD_NOT_LOOK])
+    if dl and res["verdict"] == V.BROKEN and str(res.get("finding", "")).startswith("deal "):
+        verdict_text = (f"BROKEN. The two tapes of deal {dl['id']} do not agree: "
+                        f"{dl['summary']}. timeline.md and verdict.json say where.")
     lines += [
         "",
         "## The verdict",
         "",
-        _VERDICT_WORDS.get(res["verdict"], _VERDICT_WORDS[V.COULD_NOT_LOOK]),
+        verdict_text,
         "",
         "## What this pack does not show",
         "",
@@ -406,7 +487,8 @@ def _write_readme(out: Path, res: dict, window: list[dict], *,
 
 def _write_manifest(out: Path, res: dict, integrity: dict, audit_manifest: dict,
                     window: list[dict], unplaced: list[int],
-                    checks: list[dict], *, aat: dict | None = None) -> dict:
+                    checks: list[dict], *, aat: dict | None = None,
+                    deal: dict | None = None) -> dict:
     """Write manifest.json LAST, over every other file in the pack.
 
     The three counts are of the checks this build ran (the records chain with
@@ -451,6 +533,8 @@ def _write_manifest(out: Path, res: dict, integrity: dict, audit_manifest: dict,
     }
     if aat is not None:
         manifest["aat"] = aat
+    if deal is not None:
+        manifest["deal"] = deal
     (out / MANIFEST).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     # The manifest's own hash, written after it. It catches an edit to the
     # manifest alone; a rewriter who also recomputes this line is caught only
