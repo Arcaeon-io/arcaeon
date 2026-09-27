@@ -3,13 +3,15 @@
 
     arcaeon mandate lint mandate.json        # unknown keys, bad types; exit 2 if invalid
     arcaeon mandate explain mandate.json     # the mandate in plain sentences
+    arcaeon mandate check mandate.json --field name=place_order --field total=19.00
 
 Nothing here forwards, blocks or writes a ledger row. It reads the same file
 the proxy's gate reads (arcaeon.record.adapter.mandate_gate, imported, never
 copied) and says what is in it. See docs/MANDATE_GATE.md.
 
 Exit codes are arcaeon.verdict's one table: 0 good, 2 an invalid mandate or
-bad usage, 3 COULD NOT LOOK (the file is not there or cannot be read).
+bad usage, 3 COULD NOT LOOK (the file is not there or cannot be read). `check`
+answers the gate's word: inside 0, outside 1, could_not_look 3.
 """
 from __future__ import annotations
 
@@ -23,7 +25,8 @@ from typing import Any
 
 from arcaeon import verdict as V
 
-__all__ = ["TOP_KEYS", "SPEND_CAP_KEYS", "lint", "explain", "main"]
+__all__ = ["TOP_KEYS", "SPEND_CAP_KEYS", "CHECK_EXIT", "lint", "explain", "check",
+           "parse_fields", "main"]
 
 #: Every key a mandate file may carry at the top: the tool shape, the deal
 #: lane's body, and the deal lane's sealed sidecar.
@@ -233,6 +236,57 @@ def explain(obj: Any) -> list[str]:
     return out
 
 
+# -- check ----------------------------------------------------------------------
+
+#: The gate's word -> the exit code (arcaeon.verdict's table).
+CHECK_EXIT = {"inside": V.EXIT_GOOD, "outside": V.EXIT_BAD,
+              "could_not_look": V.EXIT_COULD_NOT_LOOK}
+
+
+def parse_fields(fields: list[str]) -> tuple[dict | None, str | None]:
+    """--field KEY=VALUE (a string) or KEY:=JSON (typed), the same rule as
+    `arcaeon log --field`. (dict, None) or (None, the usage error)."""
+    out: dict = {}
+    for f in fields:
+        typed = ":=" in f and ("=" not in f or f.index(":=") < f.index("="))
+        k, sep, v = f.partition(":=") if typed else f.partition("=")
+        if not sep or not k:
+            return None, f"--field wants KEY=VALUE or KEY:=JSON, got {f!r}"
+        if typed:
+            try:
+                v = json.loads(v)
+            except ValueError as e:
+                return None, f"--field {k}:= is not JSON ({e})"
+        out[k] = v
+    return out, None
+
+
+def check(mandate_path: str, fields: dict, *, at: str | None = None,
+          spent: Any = None) -> dict:
+    """The gate's answer for one call. `fields["name"]` is the tool; every other
+    field is an argument. `spent` is what the session already spent (for
+    spend_cap.total). Record-only by construction: this forwards, blocks and
+    writes nothing."""
+    from arcaeon.record.adapter import mandate_gate
+    gate = mandate_gate.load(mandate_path)
+    args = {k: v for k, v in fields.items() if k != "name"}
+    call = {"name": fields.get("name"), "arguments": args}
+    if spent is not None:
+        gate.add_spend(spent)
+    verdict, reason, extra = gate.detail(call, at)
+    res = {"verdict": verdict, "reason": str(reason), "rule": extra.get("rule"),
+           "tool": call["name"] if isinstance(call["name"], str) else None,
+           "mandate": mandate_path, "mandate_status": gate.status,
+           "mandate_file_sha256": gate.file_sha256, "who": gate.who,
+           "blocks": False}
+    if extra.get("evt"):
+        res["evt"] = extra["evt"]
+    if verdict == "could_not_look":
+        res.update(looked_for=extra.get("looked_for"), where=extra.get("where"),
+                   reason_word=extra.get("reason_word"))
+    return res
+
+
 # -- the verb -----------------------------------------------------------------
 
 def _could_not_look(e: _CouldNotLook, as_json: bool) -> int:
@@ -292,12 +346,28 @@ def _cmd_explain(a) -> int:
     return V.EXIT_GOOD
 
 
+def _cmd_check(a) -> int:
+    fields, err = parse_fields(a.field or [])
+    if err:
+        print(f"arcaeon mandate check: {err}", file=sys.stderr)
+        return V.EXIT_USAGE
+    if not isinstance(fields.get("name"), str) or not fields["name"]:
+        print("arcaeon mandate check: needs --field name=<tool name>", file=sys.stderr)
+        return V.EXIT_USAGE
+    res = check(a.mandate, fields, at=a.at, spent=a.spent)
+    if a.json:
+        print(json.dumps(res, indent=1))
+    else:
+        print(f"{res['verdict'].replace('_', ' ')}: {res['reason']}")
+    return CHECK_EXIT[res["verdict"]]
+
+
 def _parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="arcaeon mandate",
-        description="Read a mandate file: lint it, or explain it in plain sentences. "
-                    "Nothing here forwards or blocks a call.")
-    sub = ap.add_subparsers(dest="cmd", metavar="{lint,explain}")
+        description="Read a mandate file: lint it, explain it in plain sentences, or "
+                    "check one call against it. Nothing here forwards or blocks a call.")
+    sub = ap.add_subparsers(dest="cmd", metavar="{lint,explain,check}")
     for name, fn, text in (("lint", _cmd_lint, "name unknown keys and bad types; exit 2 "
                                                 "when invalid"),
                            ("explain", _cmd_explain, "print the mandate in plain sentences")):
@@ -305,6 +375,19 @@ def _parser() -> argparse.ArgumentParser:
         p.add_argument("mandate", help="the mandate JSON file")
         p.add_argument("--json", action="store_true", help="print JSON")
         p.set_defaults(fn=fn)
+    text = ("check one call: inside exit 0, outside 1, could_not_look 3 (record-only: "
+            "says, blocks nothing)")
+    p = sub.add_parser("check", help=text, description=text)
+    p.add_argument("mandate", help="the mandate JSON file")
+    p.add_argument("--field", action="append", metavar="KEY=VALUE",
+                   help="name=<tool> and each argument (repeatable; KEY:=JSON for a typed "
+                        "value). No JSON quoting, so it works the same in PowerShell")
+    p.add_argument("--at", default=None, metavar="TIME",
+                   help="the call's time, ISO 8601 (default now, UTC)")
+    p.add_argument("--spent", default=None, metavar="AMOUNT",
+                   help="what the session already spent, for spend_cap.total")
+    p.add_argument("--json", action="store_true", help="print JSON")
+    p.set_defaults(fn=_cmd_check)
     return ap
 
 
