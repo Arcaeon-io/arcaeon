@@ -44,6 +44,9 @@ the lane (A, B or C) of the work and the commit ids that carry it.
 - **Deal tools over MCP (lane C: 3951465, 18b9659).** The MCP server gains
   `deal_mandate`, `deal_commit` and `deal_dispute` (fourteen tools, twelve
   free).
+- **The evidence pack (lane D: K051).** New module `arcaeon.prove.evidence_pack`
+  (`build_pack`) and `arcaeon.prove.evidence_pack_cli`: one folder over `audit export`,
+  with `records.jsonl` byte-equal to the ledger. Nothing existing changed.
 
 ## 0.9.1 (2026-09-25)
 
