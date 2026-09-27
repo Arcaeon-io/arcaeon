@@ -116,7 +116,9 @@ def journal_call(route: R.Route, body, result) -> None:
         if isinstance(body, dict):
             target = next((body[f] for f in F.PATH_FIELDS
                            if isinstance(body.get(f), str) and body[f]), None)
-        journal.append(verb, word, rc, target)
+        journal.append(verb, word, rc, target,
+                       reason_word=result.get("reason_word") if isinstance(result, dict)
+                       else None)
     except Exception:  # noqa: BLE001  the journal never changes a response
         pass
 

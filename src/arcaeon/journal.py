@@ -77,9 +77,10 @@ def word_for(verb: str, exit_code) -> str:
     return special.get(exit_code) or _WORD_BY_EXIT.get(exit_code, f"EXIT {exit_code}")
 
 
-def append(verb: str, word: str | None, exit_code, target=None) -> bool:
+def append(verb: str, word: str | None, exit_code, target=None, reason_word=None) -> bool:
     """Append one line. True if written; False if off or anything went wrong.
-    Never raises."""
+    `reason_word` (a COULD NOT LOOK's reason, e.g. "missing") is recorded
+    only when it is a non-empty string. Never raises."""
     try:
         if not enabled():
             return False
@@ -87,6 +88,8 @@ def append(verb: str, word: str | None, exit_code, target=None) -> bool:
                "verb": str(verb), "word": word if word else word_for(verb, exit_code),
                "exit": exit_code if isinstance(exit_code, int) else None,
                "target": target_id(target)}
+        if isinstance(reason_word, str) and reason_word:
+            row["reason_word"] = reason_word
         d = home()
         d.mkdir(parents=True, exist_ok=True)
         with open(d / FILENAME, "a", encoding="utf-8", newline="\n") as f:

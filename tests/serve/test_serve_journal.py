@@ -106,6 +106,14 @@ def test_content_in_and_could_not_look_are_journaled_with_their_word(srv, root):
     assert status == 200 and body["exit"] == 3
     row = [r for r in journal.read() if r["verb"] == "serve:/v1/verify"][-1]
     assert (row["word"], row["exit"]) == (body["verdict"], 3)
+    assert body.get("reason_word") and row["reason_word"] == body["reason_word"]  # K015b
+
+
+def test_a_verdict_with_no_reason_word_adds_no_key(srv, root):
+    _two_rows(srv)
+    call(srv, "POST", "/v1/verify", {"ledger": "l.jsonl"})
+    row = [r for r in journal.read() if r["verb"] == "serve:/v1/verify"][-1]
+    assert "reason_word" not in row
 
 
 def test_journal_off_writes_nothing(srv, root, home, monkeypatch):
