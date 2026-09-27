@@ -11,6 +11,7 @@ any version on PyPI; `pip install arcaeon` does not have them.
 
 ### Plug-in batch (branch plugin-2026-09-27)
 
+- **KH8 (61b9aa6).** `arcaeon mcp --http` serves the stdio server's same 19 tools over streamable HTTP on 127.0.0.1 with the serve token; fails closed (COULD NOT LOOK, exit 3) without the `[mcp]` extra.
 - **K14xR (c290700).** The test suite points ARCAEON_HOME and MCP_VET_AUDIT_LEDGER away from the real home for every test and fails the session if the real ~/.arcaeon or ~/.mcp_vet changed.
 - **K143 (a44ff9f).** A socket guard in the test suite: loopback only unless a test is marked `live`; the `live` marker is registered and skipped by default.
 - **K142 (1aa4818, eaac34d).** `py tools/release_check.py --offline` prints one PASS or named FAIL line per plug-in surface check.
