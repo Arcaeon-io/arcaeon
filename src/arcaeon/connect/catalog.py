@@ -29,7 +29,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
-__all__ = ["Entry", "CATALOG", "OSES", "HOME_ENV", "TRANSPORTS", "names", "get",
+__all__ = ["Entry", "CATALOG", "OSES", "HOME_ENV", "TRANSPORTS", "DEPLOY_LINE",
+           "GPT_ACTION_MANIFEST", "GPT_ACTION_COMMAND", "REMOTE_LINES", "names", "get",
            "current_os", "home", "config_path", "confirmed_for", "list_rows",
            "render_list"]
 
@@ -37,6 +38,21 @@ HOME_ENV = "ARCAEON_CONNECT_HOME"
 OSES = ("windows", "macos", "linux")
 TRANSPORTS = ("stdio-mcp", "http-openapi", "remote-connector")
 READ_DATE = "2026-09-27"
+
+#: K024. ChatGPT reaches outside tools only through a remote connector or a
+#: GPT Action, both at a public HTTPS address. The GPT Action manifest is
+#: generated from the route table (K084) and committed at this path.
+DEPLOY_LINE = "needs a public URL, which is a deploy decision"
+GPT_ACTION_MANIFEST = "docs/schemas/gpt_action_openapi.json"
+GPT_ACTION_COMMAND = "arcaeon schema --format gpt-action --out gpt_action.json"
+REMOTE_LINES = (
+    "ChatGPT reaches outside tools through remote connectors or GPT Actions, and both "
+    "need a public HTTPS address.",
+    "arcaeon serve binds 127.0.0.1 only (loopback), so it is not one.",
+    f"GPT Action manifest: {GPT_ACTION_MANIFEST} in the source tree, or "
+    f"`{GPT_ACTION_COMMAND}`; its server url is a placeholder to replace.",
+    DEPLOY_LINE,
+)
 
 
 @dataclass(frozen=True)

@@ -892,8 +892,10 @@ usage: arcaeon connect --list [--json]
 Clients: `claude-desktop`, `claude-code`, `cursor`, `windsurf`, `vscode`,
 `gemini-cli` (each starts `arcaeon mcp` over stdio), `chatgpt` (reaches
 tools only at a public HTTPS address; the loopback server is not one, so
-it needs a public URL, which is a deploy decision) and `generic-http` (the
-URL, where the token lives, and the OpenAPI URL of `arcaeon serve`).
+it needs a public URL, which is a deploy decision; it names the GPT Action
+manifest, `docs/schemas/gpt_action_openapi.json` or `arcaeon schema --format
+gpt-action`, and `--write` exits 2) and `generic-http` (the URL, where the
+token lives, and the OpenAPI URL of `arcaeon serve`).
 
 Each path was read from the client's public docs on the date the catalog
 records. Where those docs did not state the path, the output says

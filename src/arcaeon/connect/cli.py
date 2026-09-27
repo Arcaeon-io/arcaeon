@@ -44,7 +44,7 @@ USAGE = ("usage: arcaeon connect --list [--json]\n"
 NOTHING_WRITTEN = "nothing written (add --write to apply)"
 ENTRY_NAME = "arcaeon"
 DEFAULT_URL = "http://127.0.0.1:8787"
-DEPLOY_LINE = "needs a public URL, which is a deploy decision"
+DEPLOY_LINE = C.DEPLOY_LINE
 ACTIONS = ("--write", "--undo", "--check")
 
 
@@ -93,9 +93,10 @@ def plan(entry: C.Entry, os_name: str) -> dict:
         out.update({"url": url, "url_source": source, "openapi_url": url + "/openapi.json",
                     "token_file": str(journal.home() / "serve.token")})
     else:
-        out["reason"] = (f"{entry.title} reaches outside tools only at a public HTTPS "
-                         "address (a connector or a GPT Action); arcaeon serve binds "
-                         f"127.0.0.1 only, so it {DEPLOY_LINE}")
+        out["reason"] = " ".join(C.REMOTE_LINES[:2])
+        out["gpt_action_manifest"] = C.GPT_ACTION_MANIFEST
+        out["gpt_action_command"] = C.GPT_ACTION_COMMAND
+        out["deploy"] = DEPLOY_LINE
     return out
 
 
@@ -119,7 +120,7 @@ def render(p: dict) -> str:
         lines.append(f"token: {p['token_file']}  (`arcaeon serve --print-token` prints it; "
                      "send it as `Authorization: Bearer <token>`)")
     else:
-        lines.append(p["reason"])
+        lines.extend(C.REMOTE_LINES)
     lines.append(NOTHING_WRITTEN)
     return "\n".join(lines)
 
@@ -263,8 +264,14 @@ def main(argv: list[str] | None = None) -> int:
         p = plan(entry, os_name)
         print(json.dumps(p, indent=1) if as_json else render(p))
         return V.EXIT_GOOD
+    if entry.transport == "remote-connector":
+        print(f"arcaeon connect: {entry.name} has no local config to change. "
+              + " ".join(C.REMOTE_LINES[:2]) + f" It {DEPLOY_LINE}; nothing written",
+              file=sys.stderr)
+        return V.EXIT_USAGE
     if not entry.writes_file:
-        return _usage(f"{entry.name} has no config file to write")
+        return _usage(f"{entry.name} has no config file to write: point the framework at "
+                      "GET /openapi.json on a running `arcaeon serve`")
     if os_name != C.current_os():
         return _usage(f"{actions[0]} acts on this machine ({C.current_os()}) only; "
                       "--os is for previews")
