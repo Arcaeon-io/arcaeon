@@ -192,7 +192,7 @@ def test_a_verb_that_raises_is_could_not_look_naming_the_class(monkeypatch):
     from arcaeon import cli as C
 
     def boom(argv):
-        raise RuntimeError("secret path /home/x")
+        raise RuntimeError("secret path /srv/private/x")
     monkeypatch.setitem(C.HANDLERS, "verify", boom)
     got = H.verify({"ledger": "x.jsonl"})
     assert got["exit"] == 3
