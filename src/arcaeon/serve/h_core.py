@@ -18,6 +18,17 @@ Exit codes are arcaeon.verdict's one table: 0 good, 1 a bad finding, 2 bad
 usage, 3 COULD NOT LOOK. A verb that raises is COULD NOT LOOK (3), naming
 the exception class only, the same answer the CLI's front door gives.
 
+Content-in (K007): every function that takes a path also takes `content`
+(the file's text) or `content_b64` (its bytes, base64); reconcile takes
+`content_a` / `content_b` and their `_b64` forms. That is for an agent with
+no file access. Nothing is written at the named path or under the served
+root: the bytes go to a private temporary directory (created owner-only,
+outside the root) that is removed before the answer returns, and the CLI's
+own verb reads them there, so a content check runs the very same code as a
+path check. The temporary path never reaches the answer: wherever the verb
+printed it, the answer says `(content)` instead. A path and content for the
+same file together is bad usage.
+
 Capturing stdout swaps sys.stdout for the whole process, so calls run one at
 a time under a lock; a threaded server stays correct, just serial here.
 The activity journal is not written from here: the server journals each HTTP
@@ -25,9 +36,14 @@ call itself (K015), so one call is never counted twice.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import contextlib
 import io
 import json
+import os
+import shutil
+import tempfile
 import threading
 
 from arcaeon import verdict as V
@@ -85,21 +101,103 @@ def _need(body, *names) -> dict | None:
     return None
 
 
+# --- content-in (K007) ---------------------------------------------------------
+
+CONTENT_LABEL = "(content)"
+
+
+class _Usage(ValueError):
+    pass
+
+
+def _content_bytes(body: dict, text_field: str, b64_field: str) -> bytes | None:
+    text, b64 = body.get(text_field), body.get(b64_field)
+    if text is not None and b64 is not None:
+        raise _Usage(f"send `{text_field}` or `{b64_field}`, not both")
+    if text is not None:
+        if not isinstance(text, str):
+            raise _Usage(f"`{text_field}` must be a string")
+        return text.encode("utf-8", "surrogatepass")
+    if b64 is not None:
+        if not isinstance(b64, str):
+            raise _Usage(f"`{b64_field}` must be a base64 string")
+        try:
+            return base64.b64decode(b64.encode("ascii"), validate=True)
+        except (binascii.Error, ValueError, UnicodeEncodeError):
+            raise _Usage(f"`{b64_field}` is not base64") from None
+    return None
+
+
+@contextlib.contextmanager
+def _inputs(body, specs):
+    """Yield ({path_field: path}, tmpdir) for each (path_field, text_field,
+    b64_field): the path the request named, or a temporary file holding its
+    content. The temporary directory is gone when the block ends."""
+    if not isinstance(body, dict):
+        raise _Usage("the request body must be a JSON object")
+    paths: dict[str, str] = {}
+    tmpdir = None
+    try:
+        for field, text_f, b64_f in specs:
+            data = _content_bytes(body, text_f, b64_f)
+            if data is None:
+                if _str(body, field) is None:
+                    raise _Usage(f"missing required field '{field}' "
+                                 f"(or `{text_f}` / `{b64_f}`)")
+                paths[field] = body[field]
+                continue
+            if body.get(field) is not None:
+                raise _Usage(f"send `{field}` or `{text_f}`, not both")
+            if tmpdir is None:
+                tmpdir = tempfile.mkdtemp(prefix="arcaeon-content-")
+            p = os.path.join(tmpdir, f"{field}.jsonl")
+            with open(p, "wb") as fh:
+                fh.write(data)
+            paths[field] = p
+        yield paths, tmpdir
+    finally:
+        if tmpdir is not None:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _scrub(text: str, tmpdir: str | None, paths: dict) -> str:
+    """Put `(content)` wherever a temporary path was printed."""
+    if not tmpdir or not text:
+        return text
+    for p in sorted({*paths.values(), tmpdir}, key=len, reverse=True):
+        if not p.startswith(tmpdir):
+            continue
+        for form in sorted({p, json.dumps(p)[1:-1], p.replace(os.sep, "/")},
+                           key=len, reverse=True):
+            text = text.replace(form, CONTENT_LABEL)
+    return text
+
+
+def _run_with(verb: str, body, specs, build) -> dict:
+    """Materialize content, build the argv from the paths, run the verb."""
+    try:
+        with _inputs(body, specs) as (paths, tmpdir):
+            rc, out, err = run_verb(verb, build(paths))
+            return _result(rc, _scrub(out, tmpdir, paths), _scrub(err, tmpdir, paths))
+    except _Usage as e:
+        return _usage(str(e))
+
+
 # --- the six --------------------------------------------------------------------
 
 def verify(body: dict) -> dict:
-    """`arcaeon verify <ledger> [--strict] [--witness PINS [--ns NS]]`."""
-    bad = _need(body, "ledger")
-    if bad:
-        return bad
-    argv = [body["ledger"]]
-    if body.get("strict"):
-        argv.append("--strict")
-    if _str(body, "witness"):
-        argv += ["--witness", body["witness"]]
-    if _str(body, "ns"):
-        argv += ["--ns", body["ns"]]
-    return _result(*run_verb("verify", argv))
+    """`arcaeon verify <ledger> [--strict] [--witness PINS [--ns NS]]`;
+    `content` / `content_b64` instead of `ledger` verifies text sent inline."""
+    def build(paths):
+        argv = [paths["ledger"]]
+        if body.get("strict"):
+            argv.append("--strict")
+        if _str(body, "witness"):
+            argv += ["--witness", body["witness"]]
+        if _str(body, "ns"):
+            argv += ["--ns", body["ns"]]
+        return argv
+    return _run_with("verify", body, [("ledger", "content", "content_b64")], build)
 
 
 def log(body: dict) -> dict:
@@ -126,29 +224,26 @@ def reconcile(body: dict) -> dict:
     """`arcaeon reconcile <tape_a> <tape_b> [--pin PIN]` (kind "tapes")."""
     if isinstance(body, dict) and body.get("kind", "tapes") != "tapes":
         return _usage(f"reconcile kind {body.get('kind')!r} is not handled here")
-    bad = _need(body, "tape_a", "tape_b")
-    if bad:
-        return bad
-    argv = [body["tape_a"], body["tape_b"]]
-    if _str(body, "pin"):
-        argv += ["--pin", body["pin"]]
-    return _result(*run_verb("reconcile", argv))
+
+    def build(paths):
+        argv = [paths["tape_a"], paths["tape_b"]]
+        if _str(body, "pin"):
+            argv += ["--pin", body["pin"]]
+        return argv
+    return _run_with("reconcile", body, [("tape_a", "content_a", "content_a_b64"),
+                                         ("tape_b", "content_b", "content_b_b64")], build)
 
 
 def audit_verify(body: dict) -> dict:
-    """`arcaeon audit verify <path>`."""
-    bad = _need(body, "path")
-    if bad:
-        return bad
-    return _result(*run_verb("audit", ["verify", body["path"]]))
+    """`arcaeon audit verify <path>` (or `content` / `content_b64`)."""
+    return _run_with("audit", body, [("path", "content", "content_b64")],
+                     lambda paths: ["verify", paths["path"]])
 
 
 def receipt_verify(body: dict) -> dict:
-    """`arcaeon receipt verify <receipt>`."""
-    bad = _need(body, "receipt")
-    if bad:
-        return bad
-    return _result(*run_verb("receipt", ["verify", body["receipt"]]))
+    """`arcaeon receipt verify <receipt>` (or `content` / `content_b64`)."""
+    return _run_with("receipt", body, [("receipt", "content", "content_b64")],
+                     lambda paths: ["verify", paths["receipt"]])
 
 
 def status(body: dict | None = None) -> dict:

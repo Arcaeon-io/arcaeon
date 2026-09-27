@@ -114,7 +114,7 @@ ROUTES: tuple[Route, ...] = (
           "two tapes and a counter: MATCHED / MISSING / ALTERED / COULD NOT LOOK",
           _req(kind={"type": "string", "enum": ["tapes", "readings"]},
                tape_a=_PATH, tape_b=_PATH, content_a=_CONTENT, content_b=_CONTENT,
-               pin=_PATH),
+               content_a_b64=_CONTENT_B64, content_b_b64=_CONTENT_B64, pin=_PATH),
           _verdict(),
           mcp_exempt_reason=_NO_TOOL_YET),
     Route("POST", "/v1/audit/verify", _H + "h_audit:verify",
