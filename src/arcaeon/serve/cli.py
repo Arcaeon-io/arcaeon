@@ -27,6 +27,9 @@ def _parser() -> argparse.ArgumentParser:
                     help="must be 127.0.0.1 (anything else is refused, exit 2)")
     ap.add_argument("--port", type=int, default=DEFAULT_PORT,
                     help=f"default {DEFAULT_PORT}; 0 picks a free port")
+    ap.add_argument("--root", default=None, metavar="DIR",
+                    help="the only directory requests may name paths in (default: the "
+                         "directory serve starts in)")
     ap.add_argument("--print-token", action="store_true",
                     help="print the bearer token clients send (created on first run) and exit")
     return ap
@@ -46,9 +49,14 @@ def main(argv: list[str] | None = None) -> int:
     if not 0 <= a.port <= 65535:
         print(f"arcaeon serve: --port {a.port} is not a port (0 to 65535)", file=sys.stderr)
         return V.EXIT_USAGE
+    import os
+    root = os.path.abspath(a.root) if a.root is not None else os.getcwd()
+    if not os.path.isdir(root):
+        print(f"arcaeon serve: --root {a.root} is not a directory", file=sys.stderr)
+        return V.EXIT_USAGE
     from arcaeon.serve import server as S
     try:
-        srv = S.make_server(a.host, a.port)
+        srv = S.make_server(a.host, a.port, root=root)
     except S.HostRefused as e:
         print(f"arcaeon serve: {e}", file=sys.stderr)
         return V.EXIT_USAGE
@@ -60,6 +68,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"arcaeon serve: cannot listen on 127.0.0.1:{a.port} "
               f"({e.strerror or type(e).__name__})", file=sys.stderr)
         return V.EXIT_COULD_NOT_LOOK
+    print(f"arcaeon serve: serving paths under {srv.fence.root}", file=sys.stderr, flush=True)
     print(f"arcaeon serve: token in {auth.token_path()} "
           "(send it as `Authorization: Bearer <token>`; --print-token shows it)",
           file=sys.stderr, flush=True)

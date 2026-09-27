@@ -35,7 +35,7 @@ def home(tmp_path, monkeypatch):
 
 @pytest.fixture()
 def srv(home):
-    server = S.make_server(port=0, token=None)   # auth has its own tests (test_auth.py)
+    server = S.make_server(port=0, token=None, root=None)   # auth, fence: own tests
     ready, out = threading.Event(), io.StringIO()
     t = threading.Thread(target=S.run, args=(server,), kwargs={"ready": ready, "out": out},
                          daemon=True)

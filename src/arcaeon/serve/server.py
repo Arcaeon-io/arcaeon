@@ -22,6 +22,10 @@ Token auth (K005, serve/auth.py): every route but /health and /openapi.json
 needs the serve.token value as a bearer token or X-Arcaeon-Token; without
 it, 401. The check runs before the body is read.
 
+Path fence (K006, serve/fence.py): every path a request names is resolved
+against the served root, symlinks followed, and refused with 400 `outside
+the served root` if it leaves it.
+
 `run()` writes <ARCAEON_HOME or ~/.arcaeon>/serve.json (pid, port, url) once
 the socket is bound, and removes it on a clean exit if it is still ours.
 """
@@ -38,6 +42,7 @@ from urllib.parse import urlsplit
 from arcaeon import verdict as V
 from arcaeon.serve import DEFAULT_PORT, MAX_BODY
 from arcaeon.serve import auth
+from arcaeon.serve import fence as F
 from arcaeon.serve import routes as R
 
 LOOPBACK = "127.0.0.1"
@@ -176,6 +181,13 @@ class Handler(BaseHTTPRequestHandler):
         if problem:
             self._error(400, problem)
             return
+        fence = getattr(self.server, "fence", None)
+        if fence is not None:
+            try:
+                body = fence.apply(body)
+            except F.OutsideRoot as e:
+                self._error(400, str(e))
+                return
         try:
             fn = route.resolve()
         except (ImportError, AttributeError):
@@ -228,23 +240,30 @@ class Server(ThreadingHTTPServer):
     #: The bearer token every non-open route needs; None turns auth off
     #: (embedding and tests only; `arcaeon serve` always sets one).
     token: str | None = None
+    #: The served root's path fence (K006); None: paths are not fenced.
+    fence: F.Fence | None = None
 
     @property
     def url(self) -> str:
         return f"http://{LOOPBACK}:{self.server_address[1]}"
 
 
-def make_server(host: str = LOOPBACK, port: int = DEFAULT_PORT, *, token=AUTO) -> Server:
+def make_server(host: str = LOOPBACK, port: int = DEFAULT_PORT, *, token=AUTO,
+                root=AUTO) -> Server:
     """A bound, not yet serving, server. Any host but 127.0.0.1 is refused.
 
     `token`: AUTO (the default) loads serve.token, creating it on first run;
-    a string uses that token; None serves without auth (tests, embedding)."""
+    a string uses that token; None serves without auth (tests, embedding).
+    `root`: AUTO (the default) fences every request path to the current
+    directory; a directory fences to that; None does not fence. A root that
+    is not a directory raises NotADirectoryError."""
     if host != LOOPBACK:
         raise HostRefused(f"refusing --host {host}: {REFUSE_HOST}; "
                           f"arcaeon serve binds {LOOPBACK} only")
+    fence = None if root is None else F.Fence(os.getcwd() if root is AUTO else root)
     tok = auth.load_or_create() if token is AUTO else token
     srv = Server((LOOPBACK, port), Handler)
-    srv.token = tok
+    srv.token, srv.fence = tok, fence
     return srv
 
 

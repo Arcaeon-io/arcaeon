@@ -737,7 +737,8 @@ pid and port for as long as the server runs.
 **Usage**
 
 ```text
-usage: arcaeon serve [-h] [--host HOST] [--port PORT] [--print-token]
+usage: arcaeon serve [-h] [--host HOST] [--port PORT] [--root DIR]
+                     [--print-token]
 ```
 
 A verdict never rides in the HTTP status: VERIFIED, BROKEN and COULD NOT
@@ -752,6 +753,13 @@ writes to `~/.arcaeon/serve.token` (owner-only where the OS allows), sent as
 `Authorization: Bearer <token>` or `X-Arcaeon-Token: <token>`.
 `arcaeon serve --print-token` prints it and exits. The token never appears
 in the request log, the journal or an error body.
+
+`--root DIR` (default: the directory serve starts in) is the only place a
+request may name a path. Every path field, inputs and output directories
+alike, is resolved against it with symlinks followed; one that lands
+outside (`../x`, an absolute path elsewhere, a symlink pointing out) is
+refused with 400 `outside the served root`. A relative path is relative to
+the root, not to the server's working directory.
 
 **Exit codes:** 0 the server stopped cleanly (Ctrl+C), or `--print-token`
 printed the token. 2 bad usage, including `--host` anything but 127.0.0.1.
