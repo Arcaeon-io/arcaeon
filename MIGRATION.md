@@ -47,6 +47,10 @@ the lane (A, B or C) of the work and the commit ids that carry it.
 - **The evidence pack (lane D: K051).** New module `arcaeon.prove.evidence_pack`
   (`build_pack`) and `arcaeon.prove.evidence_pack_cli`: one folder over `audit export`,
   with `records.jsonl` byte-equal to the ledger. Nothing existing changed.
+- **The evidence-pack manifest (lane D: K052, K053).** A pack adds `window.jsonl`
+  (`{line, raw}` per row) and replaces the export's `manifest.json` with `pack_schema` 1:
+  `files` sha256, `chain_head`, `window`, `pins`, `witness`, `operator_at_t: "UNKNOWN"`,
+  `checks`, `counts`, and the audit manifest kept whole under `audit_export`.
 
 ## 0.9.1 (2026-09-25)
 

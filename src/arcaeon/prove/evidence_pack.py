@@ -12,6 +12,7 @@ well. It shows what was written was not changed after it was pinned.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,7 +20,16 @@ from typing import Any
 
 from arcaeon import verdict as V
 
-__all__ = ["build_pack", "select_window", "parse_when", "PackUsageError"]
+__all__ = ["build_pack", "select_window", "parse_when", "PackUsageError",
+           "PACK_SCHEMA", "MANIFEST", "OPERATOR_AT_T"]
+
+#: The evidence-pack manifest schema. 1 is the first (K053).
+PACK_SCHEMA = 1
+#: The manifest's file name. Every OTHER file in the pack is hashed in it.
+MANIFEST = "manifest.json"
+#: Who operated the witness at pin time. UNKNOWN until a custody record
+#: is published and anchored (spec section 6): never a guess.
+OPERATOR_AT_T = "UNKNOWN"
 
 
 class PackUsageError(ValueError):
@@ -153,5 +163,84 @@ def build_pack(ledger: str | Path, out: str | Path, *,
         res.update(V.could_not_look(
             f"rows for agent {agent!r} from {since!r} to {until!r}", "records.jsonl",
             "empty", "no row in the ledger matches that agent and window"))
+    audit_manifest = json.loads((out / MANIFEST).read_text(encoding="utf-8"))
+    _write_manifest(out, res, integrity, audit_manifest, window, unplaced)
     res["files"] = sorted(p.name for p in out.iterdir() if p.is_file())
     return res
+
+
+def _sha256_file(p: Path) -> str:
+    return hashlib.sha256(p.read_bytes()).hexdigest()
+
+
+def _pins(witness_block: dict) -> list[dict]:
+    """Every pin reference the export consulted: namespace, rows, chain, and
+    whatever locator the pin itself carried (as_of, received_at, and for a
+    remote pin its public commit). Empty when no pin was consulted."""
+    ns = witness_block.get("namespace")
+    if not ns or witness_block.get("witness_rows") is None:
+        return []
+    ref = {"namespace": ns, "rows": witness_block.get("witness_rows"),
+           "chain": witness_block.get("witness_chain"),
+           "verdict": witness_block.get("verdict")}
+    pin = witness_block.get("pin")
+    if isinstance(pin, dict):
+        for k in ("as_of", "received_at", "commit", "commit_url", "raw_record_url"):
+            if pin.get(k) is not None:
+                ref[k] = pin[k]
+    return [ref]
+
+
+def _write_manifest(out: Path, res: dict, integrity: dict, audit_manifest: dict,
+                    window: list[dict], unplaced: list[int]) -> dict:
+    """Write manifest.json LAST, over every other file in the pack.
+
+    The three counts are of the checks this build ran (the records chain with
+    its witness cross-check, and the window having rows), side by side. There
+    is deliberately no rate: one BROKEN beside ten VERIFIED is not "91%".
+    """
+    from arcaeon import __version__
+    from arcaeon.record.ledger import Ledger
+
+    head = Ledger(out / "records.jsonl").head()
+    wb = integrity.get("witness") or {}
+    chain_word = integrity.get("verdict") or V.COULD_NOT_LOOK
+    if chain_word not in V.EXIT_BY_WORD:
+        chain_word = V.COULD_NOT_LOOK
+    window_word = V.VERIFIED if window else V.COULD_NOT_LOOK
+    checks = [{"check": "records chain and witness cross-check", "verdict": chain_word,
+               "finding": integrity.get("finding")},
+              {"check": "window has rows", "verdict": window_word}]
+    counts = {"verified": sum(c["verdict"] == V.VERIFIED for c in checks),
+              "broken": sum(c["verdict"] == V.BROKEN for c in checks),
+              "could_not_look": sum(c["verdict"] == V.COULD_NOT_LOOK for c in checks)}
+    files = {p.name: _sha256_file(p)
+             for p in sorted(out.iterdir()) if p.is_file() and p.name != MANIFEST}
+    manifest = {
+        "pack_schema": PACK_SCHEMA,
+        "tool": f"arcaeon/{__version__}",
+        "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "verdict": res["verdict"], "exit": res["exit"],
+        "files": files,
+        "chain_head": {"chain": head.chain, "rows": head.rows, "ok": head.ok,
+                       "first_break": head.first_break},
+        "window": {"agent": res["window"]["agent"], "from": res["window"]["from"],
+                   "to": res["window"]["to"], "rows": len(window),
+                   "first_line": res["window"]["first_line"],
+                   "last_line": res["window"]["last_line"],
+                   "lines": [w["line"] for w in window],
+                   "unplaced_lines": unplaced},
+        "pins": _pins(wb),
+        "witness": {"kind": wb.get("kind"), "identifier": wb.get("identifier"),
+                    "independence": wb.get("independence"),
+                    "independence_source": wb.get("independence_source")},
+        "operator_at_t": OPERATOR_AT_T,
+        "operator_at_t_note": ("who operated the witness when each pin was taken is "
+                               "not known until a custody record is published and "
+                               "anchored"),
+        "checks": checks,
+        "counts": counts,
+        "audit_export": audit_manifest,
+    }
+    (out / MANIFEST).write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    return manifest
