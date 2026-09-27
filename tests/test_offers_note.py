@@ -46,3 +46,32 @@ def test_the_package_note_matches_the_site_note():
     ours = _witnessed_note(json.loads(PACKAGE.read_text(encoding="utf-8")))
     theirs = _witnessed_note(json.loads(site.read_text(encoding="utf-8")))
     assert ours == theirs
+
+
+def _evidence_pack(cat: dict) -> dict:
+    prod = next((p for p in cat["products"] if p.get("id") == "arcaeon-evidence-pack"), None)
+    assert prod is not None, "arcaeon-evidence-pack is gone from offers.json"
+    return prod
+
+
+def test_the_package_prices_the_sealed_pack_as_decided():
+    """K125 decision (2026-09-27): 50 credits, free through 2026-10-31 with the
+    price shown, the local pack free forever, no release date."""
+    pack = _evidence_pack(json.loads(PACKAGE.read_text(encoding="utf-8")))
+    assert pack["pricing"]["credits"] == 50
+    assert pack["pricing"]["free_until"] == "2026-10-31"
+    assert pack["price_usd"] == 0
+    assert pack["status"] == "in the next release"
+    assert "free forever" in pack["pricing"]["note"]
+
+
+def test_the_evidence_pack_entry_matches_the_site_entry():
+    """K126: the site's offers.json and the bundled snapshot carry the same
+    evidence-pack entry, field for field."""
+    site = _site_offers()
+    if site is None:
+        pytest.skip("no site checkout: set ARCAEON_SITE_ROOT (or keep one at "
+                    "../<any>/projects/arcaeon_site) to compare the entries")
+    ours = _evidence_pack(json.loads(PACKAGE.read_text(encoding="utf-8")))
+    theirs = _evidence_pack(json.loads(site.read_text(encoding="utf-8")))
+    assert ours == theirs
