@@ -1,0 +1,2397 @@
+{
+ "openapi": "3.1.0",
+ "info": {
+  "title": "arcaeon serve",
+  "version": "0.9.1",
+  "description": "The local HTTP/JSON API of arcaeon: one route per check, each answering the CLI's --json plus an integer exit (0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK). Loopback only."
+ },
+ "servers": [
+  {
+   "url": "http://127.0.0.1:8787"
+  }
+ ],
+ "security": [
+  {
+   "bearer": []
+  }
+ ],
+ "paths": {
+  "/health": {
+   "get": {
+    "operationId": "health",
+    "summary": "is the server up",
+    "x-arcaeon-tier": "free",
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/health_response"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "bad usage: not JSON, a field the schema refuses, a path outside the served root",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "no such route, or declared but not built in this checkout",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": []
+   }
+  },
+  "/openapi.json": {
+   "get": {
+    "operationId": "openapi",
+    "summary": "this API as an OpenAPI 3.1 document",
+    "x-arcaeon-tier": "free",
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/openapi_response"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "bad usage: not JSON, a field the schema refuses, a path outside the served root",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "no such route, or declared but not built in this checkout",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": []
+   }
+  },
+  "/": {
+   "get": {
+    "operationId": "index",
+    "summary": "the local dashboard (HTML)",
+    "x-arcaeon-tier": "free",
+    "responses": {
+     "200": {
+      "description": "ok",
+      "content": {
+       "text/html": {
+        "schema": {
+         "$ref": "#/components/schemas/index_response"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "bad usage: not JSON, a field the schema refuses, a path outside the served root",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "no token, or the wrong one",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "no such route, or declared but not built in this checkout",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "bearer": []
+     }
+    ]
+   }
+  },
+  "/v1/log": {
+   "post": {
+    "operationId": "log",
+    "summary": "append one JSON row to a ledger; returns the new chain value",
+    "x-arcaeon-tier": "free",
+    "x-arcaeon-mcp-tool": "ledger_append",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/log_request"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "a verdict was reached (any verdict: it rides in the body, never in the status)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/log_response"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "bad usage: not JSON, a field the schema refuses, a path outside the served root",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "no token, or the wrong one",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "no such route, or declared but not built in this checkout",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "the body is over 10 MB",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "bearer": []
+     }
+    ]
+   }
+  },
+  "/v1/verify": {
+   "post": {
+    "operationId": "verify",
+    "summary": "check a ledger's chain: VERIFIED / BROKEN / COULD NOT LOOK",
+    "x-arcaeon-tier": "free",
+    "x-arcaeon-mcp-tool": "ledger_verify_peer_ledger",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/verify_request"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "a verdict was reached (any verdict: it rides in the body, never in the status)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/verify_response"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "bad usage: not JSON, a field the schema refuses, a path outside the served root",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "no token, or the wrong one",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "no such route, or declared but not built in this checkout",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "the body is over 10 MB",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "bearer": []
+     }
+    ]
+   }
+  },
+  "/v1/reconcile": {
+   "post": {
+    "operationId": "reconcile",
+    "summary": "two tapes and a counter: MATCHED / MISSING / ALTERED / COULD NOT LOOK",
+    "x-arcaeon-tier": "free",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/reconcile_request"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "a verdict was reached (any verdict: it rides in the body, never in the status)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/reconcile_response"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "bad usage: not JSON, a field the schema refuses, a path outside the served root",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "no token, or the wrong one",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "no such route, or declared but not built in this checkout",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "the body is over 10 MB",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "bearer": []
+     }
+    ]
+   }
+  },
+  "/v1/audit/verify": {
+   "post": {
+    "operationId": "audit_verify",
+    "summary": "verify an audit log or an exported bundle",
+    "x-arcaeon-tier": "free",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/audit_verify_request"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "a verdict was reached (any verdict: it rides in the body, never in the status)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/audit_verify_response"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "bad usage: not JSON, a field the schema refuses, a path outside the served root",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "no token, or the wrong one",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "no such route, or declared but not built in this checkout",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "the body is over 10 MB",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "bearer": []
+     }
+    ]
+   }
+  },
+  "/v1/audit/export": {
+   "post": {
+    "operationId": "audit_export",
+    "summary": "export a ledger as an audit bundle into a directory under the served root",
+    "x-arcaeon-tier": "free",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/audit_export_request"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "a verdict was reached (any verdict: it rides in the body, never in the status)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/audit_export_response"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "bad usage: not JSON, a field the schema refuses, a path outside the served root",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "no token, or the wrong one",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "no such route, or declared but not built in this checkout",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "the body is over 10 MB",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "bearer": []
+     }
+    ]
+   }
+  },
+  "/v1/receipt/verify": {
+   "post": {
+    "operationId": "receipt_verify",
+    "summary": "verify a portable receipt",
+    "x-arcaeon-tier": "free",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/receipt_verify_request"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "a verdict was reached (any verdict: it rides in the body, never in the status)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/receipt_verify_response"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "bad usage: not JSON, a field the schema refuses, a path outside the served root",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "no token, or the wrong one",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "no such route, or declared but not built in this checkout",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "the body is over 10 MB",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "bearer": []
+     }
+    ]
+   }
+  },
+  "/v1/status": {
+   "get": {
+    "operationId": "status",
+    "summary": "what arcaeon did lately here: last run per verb, open COULD NOT LOOKs",
+    "x-arcaeon-tier": "free",
+    "x-arcaeon-mcp-tool": "arcaeon_status",
+    "responses": {
+     "200": {
+      "description": "a verdict was reached (any verdict: it rides in the body, never in the status)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/status_response"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "bad usage: not JSON, a field the schema refuses, a path outside the served root",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "no token, or the wrong one",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "no such route, or declared but not built in this checkout",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "bearer": []
+     }
+    ]
+   }
+  },
+  "/v1/pin": {
+   "post": {
+    "operationId": "pin",
+    "summary": "record a ledger head in a local witness file under the served root (remote pin is the paid lane)",
+    "x-arcaeon-tier": "free",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/pin_request"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "a verdict was reached (any verdict: it rides in the body, never in the status)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/pin_response"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "bad usage: not JSON, a field the schema refuses, a path outside the served root",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "no token, or the wrong one",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "no such route, or declared but not built in this checkout",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "the body is over 10 MB",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "bearer": []
+     }
+    ]
+   }
+  },
+  "/v1/seal": {
+   "post": {
+    "operationId": "seal",
+    "summary": "PAID: a badge sealed by the hosted witness (needs ARCAEON_KEY and a server started with --allow-paid)",
+    "x-arcaeon-tier": "paid",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/seal_request"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "a verdict was reached (any verdict: it rides in the body, never in the status)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/seal_response"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "bad usage: not JSON, a field the schema refuses, a path outside the served root",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "no token, or the wrong one",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "no such route, or declared but not built in this checkout",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "the body is over 10 MB",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "bearer": []
+     }
+    ]
+   }
+  },
+  "/v1/evidence-pack": {
+   "post": {
+    "operationId": "evidence_pack",
+    "summary": "build an evidence pack for a ledger and a time window",
+    "x-arcaeon-tier": "free",
+    "x-arcaeon-mcp-tool": "evidence_pack_build",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/evidence_pack_request"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "a verdict was reached (any verdict: it rides in the body, never in the status)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/evidence_pack_response"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "bad usage: not JSON, a field the schema refuses, a path outside the served root",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "no token, or the wrong one",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "no such route, or declared but not built in this checkout",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "the body is over 10 MB",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "bearer": []
+     }
+    ]
+   }
+  },
+  "/v1/evidence-pack/verify": {
+   "post": {
+    "operationId": "evidence_pack_verify",
+    "summary": "verify an evidence pack: every file rehashed, the chain, the window, the pins",
+    "x-arcaeon-tier": "free",
+    "x-arcaeon-mcp-tool": "evidence_pack_verify",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/evidence_pack_verify_request"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "a verdict was reached (any verdict: it rides in the body, never in the status)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/evidence_pack_verify_response"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "bad usage: not JSON, a field the schema refuses, a path outside the served root",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "no token, or the wrong one",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "no such route, or declared but not built in this checkout",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "the body is over 10 MB",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "bearer": []
+     }
+    ]
+   }
+  },
+  "/v1/export/aat": {
+   "post": {
+    "operationId": "export_aat",
+    "summary": "write a ledger out in the agent-audit-trail format",
+    "x-arcaeon-tier": "free",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/export_aat_request"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "a verdict was reached (any verdict: it rides in the body, never in the status)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/export_aat_response"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "bad usage: not JSON, a field the schema refuses, a path outside the served root",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "no token, or the wrong one",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "no such route, or declared but not built in this checkout",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "the body is over 10 MB",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "bearer": []
+     }
+    ]
+   }
+  },
+  "/v1/mandate/check": {
+   "post": {
+    "operationId": "mandate_check",
+    "summary": "check a call against a mandate (record-only: says inside or outside, blocks nothing)",
+    "x-arcaeon-tier": "free",
+    "x-arcaeon-mcp-tool": "mandate_check",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/mandate_check_request"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "a verdict was reached (any verdict: it rides in the body, never in the status)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/mandate_check_response"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "bad usage: not JSON, a field the schema refuses, a path outside the served root",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "no token, or the wrong one",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "no such route, or declared but not built in this checkout",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "the body is over 10 MB",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "bearer": []
+     }
+    ]
+   }
+  },
+  "/v1/readings": {
+   "post": {
+    "operationId": "readings",
+    "summary": "submit one reader's reading of a claim, chained into a readings ledger",
+    "x-arcaeon-tier": "free",
+    "x-arcaeon-mcp-tool": "second_read_submit",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/readings_request"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "a verdict was reached (any verdict: it rides in the body, never in the status)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/readings_response"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "bad usage: not JSON, a field the schema refuses, a path outside the served root",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "no token, or the wrong one",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "no such route, or declared but not built in this checkout",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "the body is over 10 MB",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "bearer": []
+     }
+    ]
+   }
+  },
+  "/v1/second-read/compare": {
+   "post": {
+    "operationId": "second_read_compare",
+    "summary": "line up two readings ledgers: COMPARED / MISSING / BROKEN / COULD NOT LOOK",
+    "x-arcaeon-tier": "free",
+    "x-arcaeon-mcp-tool": "second_read_compare",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/second_read_compare_request"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "a verdict was reached (any verdict: it rides in the body, never in the status)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/second_read_compare_response"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "bad usage: not JSON, a field the schema refuses, a path outside the served root",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "no token, or the wrong one",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "no such route, or declared but not built in this checkout",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "the body is over 10 MB",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "bearer": []
+     }
+    ]
+   }
+  },
+  "/v1/handshake/propose": {
+   "post": {
+    "operationId": "handshake_propose",
+    "summary": "propose terms to another agent; each side keeps its own ledger",
+    "x-arcaeon-tier": "free",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/handshake_propose_request"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "a verdict was reached (any verdict: it rides in the body, never in the status)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/handshake_propose_response"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "bad usage: not JSON, a field the schema refuses, a path outside the served root",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "no token, or the wrong one",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "no such route, or declared but not built in this checkout",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "the body is over 10 MB",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "bearer": []
+     }
+    ]
+   }
+  },
+  "/v1/handshake/accept": {
+   "post": {
+    "operationId": "handshake_accept",
+    "summary": "countersign proposed terms",
+    "x-arcaeon-tier": "free",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/handshake_accept_request"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "a verdict was reached (any verdict: it rides in the body, never in the status)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/handshake_accept_response"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "bad usage: not JSON, a field the schema refuses, a path outside the served root",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "no token, or the wrong one",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "no such route, or declared but not built in this checkout",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "the body is over 10 MB",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "bearer": []
+     }
+    ]
+   }
+  },
+  "/v1/handshake/verify": {
+   "post": {
+    "operationId": "handshake_verify",
+    "summary": "line up both sides' ledgers: AGREED TERMS / DIFFERENT TERMS / MISSING / COULD NOT LOOK",
+    "x-arcaeon-tier": "free",
+    "requestBody": {
+     "required": true,
+     "content": {
+      "application/json": {
+       "schema": {
+        "$ref": "#/components/schemas/handshake_verify_request"
+       }
+      }
+     }
+    },
+    "responses": {
+     "200": {
+      "description": "a verdict was reached (any verdict: it rides in the body, never in the status)",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/handshake_verify_response"
+        }
+       }
+      }
+     },
+     "400": {
+      "description": "bad usage: not JSON, a field the schema refuses, a path outside the served root",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "401": {
+      "description": "no token, or the wrong one",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "404": {
+      "description": "no such route, or declared but not built in this checkout",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     },
+     "413": {
+      "description": "the body is over 10 MB",
+      "content": {
+       "application/json": {
+        "schema": {
+         "$ref": "#/components/schemas/Error"
+        }
+       }
+      }
+     }
+    },
+    "security": [
+     {
+      "bearer": []
+     }
+    ]
+   }
+  }
+ },
+ "components": {
+  "securitySchemes": {
+   "bearer": {
+    "type": "http",
+    "scheme": "bearer",
+    "description": "the token in ~/.arcaeon/serve.token (`arcaeon serve --print-token`); X-Arcaeon-Token also works"
+   }
+  },
+  "schemas": {
+   "Error": {
+    "type": "object",
+    "required": [
+     "error"
+    ],
+    "properties": {
+     "error": {
+      "type": "string"
+     },
+     "exit": {
+      "type": "integer",
+      "enum": [
+       2
+      ]
+     }
+    }
+   },
+   "health_response": {
+    "type": "object",
+    "required": [
+     "ok"
+    ],
+    "properties": {
+     "ok": {
+      "type": "boolean"
+     }
+    }
+   },
+   "openapi_response": {
+    "type": "object",
+    "required": [
+     "openapi",
+     "paths"
+    ],
+    "properties": {
+     "openapi": {
+      "type": "string"
+     },
+     "paths": {
+      "type": "object"
+     }
+    }
+   },
+   "index_response": {
+    "type": "string",
+    "description": "text/html"
+   },
+   "log_response": {
+    "type": "object",
+    "required": [
+     "exit"
+    ],
+    "properties": {
+     "exit": {
+      "type": "integer",
+      "enum": [
+       0,
+       1,
+       2,
+       3
+      ],
+      "description": "0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK"
+     },
+     "verdict": {
+      "type": "string"
+     },
+     "reason_word": {
+      "type": "string"
+     },
+     "chain": {
+      "type": "string"
+     },
+     "rows": {
+      "type": "integer"
+     }
+    }
+   },
+   "log_request": {
+    "type": "object",
+    "required": [
+     "ledger"
+    ],
+    "properties": {
+     "ledger": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "fields": {
+      "type": "object",
+      "description": "the row's fields"
+     },
+     "row": {
+      "type": "object",
+      "description": "a whole row, instead of fields"
+     }
+    }
+   },
+   "verify_response": {
+    "type": "object",
+    "required": [
+     "exit"
+    ],
+    "properties": {
+     "exit": {
+      "type": "integer",
+      "enum": [
+       0,
+       1,
+       2,
+       3
+      ],
+      "description": "0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK"
+     },
+     "verdict": {
+      "type": "string"
+     },
+     "reason_word": {
+      "type": "string"
+     },
+     "rows": {
+      "type": "integer"
+     },
+     "first_break": {
+      "type": [
+       "string",
+       "null"
+      ]
+     }
+    }
+   },
+   "verify_request": {
+    "type": "object",
+    "required": [],
+    "properties": {
+     "ledger": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "content": {
+      "type": "string",
+      "maxLength": 10485760,
+      "description": "the file's text (JSONL), for an agent with no file access"
+     },
+     "content_b64": {
+      "type": "string",
+      "maxLength": 10485760,
+      "description": "the file's bytes, base64"
+     },
+     "strict": {
+      "type": "boolean"
+     },
+     "witness": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "ns": {
+      "type": "string",
+      "maxLength": 4096
+     }
+    }
+   },
+   "reconcile_response": {
+    "type": "object",
+    "required": [
+     "exit"
+    ],
+    "properties": {
+     "exit": {
+      "type": "integer",
+      "enum": [
+       0,
+       1,
+       2,
+       3
+      ],
+      "description": "0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK"
+     },
+     "verdict": {
+      "type": "string"
+     },
+     "reason_word": {
+      "type": "string"
+     }
+    }
+   },
+   "reconcile_request": {
+    "type": "object",
+    "required": [],
+    "properties": {
+     "kind": {
+      "type": "string",
+      "enum": [
+       "tapes",
+       "readings"
+      ]
+     },
+     "tape_a": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "tape_b": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "content_a": {
+      "type": "string",
+      "maxLength": 10485760,
+      "description": "the file's text (JSONL), for an agent with no file access"
+     },
+     "content_b": {
+      "type": "string",
+      "maxLength": 10485760,
+      "description": "the file's text (JSONL), for an agent with no file access"
+     },
+     "content_a_b64": {
+      "type": "string",
+      "maxLength": 10485760,
+      "description": "the file's bytes, base64"
+     },
+     "content_b_b64": {
+      "type": "string",
+      "maxLength": 10485760,
+      "description": "the file's bytes, base64"
+     },
+     "pin": {
+      "type": "string",
+      "maxLength": 4096
+     }
+    }
+   },
+   "audit_verify_response": {
+    "type": "object",
+    "required": [
+     "exit"
+    ],
+    "properties": {
+     "exit": {
+      "type": "integer",
+      "enum": [
+       0,
+       1,
+       2,
+       3
+      ],
+      "description": "0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK"
+     },
+     "verdict": {
+      "type": "string"
+     },
+     "reason_word": {
+      "type": "string"
+     }
+    }
+   },
+   "audit_verify_request": {
+    "type": "object",
+    "required": [],
+    "properties": {
+     "path": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "content": {
+      "type": "string",
+      "maxLength": 10485760,
+      "description": "the file's text (JSONL), for an agent with no file access"
+     },
+     "content_b64": {
+      "type": "string",
+      "maxLength": 10485760,
+      "description": "the file's bytes, base64"
+     }
+    }
+   },
+   "audit_export_response": {
+    "type": "object",
+    "required": [
+     "exit"
+    ],
+    "properties": {
+     "exit": {
+      "type": "integer",
+      "enum": [
+       0,
+       1,
+       2,
+       3
+      ],
+      "description": "0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK"
+     },
+     "verdict": {
+      "type": "string"
+     },
+     "reason_word": {
+      "type": "string"
+     },
+     "out": {
+      "type": "string"
+     }
+    }
+   },
+   "audit_export_request": {
+    "type": "object",
+    "required": [
+     "ledger",
+     "out"
+    ],
+    "properties": {
+     "ledger": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "out": {
+      "type": "string",
+      "maxLength": 4096
+     }
+    }
+   },
+   "receipt_verify_response": {
+    "type": "object",
+    "required": [
+     "exit"
+    ],
+    "properties": {
+     "exit": {
+      "type": "integer",
+      "enum": [
+       0,
+       1,
+       2,
+       3
+      ],
+      "description": "0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK"
+     },
+     "verdict": {
+      "type": "string"
+     },
+     "reason_word": {
+      "type": "string"
+     },
+     "reason": {
+      "type": "string"
+     }
+    }
+   },
+   "receipt_verify_request": {
+    "type": "object",
+    "required": [],
+    "properties": {
+     "receipt": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "content": {
+      "type": "string",
+      "maxLength": 10485760,
+      "description": "the file's text (JSONL), for an agent with no file access"
+     },
+     "content_b64": {
+      "type": "string",
+      "maxLength": 10485760,
+      "description": "the file's bytes, base64"
+     }
+    }
+   },
+   "status_response": {
+    "type": "object",
+    "required": [
+     "exit"
+    ],
+    "properties": {
+     "exit": {
+      "type": "integer",
+      "enum": [
+       0,
+       1,
+       2,
+       3
+      ],
+      "description": "0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK"
+     },
+     "verdict": {
+      "type": "string"
+     },
+     "reason_word": {
+      "type": "string"
+     },
+     "balance": {
+      "type": "string"
+     }
+    }
+   },
+   "pin_response": {
+    "type": "object",
+    "required": [
+     "exit"
+    ],
+    "properties": {
+     "exit": {
+      "type": "integer",
+      "enum": [
+       0,
+       1,
+       2,
+       3
+      ],
+      "description": "0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK"
+     },
+     "verdict": {
+      "type": "string"
+     },
+     "reason_word": {
+      "type": "string"
+     },
+     "namespace": {
+      "type": "string"
+     },
+     "chain": {
+      "type": "string"
+     }
+    }
+   },
+   "pin_request": {
+    "type": "object",
+    "required": [
+     "ledger"
+    ],
+    "properties": {
+     "ledger": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "witness": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "ns": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "remote": {
+      "type": "boolean"
+     }
+    }
+   },
+   "seal_response": {
+    "type": "object",
+    "required": [
+     "exit"
+    ],
+    "properties": {
+     "exit": {
+      "type": "integer",
+      "enum": [
+       0,
+       1,
+       2,
+       3
+      ],
+      "description": "0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK"
+     },
+     "verdict": {
+      "type": "string"
+     },
+     "reason_word": {
+      "type": "string"
+     },
+     "sealed": {
+      "type": "boolean"
+     }
+    }
+   },
+   "seal_request": {
+    "type": "object",
+    "required": [
+     "path"
+    ],
+    "properties": {
+     "path": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "ns": {
+      "type": "string",
+      "maxLength": 4096
+     }
+    }
+   },
+   "evidence_pack_response": {
+    "type": "object",
+    "required": [
+     "exit"
+    ],
+    "properties": {
+     "exit": {
+      "type": "integer",
+      "enum": [
+       0,
+       1,
+       2,
+       3
+      ],
+      "description": "0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK"
+     },
+     "verdict": {
+      "type": "string"
+     },
+     "reason_word": {
+      "type": "string"
+     },
+     "out": {
+      "type": "string"
+     }
+    }
+   },
+   "evidence_pack_request": {
+    "type": "object",
+    "required": [
+     "ledger",
+     "out"
+    ],
+    "properties": {
+     "ledger": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "out": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "agent": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "since": {
+      "type": "string",
+      "maxLength": 64
+     },
+     "until": {
+      "type": "string",
+      "maxLength": 64
+     }
+    }
+   },
+   "evidence_pack_verify_response": {
+    "type": "object",
+    "required": [
+     "exit"
+    ],
+    "properties": {
+     "exit": {
+      "type": "integer",
+      "enum": [
+       0,
+       1,
+       2,
+       3
+      ],
+      "description": "0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK"
+     },
+     "verdict": {
+      "type": "string"
+     },
+     "reason_word": {
+      "type": "string"
+     }
+    }
+   },
+   "evidence_pack_verify_request": {
+    "type": "object",
+    "required": [
+     "pack"
+    ],
+    "properties": {
+     "pack": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "witness": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "remote": {
+      "type": "boolean",
+      "description": "also read the pack's remote pins (network; unreachable is COULD NOT LOOK, reason network)"
+     }
+    }
+   },
+   "export_aat_response": {
+    "type": "object",
+    "required": [
+     "exit"
+    ],
+    "properties": {
+     "exit": {
+      "type": "integer",
+      "enum": [
+       0,
+       1,
+       2,
+       3
+      ],
+      "description": "0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK"
+     },
+     "verdict": {
+      "type": "string"
+     },
+     "reason_word": {
+      "type": "string"
+     },
+     "out": {
+      "type": "string"
+     }
+    }
+   },
+   "export_aat_request": {
+    "type": "object",
+    "required": [
+     "ledger",
+     "out"
+    ],
+    "properties": {
+     "ledger": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "out": {
+      "type": "string",
+      "maxLength": 4096
+     }
+    }
+   },
+   "mandate_check_response": {
+    "type": "object",
+    "required": [
+     "exit"
+    ],
+    "properties": {
+     "exit": {
+      "type": "integer",
+      "enum": [
+       0,
+       1,
+       2,
+       3
+      ],
+      "description": "0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK"
+     },
+     "verdict": {
+      "type": "string"
+     },
+     "reason_word": {
+      "type": "string"
+     },
+     "reason": {
+      "type": "string"
+     }
+    }
+   },
+   "mandate_check_request": {
+    "type": "object",
+    "required": [
+     "mandate"
+    ],
+    "properties": {
+     "mandate": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "fields": {
+      "type": "object"
+     }
+    }
+   },
+   "readings_response": {
+    "type": "object",
+    "required": [
+     "exit"
+    ],
+    "properties": {
+     "exit": {
+      "type": "integer",
+      "enum": [
+       0,
+       1,
+       2,
+       3
+      ],
+      "description": "0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK"
+     },
+     "verdict": {
+      "type": "string"
+     },
+     "reason_word": {
+      "type": "string"
+     },
+     "chain": {
+      "type": "string"
+     }
+    }
+   },
+   "readings_request": {
+    "type": "object",
+    "required": [
+     "ledger",
+     "reader_id",
+     "claim_id",
+     "reading"
+    ],
+    "properties": {
+     "ledger": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "reader_id": {
+      "type": "string",
+      "maxLength": 256
+     },
+     "provider": {
+      "type": "string",
+      "maxLength": 256
+     },
+     "claim_id": {
+      "type": "string",
+      "maxLength": 256
+     },
+     "claim": {
+      "type": "string",
+      "maxLength": 10485760
+     },
+     "criterion_sha256": {
+      "type": "string",
+      "maxLength": 64
+     },
+     "reading": {
+      "type": "string",
+      "enum": [
+       "yes",
+       "no",
+       "undetermined"
+      ]
+     }
+    }
+   },
+   "second_read_compare_response": {
+    "type": "object",
+    "required": [
+     "exit"
+    ],
+    "properties": {
+     "exit": {
+      "type": "integer",
+      "enum": [
+       0,
+       1,
+       2,
+       3
+      ],
+      "description": "0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK"
+     },
+     "verdict": {
+      "type": "string"
+     },
+     "reason_word": {
+      "type": "string"
+     },
+     "disagreed": {
+      "type": "integer"
+     },
+     "read": {
+      "type": "integer"
+     }
+    }
+   },
+   "second_read_compare_request": {
+    "type": "object",
+    "required": [
+     "a",
+     "b"
+    ],
+    "properties": {
+     "a": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "b": {
+      "type": "string",
+      "maxLength": 4096
+     }
+    }
+   },
+   "handshake_propose_response": {
+    "type": "object",
+    "required": [
+     "exit"
+    ],
+    "properties": {
+     "exit": {
+      "type": "integer",
+      "enum": [
+       0,
+       1,
+       2,
+       3
+      ],
+      "description": "0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK"
+     },
+     "verdict": {
+      "type": "string"
+     },
+     "reason_word": {
+      "type": "string"
+     }
+    }
+   },
+   "handshake_propose_request": {
+    "type": "object",
+    "required": [
+     "ledger",
+     "terms"
+    ],
+    "properties": {
+     "ledger": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "terms": {
+      "type": "object"
+     }
+    }
+   },
+   "handshake_accept_response": {
+    "type": "object",
+    "required": [
+     "exit"
+    ],
+    "properties": {
+     "exit": {
+      "type": "integer",
+      "enum": [
+       0,
+       1,
+       2,
+       3
+      ],
+      "description": "0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK"
+     },
+     "verdict": {
+      "type": "string"
+     },
+     "reason_word": {
+      "type": "string"
+     }
+    }
+   },
+   "handshake_accept_request": {
+    "type": "object",
+    "required": [
+     "ledger",
+     "proposal"
+    ],
+    "properties": {
+     "ledger": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "proposal": {
+      "type": "object"
+     }
+    }
+   },
+   "handshake_verify_response": {
+    "type": "object",
+    "required": [
+     "exit"
+    ],
+    "properties": {
+     "exit": {
+      "type": "integer",
+      "enum": [
+       0,
+       1,
+       2,
+       3
+      ],
+      "description": "0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK"
+     },
+     "verdict": {
+      "type": "string"
+     },
+     "reason_word": {
+      "type": "string"
+     }
+    }
+   },
+   "handshake_verify_request": {
+    "type": "object",
+    "required": [
+     "a",
+     "b"
+    ],
+    "properties": {
+     "a": {
+      "type": "string",
+      "maxLength": 4096
+     },
+     "b": {
+      "type": "string",
+      "maxLength": 4096
+     }
+    }
+   }
+  }
+ }
+}
