@@ -74,7 +74,12 @@ record exists yet), else BROKEN "operator overclaimed". `built_at` earlier
 than the newest record is BROKEN; earlier than a listed pin's receipt by the
 witness's own clock is COULD NOT LOOK "bounded". README.md is re-rendered
 from the records and compared word for word (its does-not-show bullets from
-the constant), BROKEN "readme drift"; ARTICLE_12_SUMMARY.md is re-rendered
+the constant), BROKEN "readme drift", and README.json, its bearer twin, the
+same way, BROKEN "bearer drift". Every sentence line of README.md must end
+in [bytes], [order] or [asserted], the class README.json lists for it and
+one the fixed map in evidence_pack.BEARER_ALLOWED allows for its id; an
+untagged or misclassed sentence is BROKEN naming the sentence id, and the
+result's `bearer` holds the class counts. ARTICLE_12_SUMMARY.md is re-rendered
 from the records and the witness block, BROKEN "summary drift"; integrity.json
 and the export block are re-derived from records.jsonl. Any other prose file
 must sit in the manifest's `prose` group, reported "not re-derived, hash
@@ -453,7 +458,8 @@ def _step_rederived(pack: Path, manifest: dict) -> dict:
                                              PROSE_HASH_ONLY, REDERIVED_PROSE,
                                              PackUsageError, _STAMP, newest_ts,
                                              parse_when, rederived_independence,
-                                             render_readme, select_window)
+                                             render_page_one, select_window)
+    from arcaeon.prove.evidence_pack import BEARER_FILE
     from arcaeon.record.ledger import verify_file
 
     check = "re-derived fields and prose"
@@ -615,13 +621,18 @@ def _step_rederived(pack: Path, manifest: dict) -> dict:
                 if manifest.get(k) is not None:
                     res[k] = manifest[k]
             try:
-                readme = render_readme(res, sel, system_id=system_id, provider=provider)
+                readme, twin = render_page_one(res, sel, system_id=system_id,
+                                               provider=provider)
             except (KeyError, TypeError, AttributeError):
-                readme = None
+                readme = twin = None
             rp = pack / "README.md"
             if readme is None or not rp.is_file() or rp.read_bytes() != readme.encode("utf-8"):
                 problems.append("readme drift: README.md is not the page re-rendered from the "
                                 "records (its does-not-show bullets from the constant)")
+            bp = pack / BEARER_FILE
+            if twin is None or not bp.is_file() or bp.read_bytes() != twin.encode("utf-8"):
+                problems.append(f"bearer drift: {BEARER_FILE} is not the twin re-rendered "
+                                "from the records with page one")
     prose = manifest.get("prose", {})
     if not isinstance(prose, dict) or any(v != PROSE_HASH_ONLY for v in prose.values()):
         problems.append(f"the manifest's `prose` group must map each file to "
@@ -654,6 +665,95 @@ def _step_rederived(pack: Path, manifest: dict) -> dict:
         res.update({"verdict": V.COULD_NOT_LOOK, **V.could_not_look(
             "a build time no earlier than the pins the pack lists", MANIFEST, "bounded",
             "; ".join(bounded) + "; the build time is the pack's own word")})
+        return res
+    res["verdict"] = V.VERIFIED
+    return res
+
+
+_TAGGED = re.compile(r"(.*) \[([A-Za-z_]+)\]")
+
+
+def _page_one_lines(text: str) -> list[tuple[int, str]]:
+    """(line number, line) for every sentence line of page one: not blank,
+    not a heading, not a code fence or a line inside one."""
+    out, fence = [], False
+    for n, line in enumerate(text.split("\n"), 1):
+        if line.startswith("```"):
+            fence = not fence
+            continue
+        if fence or not line.strip() or line.startswith("#"):
+            continue
+        out.append((n, line))
+    return out
+
+
+def _step_bearer(pack: Path, manifest: dict) -> dict:
+    """Every sentence on page one carries one of the three bearer words at the
+    end of its line, the same word README.json lists for it, and a word the
+    fixed map in the code allows for that sentence id. An untagged, unknown
+    or misclassed sentence is BROKEN naming the sentence id."""
+    from arcaeon.prove.evidence_pack import (BEARER_ALLOWED, BEARER_CLASSES, BEARER_FILE,
+                                             README, sentence_sha256)
+
+    check = "bearer classes"
+    rp, bp = pack / README, pack / BEARER_FILE
+    if not rp.is_file():
+        return _cnl(check, README, str(pack), "missing",
+                    "the pack has no README.md, so page one has no sentences to class")
+    try:
+        text = rp.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        return {"check": check, "verdict": V.BROKEN,
+                "finding": f"README.md could not be read as UTF-8 ({e})"}
+    twin = _load_json(bp)
+    if not isinstance(twin, dict) or not isinstance(twin.get("sentences"), list):
+        return {"check": check, "verdict": V.BROKEN, "finding": (
+            f"{BEARER_FILE} is missing or has no `sentences` list, so page one's "
+            "classes have no twin")}
+    entries = [e for e in twin["sentences"] if isinstance(e, dict)]
+    by_sha = {e.get("sha256"): e for e in entries}
+    by_line = {e.get("line"): e for e in entries}
+    problems: list[str] = []
+    counts = {c: 0 for c in BEARER_CLASSES}
+    matched: set[int] = set()
+    for n, line in _page_one_lines(text):
+        m = _TAGGED.fullmatch(line)
+        body, tag = (m.group(1), m.group(2)) if m else (line, None)
+        e = by_sha.get(sentence_sha256(body)) or by_line.get(n)
+        sid = e.get("id") if e else None
+        name = f"sentence {sid}" if isinstance(sid, str) else f"sentence at line {n}"
+        if e is not None:
+            matched.add(id(e))
+        if tag is None:
+            problems.append(f"{name} (line {n}) carries no bearer class")
+            continue
+        if tag not in BEARER_CLASSES:
+            problems.append(f"{name} (line {n}) is tagged [{tag}], not one of "
+                            f"{', '.join(BEARER_CLASSES)}")
+            continue
+        counts[tag] += 1
+        if e is None:
+            problems.append(f"{name} (line {n}) is not listed in {BEARER_FILE}")
+            continue
+        if e.get("class") != tag:
+            problems.append(f"{name} (line {n}) is tagged [{tag}], {BEARER_FILE} says "
+                            f"[{e.get('class')}]")
+        allowed = BEARER_ALLOWED.get(sid) if isinstance(sid, str) else None
+        if allowed is None:
+            problems.append(f"{name} (line {n}) is not a sentence page one prints")
+        elif tag not in allowed:
+            problems.append(f"{name} (line {n}) is tagged [{tag}], which it cannot bear "
+                            f"(it may carry: {', '.join(allowed)})")
+    for e in entries:
+        if id(e) not in matched:
+            problems.append(f"{BEARER_FILE} lists sentence {e.get('id')} that README.md "
+                            "does not carry")
+    if twin.get("counts") != counts:
+        problems.append(f"{BEARER_FILE} counts {twin.get('counts')!r} are not the "
+                        f"{counts!r} on page one")
+    res = {"check": check, "counts": counts}
+    if problems:
+        res.update({"verdict": V.BROKEN, "finding": "; ".join(problems)})
         return res
     res["verdict"] = V.VERIFIED
     return res
@@ -1168,7 +1268,8 @@ def _step_pins(pack: Path, manifest: dict, *, witness=None, remote: bool = False
 STEPS: list[Callable[[Path, dict], dict]] = [_step_hashes, _step_chain, _step_window,
                                               _step_build, _step_manifest_hash,
                                               _step_aat, _step_mandate,
-                                              _step_readings, _step_rederived]
+                                              _step_readings, _step_rederived,
+                                              _step_bearer]
 
 
 #: The most a pack zip may unpack to. A pack bigger than this is COULD NOT
@@ -1285,6 +1386,9 @@ def verify_pack(pack: str | Path, *, witness: str | Path | None = None,
     # what a reader should know was checked against a hash and nothing more
     res["prose_not_rederived"] = {n: "not re-derived, hash only"
                                   for n in rd.get("prose_hash_only") or []}
+    bc = next((c for c in checks if c["check"] == "bearer classes"), {})
+    # how many page-one sentences each kind of bearer carries
+    res["bearer"] = bc.get("counts")
     return res
 
 
