@@ -146,3 +146,38 @@ def test_journal_and_status_import_stdlib_only(module):
     out = json.loads(p.stdout.strip().splitlines()[-1])
     assert out["third_party"] == [], (module, out["third_party"])
     assert module in out["arcaeon_modules"]
+
+
+#: Agent frameworks the adapters wrap (and pydantic, which several of them
+#: need): none may be imported by importing arcaeon. Each adapter imports its
+#: framework inside the function that builds the tools.
+FRAMEWORKS = ("agents", "openai", "langchain", "langchain_core", "langgraph",
+              "llama_index", "crewai", "autogen", "autogen_core",
+              "autogen_agentchat", "pydantic")
+
+_PLUGIN_MODULES = ["arcaeon", "arcaeon.serve", "arcaeon.client", "arcaeon.connect",
+                   "arcaeon.prove.readers", "arcaeon.adapters"] + sorted(
+    "arcaeon.adapters." + p.stem
+    for p in (ROOT / "src" / "arcaeon" / "adapters").glob("*.py")
+    if p.stem != "__init__")
+
+
+def test_every_adapter_module_is_in_the_plug_in_list():
+    """K090: the list below is globbed, so a new adapter is covered the day it lands."""
+    for name in ("openai_agents", "langchain", "llamaindex", "crewai", "autogen"):
+        assert f"arcaeon.adapters.{name}" in _PLUGIN_MODULES
+
+
+@pytest.mark.parametrize("module", _PLUGIN_MODULES)
+def test_plug_in_modules_pull_in_no_framework_mcp_or_cryptography(module):
+    """K090: importing the server, the client, connect, the readers and every
+    adapter pulls in no agent framework, no mcp and no cryptography, and opens
+    no socket."""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = SRC
+    p = subprocess.run([sys.executable, "-c", _PROBE, module, ",".join(HEAVY + FRAMEWORKS)],
+                       capture_output=True, text=True, env=env, timeout=120)
+    assert p.returncode == 0, p.stderr
+    out = json.loads(p.stdout.strip().splitlines()[-1])
+    assert out["heavy"] == [], (module, out["heavy"])
+    assert module in out["arcaeon_modules"]
