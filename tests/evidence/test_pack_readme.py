@@ -62,6 +62,10 @@ def test_does_not_show_bullets_verbatim(pack):
     section = text.split("## What this pack does not show", 1)[1].split("\n## ", 1)[0]
     bullets = [l[2:] for l in section.splitlines() if l.startswith("- ")]
     assert bullets == list(DOES_NOT_SHOW)
+    # spec section 6, verbatim: six bullets, the first names the overclaims
+    assert len(DOES_NOT_SHOW) == 6
+    assert DOES_NOT_SHOW[0].startswith('Not "Article 12 compliant", "AI Act ready"')
+    assert DOES_NOT_SHOW[-1] == "Not six-month retention by us. Retention is the holder's."
 
 
 def test_two_commands(pack):
@@ -72,7 +76,10 @@ def test_two_commands(pack):
 
 def test_evidence_toward_once_on_page_one(pack):
     text = _readme(pack[0])
-    assert text.lower().count("evidence toward") == 1
+    low = text.lower()
+    # the spec section 6 bullet quotes the phrase ('We say "evidence toward"');
+    # a quotation is not a use, so the claim itself is counted once
+    assert low.count("evidence toward") - low.count('"evidence toward"') == 1
     first_para = text.split("\n\n")[1]
     assert "evidence toward" in first_para
     assert len(text.splitlines()) <= 60  # one page

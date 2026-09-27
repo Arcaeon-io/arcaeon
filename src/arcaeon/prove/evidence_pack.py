@@ -32,20 +32,21 @@ MANIFEST = "manifest.json"
 CNL_FILE = "could_not_look.json"
 #: The one-page reader's note inside the pack (K055).
 README = "README.md"
-#: What a pack does not show, printed verbatim in README.md. Kept here, one
+#: What a pack does not show, printed verbatim in README.md: the bullets of
+#: spec section 6 ("What must not be claimed"), word for word. Kept here, one
 #: list, so the page and any test read the same words.
 DOES_NOT_SHOW = (
-    "That the agent behaved well. The records say what was written, true or not.",
-    "That nothing was left unwritten. A row that was never logged is not in the "
-    "chain, and no chain can name it.",
-    "That the most recent rows were not cut off, unless a pin is listed in "
-    "manifest.json. A pin fixes the head as it stood when it was taken.",
-    "Who wrote each row. Authorship is data in the row, not a signature.",
-    "Who operated the witness when each pin was taken. The manifest says "
-    "UNKNOWN, and it stays unknown until a custody record is published.",
-    "A second, unrelated party. The witness is self-asserted: the manifest "
-    "names its kind and says so.",
-    "That the system meets the EU AI Act. This pack is not a claim of compliance.",
+    'Not "Article 12 compliant", "AI Act ready" or "conformant to" either '
+    'standard. We say "evidence toward", once, on page one.',
+    "Not that the pack proves the agent behaved well. It proves what was "
+    "written was not changed after pinning.",
+    'Not "independent witness". One witness, we operate it, `independence` '
+    "reads `self_asserted` unless proven otherwise.",
+    "Not a known `operator_at_t`. It is UNKNOWN until the custody record (P7) "
+    "is published and anchored.",
+    "Not AAT-conformant. We emit a subset, with a re-derived chain, and list "
+    "what is missing.",
+    "Not six-month retention by us. Retention is the holder's.",
 )
 #: Who operated the witness at pin time. UNKNOWN until a custody record
 #: is published and anchored (spec section 6): never a guess.
