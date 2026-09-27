@@ -754,7 +754,7 @@ pid and port for as long as the server runs.
 
 ```text
 usage: arcaeon serve [-h] [--host HOST] [--port PORT] [--root DIR]
-                     [--print-token]
+                     [--allow-paid] [--print-token]
 ```
 
 A verdict never rides in the HTTP status: VERIFIED, BROKEN and COULD NOT
@@ -776,6 +776,12 @@ alike, is resolved against it with symlinks followed; one that lands
 outside (`../x`, an absolute path elsewhere, a symlink pointing out) is
 refused with 400 `outside the served root`. A relative path is relative to
 the root, not to the server's working directory.
+
+The paid lane (`POST /v1/seal`, and `POST /v1/pin` with `"remote": true`)
+spends only with two opt-ins: `ARCAEON_KEY` set, and the server started with
+`--allow-paid`. Missing either, the answer is a refusal sentence as COULD
+NOT LOOK (`exit` 3, `refused: true`) and nothing is sent, so an agent can
+never spend by surprise. A local pin to a witness file under the root is free.
 
 **Exit codes:** 0 the server stopped cleanly (Ctrl+C), or `--print-token`
 printed the token. 2 bad usage, including `--host` anything but 127.0.0.1.
