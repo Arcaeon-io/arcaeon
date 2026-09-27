@@ -270,3 +270,10 @@ def test_gate_is_imported_lazily():
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
                          env={**os.environ, "PYTHONPATH": src}, timeout=60)
     assert out.stdout.strip() == "False", out.stderr
+
+
+@pytest.fixture(autouse=True)
+def _arcaeon_home(tmp_path, monkeypatch):
+    """A gated session appends its counts under ARCAEON_HOME (K077); keep a
+    test's sessions out of the real ~/.arcaeon."""
+    monkeypatch.setenv("ARCAEON_HOME", str(tmp_path / "arc_home"))

@@ -334,3 +334,10 @@ def test_fingerprint_changes_when_the_mandate_file_changes(tmp_path, mandate_fil
     mandate_file.write_text(json.dumps(dict(MANDATE, forbidden_acts=[])), encoding="utf-8")
     _run(["--mandate", str(mandate_file)], b)
     assert _rows(a)[0]["mandate_file_sha256"] != _rows(b)[0]["mandate_file_sha256"]
+
+
+@pytest.fixture(autouse=True)
+def _arcaeon_home(tmp_path, monkeypatch):
+    """A gated session appends its counts under ARCAEON_HOME (K077); keep a
+    test's sessions out of the real ~/.arcaeon."""
+    monkeypatch.setenv("ARCAEON_HOME", str(tmp_path / "arc_home"))

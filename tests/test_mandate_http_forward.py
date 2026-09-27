@@ -300,3 +300,10 @@ def test_cli_accepts_mandate_with_http_forward(tmp_path):
                "http://127.0.0.1:9/mcp", "--mandate", str(tmp_path / "absent.json"),
                "--mandate-enforce"])
     assert rc == 3
+
+
+@pytest.fixture(autouse=True)
+def _arcaeon_home(tmp_path, monkeypatch):
+    """A gated session appends its counts under ARCAEON_HOME (K077); keep a
+    test's sessions out of the real ~/.arcaeon."""
+    monkeypatch.setenv("ARCAEON_HOME", str(tmp_path / "arc_home"))

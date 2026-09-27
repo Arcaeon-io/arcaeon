@@ -117,3 +117,98 @@ def test_journal_path_under_home_is_shown_with_a_tilde(monkeypatch, tmp_path, ca
     first = capsys.readouterr().out.splitlines()[0]
     assert first == "arcaeon status  (journal: ~/.arcaeon/activity.jsonl)"
     assert str(tmp_path) not in first
+
+
+# --- K077: mandate counts under `mandate` -------------------------------------------
+
+def test_no_gated_sessions(home, capsys):
+    assert status.main(["--json"]) == 0
+    m = json.loads(capsys.readouterr().out)["mandate"]
+    assert m["sessions"] == 0 and m["outside"] == 0 and m["last_session"] is None
+    assert status.main([]) == 0
+    assert "mandate: no gated sessions recorded" in capsys.readouterr().out
+
+
+def test_session_lines_are_summed(home, capsys):
+    status.note_mandate_session("s-1", {"mandate_inside": 3, "mandate_outside": 1,
+                                        "mandate_could_not_look": 0,
+                                        "mandate_blocked": None},
+                                mode="record-only", mandate_status="loaded",
+                                mandate_file_sha256="a" * 64)
+    status.note_mandate_session("s-2", {"mandate_inside": 1, "mandate_outside": 2,
+                                        "mandate_could_not_look": 1, "mandate_blocked": 2,
+                                        "mandate_cap_exceeded": 1, "mandate_changes": 1},
+                                mode="enforce", mandate_status="loaded",
+                                mandate_file_sha256="b" * 64)
+    assert status.main(["--json"]) == 0
+    m = json.loads(capsys.readouterr().out)["mandate"]
+    assert (m["sessions"], m["inside"], m["outside"], m["could_not_look"], m["blocked"],
+            m["cap_exceeded"], m["changes"]) == (2, 4, 3, 1, 2, 1, 1)
+    assert m["sessions_by_mode"] == {"record-only": 1, "enforce": 1}
+    assert m["last_session"]["session"] == "s-2"
+    assert status.main([]) == 0
+    assert ("mandate: 2 gated sessions: 4 inside, 3 outside, 1 COULD NOT LOOK, "
+            "2 blocked, 1 cap exceeded, 1 mandate file changes") in capsys.readouterr().out
+
+
+def test_session_line_holds_no_path_or_tool(home):
+    status.note_mandate_session("s-1", {"mandate_outside": 1, "tool": "refund",
+                                        "ledger": "C:/secret/seam.jsonl"},
+                                mode="record-only", mandate_status="loaded",
+                                mandate_file_sha256=None)
+    text = (home / status.MANDATE_FILENAME).read_text(encoding="utf-8")
+    assert "refund" not in text and "secret" not in text
+
+
+def test_journal_off_writes_no_session_line(home, monkeypatch):
+    monkeypatch.setenv("ARCAEON_JOURNAL", "0")
+    assert status.note_mandate_session("s", {}, mode="record-only", mandate_status="loaded",
+                                       mandate_file_sha256=None) is False
+    assert not (home / status.MANDATE_FILENAME).exists()
+
+
+def test_bad_lines_are_skipped_and_bad_counts_are_zero(home, capsys):
+    home.mkdir(parents=True, exist_ok=True)
+    (home / status.MANDATE_FILENAME).write_text(
+        'not json\n{"mode": "record-only", "outside": "7", "inside": -2, "blocked": true}\n',
+        encoding="utf-8")
+    assert status.main(["--json"]) == 0
+    m = json.loads(capsys.readouterr().out)["mandate"]
+    assert m["sessions"] == 1 and m["outside"] == 0 and m["inside"] == 0 and m["blocked"] == 0
+
+
+def test_a_real_gated_proxy_session_shows_up(home, tmp_path, capsys):
+    """End to end: a record-only stdio proxy session with one inside and one
+    outside call; status --json carries the same counts as its session_end row."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    src = str(Path(__file__).resolve().parents[1] / "src")
+    mandate = tmp_path / "mandate.json"
+    mandate.write_text(json.dumps({"who": "status-agent", "allowed_acts": ["echo"]}),
+                       encoding="utf-8")
+    ledger = tmp_path / "seam.jsonl"
+    env = dict(os.environ)
+    env["PYTHONPATH"] = src + os.pathsep + env.get("PYTHONPATH", "")
+    env["ARCAEON_HOME"] = str(home)
+    env.pop("ARCAEON_JOURNAL", None)
+    env.pop("ARCAEON_ADAPTER_SELFTEST_CORRUPT", None)
+    frames = [{"jsonrpc": "2.0", "id": i, "method": "tools/call",
+               "params": {"name": n, "arguments": {"text": "x"}}}
+              for i, n in ((1, "echo"), (2, "refund"))]
+    stdin = b"".join(json.dumps(f).encode() + b"\n" for f in frames)
+    subprocess.run([sys.executable, "-m", "arcaeon.record.adapter.proxy", "--ledger",
+                    str(ledger), "--mandate", str(mandate), "--", sys.executable, "-m",
+                    "arcaeon.record.adapter._echo_server"],
+                   input=stdin, capture_output=True, env=env, timeout=60)
+    rows = [json.loads(x) for x in ledger.read_text(encoding="utf-8").splitlines() if x]
+    end = rows[-1]
+    assert end["evt"] == "session_end"
+    assert (end["mandate_inside"], end["mandate_outside"]) == (1, 1)
+    assert status.main(["--json"]) == 0
+    m = json.loads(capsys.readouterr().out)["mandate"]
+    assert m["sessions"] == 1 and m["inside"] == 1 and m["outside"] == 1
+    assert m["last_session"]["session"] == end["session"]
+    assert m["last_session"]["mode"] == "record-only"
+    assert str(tmp_path) not in (home / status.MANDATE_FILENAME).read_text(encoding="utf-8")

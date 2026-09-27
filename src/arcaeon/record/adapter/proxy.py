@@ -277,6 +277,7 @@ class _MandateWatch:
         self._seen_sha256 = getattr(gate, "file_sha256", None)
         self.changes = 0
         self._hook_session_begin()
+        self._hook_session_end()
 
     def _hook_session_begin(self) -> None:
         """Write `mandate_loaded` right after the session's first row, on
@@ -302,6 +303,28 @@ class _MandateWatch:
                 pass            # a pin row never stops the session
             return row
         self.obs.session_begin = session_begin
+
+    def _hook_session_end(self) -> None:
+        """After the session's last row, add this session's mandate counts to
+        ~/.arcaeon/mandate_sessions.jsonl, which `arcaeon status` sums (K077).
+        Counts and the session id only, never a path or tool name; off with
+        ARCAEON_JOURNAL=0; never raises, never changes the session."""
+        end = getattr(self.obs, "session_end", None)
+        if end is None:
+            return
+
+        def session_end(**fields):
+            row = end(**fields)
+            try:
+                from arcaeon import status  # lazy: only a gated session loads it
+                status.note_mandate_session(
+                    getattr(self.obs, "session", None), fields, mode=self.mode,
+                    mandate_status=getattr(self.gate, "status", None),
+                    mandate_file_sha256=getattr(self.gate, "file_sha256", None))
+            except Exception:
+                pass
+            return row
+        self.obs.session_end = session_end
 
     def _row(self, evt: str, **fields) -> None:
         with self.obs._lock:

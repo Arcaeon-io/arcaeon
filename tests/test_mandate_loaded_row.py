@@ -241,3 +241,10 @@ def test_nothing_loaded_no_loaded_row_and_a_later_file_is_a_change(tmp_path):
     changed = [r for r in rows if r.get("evt") == "mandate_changed"]
     assert len(changed) == 1 and changed[0].get("from_sha256") is None
     assert changed[0]["to_sha256"] == _sha(mandate)
+
+
+@pytest.fixture(autouse=True)
+def _arcaeon_home(tmp_path, monkeypatch):
+    """A gated session appends its counts under ARCAEON_HOME (K077); keep a
+    test's sessions out of the real ~/.arcaeon."""
+    monkeypatch.setenv("ARCAEON_HOME", str(tmp_path / "arc_home"))

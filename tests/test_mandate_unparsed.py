@@ -189,3 +189,10 @@ def test_stdio_enforce_passes_unparsed_but_never_unrowed(tmp_path):
     got = _unparsed_rows(rows)
     assert len(got) == 1
     assert got[0]["action"] == "forwarded" and got[0]["mandate_mode"] == "enforce"
+
+
+@pytest.fixture(autouse=True)
+def _arcaeon_home(tmp_path, monkeypatch):
+    """A gated session appends its counts under ARCAEON_HOME (K077); keep a
+    test's sessions out of the real ~/.arcaeon."""
+    monkeypatch.setenv("ARCAEON_HOME", str(tmp_path / "arc_home"))

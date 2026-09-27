@@ -174,3 +174,10 @@ def test_session_without_total_has_no_spent_field(tmp_path):
     end = [json.loads(x) for x in ledger.read_text(encoding="utf-8").splitlines()][-1]
     assert end["evt"] == "session_end" and end.get("mandate_spent") is None
     assert not end.get("mandate_cap_exceeded")
+
+
+@pytest.fixture(autouse=True)
+def _arcaeon_home(tmp_path, monkeypatch):
+    """A gated session appends its counts under ARCAEON_HOME (K077); keep a
+    test's sessions out of the real ~/.arcaeon."""
+    monkeypatch.setenv("ARCAEON_HOME", str(tmp_path / "arc_home"))

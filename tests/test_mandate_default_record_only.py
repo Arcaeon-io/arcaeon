@@ -310,3 +310,10 @@ def test_a_surface_that_blocks_by_default_fails_the_guard():
     silent = Result("guard", None, [])          # forwarded, but left no row
     with pytest.raises(AssertionError):
         _assert_record_only("fake_silent_surface", silent, "outside")
+
+
+@pytest.fixture(autouse=True)
+def _arcaeon_home(tmp_path, monkeypatch):
+    """A gated session appends its counts under ARCAEON_HOME (K077); keep a
+    test's sessions out of the real ~/.arcaeon."""
+    monkeypatch.setenv("ARCAEON_HOME", str(tmp_path / "arc_home"))
