@@ -3,8 +3,9 @@
 Build a pack from a four-row ledger with two agents; verify returns 0. Change
 one byte in window.jsonl: returns 1 naming that file. Restore, change one word
 in records.jsonl and regenerate its manifest hash to hide it: returns 1 naming
-the chain break at that row. Delete could_not_look.json: returns 3,
-reason_word "missing", never 0. Grep the README for "compliant" outside a
+the chain break at that row. Delete could_not_look.json: returns 1
+naming the file, never 0 (OA1: a file the manifest lists is not
+optional). Grep the README for "compliant" outside a
 negation: the test fails if found.
 """
 import hashlib
@@ -83,17 +84,16 @@ def test_3_restore_then_hidden_word_change_is_broken_at_that_row(built):
     assert "line 2" in res["finding"]
 
 
-def test_4_deleted_could_not_look_file_is_exit_3_missing_never_0(built, capsys):
+def test_4_deleted_could_not_look_file_is_broken_never_0(built, capsys):
     out, _, _ = built
     (out / "could_not_look.json").unlink()
     res = verify_pack(out)
-    assert res["verdict"] == V.COULD_NOT_LOOK
-    assert res["exit"] == 3 and res["exit"] != 0
-    assert res["reason_word"] == "missing"
-    assert "could_not_look.json" in res["looked_for"]
+    assert res["verdict"] == V.BROKEN
+    assert res["exit"] == 1 and res["exit"] != 0
+    assert "could_not_look.json" in res["finding"]
     rc = evidence_pack_cli.main(["verify", str(out)])
-    assert rc == 3
-    assert capsys.readouterr().out.startswith("COULD NOT LOOK")
+    assert rc == 1
+    assert capsys.readouterr().out.startswith("BROKEN")
 
 
 def test_5_readme_never_says_compliant_outside_a_negation(built):

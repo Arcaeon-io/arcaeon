@@ -90,12 +90,13 @@ def test_dropped_window_row_disagrees_with_manifest(pack):
     assert "the manifest lists [1, 3]" in _step(res)["finding"]
 
 
-def test_missing_window_is_could_not_look(pack):
+def test_missing_window_is_broken(pack):
     (pack / "window.jsonl").unlink()
     res = verify_pack(pack)
     st = _step(res)
     assert st["verdict"] == V.COULD_NOT_LOOK and st["reason_word"] == "missing"
-    assert res["exit"] == 3
+    # OA1: the manifest lists window.jsonl, so the pack is BROKEN naming it
+    assert res["exit"] == 1 and "window.jsonl" in res["finding"]
 
 
 def test_crlf_records_still_match(ledger, tmp_path):

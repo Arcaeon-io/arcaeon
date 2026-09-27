@@ -101,7 +101,7 @@ the lane (A, B or C) of the work and the commit ids that carry it.
 - **`evidence-pack verify` (lane D: K056).** `arcaeon evidence-pack verify PACK [--json]`
   (`arcaeon.prove.evidence_pack_verify.verify_pack`) rehashes every file the manifest
   lists: a changed byte or an unlisted file is BROKEN naming the file, a listed file that
-  is gone is COULD NOT LOOK `missing`. A build on a missing ledger now prints "no
+  is gone is BROKEN naming the file (OA1; it was COULD NOT LOOK `missing` before). A build on a missing ledger now prints "no
   evidence pack written" instead of "evidence pack at None".
 - **`evidence-pack verify` chain step (lane D: K057).** Verify also reruns the chain on
   `records.jsonl` and compares its head to the manifest's `chain_head`: an edit hidden by

@@ -61,12 +61,33 @@ def test_unlisted_file_is_broken(pack):
     assert res["checks"][0]["unlisted"] == ["extra.txt"]
 
 
-def test_listed_file_gone_is_could_not_look_missing(pack):
-    (pack / "could_not_look.json").unlink()
+@pytest.mark.parametrize("name", ["could_not_look.json", "README.md", "records.jsonl"])
+def test_listed_file_gone_is_broken_naming_it(pack, name, capsys):
+    """OA1: the manifest names the file, so its absence is tampering."""
+    (pack / name).unlink()
     res = verify_pack(pack)
-    assert res["verdict"] == V.COULD_NOT_LOOK and res["exit"] == 3
-    assert res["reason_word"] == "missing"
-    assert "could_not_look.json" in res["looked_for"]
+    assert res["verdict"] == V.BROKEN and res["exit"] == 1
+    assert res["checks"][0]["missing"] == [name]
+    assert f"listed in the manifest and missing from the pack: {name}" in res["finding"]
+    assert evidence_pack_cli.main(["verify", str(pack)]) == 1
+    assert name in capsys.readouterr().out
+
+
+def test_deleting_cnl_file_does_not_hide_manifest_incomplete(pack):
+    """OA1 (the audit's R1): drop `checks`, delete could_not_look.json, unlist it
+    and reseal manifest.sha256; the pack stays BROKEN "manifest incomplete"."""
+    import hashlib
+    m = json.loads((pack / "manifest.json").read_text(encoding="utf-8"))
+    del m["checks"]
+    del m["files"]["could_not_look.json"]
+    (pack / "could_not_look.json").unlink()
+    raw = json.dumps(m, indent=2).encode("utf-8")
+    (pack / "manifest.json").write_bytes(raw)
+    (pack / "manifest.sha256").write_text(
+        f"{hashlib.sha256(raw).hexdigest()}  manifest.json\n", encoding="utf-8")
+    res = verify_pack(pack)
+    assert res["verdict"] == V.BROKEN and res["exit"] == 1
+    assert "manifest incomplete" in res["finding"]
 
 
 def test_no_manifest_or_no_pack_is_could_not_look(pack, tmp_path):

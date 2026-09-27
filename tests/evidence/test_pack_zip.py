@@ -73,13 +73,14 @@ def test_changed_byte_inside_the_zip_is_broken_naming_the_file(ledger, tmp_path)
     assert "window.jsonl" in v["finding"]
 
 
-def test_missing_entry_in_the_zip_is_exit_3(ledger, tmp_path):
+def test_missing_entry_in_the_zip_is_broken_naming_it(ledger, tmp_path):
     build_pack(ledger, tmp_path / "a", built_at=STAMP, zip_out=True)
     bad = tmp_path / "bad.zip"
     _rezip(tmp_path / "a.zip", bad,
            lambda n, d: (None, d) if n == "could_not_look.json" else (n, d))
     v = verify_pack(bad)
-    assert v["exit"] == 3 and v["reason_word"] == "missing"
+    assert v["exit"] == 1 and v["verdict"] == V.BROKEN  # OA1
+    assert "could_not_look.json" in v["finding"]
 
 
 @pytest.mark.parametrize("entry", ["../evil.txt", "sub/extra.txt", "/abs.txt"])

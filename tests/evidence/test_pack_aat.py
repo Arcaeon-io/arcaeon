@@ -104,7 +104,9 @@ def test_rechained_rewrite_with_head_fixed_is_broken(pack):
 def test_deleted_aat_file_never_exits_0(pack):
     (pack / "aat.jsonl").unlink()
     res = verify_pack(pack)
-    assert res["exit"] == 3 and res["verdict"] == V.COULD_NOT_LOOK
+    # OA1: the manifest lists it, so its absence is BROKEN naming it
+    assert res["exit"] == 1 and res["verdict"] == V.BROKEN
+    assert "aat.jsonl" in res["finding"]
 
 
 def test_pack_without_aat_has_nothing_to_check(ledger, tmp_path):

@@ -4,9 +4,10 @@
     arcaeon evidence-pack verify PACK [--witness PINS] [--remote] [--json]
 
 Step 1 (K056): rehash every file the manifest lists and compare. A changed
-byte is BROKEN naming the file; a listed file that is gone is COULD NOT LOOK
-`reason_word: "missing"`; a file in the pack the manifest does not list is
-BROKEN (nothing vouches for it). The manifest itself is not hashed (it holds
+byte is BROKEN naming the file; a listed file that is gone is BROKEN naming
+the file (OA1: the manifest names it, so its absence is tampering, never a
+file verify could not look at); a file in the pack the manifest does not list
+is BROKEN (nothing vouches for it). The manifest itself is not hashed (it holds
 the hashes), which is why later steps recompute what it claims from the files.
 
 Step 2 (K057): rerun the chain check on records.jsonl and compare its head
@@ -168,19 +169,16 @@ def _step_hashes(pack: Path, manifest: dict) -> dict:
     unlisted = sorted(on_disk - set(listed))
     res = {"check": check, "files_checked": len(listed) - len(missing),
            "changed": changed, "missing": missing, "unlisted": unlisted}
-    if changed or unlisted:
+    if changed or unlisted or missing:
         parts = []
+        if missing:
+            parts.append("listed in the manifest and missing from the pack: "
+                         f"{', '.join(missing)}")
         if changed:
             parts.append(f"sha256 differs from the manifest: {', '.join(changed)}")
         if unlisted:
             parts.append(f"not listed in the manifest: {', '.join(unlisted)}")
         res.update({"verdict": V.BROKEN, "finding": "; ".join(parts)})
-        return res
-    if missing:
-        res.update({"verdict": V.COULD_NOT_LOOK,
-                    **V.could_not_look(", ".join(missing), str(pack), "missing",
-                                       "the manifest lists these files and they are "
-                                       "not in the pack, so they could not be rehashed")})
         return res
     res["verdict"] = V.VERIFIED
     return res
@@ -819,17 +817,22 @@ def _step_build(pack: Path, manifest: dict) -> dict:
     """What the build itself could not look at, and whether the pack still says so."""
     check = "build-time findings"
     p = pack / CNL_FILE
+    entries, unread = [], None
     if not p.is_file():
-        return _cnl(check, CNL_FILE, str(pack), "missing",
-                    "the pack has no could_not_look.json, so what the build could not "
-                    "look at is unknown")
-    try:
-        entries = json.loads(p.read_text(encoding="utf-8"))
-        if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
-            raise ValueError("not a JSON list of objects")
-    except (OSError, UnicodeDecodeError, ValueError) as e:
-        return _cnl(check, CNL_FILE, str(pack), "unreadable",
-                    f"could_not_look.json could not be read as a list of entries ({e})")
+        unread = _cnl(check, CNL_FILE, str(pack), "missing",
+                      "the pack has no could_not_look.json, so what the build could not "
+                      "look at is unknown")
+    else:
+        try:
+            entries = json.loads(p.read_text(encoding="utf-8"))
+            if not isinstance(entries, list) or not all(isinstance(e, dict)
+                                                        for e in entries):
+                raise ValueError("not a JSON list of objects")
+        except (OSError, UnicodeDecodeError, ValueError) as e:
+            entries = []
+            unread = _cnl(check, CNL_FILE, str(pack), "unreadable",
+                          f"could_not_look.json could not be read as a list of "
+                          f"entries ({e})")
     counts = manifest.get("counts")
     checks = manifest.get("checks")
     incomplete = []
@@ -840,9 +843,13 @@ def _step_build(pack: Path, manifest: dict) -> dict:
     if not isinstance(checks, list) or not all(isinstance(c, dict) for c in checks):
         incomplete.append("`checks`")
     if incomplete:
+        # OA1: tested before a missing could_not_look.json can return, so
+        # deleting that file never turns "manifest incomplete" into exit 3
         return {"check": check, "entries": entries, "verdict": V.BROKEN,
                 "finding": (f"manifest incomplete: it has no readable "
                             f"{' or '.join(incomplete)}, which every pack writes")}
+    if unread is not None:
+        return unread
     res = {"check": check, "entries": entries, "manifest_counts": counts}
     problems = []
     listed_cnl = [{k: c.get(k) for k in _CNL_ENTRY_KEYS} for c in checks
