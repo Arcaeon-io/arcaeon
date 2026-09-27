@@ -1,18 +1,18 @@
-## --list, home /home/kh4
+## --list, home /fake/kh4
 client          transport         confirmed  config file
-claude-desktop  stdio-mcp         NO         /home/kh4/.config/Claude/claude_desktop_config.json
-claude-code     stdio-mcp         yes        /home/kh4/.claude.json
-cursor          stdio-mcp         yes        /home/kh4/.cursor/mcp.json
-windsurf        stdio-mcp         yes        /home/kh4/.config/devin/mcp_config.json
-vscode          stdio-mcp         NO         /home/kh4/.config/Code/User/mcp.json
-gemini-cli      stdio-mcp         yes        /home/kh4/.gemini/settings.json
+claude-desktop  stdio-mcp         NO         /fake/kh4/.config/Claude/claude_desktop_config.json
+claude-code     stdio-mcp         yes        /fake/kh4/.claude.json
+cursor          stdio-mcp         yes        /fake/kh4/.cursor/mcp.json
+windsurf        stdio-mcp         yes        /fake/kh4/.config/devin/mcp_config.json
+vscode          stdio-mcp         NO         /fake/kh4/.config/Code/User/mcp.json
+gemini-cli      stdio-mcp         yes        /fake/kh4/.gemini/settings.json
 chatgpt         remote-connector  yes        (none: nothing to write)
 generic-http    http-openapi      yes        (none: nothing to write)
 confirmed NO: the client's docs did not state that path; check it before --write
 
 ## connect claude-desktop
 arcaeon connect claude-desktop  (Claude Desktop, stdio-mcp, linux)
-file: /home/kh4/.config/Claude/claude_desktop_config.json  (not there yet)
+file: /fake/kh4/.config/Claude/claude_desktop_config.json  (not there yet)
 confirmed: NO, the client's docs did not state this path; check it before --write
 source: https://modelcontextprotocol.io/quickstart/user (read 2026-09-27)
 note: the page names the macOS and Windows files only; there is no Linux build it documents
@@ -34,7 +34,7 @@ nothing written (add --write to apply)
 
 ## connect claude-code
 arcaeon connect claude-code  (Claude Code, stdio-mcp, linux)
-file: /home/kh4/.claude.json  (not there yet)
+file: /fake/kh4/.claude.json  (not there yet)
 confirmed: yes
 source: https://code.claude.com/docs/en/mcp (read 2026-09-27)
 note: user scope; a project's own .mcp.json takes the same mcpServers key
@@ -56,7 +56,7 @@ nothing written (add --write to apply)
 
 ## connect cursor
 arcaeon connect cursor  (Cursor, stdio-mcp, linux)
-file: /home/kh4/.cursor/mcp.json  (not there yet)
+file: /fake/kh4/.cursor/mcp.json  (not there yet)
 confirmed: yes
 source: https://cursor.com/docs/context/mcp (read 2026-09-27)
 note: global file; a project's .cursor/mcp.json takes the same key
@@ -78,7 +78,7 @@ nothing written (add --write to apply)
 
 ## connect windsurf
 arcaeon connect windsurf  (Windsurf (Cascade), stdio-mcp, linux)
-file: /home/kh4/.config/devin/mcp_config.json  (not there yet)
+file: /fake/kh4/.config/devin/mcp_config.json  (not there yet)
 confirmed: yes
 source: https://docs.windsurf.com/windsurf/cascade/mcp (read 2026-09-27)
 note: the Windsurf page now redirects to docs.devin.ai/desktop/cascade/mcp, which gives these paths; builds from before the move read ~/.codeium/windsurf/mcp_config.json
@@ -100,7 +100,7 @@ nothing written (add --write to apply)
 
 ## connect vscode
 arcaeon connect vscode  (VS Code (Copilot agent mode), stdio-mcp, linux)
-file: /home/kh4/.config/Code/User/mcp.json  (not there yet)
+file: /fake/kh4/.config/Code/User/mcp.json  (not there yet)
 confirmed: NO, the client's docs did not state this path; check it before --write
 source: https://code.visualstudio.com/docs/copilot/customization/mcp-servers (read 2026-09-27)
 note: the page confirms the `servers` key and a user-profile mcp.json, but reaches it through `MCP: Open User Configuration`, not by path; a workspace's .vscode/mcp.json takes the same key
@@ -123,7 +123,7 @@ nothing written (add --write to apply)
 
 ## connect gemini-cli
 arcaeon connect gemini-cli  (Gemini CLI, stdio-mcp, linux)
-file: /home/kh4/.gemini/settings.json  (not there yet)
+file: /fake/kh4/.gemini/settings.json  (not there yet)
 confirmed: yes
 source: https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md (read 2026-09-27)
 note: user settings; a project's .gemini/settings.json takes the same key

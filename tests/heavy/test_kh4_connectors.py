@@ -54,7 +54,7 @@ GOLDEN = HERE / "kh4_golden"
 ON_WINDOWS = sys.platform.startswith("win")
 
 #: Display homes for the path-only goldens (nothing is read or written there).
-DISPLAY_HOME = {"windows": r"C:\Users\kh4", "macos": "/Users/kh4", "linux": "/home/kh4"}
+DISPLAY_HOME = {"windows": r"C:\Users\kh4", "macos": "/Users/kh4", "linux": "/fake/kh4"}
 FILE_CLIENTS = [e.name for e in C.CATALOG if e.writes_file]
 NO_FILE_CLIENTS = [e.name for e in C.CATALOG if not e.writes_file]
 OS_SHAPES = [pytest.param(o, marks=pytest.mark.skipif(
