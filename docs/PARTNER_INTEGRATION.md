@@ -120,6 +120,7 @@ Change one byte of one row in the pack and check again:
 $ python -c "p='pack/records.jsonl'; b=open(p,'rb').read(); i=b.index(b'refund'); open(p,'wb').write(b[:i]+b'R'+b[i+1:])"
 $ arcaeon evidence-pack verify pack --witness witness.jsonl --namespace customer-a
 BROKEN: evidence pack pack (file hashes: sha256 differs from the manifest: records.jsonl; records chain and head: records.jsonl chain breaks at line 2: chain mismatch; window rows equal their records lines: window.jsonl rows differ from records.jsonl at ledger line 2)
+  COULD NOT LOOK [bounded] re-derived fields and prose: records.jsonl fails its own hash or chain, so integrity.json, README.md and ARTICLE_12_SUMMARY.md were not re-derived from it
 (exit 1)
 ```
 
