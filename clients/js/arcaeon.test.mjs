@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { Client, ROUTE_METHODS } from "./arcaeon.mjs";
+import { Client, ROUTE_METHODS, isLoopback } from "./arcaeon.mjs";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SRC = join(REPO, "src");
@@ -133,4 +133,52 @@ test("no server is network COULD NOT LOOK, never a rejection", async () => {
   assert.equal(r.reason_word, "network");
   const none = await new Client().verify({ ledger: "x.jsonl" });
   assert.equal(none.reason_word, "network");
+});
+
+// K016R: the serve token never leaves loopback. fetch is swapped for a
+// recorder, so nothing goes anywhere.
+async function recorded(fn) {
+  const seen = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = async (u, init) => {
+    seen.push({ u, headers: init.headers });
+    return new Response('{"verdict": "VERIFIED", "exit": 0}', { status: 200 });
+  };
+  try { await fn(); } finally { globalThis.fetch = real; }
+  return seen;
+}
+
+test("loopback hosts are loopback, others are not", () => {
+  for (const h of ["127.0.0.1", "127.0.0.9", "localhost", "[::1]", "::1"]) assert.ok(isLoopback(h), h);
+  for (const h of ["example.invalid", "10.0.0.1", "127.example.com", ""]) assert.ok(!isLoopback(h), h);
+});
+
+test("the home token never goes to another host", async () => {
+  const seen = await recorded(async () => {
+    const c = new Client({ url: "http://example.invalid:8787", homeToken: "home-secret",
+                           allowInsecure: true });
+    assert.equal((await c.verify({ ledger: "x" })).exit, 0);
+  });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].headers.Authorization, undefined);
+});
+
+test("an explicit token goes where the caller sends it", async () => {
+  const seen = await recorded(async () => {
+    await new Client({ url: "http://example.invalid:8787", token: "mine",
+                       allowInsecure: true }).verify({ ledger: "x" });
+  });
+  assert.equal(seen[0].headers.Authorization, "Bearer mine");
+});
+
+test("plain http to another host is refused unless allowed", async () => {
+  const seen = await recorded(async () => {
+    for (const token of [null, "mine"]) {
+      const r = await new Client({ url: "http://example.invalid:8787", token,
+                                   homeToken: "home-secret" }).verify({ ledger: "x" });
+      assert.equal(r.exit, 2);
+      assert.equal(r.reason_word, "insecure");
+    }
+  });
+  assert.equal(seen.length, 0);
 });

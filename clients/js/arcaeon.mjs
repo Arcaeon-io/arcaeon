@@ -16,6 +16,12 @@
 // COULD NOT LOOK, reason_word "unreadable". A refusal the server sent (400,
 // 401, 404, 405, 413) comes back as its body plus http_status, always with a
 // non-zero exit (2 when the body names none). Methods resolve, never reject.
+//
+// THE TOKEN NEVER LEAVES LOOPBACK (K016R). The token read from serve.token
+// goes only to a loopback host (127.x, ::1, localhost). To any other host no
+// token is sent unless the caller passed { token } itself, and a plain
+// http:// url to a non-loopback host is refused (exit 2, reason_word
+// "insecure", nothing sent) unless { allowInsecure: true } is passed.
 
 export const COULD_NOT_LOOK = "COULD NOT LOOK";
 export const EXIT_USAGE = 2;
@@ -46,6 +52,13 @@ export const ROUTE_METHODS = Object.freeze({
   handshakeAccept: ["POST", "/v1/handshake/accept"],
   handshakeVerify: ["POST", "/v1/handshake/verify"],
 });
+
+export function isLoopback(host) {
+  if (!host) return false;
+  const h = String(host).toLowerCase().replace(/^\[|\]$/g, "").replace(/\.$/, "");
+  if (h === "localhost" || h === "::1" || h === "0:0:0:0:0:0:0:1") return true;
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h);
+}
 
 function couldNotLook(where, reasonWord, reason) {
   return { verdict: COULD_NOT_LOOK, exit: EXIT_COULD_NOT_LOOK,
@@ -79,18 +92,24 @@ async function readHome() {
 }
 
 export class Client {
-  constructor({ url = null, token = null, timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
+  constructor({ url = null, token = null, timeoutMs = DEFAULT_TIMEOUT_MS,
+                allowInsecure = false, homeToken = null } = {}) {
     this.url = url ? String(url).replace(/\/+$/, "") : null;
     // Not enumerable, so JSON.stringify(client) and console.log never show it.
-    Object.defineProperty(this, "token", { value: token, writable: true, enumerable: false });
+    Object.defineProperty(this, "token", { value: token != null ? token : homeToken,
+                                           writable: true, enumerable: false });
+    Object.defineProperty(this, "tokenGiven", { value: token != null, writable: true,
+                                                enumerable: false });
     this.timeoutMs = timeoutMs;
+    this.allowInsecure = Boolean(allowInsecure);
   }
 
   // A client whose missing url and token are read from the serve files.
   static async connect(opts = {}) {
     const found = (opts.url && opts.token) ? {} : await readHome();
     return new Client({ ...opts, url: opts.url || found.url,
-                        token: opts.token != null ? opts.token : found.token });
+                        token: opts.token != null ? opts.token : null,
+                        homeToken: found.token || null });
   }
 
   async call(method, path, body = null) {
@@ -102,13 +121,20 @@ export class Client {
     if (!/^http:\/\/[^/]+/.test(this.url)) {
       return couldNotLook(where, "network", `not an http:// server url: ${this.url}`);
     }
+    const host = new URL(this.url).hostname;
+    const loopback = isLoopback(host);
+    if (!loopback && !this.allowInsecure) {
+      return { error: `refusing plain http:// to a non-loopback host ${host}: ` +
+                      "pass allowInsecure: true to send anyway",
+               exit: EXIT_USAGE, reason_word: "insecure", where };
+    }
     const headers = { Accept: "application/json" };
     const init = { method, headers, redirect: "manual" };
     if (method !== "GET") {
       headers["Content-Type"] = "application/json";
       init.body = JSON.stringify(body || {});
     }
-    if (this.token) headers.Authorization = `Bearer ${this.token}`;
+    if (this.token && (loopback || this.tokenGiven)) headers.Authorization = `Bearer ${this.token}`;
     if (typeof AbortSignal !== "undefined" && AbortSignal.timeout) {
       init.signal = AbortSignal.timeout(this.timeoutMs);
     }

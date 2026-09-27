@@ -23,12 +23,17 @@ a refused connection, a timeout, a reset) is COULD NOT LOOK, exit 3, with
 non-zero `exit` (2, bad usage, when the body names none), so no branch on
 `exit == 0` can read a refused call as a pass.
 
-Loopback is what `arcaeon serve` binds; this client talks to whatever url it
-is given and adds nothing else. Stdlib only.
+THE TOKEN NEVER LEAVES LOOPBACK (K016R). The serve token read from the home
+directory goes only to a loopback host (127.0.0.1 or any 127.x, ::1,
+localhost). To any other host the client sends no token unless the caller
+passed `token=` itself, and it refuses a plain http:// url to a non-loopback
+host outright (exit 2, `reason_word: "insecure"`, nothing sent) unless
+`allow_insecure=True` is passed. Stdlib only.
 """
 from __future__ import annotations
 
 import http.client
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -90,6 +95,18 @@ def _read_token() -> str | None:
     return t or None
 
 
+def is_loopback(host: str | None) -> bool:
+    """True for localhost, 127.0.0.0/8 and ::1."""
+    if not host:
+        return False
+    if host.lower().rstrip(".") == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
 def _could_not_look(where, reason_word: str, reason: str) -> dict:
     return {"verdict": COULD_NOT_LOOK, "exit": EXIT_COULD_NOT_LOOK,
             "looked_for": "an arcaeon serve answer", "where": where,
@@ -100,10 +117,12 @@ class Client:
     """A caller for one `arcaeon serve`. Every method returns a dict."""
 
     def __init__(self, url: str | None = None, token: str | None = None,
-                 timeout: float = DEFAULT_TIMEOUT):
+                 timeout: float = DEFAULT_TIMEOUT, allow_insecure: bool = False):
         self.url = (url or _read_url() or "").rstrip("/") or None
+        self._token_given = token is not None
         self.token = token if token is not None else _read_token()
         self.timeout = timeout
+        self.allow_insecure = bool(allow_insecure)
 
     def __repr__(self) -> str:        # never the token
         return f"Client(url={self.url!r})"
@@ -119,12 +138,17 @@ class Client:
         if parts.scheme != "http" or not parts.hostname:
             return _could_not_look(where, "network",
                                    f"not an http:// server url: {self.url!r}")
+        loopback = is_loopback(parts.hostname)
+        if not loopback and not self.allow_insecure:
+            return {"error": f"refusing plain http:// to a non-loopback host "
+                             f"{parts.hostname!r}: pass allow_insecure=True to send anyway",
+                    "exit": EXIT_USAGE, "reason_word": "insecure", "where": where}
         headers = {"Accept": "application/json"}
         data = None
         if method != "GET":
             data = json.dumps(body or {}, ensure_ascii=False).encode("utf-8")
             headers["Content-Type"] = "application/json"
-        if self.token:
+        if self.token and (loopback or self._token_given):
             headers["Authorization"] = f"Bearer {self.token}"
         conn = http.client.HTTPConnection(parts.hostname, parts.port or 80,
                                           timeout=self.timeout)

@@ -143,3 +143,63 @@ def test_a_reply_that_is_not_json_is_unreadable(home):
         s.server_close()
         t.join(10)
     assert (r["verdict"], r["exit"], r["reason_word"]) == ("COULD NOT LOOK", 3, "unreadable")
+
+
+# --- K016R: the serve token never leaves loopback -----------------------------------
+
+class _FakeConn:
+    """Stands in for http.client.HTTPConnection: records, never connects."""
+    made: list = []
+
+    def __init__(self, host, port, timeout=None):
+        self.host = host
+        _FakeConn.made.append(self)
+
+    def request(self, method, path, body=None, headers=None):
+        self.headers = dict(headers or {})
+
+    def getresponse(self):
+        class R:
+            status = 200
+
+            @staticmethod
+            def read():
+                return b'{"verdict": "VERIFIED", "exit": 0}'
+        return R()
+
+    def close(self):
+        pass
+
+
+@pytest.fixture()
+def fake_conn(home, monkeypatch):
+    home.mkdir(parents=True)
+    (home / "serve.token").write_text("home-token-secret", encoding="utf-8")
+    _FakeConn.made = []
+    monkeypatch.setattr(C.http.client, "HTTPConnection", _FakeConn)
+    return _FakeConn
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "[::1]", "127.0.0.9"])
+def test_the_home_token_goes_to_loopback(fake_conn, host):
+    assert Client(url=f"http://{host}:8787").verify(ledger="x")["exit"] == 0
+    assert fake_conn.made[-1].headers["Authorization"] == "Bearer home-token-secret"
+
+
+def test_the_home_token_never_goes_to_another_host(fake_conn):
+    r = Client(url="http://example.invalid:8787", allow_insecure=True).verify(ledger="x")
+    assert r["exit"] == 0
+    assert "Authorization" not in fake_conn.made[-1].headers
+
+
+def test_an_explicit_token_goes_where_the_caller_sends_it(fake_conn):
+    Client(url="http://example.invalid:8787", token="mine",
+           allow_insecure=True).verify(ledger="x")
+    assert fake_conn.made[-1].headers["Authorization"] == "Bearer mine"
+
+
+def test_plain_http_to_another_host_is_refused_unless_allowed(fake_conn):
+    for tok in (None, "mine"):
+        r = Client(url="http://example.invalid:8787", token=tok).verify(ledger="x")
+        assert (r["exit"], r["reason_word"]) == (2, "insecure")
+    assert fake_conn.made == []                      # nothing was sent at all
