@@ -27,10 +27,23 @@ still printed and `not_yet_informative` is true. When the counts were not
 computed at all (a ledger BROKEN or not readable), `disagreed` and `read` are
 null and `counts_reason` says why.
 
+THE READERS. Each lined-up claim carries `independence`, from what the rows
+say about their readers (nothing here checks it):
+  same_reader                      one reader id on both sides. That is not a
+                                   second read, so the claim is COULD NOT LOOK,
+                                   reason "the same reader on both sides",
+                                   `reason_word: "bounded"`.
+  same_provider                    two reader ids, one provider.
+  distinct_provider_self_asserted  two providers, as the rows assert them.
+The result's top-level `independence` is the weakest class among lined-up
+claims (null with `independence_reason` when none lined up), and
+`independence_counts` gives the count per class.
+
 THE VERDICT, first match wins:
   BROKEN          either ledger's chain is broken; names the ledger and line.
   COULD NOT LOOK  a ledger is missing, unreadable, empty, bounded, or cites a
                   criterion it never froze (`reason_word: "name_not_found"`).
+  COULD NOT LOOK  one reader id on both sides of any claim (`bounded`).
   MISSING         one or more claims were read on one side only.
   COULD NOT LOOK  one or more claims could not be lined up.
   COMPARED        every claim was lined up. Disagreement is filed, not failed.
@@ -48,7 +61,8 @@ from arcaeon.prove.readings import load_readings
 from arcaeon.record.ledger import verify_file
 
 __all__ = ["COMPARE_FORMAT", "COMPARED", "AGREED", "DISAGREED", "MISSING", "COULD_NOT_LOOK",
-           "BROKEN", "INFORMATIVE_AT", "LIMITS", "EXIT_CODES", "compare"]
+           "BROKEN", "INFORMATIVE_AT", "LIMITS", "EXIT_CODES", "SAME_READER", "SAME_PROVIDER",
+           "DISTINCT_PROVIDER", "INDEPENDENCE_CLASSES", "compare"]
 
 COMPARE_FORMAT = "arcaeon-readings-compare/1"
 
@@ -59,6 +73,13 @@ DISAGREED = "DISAGREED"
 MISSING = _v.MISSING
 COULD_NOT_LOOK = _v.COULD_NOT_LOOK
 BROKEN = _v.BROKEN
+
+#: The independence classes, weakest first. Self-asserted by the rows.
+SAME_READER = "same_reader"
+SAME_PROVIDER = "same_provider"
+DISTINCT_PROVIDER = "distinct_provider_self_asserted"
+INDEPENDENCE_CLASSES = (SAME_READER, SAME_PROVIDER, DISTINCT_PROVIDER)
+SAME_READER_REASON = "the same reader on both sides"
 
 #: Below this many claims read, the counts are printed and marked not yet informative.
 INFORMATIVE_AT = 20
@@ -157,8 +178,22 @@ def _pair(claim_id: str, ra: dict | None, rb: dict | None, a: Path, b: Path) -> 
             "one criterion on both sides", f"{a} line {va['line']}, {b} line {vb['line']}",
             "bounded", f"claim {claim_id}: the two readings cite different criteria")})
         return entry
+    entry["independence"] = _independence(va, vb)
+    if entry["independence"] == SAME_READER:
+        entry.update({"status": COULD_NOT_LOOK, **_v.could_not_look(
+            "two different readers", f"{a} line {va['line']}, {b} line {vb['line']}",
+            "bounded", SAME_READER_REASON)})
+        return entry
     entry["status"] = AGREED if va["reading"] == vb["reading"] else DISAGREED
     return entry
+
+
+def _independence(va: dict, vb: dict) -> str:
+    if va["reader_id"] == vb["reader_id"]:
+        return SAME_READER
+    pa = (va["provider"] or "").strip().casefold()
+    pb = (vb["provider"] or "").strip().casefold()
+    return SAME_PROVIDER if pa == pb else DISTINCT_PROVIDER
 
 
 def _summary(claims: list[dict]) -> dict:
@@ -209,15 +244,23 @@ def compare(ledger_a: str | Path, ledger_b: str | Path) -> dict:
     ids = list(la) + [cid for cid in lb if cid not in la]
     claims = [_pair(cid, la.get(cid), lb.get(cid), a, b) for cid in ids]
     summary = _summary(claims)
+    counts = {k: sum(1 for c in claims if c.get("independence") == k) for k in INDEPENDENCE_CLASSES}
+    seen = [k for k in INDEPENDENCE_CLASSES if counts[k]]
+    indep = {"independence": seen[0] if seen else None, "independence_counts": counts,
+             "independence_reason": None if seen else "no claim was on both sides to line up"}
+    if counts[SAME_READER]:
+        return _result(a, b, COULD_NOT_LOOK, claims=claims, summary=summary, extra={
+            **indep, **_v.could_not_look("two different readers", f"{a}, {b}", "bounded",
+                                         SAME_READER_REASON), "ledger": None})
     if summary["missing"]:
         word = MISSING
     elif summary["could_not_look"]:
         word = COULD_NOT_LOOK
     else:
         word = COMPARED
-    extra = None
+    extra = dict(indep)
     if word == COULD_NOT_LOOK:
         n = summary["could_not_look"]
-        extra = {**_v.could_not_look("every claim lined up", f"{a}, {b}", "bounded",
+        extra = {**indep, **_v.could_not_look("every claim lined up", f"{a}, {b}", "bounded",
                                      f"{n} claim(s) could not be lined up"), "ledger": None}
     return _result(a, b, word, claims=claims, summary=summary, extra=extra)
