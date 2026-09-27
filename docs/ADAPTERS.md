@@ -138,3 +138,17 @@ print(r["verdict"], r["rows"], r["exit"])
 ```text
 VERIFIED 1 0
 ```
+
+## Any OpenAPI-capable framework
+
+Semantic Kernel, the Vercel AI SDK, Dify, n8n and any other framework that
+imports an OpenAPI document need no adapter at all. Point them at the
+document: the committed copy is [docs/openapi.json](openapi.json), and a
+running `arcaeon serve` answers the same one at `GET /openapi.json` (no token
+needed for that route; every check route needs the token). The document is
+built from the route table, so what the framework imports is what the server
+answers.
+
+`arcaeon connect generic-http` prints the server's URL, where the token
+lives, and the OpenAPI URL, for pasting into such a framework. It writes
+nothing.

@@ -660,3 +660,25 @@ def test_adapters_doc_examples_print_what_the_doc_says(tmp_path, monkeypatch, ca
                                     "compliant", "guarantee", "—", "–"])
 def test_adapters_doc_makes_no_overclaim(phrase):
     assert phrase not in ADAPTERS_MD.lower(), phrase
+
+
+# --- docs/ADAPTERS.md: the OpenAPI-capable section (K093) -----------------------------
+
+def test_adapters_openapi_section_links_the_committed_document():
+    body = _section(ADAPTERS_MD, "Any OpenAPI-capable framework")
+    for name in ("Semantic Kernel", "Vercel AI SDK", "Dify", "n8n",
+                 "arcaeon connect generic-http", "GET /openapi.json"):
+        assert name in body, name
+    links = re.findall(r"\]\(([^)#\s]+)\)", body)
+    assert links, "the section links no file"
+    target = (ROOT / "docs" / links[0]).resolve()
+    assert target == (ROOT / "docs" / "openapi.json").resolve(), links[0]
+    assert target.is_file()
+    import json
+    assert json.loads(target.read_text(encoding="utf-8"))["openapi"].startswith("3.")
+    if (ROOT / ".git").exists():
+        p = subprocess.run(["git", "-C", str(ROOT), "ls-files", "--error-unmatch",
+                            "docs/openapi.json"], capture_output=True, text=True)
+        assert p.returncode == 0, "docs/openapi.json is not committed"
+    from arcaeon.connect import catalog
+    assert "generic-http" in {e.name for e in catalog.CATALOG}
