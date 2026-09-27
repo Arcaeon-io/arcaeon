@@ -832,6 +832,8 @@ A witnessed transaction: each side records the same steps on its own ledger;
             [--json] [--remote] [--claim CLAIM --by buyer|seller [--text T]]
   pack      <deal_id> --buyer B --seller S [--pins FILE] [-o DIR]
   show      <ledger> --deal ID
+  handshake propose|accept|verify ...   two agents countersign any agreement
+            (`arcaeon deal handshake --help`)
 
 dispute / pack exit 0 MATCHED, 1 MISSING or ALTERED, 3 COULD NOT LOOK, 2 bad usage.
 The deal lane is new in 0.9.0: --legacy-exit changes nothing here."""
@@ -910,6 +912,9 @@ def main(argv: list[str]) -> int:
         print(USAGE)
         return _v.EXIT_GOOD if argv else _v.EXIT_USAGE
     cmd, rest = argv[0], argv[1:]
+    if cmd == "handshake":                          # KH7: any agreement, not only a sale
+        from arcaeon.record import handshake
+        return handshake.main(rest)
     if cmd not in (*_STEP_CMDS, "dispute", "pack", "show"):
         print(f"arcaeon deal: unknown step {cmd!r}\n\n{USAGE}")
         return _v.EXIT_USAGE
