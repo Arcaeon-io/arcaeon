@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import hmac
 import os
+import re
 import secrets
 from pathlib import Path
 
@@ -111,15 +112,35 @@ def check(token: str, headers) -> str | None:
     return None
 
 
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+_ORIGIN = re.compile(r"^(https?)://(\[[^\]/]*\]|[^\[\]/:]+)(?::(\d{1,5}))?$")
+
+
+def _norm_origin(origin: str) -> str:
+    """An origin with its scheme's default port dropped (OA3: a browser sends
+    `http://127.0.0.1` for a page on port 80, RFC 6454). Anything that is not
+    a plain scheme://host[:port] comes back as given, lowercased."""
+    o = origin.strip().rstrip("/").lower()
+    m = _ORIGIN.match(o)
+    if not m:
+        return o
+    scheme, host, port = m.groups()
+    if port is None or int(port) == _DEFAULT_PORTS[scheme]:
+        return f"{scheme}://{host}"
+    return f"{scheme}://{host}:{int(port)}"
+
+
 def served_origins(port: int) -> frozenset[str]:
-    """The origins a browser shows for this server's own pages."""
-    return frozenset({f"http://127.0.0.1:{port}", f"http://localhost:{port}"})
+    """The origins a browser shows for this server's own pages, default
+    port dropped: on port 80 that is `http://127.0.0.1` with no port."""
+    return frozenset(_norm_origin(f"http://{h}:{port}") for h in ("127.0.0.1", "localhost"))
 
 
 def origin_ok(headers, port: int) -> bool:
-    """True if the request's Origin is exactly one of this server's origins.
-    A missing Origin, "null", a different scheme, host or port is False."""
+    """True if the request's Origin is one of this server's origins, with a
+    default port (80 for http, 443 for https) matching its omission either
+    way. A missing Origin, "null", a different scheme, host or port is False."""
     got = headers.get("Origin")
     if got is None:
         return False
-    return got.strip().rstrip("/").lower() in served_origins(port)
+    return _norm_origin(got) in served_origins(port)

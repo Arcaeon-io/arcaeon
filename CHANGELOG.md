@@ -11,6 +11,7 @@ any version on PyPI; `pip install arcaeon` does not have them.
 
 ### Plug-in batch (branch plugin-2026-09-27)
 
+- **OA3.** The dashboard's origin guard drops a default port both ways, so on `--port 80` the `Origin: http://127.0.0.1` a browser sends is its own; every non-default port still needs the exact port.
 - **OA2.** A reader whose endpoint redirects to a malformed Location (a bad port, a bad IPv6 host) is refused like any redirect: COULD NOT LOOK `redirect_refused`, reason "redirect refused: ...", the run continues and the key is not sent.
 - **OA1.** Pack verify: a file the manifest lists that is gone from the pack is BROKEN, exit 1, naming the file (was COULD NOT LOOK, exit 3), and deleting could_not_look.json no longer hides "manifest incomplete".
 - **K021R (aa69d47).** `arcaeon connect --undo` refuses a config changed since the write: COULD NOT LOOK, exit 3, new reason word `changed_since_write`, nothing touched, and the reason names the backup to compare against. `--write` now leaves a `<backup>.written` sidecar beside each backup holding the sha256 of the bytes it wrote; undo consumes it with the backup. A backup with no sidecar (made before this change) is restored as before.

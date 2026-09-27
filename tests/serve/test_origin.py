@@ -130,3 +130,33 @@ def test_origin_ok_unit():
     assert not auth.origin_ok({}, 8787)
     assert not auth.origin_ok({"Origin": "null"}, 8787)
     assert auth.served_origins(8787) == {"http://127.0.0.1:8787", "http://localhost:8787"}
+
+
+def test_port_80_accepts_the_origin_a_browser_sends_without_the_port():
+    """OA3: a browser omits the default port from Origin (RFC 6454), so a
+    dashboard on --port 80 must match `http://127.0.0.1`. Port 80 is never
+    bound here; the check function is given the port."""
+    for o in ("http://127.0.0.1", "http://127.0.0.1:80", "http://localhost",
+              "http://LOCALHOST:80/"):
+        assert auth.origin_ok({"Origin": o}, 80), o
+    assert auth.served_origins(80) == {"http://127.0.0.1", "http://localhost"}
+    for o in ("https://127.0.0.1", "https://127.0.0.1:443", "http://127.0.0.1:8080",
+              "http://evil.example", "http://127.0.0.1.evil.example", "null"):
+        assert not auth.origin_ok({"Origin": o}, 80), o
+
+
+def test_non_default_ports_still_need_the_exact_port():
+    assert not auth.origin_ok({"Origin": "http://127.0.0.1"}, 8787)
+    assert not auth.origin_ok({"Origin": "http://127.0.0.1:80"}, 8787)
+    assert auth.origin_ok({"Origin": "http://localhost:8787"}, 8787)
+    # a server on 443 speaks plain http, so :443 is not a default port for it
+    assert auth.origin_ok({"Origin": "http://127.0.0.1:443"}, 443)
+    assert not auth.origin_ok({"Origin": "http://127.0.0.1"}, 443)
+    assert not auth.origin_ok({"Origin": "https://127.0.0.1"}, 443)
+
+
+def test_https_default_port_is_normalised_both_ways():
+    assert auth._norm_origin("https://127.0.0.1:443") == "https://127.0.0.1"
+    assert auth._norm_origin("https://127.0.0.1") == "https://127.0.0.1"
+    assert auth._norm_origin("http://127.0.0.1:080") == "http://127.0.0.1"
+    assert auth._norm_origin("http://[::1]:80") == "http://[::1]"
