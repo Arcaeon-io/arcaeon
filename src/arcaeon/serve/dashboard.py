@@ -66,6 +66,7 @@ PAGES = {
     "/": "arcaeon.serve.pages.home",
     "/status": "arcaeon.serve.pages.status",
     "/verify": "arcaeon.serve.pages.verify",
+    "/packs": "arcaeon.serve.pages.packs",
 }
 
 #: The clock codes and sessions are timed by (tests move it).

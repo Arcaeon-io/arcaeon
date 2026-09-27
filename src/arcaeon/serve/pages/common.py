@@ -20,7 +20,8 @@ STATIC = Path(__file__).resolve().parents[1] / "static"
 
 esc = html.escape
 
-NAV_ITEMS = (("/", "Home"), ("/status", "Status"), ("/verify", "Verify"))
+NAV_ITEMS = (("/", "Home"), ("/status", "Status"), ("/verify", "Verify"),
+             ("/packs", "Evidence packs"))
 
 LAYOUT = string.Template("""<!doctype html>
 <html lang="en">

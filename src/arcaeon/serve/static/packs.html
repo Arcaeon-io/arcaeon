@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$title</title>
+<link rel="stylesheet" href="/static/placeholder.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+$nav
+<main>
+<h1>$title</h1>
+<p>An evidence pack is a folder that carries a ledger, the window of rows it
+covers, and a manifest with the hash of every file. Checking one rehashes every
+file, reruns the chain and compares the pins, the same checks
+<code>arcaeon evidence-pack verify</code> runs.</p>
+$result
+<h2>Packs under the served root</h2>
+$packs
+<p class="note">The three counts are how many of the checks came back
+VERIFIED, BROKEN and COULD NOT LOOK. They are kept side by side, never folded
+into one rate: a file nobody could read is neither a pass nor a break. Pins on
+the hosted witness are not read from this page, so they show as COULD NOT LOOK
+(network).</p>
+</main>
+</body>
+</html>
