@@ -8,6 +8,7 @@ the lane (A, B or C) of the work and the commit ids that carry it.
 
 - **Reading rows (plug-in batch lane C, K030).** New row shape `arcaeon-reading/1` (`evt: "reading"`, `claim_id`, `claim_sha256`, `criterion_sha256`, `reader`, `reading`, `near_match_id`, `rationale_sha256`, `rationale`, `prompt_sha256`, `ts`) in `arcaeon.prove.readings`. Additive; no existing row changes.
 - **Criterion rows (lane C, K031).** New row `evt: "criterion"` (`arcaeon-criterion/1`: `criterion_sha256`, `text`, optional `supersedes`, `ts`). `write_reading` now refuses a reading whose criterion is not frozen earlier in its ledger; `load_readings` answers COULD NOT LOOK `name_not_found` for one.
+- **Readings compare (lane C, K032).** New result `arcaeon-readings-compare/1` from `arcaeon.prove.readings_compare.compare(a, b)`: per-claim AGREED / DISAGREED / MISSING / COULD NOT LOOK, and `summary` with `disagreed` and `read` as two integers (null plus `counts_reason` when not computed), `fraction` (null plus `fraction_reason` at read 0), `not_yet_informative` under 20 read.
 - **Additive COULD NOT LOOK keys (lane A: e7cb56f, 34df5f3, 026d882, 4925e90,
   b2e4bb8, 886f98b; lane B: 4b1fdfa).** `arcaeon.verdict.REASON_WORDS`
   (`unreadable`, `missing`, `empty`, `name_not_found`, `bounded`, `network`)
