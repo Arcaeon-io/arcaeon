@@ -163,3 +163,167 @@ def pytest_sessionfinish(session, exitstatus):
     else:
         print(msg)
     session.exitstatus = 1
+
+
+# 6. The socket guard (K143). A test may talk to 127.0.0.1 / ::1 / localhost
+#    (the stubs a test starts itself) and nothing else, unless it is marked
+#    `live`. A non-loopback connect, connect_ex, sendto, bind or name lookup
+#    is refused with SocketGuardRefused (an OSError, so the code under test
+#    sees a network that is down and nothing leaves the machine) AND the test
+#    is failed in its call phase naming the address, even if the code swallowed the
+#    error. `live` tests are skipped unless the run selects them (`-m live`).
+#    Subprocesses a test spawns are not covered by this in-process guard.
+import ipaddress  # noqa: E402
+import re  # noqa: E402
+import socket as _socket  # noqa: E402
+
+LOOPBACK_NAMES = frozenset({"localhost", "localhost.", "ip6-localhost"})
+
+
+class SocketGuardRefused(OSError):
+    """A test that is not marked `live` tried to reach past loopback."""
+
+
+def is_loopback_host(host) -> bool:
+    if host is None:
+        return False
+    if isinstance(host, bytes):
+        host = host.decode("ascii", "replace")
+    host = str(host).strip().strip("[]")
+    if host.lower() in LOOPBACK_NAMES:
+        return True
+    try:
+        return ipaddress.ip_address(host.split("%", 1)[0]).is_loopback
+    except ValueError:
+        return False
+
+
+def _address_host(address):
+    """The host part of a socket address, or None when it has none to judge
+    (an AF_UNIX path)."""
+    if isinstance(address, (tuple, list)) and address:
+        return address[0]
+    return None
+
+
+class _Guard:
+    def __init__(self):
+        self.active = False
+        self.hits = []
+
+    def check(self, what, host, detail=None):
+        if not self.active or is_loopback_host(host):
+            return
+        where = detail if detail is not None else host
+        self.hits.append(f"{what} {where!r}")
+        raise SocketGuardRefused(f"socket guard: {what} to {where!r} refused; only loopback "
+                                 f"is allowed in a test not marked live (K143)")
+
+
+SOCKET_GUARD = _Guard()
+_orig_connect = _socket.socket.connect
+_orig_connect_ex = _socket.socket.connect_ex
+_orig_sendto = _socket.socket.sendto
+_orig_bind = _socket.socket.bind
+_orig_getaddrinfo = _socket.getaddrinfo
+
+
+def _is_inet(sock) -> bool:
+    return sock.family in (_socket.AF_INET, _socket.AF_INET6)
+
+
+def _guarded_connect(self, address):
+    if _is_inet(self):
+        SOCKET_GUARD.check("connect", _address_host(address), address)
+    return _orig_connect(self, address)
+
+
+def _guarded_connect_ex(self, address):
+    if _is_inet(self):
+        SOCKET_GUARD.check("connect", _address_host(address), address)
+    return _orig_connect_ex(self, address)
+
+
+def _guarded_sendto(self, data, *args):
+    address = args[-1] if args else None
+    if _is_inet(self) and address is not None:
+        SOCKET_GUARD.check("sendto", _address_host(address), address)
+    return _orig_sendto(self, data, *args)
+
+
+def _guarded_bind(self, address):
+    if _is_inet(self):
+        host = _address_host(address)
+        # "" and 0.0.0.0 / :: are every interface: not loopback
+        SOCKET_GUARD.check("bind", host if host else "0.0.0.0", address)
+    return _orig_bind(self, address)
+
+
+def _guarded_getaddrinfo(host, *args, **kwargs):
+    if host is not None:
+        SOCKET_GUARD.check("lookup", host)
+    return _orig_getaddrinfo(host, *args, **kwargs)
+
+
+_socket.socket.connect = _guarded_connect
+_socket.socket.connect_ex = _guarded_connect_ex
+_socket.socket.sendto = _guarded_sendto
+_socket.socket.bind = _guarded_bind
+_socket.getaddrinfo = _guarded_getaddrinfo
+
+_LIVE_SELECTED = re.compile(r"(?<!not )\blive\b")
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "live: talks to a real model or the hosted witness; skipped unless the "
+                   "run selects it (`-m live`); the only tests the socket guard lets past "
+                   "loopback (K143)")
+
+
+def pytest_collection_modifyitems(config, items):
+    if _LIVE_SELECTED.search(config.getoption("markexpr") or ""):
+        return
+    skip = pytest.mark.skip(reason="live test: skipped by default; run with -m live (K143)")
+    for item in items:
+        if item.get_closest_marker("live") is not None:
+            item.add_marker(skip)
+
+
+@pytest.fixture(autouse=True)
+def _socket_guard(request):
+    """Loopback only, unless the test is marked `live`."""
+    if request.node.get_closest_marker("live") is not None:
+        yield
+        return
+    SOCKET_GUARD.hits = []
+    SOCKET_GUARD.active = True
+    try:
+        yield
+    finally:
+        SOCKET_GUARD.active = False
+        SOCKET_GUARD.hits = []
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item, call):
+    """A test whose body reached past loopback is FAILED in its call phase,
+    naming each address, whatever the body did with the refusal."""
+    outcome = yield
+    report = outcome.get_result()
+    if call.when != "call" or not SOCKET_GUARD.hits:
+        return
+    if item.get_closest_marker("live") is not None:
+        return
+    hits, SOCKET_GUARD.hits = SOCKET_GUARD.hits, []
+    report.outcome = "failed"
+    report.longrepr = ("socket guard (K143): a test not marked live reached past loopback: "
+                       + "; ".join(dict.fromkeys(hits)))
+
+
+@pytest.fixture
+def socket_guard():
+    """The guard's parts, for tests/test_socket_guard.py."""
+    import types
+    return types.SimpleNamespace(guard=SOCKET_GUARD, refused=SocketGuardRefused,
+                                 is_loopback_host=is_loopback_host)
