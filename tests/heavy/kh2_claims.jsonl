@@ -1,0 +1,24 @@
+{"claim_id": "c01", "claim": "The first unit was assigned at 04:12.", "expect": "yes"}
+{"claim_id": "c02", "claim": "The caller asked for an ambulance.", "expect": "no"}
+{"claim_id": "c03", "claim": "The line went quiet a little after midnight.", "expect": "yes"}
+{"claim_id": "c04", "claim": "The address was confirmed twice with the caller.", "expect": "no"}
+{"claim_id": "c05", "claim": "The report was closed at 3:45 PM.", "expect": "yes"}
+{"claim_id": "c06", "claim": "Two engines and one ladder were sent.", "expect": "no"}
+{"claim_id": "c07", "claim": "The alarm sounded at noon.", "expect": "yes"}
+{"claim_id": "c08", "claim": "The supervisor approved the overtime request.", "expect": "no"}
+{"claim_id": "c09", "claim": "At 22:30 the road was reopened.", "expect": "yes"}
+{"claim_id": "c10", "claim": "The caller spoke only Spanish.", "expect": "no"}
+{"claim_id": "c11", "claim": "The shift change happened at 0600 hours.", "expect": "yes"}
+{"claim_id": "c12", "claim": "The dog was returned to its owner.", "expect": "no"}
+{"claim_id": "c13", "claim": "The storm knocked out power around 7 in the evening.", "expect": "yes"}
+{"claim_id": "c14", "claim": "The radio channel was switched to tactical two.", "expect": "no"}
+{"claim_id": "c15", "claim": "The patient was transported at 11:05.", "expect": "yes"}
+{"claim_id": "c16", "claim": "The complaint was about a neighbor's music.", "expect": "no"}
+{"claim_id": "c17", "claim": "The crew cleared the scene at half past nine in the morning.", "expect": "yes"}
+{"claim_id": "c18", "claim": "The call was transferred to the fire desk.", "expect": "no"}
+{"claim_id": "c19", "claim": "The outage report came in at 01:50.", "expect": "yes"}
+{"claim_id": "c20", "claim": "The caller gave a callback number.", "expect": "no"}
+{"claim_id": "c21", "claim": "The first responder arrived at 5:17 AM.", "expect": "yes"}
+{"claim_id": "c22", "claim": "The incident was filed under traffic hazards.", "expect": "no"}
+{"claim_id": "c23", "claim": "The backup generator started at 18:02.", "expect": "yes"}
+{"claim_id": "c24", "claim": "The vehicle was a blue pickup truck.", "expect": "no"}
