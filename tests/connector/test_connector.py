@@ -30,6 +30,7 @@ from arcaeon.mcp.server import (  # noqa: E402
     LEDGER_TOOLS,
     MANDATE_TOOLS,
     PAID_TOOLS,
+    SECOND_READ_TOOLS,
     VET_TOOLS,
     WITNESS_TOOLS,
     build_server,
@@ -103,7 +104,7 @@ def test_one_install_exposes_the_full_tool_list():
     alone passes if a tool is silently renamed.
     """
     names = _tool_names()
-    assert len(names) == len(LEDGER_TOOLS) + len(VET_TOOLS) + len(WITNESS_TOOLS) + len(DEAL_TOOLS) + len(MANDATE_TOOLS) + 1
+    assert len(names) == len(LEDGER_TOOLS) + len(VET_TOOLS) + len(WITNESS_TOOLS) + len(DEAL_TOOLS) + len(MANDATE_TOOLS) + len(SECOND_READ_TOOLS) + 1
     assert names == sorted([
         "arcaeon_status",
         "deal_commit",
@@ -115,6 +116,8 @@ def test_one_install_exposes_the_full_tool_list():
         "ledger_verify",
         "ledger_verify_peer_ledger",
         "mandate_check",
+        "second_read_compare",
+        "second_read_submit",
         "vet_audit_verify",
         "vet_grade",
         "vet_scan",
@@ -431,7 +434,7 @@ def test_the_installed_entry_point_serves_over_real_stdio(tmp_path):
         proc.kill()
         proc.wait(timeout=15)
 
-    assert len(names) == len(LEDGER_TOOLS) + len(VET_TOOLS) + len(WITNESS_TOOLS) + len(DEAL_TOOLS) + len(MANDATE_TOOLS) + 1, names
+    assert len(names) == len(LEDGER_TOOLS) + len(VET_TOOLS) + len(WITNESS_TOOLS) + len(DEAL_TOOLS) + len(MANDATE_TOOLS) + len(SECOND_READ_TOOLS) + 1, names
     assert appended["ok"] is True, appended
     assert "buy.stripe.com" in gated_text, gated_text
 

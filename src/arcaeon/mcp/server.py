@@ -21,7 +21,7 @@ NAMESPACING. Upstream names that already read as ledger tools keep their names
 (`ledger_prove_my_conduct`, and so on), and mcp-vet's `mcp_vet_*` becomes
 `vet_*`. The deal lane's three writers and its verdict appear as `deal_mandate`,
 `deal_commit` and `deal_dispute`, calling `arcaeon.record.deal` directly (the
-same functions `arcaeon deal` runs). One list of fourteen tools where the
+same functions `arcaeon deal` runs). One list of seventeen tools where the
 prefix says which product answers.
 
 THE DRIFT RISK, stated. The wrappers are written out by hand rather than
@@ -104,11 +104,12 @@ VET_TOOLS = {
 WITNESS_TOOLS = ("witness_pin", "witness_renew")
 DEAL_TOOLS = ("deal_mandate", "deal_commit", "deal_dispute")
 MANDATE_TOOLS = ("mandate_check",)
+SECOND_READ_TOOLS = ("second_read_submit", "second_read_compare")
 PAID_TOOLS = WITNESS_TOOLS
 STATUS_TOOL = "arcaeon_status"
 
 ALL_TOOLS = sorted([*LEDGER_TOOLS.values(), *VET_TOOLS.values(), *WITNESS_TOOLS,
-                    *DEAL_TOOLS, *MANDATE_TOOLS, STATUS_TOOL])
+                    *DEAL_TOOLS, *MANDATE_TOOLS, *SECOND_READ_TOOLS, STATUS_TOOL])
 FREE_TOOLS = [n for n in ALL_TOOLS if n not in PAID_TOOLS]
 
 
@@ -142,7 +143,7 @@ def _key() -> str | None:
     `Authorization: Bearer ` to the witness and let the server decide whether
     an unauthenticated caller is a caller. `test_empty_key.py` pins both arms.
 
-    NOT a startup check, on purpose. Twelve of the fourteen tools are free and need
+    NOT a startup check, on purpose. Fifteen of the seventeen tools are free and need
     no key at all, so refusing to START over a blank optional variable would
     take the whole free lane down to enforce a gate on two tools. The refusal
     lives at the call, which is also where the config is read (see the note
@@ -408,6 +409,42 @@ def _mandate_check(args: dict) -> dict:
     return _plain(res)
 
 
+# --- the second reader (K044) ------------------------------------------------
+# Import only: the answers are arcaeon.prove.readings_cli.submit and
+# arcaeon.prove.readings_compare.compare, the same functions
+# `arcaeon second-read submit|compare` and POST /v1/readings |
+# /v1/second-read/compare run. Neither calls a model: submit files a reading
+# the caller took itself, compare reads two ledgers.
+
+_SUBMIT_STR = ("ledger", "reader_id", "provider", "claim_id", "reading")
+_SUBMIT_OPT = ("claim", "claim_sha256", "criterion_sha256", "criterion", "model",
+               "near_match_id", "rationale")
+
+
+def _second_read_submit(args: dict) -> dict:
+    from arcaeon.prove.readings_cli import submit  # lazy: only this tool loads it
+    for name in _SUBMIT_OPT:
+        if args.get(name) is not None and not isinstance(args[name], str):
+            raise ValueError(f"`{name}` must be a string")
+    if not isinstance(args.get("keep_text", False), bool):
+        raise ValueError("`keep_text` must be true or false")
+    res = submit(args["ledger"], reader_id=args["reader_id"], provider=args["provider"],
+                 claim_id=args["claim_id"], reading=args["reading"],
+                 claim_text=args.get("claim"), claim_sha256=args.get("claim_sha256"),
+                 criterion_sha256=args.get("criterion_sha256"),
+                 criterion_text=args.get("criterion"), model=args.get("model"),
+                 near_match_id=args.get("near_match_id"), rationale=args.get("rationale"),
+                 keep_text=bool(args.get("keep_text", False)))
+    if res.get("exit") == 2:  # bad usage is the caller's to fix: a tool error
+        raise ValueError(res.get("error") or "bad usage")
+    return _plain(res)
+
+
+def _second_read_compare(args: dict) -> dict:
+    from arcaeon.prove.readings_compare import compare  # lazy
+    return _plain(compare(args["a"], args["b"]))
+
+
 def _server_class():
     """The SDK's server class under whichever name the installed version uses
     (2.x: MCPServer; 1.x: FastMCP). Same probe mcp-vet ships."""
@@ -629,6 +666,48 @@ def build_server():
         args = {"mandate": mandate, "fields": fields, "at": at, "spent": spent}
         outcome = _attempt(_mandate_check, args)
         return _record_call("mandate_check", args, outcome)
+
+    # --- the second reader --------------------------------------------------
+
+    @_tool(
+        name="second_read_submit",
+        description=(
+            "File YOUR OWN reading of one claim into a readings ledger (no model is "
+            "called). reading is yes, no or undetermined. Give the claim as claim (its "
+            "text) or claim_sha256. The reading cites a frozen criterion: "
+            "criterion_sha256, or criterion (the sentence text, frozen first if the "
+            "ledger lacks it), or with neither the ledger's latest criterion. Answers "
+            "written, the row's chain, and exit 0 filed or 3 COULD NOT LOOK (no such "
+            "criterion). Filed means the row was written, never that the reading is right."),
+    )
+    def second_read_submit(ledger: str, reader_id: str, provider: str, claim_id: str,
+                           reading: str, claim: str | None = None,
+                           claim_sha256: str | None = None,
+                           criterion_sha256: str | None = None, criterion: str | None = None,
+                           model: str | None = None, near_match_id: str | None = None,
+                           rationale: str | None = None, keep_text: bool = False) -> dict:
+        args = {"ledger": ledger, "reader_id": reader_id, "provider": provider,
+                "claim_id": claim_id, "reading": reading, "claim": claim,
+                "claim_sha256": claim_sha256, "criterion_sha256": criterion_sha256,
+                "criterion": criterion, "model": model, "near_match_id": near_match_id,
+                "rationale": rationale, "keep_text": keep_text}
+        outcome = _attempt(_second_read_submit, args)
+        return _record_call("second_read_submit", args, outcome)
+
+    @_tool(
+        name="second_read_compare",
+        description=(
+            "Line up two readings ledgers a and b claim by claim: COMPARED, MISSING, "
+            "BROKEN or COULD NOT LOOK, with each claim AGREED, DISAGREED, MISSING or "
+            "COULD NOT LOOK. A DISAGREED claim carries both readings, both reader ids "
+            "and the near-match ids. summary.disagreed and summary.read are two "
+            "integers (null with counts_reason when not computed). Agreement says "
+            "nothing about whether a claim holds. Reads only; exit 0, 1 or 3."),
+    )
+    def second_read_compare(a: str, b: str) -> dict:
+        args = {"a": a, "b": b}
+        outcome = _attempt(_second_read_compare, args)
+        return _record_call("second_read_compare", args, outcome)
 
     # --- what is in here, and what costs money ----------------------------
 

@@ -111,4 +111,5 @@ the same `compared N claims: D disagreed of R read` line as `compare`, and
 COMPARED, 1 MISSING or BROKEN, 2 bad usage, 3 COULD NOT LOOK (a `run` whose
 claims all lined up but where some claim got no reading on either side exits
 3). Over HTTP the same doors are `POST /v1/readings` and
-`POST /v1/second-read/compare`.
+`POST /v1/second-read/compare`; over MCP, `second_read_submit` and
+`second_read_compare`.
