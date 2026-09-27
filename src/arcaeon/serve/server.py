@@ -28,11 +28,17 @@ Path fence (K006, serve/fence.py): every path a request names is resolved
 against the served root, symlinks followed, and refused with 400 `outside
 the served root` if it leaves it.
 
+Paid lane (K012): a route with tier "paid" (and /v1/pin with remote) can
+spend only if the server was started with allow_paid (`--allow-paid`) AND
+ARCAEON_KEY is set. A handler reads the flag through current_server(),
+never from the request body, so a request cannot grant itself the spend.
+
 `run()` writes <ARCAEON_HOME or ~/.arcaeon>/serve.json (pid, port, url) once
 the socket is bound, and removes it on a clean exit if it is still ours.
 """
 from __future__ import annotations
 
+import contextvars
 import json
 import os
 import sys
@@ -57,6 +63,16 @@ _DRAIN_LIMIT = 4 * MAX_BODY
 
 #: make_server's default for `token`: load (or on first run create) serve.token.
 AUTO = object()
+
+
+#: The server answering the current request, for a handler that needs its
+#: settings (K012's allow_paid). Set by Handler._dispatch around the call.
+_CURRENT: contextvars.ContextVar = contextvars.ContextVar("arcaeon_serve_current", default=None)
+
+
+def current_server():
+    """The Server answering this request, or None outside a request."""
+    return _CURRENT.get()
 
 
 class HostRefused(ValueError):
@@ -195,11 +211,14 @@ class Handler(BaseHTTPRequestHandler):
         except (ImportError, AttributeError):
             self._error(404, f"{path} is declared but not built in this checkout")
             return
+        tok = _CURRENT.set(self.server)
         try:
             result = fn(body)
         except Exception as e:  # noqa: BLE001  never a traceback, never a green
             result = {"verdict": V.COULD_NOT_LOOK, "exit": V.EXIT_COULD_NOT_LOOK,
                       "error": f"could not finish: {type(e).__name__} [internal_error]"}
+        finally:
+            _CURRENT.reset(tok)
         if isinstance(result, str):
             self._send(200, result, content_type="text/html; charset=utf-8")
         elif isinstance(result, dict) and result.get("exit") == V.EXIT_USAGE:
@@ -246,6 +265,8 @@ class Server(ThreadingHTTPServer):
     token: str | None = None
     #: The served root's path fence (K006); None: paths are not fenced.
     fence: F.Fence | None = None
+    #: Started with --allow-paid (K012): the paid lane may spend when a key is set.
+    allow_paid: bool = False
 
     @property
     def url(self) -> str:
@@ -253,21 +274,22 @@ class Server(ThreadingHTTPServer):
 
 
 def make_server(host: str = LOOPBACK, port: int = DEFAULT_PORT, *, token=AUTO,
-                root=AUTO) -> Server:
+                root=AUTO, allow_paid: bool = False) -> Server:
     """A bound, not yet serving, server. Any host but 127.0.0.1 is refused.
 
     `token`: AUTO (the default) loads serve.token, creating it on first run;
     a string uses that token; None serves without auth (tests, embedding).
     `root`: AUTO (the default) fences every request path to the current
     directory; a directory fences to that; None does not fence. A root that
-    is not a directory raises NotADirectoryError."""
+    is not a directory raises NotADirectoryError.
+    `allow_paid`: the second opt-in for the paid lane (K012); off by default."""
     if host != LOOPBACK:
         raise HostRefused(f"refusing --host {host}: {REFUSE_HOST}; "
                           f"arcaeon serve binds {LOOPBACK} only")
     fence = None if root is None else F.Fence(os.getcwd() if root is AUTO else root)
     tok = auth.load_or_create() if token is AUTO else token
     srv = Server((LOOPBACK, port), Handler)
-    srv.token, srv.fence = tok, fence
+    srv.token, srv.fence, srv.allow_paid = tok, fence, bool(allow_paid)
     return srv
 
 

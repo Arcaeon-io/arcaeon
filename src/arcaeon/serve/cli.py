@@ -7,7 +7,8 @@ start (the port is taken, the address cannot be bound, the token file cannot
 be read or created).
 
 Every route but /health and /openapi.json needs the token in serve.token
-(K005); `arcaeon serve --print-token` prints it and exits 0.
+(K005); `arcaeon serve --print-token` prints it and exits 0. The paid lane
+spends only with ARCAEON_KEY set AND `--allow-paid` (K012).
 """
 from __future__ import annotations
 
@@ -30,6 +31,10 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--root", default=None, metavar="DIR",
                     help="the only directory requests may name paths in (default: the "
                          "directory serve starts in)")
+    ap.add_argument("--allow-paid", action="store_true",
+                    help="let the paid lane (/v1/seal, /v1/pin with remote) spend when "
+                         "ARCAEON_KEY is set; off by default, so an agent never spends "
+                         "by surprise")
     ap.add_argument("--print-token", action="store_true",
                     help="print the bearer token clients send (created on first run) and exit")
     return ap
@@ -56,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
         return V.EXIT_USAGE
     from arcaeon.serve import server as S
     try:
-        srv = S.make_server(a.host, a.port, root=root)
+        srv = S.make_server(a.host, a.port, root=root, allow_paid=a.allow_paid)
     except S.HostRefused as e:
         print(f"arcaeon serve: {e}", file=sys.stderr)
         return V.EXIT_USAGE
