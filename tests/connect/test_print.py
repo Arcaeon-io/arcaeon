@@ -112,6 +112,6 @@ def test_preview_for_another_os_uses_placeholders(capsys, monkeypatch):
 
 
 @pytest.mark.parametrize("argv", [[], ["nope"], ["cursor", "vscode"], ["cursor", "--os", "bsd"],
-                                  ["cursor", "--frobnicate"], ["cursor", "--write"]])
+                                  ["cursor", "--frobnicate"], ["cursor", "--path", "x.json"]])
 def test_bad_usage_is_exit_2(capsys, argv):
     assert cli.main(argv) == 2

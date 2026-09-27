@@ -886,6 +886,7 @@ it knows with its transport and whether the path is confirmed.
 ```text
 usage: arcaeon connect --list [--json]
        arcaeon connect <client> [--os windows|macos|linux] [--json]
+       arcaeon connect <client> --write [--path FILE] [--json]
 ```
 
 Clients: `claude-desktop`, `claude-code`, `cursor`, `windsurf`, `vscode`,
@@ -900,8 +901,19 @@ records. Where those docs did not state the path, the output says
 previews another machine (`~` or `%APPDATA%` stand in for its home).
 `ARCAEON_CONNECT_HOME` replaces the home directory, for trying it on a copy.
 
-**Exit codes:** 0 printed. 2 bad usage (no client, an unknown client or
-option).
+`--write` applies it on this machine. First it copies the file byte for
+byte to `<file>.arcaeon-bak-<UTC stamp>` (a file that was not there gets an
+`.absent` marker instead), then it splices in only the `arcaeon` entry:
+every other server, key and line ending stays exactly as it was. It prints
+the keys it changed and the backup path. A file it cannot parse (JSON with
+comments included) is COULD NOT LOOK `unreadable` and is never overwritten.
+A path marked `confirmed: NO` is refused (COULD NOT LOOK
+`path_unconfirmed`) unless `--path FILE` names the file.
+
+**Exit codes:** 0 printed, or written. 2 bad usage (no client, an unknown
+client or option, `--write` with `--os` for another machine). 3 COULD NOT
+LOOK: the file is unreadable, the path is unconfirmed, or the file could
+not be written; nothing was written.
 
 ```console
 $ arcaeon connect cursor --os linux
