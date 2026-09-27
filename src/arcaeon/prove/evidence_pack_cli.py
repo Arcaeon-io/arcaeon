@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 """`arcaeon evidence-pack`: build an evidence pack folder.
 
-    arcaeon evidence-pack --ledger L --out DIR [--witness STORE --namespace NS]
+    arcaeon evidence-pack --ledger L --out DIR [--agent ID] [--from TS] [--to TS]
+                          [--witness STORE --namespace NS]
                           [--system-id ID] [--provider NAME] [--json]
 
 Exit codes as every verb: 0 VERIFIED, 1 BROKEN, 2 bad usage, 3 COULD NOT LOOK.
@@ -21,6 +22,12 @@ def _parser(prog: str) -> argparse.ArgumentParser:
         "the EU AI Act logging duties (not a claim of compliance).")
     p.add_argument("--ledger", required=True, help="the ledger (JSONL) to pack")
     p.add_argument("--out", required=True, help="a new or empty folder to write")
+    p.add_argument("--agent", default=None,
+                   help="the agent: matches a row's `agent` or `system_id`")
+    p.add_argument("--from", dest="since", default=None,
+                   help="window start, ISO 8601, inclusive (no zone means UTC)")
+    p.add_argument("--to", dest="until", default=None,
+                   help="window end, ISO 8601, inclusive (no zone means UTC)")
     p.add_argument("--witness", default=None, help="path to a witness store (JSONL)")
     p.add_argument("--namespace", default=None, help="the witness namespace to check")
     p.add_argument("--system-id", default="", help="the system's id, for the summary")
@@ -35,7 +42,8 @@ def main(argv: list[str] | None = None, *, prog: str = "arcaeon evidence-pack") 
     a = _parser(prog).parse_args(argv)
     try:
         res = build_pack(a.ledger, a.out, system_id=a.system_id, provider=a.provider,
-                         witness=a.witness, witness_namespace=a.namespace)
+                         witness=a.witness, witness_namespace=a.namespace,
+                         agent=a.agent, since=a.since, until=a.until)
     except PackUsageError as e:
         print(f"{prog}: {e}", file=sys.stderr)
         return V.EXIT_USAGE
