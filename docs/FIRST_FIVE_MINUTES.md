@@ -10,7 +10,7 @@ You do not need to know the terminal for this page. You will paste a few lines, 
 
 Read this part first. It is short.
 
-- It does not tell you what your agent did was right. It tells you the record was not changed after it was written.
+- It does not tell you what your agent did was right. It tells you every row still hashes to the next, and, with a pin, that the rows up to the pinned head have not changed since the pin.
 - Anyone who can write the file can still change it. What they cannot do is change it without the check naming the line.
 - Cutting the newest lines off the end needs a pin to catch. The five minutes here make no pin.
 - The full list is in [What it can and cannot prove](WHAT_IT_CAN_AND_CANNOT_PROVE.md).
