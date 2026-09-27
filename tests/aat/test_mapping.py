@@ -17,7 +17,8 @@ from arcaeon.record.ledger import Ledger
 SESSION = "0b7c2a6e-1f7e-4c55-9a53-2d7f0e1b9c11"
 ALLOWED = {"timestamp", "agent_id", "session_id", "action_type", "action_detail",
            "response_hash", "input_hash", "output_hash", "outcome", "sequence_number",
-           "recording_component", "chain", "source_line"}
+           "recording_component", "chain", "source_line",
+           "prev_hash"}  # K062: the draft's own chain field
 
 
 def _frame(obj):

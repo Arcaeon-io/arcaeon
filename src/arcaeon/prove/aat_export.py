@@ -28,9 +28,21 @@ Each record also carries our original `chain` (and `source_line`, the row's
 line in the ledger), because the draft's own chain (SHA-256 over RFC 8785 JCS)
 would be computed at export and proves the export, not the original. JSONL
 only: the draft calls CSV "inherently lossy".
+
+The AAT chain (K062), as the draft defines it:
+
+    prev_hash(1) = null
+    prev_hash(N) = hex(SHA-256(JCS(record(N-1))))      64 hex
+
+where record(N-1) is the whole previous record, its own `prev_hash`
+included. Each line of the file IS the JCS form of its record, so a reader
+can hash line N-1 as bytes. A value JCS cannot write exactly (NaN, Infinity,
+an integer past 2**53, a lone surrogate) is refused, left out of its record
+and listed, never rounded (`arcaeon.prove.jcs`).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -39,7 +51,7 @@ from urllib.parse import quote
 from arcaeon import verdict as V
 
 __all__ = ["map_row", "export_aat", "AAT_FORMAT", "AGENT_URI_PREFIX", "NEVER_EMITTED",
-           "AatUsageError"]
+           "AatUsageError", "chain_records", "verify_aat_bytes", "AAT_CHAIN_ALGORITHM"]
 
 AAT_FORMAT = "agent-audit-trail"
 #: The URI prefix our agent names get, so `agent_id` is a URI as the draft
@@ -60,6 +72,91 @@ _OUTCOME = {"ok": "success", "error": "failure"}
 
 class AatUsageError(ValueError):
     """The export could not start on what it was given (exit 2)."""
+
+
+#: How the AAT `prev_hash` chain is computed (the draft's rule, not ours).
+AAT_CHAIN_ALGORITHM = "prev_hash = hex(sha256(jcs(previous record))); null at genesis"
+
+
+def _drop(rec: dict, path: str) -> str:
+    """Remove the value a JcsError names from `rec`; return its top-level field."""
+    keys = path[2:].split(".") if path.startswith("$.") else []
+    top = keys[0].split("[", 1)[0] if keys else ""
+    if not top or top not in rec:
+        raise ValueError(f"cannot place {path!r} in the record")
+    parent, key = rec, top
+    for k in keys[1:]:
+        nxt = parent.get(key)
+        if not isinstance(nxt, dict) or "[" in k or k not in nxt:
+            break
+        parent, key = nxt, k
+    parent.pop(key, None)
+    if isinstance(rec.get(top), dict) and not rec[top]:
+        rec.pop(top)
+    return top
+
+
+def chain_records(records: list[dict]) -> tuple[list[bytes], str | None, list[dict]]:
+    """Give each record its AAT `prev_hash` and its JCS line.
+
+    Returns (lines, head, refused): `lines` are the JCS bytes of each record
+    in order, `head` is hex(SHA-256) of the last line (None when there are
+    none), `refused` lists every value JCS could not write exactly, each as
+    {"source_line", "field", "path", "why"}; that value is left out of its
+    record, never rounded. `records` are updated in place.
+    """
+    from arcaeon.prove.jcs import JcsError, canonicalize
+
+    lines: list[bytes] = []
+    refused: list[dict] = []
+    prev: str | None = None
+    for rec in records:
+        rec.pop("prev_hash", None)
+        rec["prev_hash"] = prev
+        while True:  # every refusal removes one value, so this ends
+            try:
+                b = canonicalize(rec)
+                break
+            except JcsError as e:
+                field = _drop(rec, e.path)
+                refused.append({"source_line": rec.get("source_line"), "field": field,
+                                "path": e.path, "why": e.why})
+        lines.append(b)
+        prev = hashlib.sha256(b).hexdigest()
+    return lines, prev, refused
+
+
+def verify_aat_bytes(raw: bytes) -> dict:
+    """Recompute the AAT chain of an exported file, line by line.
+
+    Each line must be a JSON object whose bytes are its own JCS form, with
+    `prev_hash` null on line 1 and hex(SHA-256(line N-1)) after. Returns
+    {"ok": True, "records", "head"} or {"ok": False, "line", "finding"}.
+    """
+    from arcaeon.prove.jcs import JcsError, canonicalize
+
+    prev: str | None = None
+    n = 0
+    body = raw[:-1] if raw.endswith(b"\n") else raw
+    for n, line in enumerate(body.split(b"\n") if body else [], start=1):
+        try:
+            rec = json.loads(line.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            return {"ok": False, "line": n, "finding": f"AAT line {n} is not JSON"}
+        if not isinstance(rec, dict):
+            return {"ok": False, "line": n, "finding": f"AAT line {n} is not a JSON object"}
+        try:
+            if canonicalize(rec) != line:
+                return {"ok": False, "line": n,
+                        "finding": f"AAT line {n} is not in its JCS form"}
+        except JcsError as e:
+            return {"ok": False, "line": n, "finding": f"AAT line {n}: {e}"}
+        if "prev_hash" not in rec or rec["prev_hash"] != prev:
+            return {"ok": False, "line": n,
+                    "finding": f"the AAT chain breaks at line {n}: prev_hash is not the "
+                               "hash of the line before it"}
+        prev = hashlib.sha256(line).hexdigest()
+    return {"ok": True, "records": n, "head": prev}
 
 
 def _digest(value: Any) -> str | None:
@@ -168,15 +265,19 @@ def export_aat(ledger: str | Path, out: str | Path) -> dict:
             skipped.append(n)
             continue
         records.append(map_row(row, line=n))
+    lines, head, refused = chain_records(records)
     out.parent.mkdir(parents=True, exist_ok=True)
     with out.open("wb") as fh:
-        for r in records:
-            fh.write((json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8"))
+        for b in lines:
+            fh.write(b + b"\n")
     vr = verify_file(ledger)
     word = V.VERIFIED if vr.ok is True else V.BROKEN if vr.ok is False else V.COULD_NOT_LOOK
     res = {"verdict": word, "exit": V.EXIT_BY_WORD[word], "out": str(out),
            "format": AAT_FORMAT, "records": len(records), "skipped_lines": skipped,
-           "source_chain": {"ok": vr.ok, "rows": vr.rows, "first_break": vr.first_break}}
+           "source_chain": {"ok": vr.ok, "rows": vr.rows, "first_break": vr.first_break},
+           "aat_chain": {"algorithm": AAT_CHAIN_ALGORITHM, "records": len(lines),
+                         "head": head},
+           "refused": refused}
     if word == V.BROKEN:
         res["finding"] = f"the source ledger's chain breaks at {vr.first_break}"
     elif word == V.COULD_NOT_LOOK:
