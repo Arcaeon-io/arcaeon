@@ -3,7 +3,7 @@
   "name": "io.arcaeon/arcaeon",
   "title": "Arcaeon",
   "description": "A record of what an agent did that the agent cannot quietly rewrite, and a way for anyone to check.",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "websiteUrl": "https://arcaeon.io",
   "repository": {
     "url": "https://github.com/Arcaeon-io/arcaeon",
@@ -14,7 +14,7 @@
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "arcaeon",
-      "version": "0.9.1",
+      "version": "0.10.0",
       "runtimeHint": "uvx",
       "runtimeArguments": [
         {

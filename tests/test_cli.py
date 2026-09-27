@@ -52,7 +52,7 @@ def test_help_via_python_dash_m():
     p = subprocess.run([sys.executable, "-m", "arcaeon", "--help"], capture_output=True,
                        text=True, env=env, timeout=120)
     assert p.returncode == 0, p.stderr
-    assert "reconcile" in p.stdout and "arcaeon 0.9.1" in p.stdout
+    assert "reconcile" in p.stdout and "arcaeon 0.10.0" in p.stdout
 
 
 def test_unknown_verb_is_usage_2(capsys):
@@ -103,7 +103,7 @@ def test_every_verb_version_names_arcaeon_verb(verb, capsys, monkeypatch):
     monkeypatch.delenv("ARCAEON_KEY", raising=False)
     assert cli.main([verb, "--version"]) == 0
     out = capsys.readouterr()
-    assert out.out.strip() == f"arcaeon {verb} 0.9.1", (verb, out.out[:200])
+    assert out.out.strip() == f"arcaeon {verb} 0.10.0", (verb, out.out[:200])
     assert out.err == ""
 
 
@@ -153,9 +153,9 @@ def test_a_built_lazy_verb_runs_its_module_main(tmp_path, monkeypatch):
 
 def test_version_flag_after_a_subcommand_and_dash_v(capsys):
     assert cli.main(["audit", "verify", "--version"]) == 0
-    assert capsys.readouterr().out.strip() == "arcaeon audit 0.9.1"
+    assert capsys.readouterr().out.strip() == "arcaeon audit 0.10.0"
     assert cli.main(["meter", "-V"]) == 0
-    assert capsys.readouterr().out.strip() == "arcaeon meter 0.9.1"
+    assert capsys.readouterr().out.strip() == "arcaeon meter 0.10.0"
 
 
 def test_version_after_double_dash_is_an_argument_not_the_flag(monkeypatch):
@@ -178,7 +178,7 @@ def test_once_help_is_in_the_arcaeon_form(capsys):
 def test_version_verb_names_every_family(capsys):
     assert cli.main(["version"]) == 0
     out = capsys.readouterr().out
-    assert out.startswith("arcaeon 0.9.1")
+    assert out.startswith("arcaeon 0.10.0")
     for mod in cli.COMPONENTS:
         assert mod in out
     assert "import failed" not in out
