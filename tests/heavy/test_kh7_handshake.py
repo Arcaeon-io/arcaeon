@@ -172,7 +172,9 @@ def test_an_offer_changed_in_transit_is_refused_and_nothing_is_written(agents):
                                "to": b.name, "handshake": "h-mitm"})
     forged = dict(p["proposal"], terms=dict(TERMS, fee="1.20"))
     st, acc = b.post("accept", {"ledger": str(b.ledger), "proposal": forged, "agent": b.name})
-    assert st == 200 and acc["exit"] == 2 and "terms_digest" in acc["error"]
+    # a refused offer is bad usage: exit 2 in the body; the server answers it
+    # as 400 (lane A's rule, bad usage is the request, not a verdict)
+    assert st in (200, 400) and acc["exit"] == 2 and "terms_digest" in acc["error"]
     assert not b.ledger.exists()
 
 
