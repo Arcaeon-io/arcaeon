@@ -22,6 +22,7 @@ from arcaeon import verdict as V
 
 __all__ = ["build_pack", "select_window", "parse_when", "PackUsageError",
            "PACK_SCHEMA", "MANIFEST", "CNL_FILE", "README", "DOES_NOT_SHOW",
+           "README_DOES_NOT_SHOW",
            "OPERATOR_AT_T"]
 
 #: The evidence-pack manifest schema. 1 is the first (K053).
@@ -48,6 +49,20 @@ DOES_NOT_SHOW = (
     "what is missing.",
     "Not six-month retention by us. Retention is the holder's.",
 )
+#: The same bullets as a customer reads them in README.md: identical except
+#: that the two internal references are spelled out for a stranger (the
+#: roadmap code "(P7)" is dropped, since "the custody record" already names
+#: it, and "by us" names who "us" is). The constant above stays verbatim.
+_README_WORDING = ((" (P7)", ""), ("by us.", "by the operator of the hosted witness."))
+
+
+def _for_readme(bullet: str) -> str:
+    for old, new in _README_WORDING:
+        bullet = bullet.replace(old, new)
+    return bullet
+
+
+README_DOES_NOT_SHOW = tuple(_for_readme(b) for b in DOES_NOT_SHOW)
 #: Who operated the witness at pin time. UNKNOWN until a custody record
 #: is published and anchored (spec section 6): never a guess.
 OPERATOR_AT_T = "UNKNOWN"
@@ -340,7 +355,7 @@ def _write_readme(out: Path, res: dict, window: list[dict], *,
         "## What this pack does not show",
         "",
     ]
-    lines += [f"- {b}" for b in DOES_NOT_SHOW]
+    lines += [f"- {b}" for b in README_DOES_NOT_SHOW]
     lines += [
         "",
         "## How to check it yourself",

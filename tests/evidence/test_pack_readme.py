@@ -6,7 +6,7 @@ import re
 import pytest
 
 from arcaeon import verdict as V
-from arcaeon.prove.evidence_pack import DOES_NOT_SHOW, build_pack
+from arcaeon.prove.evidence_pack import DOES_NOT_SHOW, README_DOES_NOT_SHOW, build_pack
 
 # the same negation rule tests/test_docs.py applies to the product README
 _NEGATIONS = ("not ", "never ", "no ", "nor ", "isn't ", "is not ")
@@ -61,7 +61,14 @@ def test_does_not_show_bullets_verbatim(pack):
     text = _readme(pack[0])
     section = text.split("## What this pack does not show", 1)[1].split("\n## ", 1)[0]
     bullets = [l[2:] for l in section.splitlines() if l.startswith("- ")]
-    assert bullets == list(DOES_NOT_SHOW)
+    assert bullets == list(README_DOES_NOT_SHOW)
+    # the customer page spells out the internal references, nothing else moves
+    assert "(P7)" not in text and "by us" not in text
+    assert "until the custody record is published and anchored" in text
+    assert "Not six-month retention by the operator of the hosted witness." in text
+    changed = [i for i, (a, b) in enumerate(zip(DOES_NOT_SHOW, README_DOES_NOT_SHOW))
+               if a != b]
+    assert changed == [3, 5]
     # spec section 6, verbatim: six bullets, the first names the overclaims
     assert len(DOES_NOT_SHOW) == 6
     assert DOES_NOT_SHOW[0].startswith('Not "Article 12 compliant", "AI Act ready"')
