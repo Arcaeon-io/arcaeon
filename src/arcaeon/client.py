@@ -96,15 +96,19 @@ def _read_token() -> str | None:
 
 
 def is_loopback(host: str | None) -> bool:
-    """True for localhost, 127.0.0.0/8 and ::1."""
+    """True for localhost, 127.0.0.0/8 and ::1. An IPv4-mapped address
+    (::ffff:127.0.0.1) is not loopback here, the same rule as the JS client."""
     if not host:
         return False
     if host.lower().rstrip(".") == "localhost":
         return True
     try:
-        return ipaddress.ip_address(host.strip("[]")).is_loopback
+        ip = ipaddress.ip_address(host.strip("[]"))
     except ValueError:
         return False
+    if ip.version == 6 and ip.ipv4_mapped is not None:
+        return False
+    return ip.is_loopback
 
 
 def _could_not_look(where, reason_word: str, reason: str) -> dict:

@@ -203,3 +203,13 @@ def test_plain_http_to_another_host_is_refused_unless_allowed(fake_conn):
         r = Client(url="http://example.invalid:8787", token=tok).verify(ledger="x")
         assert (r["exit"], r["reason_word"]) == (2, "insecure")
     assert fake_conn.made == []                      # nothing was sent at all
+
+
+@pytest.mark.parametrize("host", ["::ffff:127.0.0.1", "[::ffff:127.0.0.1]", "::ffff:7f00:1"])
+def test_an_ipv4_mapped_loopback_is_not_loopback_as_in_js(host):
+    assert not C.is_loopback(host)
+
+
+def test_the_home_token_does_not_go_to_an_ipv4_mapped_host(fake_conn):
+    r = Client(url="http://[::ffff:127.0.0.1]:8787").verify(ledger="x")
+    assert (r["exit"], r["reason_word"]) == (2, "insecure") and fake_conn.made == []
