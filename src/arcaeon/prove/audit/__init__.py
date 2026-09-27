@@ -597,6 +597,312 @@ def _could_not_look_fields(finding: str, vr: Any, wv: Any, witness_block: dict,
             "where": witness_where, "reason_word": "unreadable"}
 
 
+def derive_finding(vr: Any, wv: Any) -> str:
+    """The detailed finding (PASS, FAIL, VERIFIED_MODULO_TRUNCATION, ...) from
+    the chain verdict `vr` and the witness verdict `wv` (None when no witness
+    and namespace were cross-checked). One function for export_bundle and
+    for `evidence-pack verify`, which derives it again (K06xR3)."""
+    truncation_checked = wv is not None and wv.verdict != "no_record"
+    truncation_ok = ({"consistent": True, "truncated": False,
+                      "rewritten": False}.get(wv.verdict)
+                     if truncation_checked else None)
+    if wv is not None and wv.verdict == "rewritten":
+        verdict = "REWRITE_DETECTED"
+    elif wv is not None and wv.verdict == "truncated":
+        verdict = "TRUNCATION_DETECTED"
+    elif wv is not None and wv.verdict in ("witness_broken", "local_broken"):
+        # the fault is in the named artifact, not necessarily the record set
+        verdict = "WITNESS_CHECK_FAILED"
+    elif wv is not None and wv.verdict == "no_record":
+        # C9 (pre-invite audit): `wv is not None` only when the CALLER explicitly
+        # configured both a witness AND a namespace (see `wv = None` default
+        # above) — this is not "nobody asked", it is "somebody asked THIS exact
+        # namespace and nothing was there". That used to fall through to the
+        # tri-state chain below and land on VERIFIED_MODULO_TRUNCATION, exit 0,
+        # identical to a caller who never configured a witness at all. A
+        # mistyped or miscased namespace silently disabled the check, at zero
+        # visible cost, chosen by the same party being audited. Now it is a
+        # check that could not complete, not a clean skip.
+        verdict = "WITNESS_CHECK_FAILED"
+    elif vr.ok is None and getattr(vr, "verified_scope", "") == "empty" and vr.rows == 0:
+        verdict = "EMPTY_LOG"            # nothing recorded yet; nothing to accuse
+    elif vr.ok is None:
+        # rows exist, the chain could not speak for them: say exactly that
+        verdict = "UNVERIFIED_SCOPE"
+    elif not vr.ok:
+        verdict = "FAIL"
+    elif not truncation_checked:
+        verdict = "VERIFIED_MODULO_TRUNCATION"
+    elif truncation_ok:
+        verdict = "PASS"
+    else:
+        # a verdict this version has never heard of: report it verbatim rather
+        # than converting the unknown into the worst available accusation.
+        # `is not None`, not truthiness (0.1.8): WitnessVerdict is truthy ONLY
+        # on "consistent", so `if wv` was False for every verdict that reaches
+        # a prose line below, and each one printed its generic fallback -- this
+        # verdict read ":none", TRUNCATION_DETECTED lost the ledger's row
+        # arithmetic, WITNESS_CHECK_FAILED said "witness unavailable" for a
+        # witness that answered. integrity.json had the detail; the summary
+        # a regulator reads did not.
+        verdict = f"UNRECOGNIZED_WITNESS_VERDICT:{wv.verdict if wv is not None else 'none'}"
+    return verdict
+
+
+def render_summary(*, vr: Any, verdict: str, wv: Any, witness_block: dict,
+                   store_configured: bool, witness_namespace: str | None,
+                   unreadable: int, instrument_notes: str | None,
+                   system_id: str, provider: str, rows_count: int, s: dict,
+                   stamp: str, version: str = __version__) -> str:
+    """ARTICLE_12_SUMMARY.md's text. One function for export_bundle and for
+    `evidence-pack verify`, which re-renders it from the records and the
+    witness block and compares it byte for byte (K06xR3): prose a pack
+    carries is re-derived, never trusted. `wv` is None when no witness
+    and namespace were cross-checked, else any object with `verdict`,
+    `detail` and `witness_rows`."""
+    # How much the CHAIN can say about these rows. Since a witness accusation
+    # now outranks the chain-scope verdict (see the verdict chain above), the
+    # accusation branches can be reached with an unverified or broken chain —
+    # so none of them may assert "the chain itself is intact" unconditionally.
+    if vr.ok:
+        _chain_state = "the chain itself is intact"
+    elif vr.ok is None:
+        _chain_state = ("the chain could not speak for these rows (they carry no "
+                        "chain links, so nothing was verified locally)")
+    else:
+        _chain_state = "the chain is ALSO broken"
+
+    if verdict == "EMPTY_LOG":
+        integrity_line = (
+            "EMPTY_LOG — no records have been written yet. There is nothing to verify "
+            "and nothing to accuse: an empty log is an absence of evidence, not "
+            "evidence of tampering. (Before 2026-08-23 this case exported as FAIL with "
+            "an alteration accusation — an external audit caught it; the ledger's own "
+            "ok=None tri-state now passes through honestly.)")
+    elif verdict == "WITNESS_CHECK_FAILED":
+        integrity_line = (
+            f"WITNESS_CHECK_FAILED — {_chain_state}, but the witness "
+            f"cross-check could not complete: {wv.detail if wv is not None else 'witness unavailable'}. "
+            "The fault is in the witness consultation, not (necessarily) in the record "
+            "set. Do not read this as tampering, and do not read it as a pass: the "
+            "completeness question is unanswered.")
+    elif verdict.startswith("UNRECOGNIZED_WITNESS_VERDICT"):
+        integrity_line = (
+            f"{verdict} — the witness returned a verdict this version of arcaeon-audit "
+            "does not recognize (likely a newer arcaeon-ledger vocabulary). Reported "
+            "verbatim rather than mapped onto an accusation. Upgrade arcaeon-audit, or "
+            "read the raw witness block in integrity.json.")
+    elif verdict == "FAIL":
+        integrity_line = (
+            f"FAIL — integrity broken at: {vr.first_break}. The record set has been "
+            "altered, truncated, or reordered since it was written.")
+    elif verdict == "PASS":
+        integrity_line = (
+            f"PASS — no tampering detected, and the witnessed prefix is complete. Every "
+            f"record chains to the prior one, and the log's chain at the witnessed row "
+            f"still matches an external witness pin (namespace {witness_namespace!r}, "
+            f"{wv.witness_rows if wv is not None else '?'} row(s) witnessed): no records were dropped AT OR BEFORE "
+            f"the witnessed point (row {wv.witness_rows if wv is not None else '?'}). This does NOT cover records "
+            "written AFTER the last pin — anything logged past the witnessed head can "
+            "still be dropped undetectably, so the completeness guarantee runs only up to "
+            "the last pin (pin close to export to shrink that window). It also assumes the "
+            "witness is controlled INDEPENDENTLY of whoever can write the log: a witness an "
+            "attacker can also rewrite proves nothing."
+            + ("" if witness_block.get("self_integrity") == "verified" else
+               " READ THIS BEFORE RELYING ON THE PASS: the witness did NOT prove its own "
+               "record was unedited (self_integrity="
+               f"{witness_block.get('self_integrity', 'unknown')!r}). Every remote/hosted "
+               "witness client is this shape, and so is arcaeon-ledger before 0.5.9. The "
+               "comparison above therefore rests on a pin whose own integrity was never "
+               "established here — an attacker who can write BOTH the log and the pin can "
+               "produce exactly this PASS. Check the witness at its source."))
+    elif verdict == "TRUNCATION_DETECTED":
+        integrity_line = (
+            f"TRUNCATION_DETECTED — {_chain_state}, but {wv.detail if wv is not None else 'the witness reported truncation'}. A hash "
+            "chain cannot see truncation on its own (a truncated prefix still chains "
+            "clean); the external witness caught it. This log is MISSING records that "
+            "existed when it was witnessed — it is NOT a complete record and must not "
+            "be treated as one.")
+    elif verdict == "REWRITE_DETECTED":
+        integrity_line = (
+            f"REWRITE_DETECTED — {wv.detail if wv is not None else 'the witness reported a rewrite'}. The exported log has enough rows, but its "
+            "chain at the witnessed row disagrees with the external witness: history was "
+            "rewritten from at or before that point.")
+    elif verdict == "UNVERIFIED_SCOPE":
+        # WHY the scan was bounded, from the ledger's own scope fields rather
+        # than one hardcoded story (audit 2026-08-28). ok=None has more than one
+        # cause and 0.6.0 added another: `bounded_declared_break` has prechain
+        # == 0, so this rendered "the chain could not speak for 0 of them: they
+        # carry no chain links" — a sentence that contradicts itself, names the
+        # wrong cause, and then advises a fix ("chain the log going forward")
+        # for a condition the reader does not have. The verdict was right and
+        # the sentence beside it was false; a regulator reads the sentence.
+        _scope = getattr(vr, "verified_scope", "") or "bounded"
+        _pre = getattr(vr, "prechain", 0) or 0
+        _decl = getattr(vr, "declared_breaks", 0) or 0
+        _why, _advice = [], []
+        if _pre:
+            _why.append(f"{_pre} row(s) carry no chain links, so nothing about "
+                        "them was verified locally")
+            _advice.append("Chain the log going forward and pin it to a witness; "
+                           "rows written from that point on are verifiable.")
+        if _decl:
+            _why.append(f"{_decl} declared break(s) bound the scan — the chain was "
+                        "not checked ACROSS those rows (the breaks are named in "
+                        "`declared`, and they stay named permanently)")
+            _advice.append("A declared break is an honest permanent record, not a "
+                           "repair: the rows on either side of it are chained, the "
+                           "join between them is not.")
+        if not _why:
+            _why.append(f"the chain's scan was bounded (verified_scope={_scope!r}) "
+                        "for a reason this version of arcaeon-audit does not "
+                        "itemize — read `verified_scope` in integrity.json")
+        integrity_line = (
+            f"UNVERIFIED_SCOPE — this log contains {vr.rows} record(s) and the chain "
+            f"could not speak for all of them (verified_scope={_scope!r}): "
+            + "; ".join(_why) + ". This is NOT a pass and NOT an accusation — it is "
+            "an unanswered question. " + " ".join(_advice) + (" " if _advice else "")
+            + "(Before 2026-08-23 this case exported as EMPTY_LOG — 'no records have "
+            "been written yet' — over a log with records in it, which also masked a "
+            "positive witness detection. A pre-invite adversarial audit caught it.)")
+    else:  # VERIFIED_MODULO_TRUNCATION
+        # A HALF-CONFIGURED WITNESS IS A SKIPPED CHECK, NOT AN ABSENT ONE
+        # (audit 2026-08-28). `witness` and `witness_namespace` are two
+        # arguments and the check needs both; supply exactly one and the
+        # truncation cross-check silently does not run, at exit 0, while this
+        # sentence told the reader "no external witness was consulted" — over a
+        # run whose own `witness` block in the same integrity.json records
+        # kind: local_file and the store's path. That is C9's defect (a
+        # mistyped namespace silently disabling the check at zero visible cost,
+        # chosen by the party being audited) one argument over, and the
+        # contradiction is inside a single artefact.
+        # The VERDICT is deliberately unchanged here — see CHANGELOG 0.1.7,
+        # flagged for a consumer-visible decision rather than taken silently.
+        # The prose stops lying either way.
+        # (The old `no_pin` branch this replaces was unreachable: wv.verdict ==
+        # "no_record" became WITNESS_CHECK_FAILED in 0.1.5's C9 fix, so it can
+        # never arrive at VERIFIED_MODULO_TRUNCATION.)
+        if store_configured and not witness_namespace:
+            why = ("a witness WAS configured but no `witness_namespace` was given, so "
+                   "the cross-check never ran — this is a SKIPPED check, not an "
+                   "absent one; supply both to close the gap, and")
+        elif not store_configured and witness_namespace:
+            why = (f"a namespace ({witness_namespace!r}) was given but no witness was "
+                   "configured, so the cross-check never ran — a SKIPPED check, not "
+                   "an absent one; supply both to close the gap, and")
+        else:
+            why = "no external witness was consulted, and"
+        integrity_line = (
+            "VERIFIED (MODULO TRUNCATION) — no tampering detected: every record chains to "
+            f"the prior one. TRUNCATION NOT CHECKED — {why} a hash chain provably cannot "
+            "detect truncation on its own (dropping the most recent rows leaves a prefix "
+            "that still verifies clean). This is NOT a proof of completeness. Pin the log "
+            "to an external witness to close this gap.")
+    if witness_block.get("kind") not in (None, "none"):
+        integrity_line += (
+            f"\n\nWitness independence — kind: {witness_block['kind']}; "
+            f"identifier: {witness_block.get('identifier')}; "
+            f"independence: {witness_block['independence']}. {witness_block['note']}")
+    # Point the reader at a source WE DO NOT CONTROL (pre-invite audit C6). Without
+    # this, every instruction in this document resolves to "re-run their tool on
+    # the bytes they gave you", which is self-attestation with extra steps.
+    _ns = witness_namespace or witness_block.get("namespace")
+    _wr, _wc = witness_block.get("witness_rows"), witness_block.get("witness_chain")
+    if _ns and _wr is not None and _wc:
+        integrity_line += (
+            f"\n\nCHECK THIS WITHOUT TRUSTING US. The witnessed head above is held by a "
+            f"public witness whose pin store is a PUBLIC git repository. Fetch it yourself, "
+            f"no account and no credential:\n\n"
+            f"    curl -s '{PUBLIC_WITNESS_BASE}/api/verify{_verify_query(_ns, _wr, _wc)}'\n\n"
+            f"Read `witnessed` and `is_current_head`, then open the `raw_record_url` it "
+            f"returns — that file lives in the public repo, and its commit history is linked "
+            f"as `history`. If those numbers disagree with this bundle, believe the public "
+            f"repository, not this document. (If the namespace is not found there, this log "
+            f"was pinned to a privately held witness and its completeness rests on a record "
+            f"you cannot independently reach — which is itself worth knowing.)")
+    if unreadable:
+        integrity_line += (f"\n\n{unreadable} line(s) in the log could not be read as a "
+                           "record (unparseable, non-UTF8, or not a JSON object). They are "
+                           "preserved verbatim in `records.jsonl` and excluded from the "
+                           "counts below — an export never silently drops what it cannot read.")
+    # The same disclosure, in the human-readable half of the bundle. Verbatim
+    # again: whatever the author wrote is dropped in unaltered under its own
+    # heading, so a reader who never opens integrity.json still meets the
+    # instrument's confessed limits next to its verdict.
+    instrument_section = "" if instrument_notes is None else f"""
+## Instrument — known defects of this check
+*Supplied by the author of this audit and reproduced verbatim; `arcaeon-audit`
+does not validate, edit, or vouch for its contents. Also in the bundle as
+`INSTRUMENT_NOTES.md` and in `integrity.json` under `instrument_notes`.*
+
+{instrument_notes}
+"""
+
+    summary = f"""# Article 12 audit export — {system_id or '(unnamed system)'}
+
+**Provider:** {provider or '(unspecified)'}
+**Records:** {rows_count}  ·  **Period covered:** {s['first_ts']} → {s['last_ts']}
+**Generated:** {stamp} by arcaeon-audit/{version}
+
+## Integrity
+{integrity_line}
+{instrument_section}
+Verification is reproducible by anyone: `records.jsonl` is hash-chained, so
+re-running arcaeon-ledger's `verify_file()` reproduces `integrity.json`. Tamper
+evidence does not depend on trusting this tool or its author.
+
+## How this maps to EU AI Act Article 12
+*Scope note, stated here because vendors routinely overstate this: Article 12
+requires automatic recording of events. It does not require tamper-evidence or
+integrity protection — the rows below marked "beyond Article 12" are engineering
+properties this tool adds because they make the record usable as evidence, not
+because the Act demands them.*
+
+- **Automatic recording of events over the lifetime (Art.12(1)):** every action
+  is appended automatically at the time it happens; timestamps are on each row.
+- **Traceability appropriate to the intended purpose (Art.12(2)):** records carry
+  system_id, agent, event type, inputs, outputs, decisions, and the acting
+  principal + capability version.
+- **Periods of use (Art.12(3)(a)):** see `system_start`/`system_stop` events and
+  `period_covered` in the manifest.
+- **Reference database checked (Art.12(3)(b)):** see `reference_check` events;
+  what they name is the operator's to record.
+- **Input data that led to a match (Art.12(3)(c)):** see `inputs` on `input`
+  and `reference_check` rows.
+- **Tamper-evidence (beyond Article 12 — the Act does not require this):**
+  hash-chaining makes any post-hoc edit, deletion, or reorder detectable and
+  locatable — the property a plain log file does not have, and the property that
+  makes the record evidence rather than a self-report when it is challenged.
+- **Truncation (the one thing a chain cannot catch alone):** deleting the most
+  recent records leaves a prefix that still chains clean, so tamper-evidence by
+  itself cannot prove a log is *complete*. That gap is closed only by an external
+  witness — an outside record of the log's head that a later truncation would
+  disagree with. When a witness is consulted, this export reports it under
+  `witness` in `integrity.json` (and `witness.json`); a bundle marked PASS has
+  been checked against a witness, while "verified modulo truncation" means the
+  chain is intact but completeness was not witnessed. See the Integrity line above.
+- **Witness independence (judge it yourself):** the `witness` block in
+  `integrity.json` names the witness's `kind` (`local_file` / `remote_url` /
+  `opentimestamps` / `none`), its `identifier`, and an honest `independence` label
+  (`self_asserted` / `externally_verifiable` / `none`). A witness only proves
+  completeness if it is controlled INDEPENDENTLY of whoever can write the log — a
+  `local_file` witness sits in the writer's own control domain and is labelled
+  `self_asserted`, NOT independent. This lets a regulator see the independence
+  question rather than take a bare PASS on trust.
+
+## What this is NOT
+This is an engineering control that produces tamper-evident, exportable records.
+It is not legal advice and does not by itself make a system compliant. Article 12
+compliance depends on WHAT you choose to log and your broader obligations under
+the Act. This tool gives you the integrity + export primitive; the coverage is
+yours to define.
+
+## Event counts
+{chr(10).join(f'- {k}: {v}' for k, v in sorted(s['counts'].items())) or '- (none)'}
+"""
+    return summary
+
+
 def export_bundle(log_path: str | Path, out_dir: str | Path, *,
                   system_id: str = "", provider: str = "",
                   witness: Any = None,
@@ -726,46 +1032,7 @@ def export_bundle(log_path: str | Path, out_dir: str | Path, *,
     # Rule 2 also protects the honest adopter: the documented adoption path
     # leaves prechain rows, so a real customer's real log was exporting as
     # "no records have been written yet".
-    if wv is not None and wv.verdict == "rewritten":
-        verdict = "REWRITE_DETECTED"
-    elif wv is not None and wv.verdict == "truncated":
-        verdict = "TRUNCATION_DETECTED"
-    elif wv is not None and wv.verdict in ("witness_broken", "local_broken"):
-        # the fault is in the named artifact, not necessarily the record set
-        verdict = "WITNESS_CHECK_FAILED"
-    elif wv is not None and wv.verdict == "no_record":
-        # C9 (pre-invite audit): `wv is not None` only when the CALLER explicitly
-        # configured both a witness AND a namespace (see `wv = None` default
-        # above) — this is not "nobody asked", it is "somebody asked THIS exact
-        # namespace and nothing was there". That used to fall through to the
-        # tri-state chain below and land on VERIFIED_MODULO_TRUNCATION, exit 0,
-        # identical to a caller who never configured a witness at all. A
-        # mistyped or miscased namespace silently disabled the check, at zero
-        # visible cost, chosen by the same party being audited. Now it is a
-        # check that could not complete, not a clean skip.
-        verdict = "WITNESS_CHECK_FAILED"
-    elif vr.ok is None and getattr(vr, "verified_scope", "") == "empty" and vr.rows == 0:
-        verdict = "EMPTY_LOG"            # nothing recorded yet; nothing to accuse
-    elif vr.ok is None:
-        # rows exist, the chain could not speak for them: say exactly that
-        verdict = "UNVERIFIED_SCOPE"
-    elif not vr.ok:
-        verdict = "FAIL"
-    elif not truncation_checked:
-        verdict = "VERIFIED_MODULO_TRUNCATION"
-    elif truncation_ok:
-        verdict = "PASS"
-    else:
-        # a verdict this version has never heard of: report it verbatim rather
-        # than converting the unknown into the worst available accusation.
-        # `is not None`, not truthiness (0.1.8): WitnessVerdict is truthy ONLY
-        # on "consistent", so `if wv` was False for every verdict that reaches
-        # a prose line below, and each one printed its generic fallback -- this
-        # verdict read ":none", TRUNCATION_DETECTED lost the ledger's row
-        # arithmetic, WITNESS_CHECK_FAILED said "witness unavailable" for a
-        # witness that answered. integrity.json had the detail; the summary
-        # a regulator reads did not.
-        verdict = f"UNRECOGNIZED_WITNESS_VERDICT:{wv.verdict if wv is not None else 'none'}"
+    verdict = derive_finding(vr, wv)
 
     # 0.9.0: `verdict` is the one Arcaeon word (arcaeon.verdict), and the
     # detailed ten-value string that `verdict` carried through arcaeon-audit
@@ -831,245 +1098,11 @@ def export_bundle(log_path: str | Path, out_dir: str | Path, *,
                 "generated_at": stamp, "tool": f"arcaeon-audit/{__version__}"}
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
-    # How much the CHAIN can say about these rows. Since a witness accusation
-    # now outranks the chain-scope verdict (see the verdict chain above), the
-    # accusation branches can be reached with an unverified or broken chain —
-    # so none of them may assert "the chain itself is intact" unconditionally.
-    if vr.ok:
-        _chain_state = "the chain itself is intact"
-    elif vr.ok is None:
-        _chain_state = ("the chain could not speak for these rows (they carry no "
-                        "chain links, so nothing was verified locally)")
-    else:
-        _chain_state = "the chain is ALSO broken"
-
-    if verdict == "EMPTY_LOG":
-        integrity_line = (
-            "EMPTY_LOG — no records have been written yet. There is nothing to verify "
-            "and nothing to accuse: an empty log is an absence of evidence, not "
-            "evidence of tampering. (Before 2026-08-23 this case exported as FAIL with "
-            "an alteration accusation — an external audit caught it; the ledger's own "
-            "ok=None tri-state now passes through honestly.)")
-    elif verdict == "WITNESS_CHECK_FAILED":
-        integrity_line = (
-            f"WITNESS_CHECK_FAILED — {_chain_state}, but the witness "
-            f"cross-check could not complete: {wv.detail if wv is not None else 'witness unavailable'}. "
-            "The fault is in the witness consultation, not (necessarily) in the record "
-            "set. Do not read this as tampering, and do not read it as a pass: the "
-            "completeness question is unanswered.")
-    elif verdict.startswith("UNRECOGNIZED_WITNESS_VERDICT"):
-        integrity_line = (
-            f"{verdict} — the witness returned a verdict this version of arcaeon-audit "
-            "does not recognize (likely a newer arcaeon-ledger vocabulary). Reported "
-            "verbatim rather than mapped onto an accusation. Upgrade arcaeon-audit, or "
-            "read the raw witness block in integrity.json.")
-    elif verdict == "FAIL":
-        integrity_line = (
-            f"FAIL — integrity broken at: {vr.first_break}. The record set has been "
-            "altered, truncated, or reordered since it was written.")
-    elif verdict == "PASS":
-        integrity_line = (
-            f"PASS — no tampering detected, and the witnessed prefix is complete. Every "
-            f"record chains to the prior one, and the log's chain at the witnessed row "
-            f"still matches an external witness pin (namespace {witness_namespace!r}, "
-            f"{wv.witness_rows if wv is not None else '?'} row(s) witnessed): no records were dropped AT OR BEFORE "
-            f"the witnessed point (row {wv.witness_rows if wv is not None else '?'}). This does NOT cover records "
-            "written AFTER the last pin — anything logged past the witnessed head can "
-            "still be dropped undetectably, so the completeness guarantee runs only up to "
-            "the last pin (pin close to export to shrink that window). It also assumes the "
-            "witness is controlled INDEPENDENTLY of whoever can write the log: a witness an "
-            "attacker can also rewrite proves nothing."
-            + ("" if witness_block.get("self_integrity") == "verified" else
-               " READ THIS BEFORE RELYING ON THE PASS: the witness did NOT prove its own "
-               "record was unedited (self_integrity="
-               f"{witness_block.get('self_integrity', 'unknown')!r}). Every remote/hosted "
-               "witness client is this shape, and so is arcaeon-ledger before 0.5.9. The "
-               "comparison above therefore rests on a pin whose own integrity was never "
-               "established here — an attacker who can write BOTH the log and the pin can "
-               "produce exactly this PASS. Check the witness at its source."))
-    elif verdict == "TRUNCATION_DETECTED":
-        integrity_line = (
-            f"TRUNCATION_DETECTED — {_chain_state}, but {wv.detail if wv is not None else 'the witness reported truncation'}. A hash "
-            "chain cannot see truncation on its own (a truncated prefix still chains "
-            "clean); the external witness caught it. This log is MISSING records that "
-            "existed when it was witnessed — it is NOT a complete record and must not "
-            "be treated as one.")
-    elif verdict == "REWRITE_DETECTED":
-        integrity_line = (
-            f"REWRITE_DETECTED — {wv.detail if wv is not None else 'the witness reported a rewrite'}. The exported log has enough rows, but its "
-            "chain at the witnessed row disagrees with the external witness: history was "
-            "rewritten from at or before that point.")
-    elif verdict == "UNVERIFIED_SCOPE":
-        # WHY the scan was bounded, from the ledger's own scope fields rather
-        # than one hardcoded story (audit 2026-08-28). ok=None has more than one
-        # cause and 0.6.0 added another: `bounded_declared_break` has prechain
-        # == 0, so this rendered "the chain could not speak for 0 of them: they
-        # carry no chain links" — a sentence that contradicts itself, names the
-        # wrong cause, and then advises a fix ("chain the log going forward")
-        # for a condition the reader does not have. The verdict was right and
-        # the sentence beside it was false; a regulator reads the sentence.
-        _scope = getattr(vr, "verified_scope", "") or "bounded"
-        _pre = getattr(vr, "prechain", 0) or 0
-        _decl = getattr(vr, "declared_breaks", 0) or 0
-        _why, _advice = [], []
-        if _pre:
-            _why.append(f"{_pre} row(s) carry no chain links, so nothing about "
-                        "them was verified locally")
-            _advice.append("Chain the log going forward and pin it to a witness; "
-                           "rows written from that point on are verifiable.")
-        if _decl:
-            _why.append(f"{_decl} declared break(s) bound the scan — the chain was "
-                        "not checked ACROSS those rows (the breaks are named in "
-                        "`declared`, and they stay named permanently)")
-            _advice.append("A declared break is an honest permanent record, not a "
-                           "repair: the rows on either side of it are chained, the "
-                           "join between them is not.")
-        if not _why:
-            _why.append(f"the chain's scan was bounded (verified_scope={_scope!r}) "
-                        "for a reason this version of arcaeon-audit does not "
-                        "itemize — read `verified_scope` in integrity.json")
-        integrity_line = (
-            f"UNVERIFIED_SCOPE — this log contains {vr.rows} record(s) and the chain "
-            f"could not speak for all of them (verified_scope={_scope!r}): "
-            + "; ".join(_why) + ". This is NOT a pass and NOT an accusation — it is "
-            "an unanswered question. " + " ".join(_advice) + (" " if _advice else "")
-            + "(Before 2026-08-23 this case exported as EMPTY_LOG — 'no records have "
-            "been written yet' — over a log with records in it, which also masked a "
-            "positive witness detection. A pre-invite adversarial audit caught it.)")
-    else:  # VERIFIED_MODULO_TRUNCATION
-        # A HALF-CONFIGURED WITNESS IS A SKIPPED CHECK, NOT AN ABSENT ONE
-        # (audit 2026-08-28). `witness` and `witness_namespace` are two
-        # arguments and the check needs both; supply exactly one and the
-        # truncation cross-check silently does not run, at exit 0, while this
-        # sentence told the reader "no external witness was consulted" — over a
-        # run whose own `witness` block in the same integrity.json records
-        # kind: local_file and the store's path. That is C9's defect (a
-        # mistyped namespace silently disabling the check at zero visible cost,
-        # chosen by the party being audited) one argument over, and the
-        # contradiction is inside a single artefact.
-        # The VERDICT is deliberately unchanged here — see CHANGELOG 0.1.7,
-        # flagged for a consumer-visible decision rather than taken silently.
-        # The prose stops lying either way.
-        # (The old `no_pin` branch this replaces was unreachable: wv.verdict ==
-        # "no_record" became WITNESS_CHECK_FAILED in 0.1.5's C9 fix, so it can
-        # never arrive at VERIFIED_MODULO_TRUNCATION.)
-        if store is not None and not witness_namespace:
-            why = ("a witness WAS configured but no `witness_namespace` was given, so "
-                   "the cross-check never ran — this is a SKIPPED check, not an "
-                   "absent one; supply both to close the gap, and")
-        elif store is None and witness_namespace:
-            why = (f"a namespace ({witness_namespace!r}) was given but no witness was "
-                   "configured, so the cross-check never ran — a SKIPPED check, not "
-                   "an absent one; supply both to close the gap, and")
-        else:
-            why = "no external witness was consulted, and"
-        integrity_line = (
-            "VERIFIED (MODULO TRUNCATION) — no tampering detected: every record chains to "
-            f"the prior one. TRUNCATION NOT CHECKED — {why} a hash chain provably cannot "
-            "detect truncation on its own (dropping the most recent rows leaves a prefix "
-            "that still verifies clean). This is NOT a proof of completeness. Pin the log "
-            "to an external witness to close this gap.")
-    if witness_block.get("kind") not in (None, "none"):
-        integrity_line += (
-            f"\n\nWitness independence — kind: {witness_block['kind']}; "
-            f"identifier: {witness_block.get('identifier')}; "
-            f"independence: {witness_block['independence']}. {witness_block['note']}")
-    # Point the reader at a source WE DO NOT CONTROL (pre-invite audit C6). Without
-    # this, every instruction in this document resolves to "re-run their tool on
-    # the bytes they gave you", which is self-attestation with extra steps.
-    _ns = witness_namespace or witness_block.get("namespace")
-    _wr, _wc = witness_block.get("witness_rows"), witness_block.get("witness_chain")
-    if _ns and _wr is not None and _wc:
-        integrity_line += (
-            f"\n\nCHECK THIS WITHOUT TRUSTING US. The witnessed head above is held by a "
-            f"public witness whose pin store is a PUBLIC git repository. Fetch it yourself, "
-            f"no account and no credential:\n\n"
-            f"    curl -s '{PUBLIC_WITNESS_BASE}/api/verify{_verify_query(_ns, _wr, _wc)}'\n\n"
-            f"Read `witnessed` and `is_current_head`, then open the `raw_record_url` it "
-            f"returns — that file lives in the public repo, and its commit history is linked "
-            f"as `history`. If those numbers disagree with this bundle, believe the public "
-            f"repository, not this document. (If the namespace is not found there, this log "
-            f"was pinned to a privately held witness and its completeness rests on a record "
-            f"you cannot independently reach — which is itself worth knowing.)")
-    if unreadable:
-        integrity_line += (f"\n\n{unreadable} line(s) in the log could not be read as a "
-                           "record (unparseable, non-UTF8, or not a JSON object). They are "
-                           "preserved verbatim in `records.jsonl` and excluded from the "
-                           "counts below — an export never silently drops what it cannot read.")
-    # The same disclosure, in the human-readable half of the bundle. Verbatim
-    # again: whatever the author wrote is dropped in unaltered under its own
-    # heading, so a reader who never opens integrity.json still meets the
-    # instrument's confessed limits next to its verdict.
-    instrument_section = "" if instrument_notes is None else f"""
-## Instrument — known defects of this check
-*Supplied by the author of this audit and reproduced verbatim; `arcaeon-audit`
-does not validate, edit, or vouch for its contents. Also in the bundle as
-`INSTRUMENT_NOTES.md` and in `integrity.json` under `instrument_notes`.*
-
-{instrument_notes}
-"""
-
-    summary = f"""# Article 12 audit export — {system_id or '(unnamed system)'}
-
-**Provider:** {provider or '(unspecified)'}
-**Records:** {len(rows)}  ·  **Period covered:** {s['first_ts']} → {s['last_ts']}
-**Generated:** {stamp} by arcaeon-audit/{__version__}
-
-## Integrity
-{integrity_line}
-{instrument_section}
-Verification is reproducible by anyone: `records.jsonl` is hash-chained, so
-re-running arcaeon-ledger's `verify_file()` reproduces `integrity.json`. Tamper
-evidence does not depend on trusting this tool or its author.
-
-## How this maps to EU AI Act Article 12
-*Scope note, stated here because vendors routinely overstate this: Article 12
-requires automatic recording of events. It does not require tamper-evidence or
-integrity protection — the rows below marked "beyond Article 12" are engineering
-properties this tool adds because they make the record usable as evidence, not
-because the Act demands them.*
-
-- **Automatic recording of events over the lifetime (Art.12(1)):** every action
-  is appended automatically at the time it happens; timestamps are on each row.
-- **Traceability appropriate to the intended purpose (Art.12(2)):** records carry
-  system_id, agent, event type, inputs, outputs, decisions, and the acting
-  principal + capability version.
-- **Periods of use (Art.12(3)(a)):** see `system_start`/`system_stop` events and
-  `period_covered` in the manifest.
-- **Reference database checked (Art.12(3)(b)):** see `reference_check` events;
-  what they name is the operator's to record.
-- **Input data that led to a match (Art.12(3)(c)):** see `inputs` on `input`
-  and `reference_check` rows.
-- **Tamper-evidence (beyond Article 12 — the Act does not require this):**
-  hash-chaining makes any post-hoc edit, deletion, or reorder detectable and
-  locatable — the property a plain log file does not have, and the property that
-  makes the record evidence rather than a self-report when it is challenged.
-- **Truncation (the one thing a chain cannot catch alone):** deleting the most
-  recent records leaves a prefix that still chains clean, so tamper-evidence by
-  itself cannot prove a log is *complete*. That gap is closed only by an external
-  witness — an outside record of the log's head that a later truncation would
-  disagree with. When a witness is consulted, this export reports it under
-  `witness` in `integrity.json` (and `witness.json`); a bundle marked PASS has
-  been checked against a witness, while "verified modulo truncation" means the
-  chain is intact but completeness was not witnessed. See the Integrity line above.
-- **Witness independence (judge it yourself):** the `witness` block in
-  `integrity.json` names the witness's `kind` (`local_file` / `remote_url` /
-  `opentimestamps` / `none`), its `identifier`, and an honest `independence` label
-  (`self_asserted` / `externally_verifiable` / `none`). A witness only proves
-  completeness if it is controlled INDEPENDENTLY of whoever can write the log — a
-  `local_file` witness sits in the writer's own control domain and is labelled
-  `self_asserted`, NOT independent. This lets a regulator see the independence
-  question rather than take a bare PASS on trust.
-
-## What this is NOT
-This is an engineering control that produces tamper-evident, exportable records.
-It is not legal advice and does not by itself make a system compliant. Article 12
-compliance depends on WHAT you choose to log and your broader obligations under
-the Act. This tool gives you the integrity + export primitive; the coverage is
-yours to define.
-
-## Event counts
-{chr(10).join(f'- {k}: {v}' for k, v in sorted(s['counts'].items())) or '- (none)'}
-"""
+    summary = render_summary(
+        vr=vr, verdict=verdict, wv=wv, witness_block=witness_block,
+        store_configured=store is not None, witness_namespace=witness_namespace,
+        unreadable=unreadable, instrument_notes=instrument_notes,
+        system_id=system_id, provider=provider, rows_count=len(rows), s=s,
+        stamp=stamp)
     (out / "ARTICLE_12_SUMMARY.md").write_text(summary, encoding="utf-8")
     return out
