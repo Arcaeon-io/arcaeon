@@ -19,10 +19,17 @@ BROKEN and COULD NOT LOOK separately and never folds them into one rate: a
 file nobody could read is not a pass and not a break, and a percentage would
 make it look like one or the other.
 
-Contents: Record (`log`, `verify`, `receipt`, `once`, `proxy`, `pin`, `deal`),
-Prove (`reconcile`, `audit`, `vet`, `badge`, `seal`, `baseline`, `compact`),
-Save (`distill`, `dedup`, `meter`), Hosted (`stamp`, `credits`, `buy`),
-Serve (`mcp`), This install (`status`, `selftest`, `version`).
+Contents: Record (`log`, `verify`, `receipt`, `once`, `proxy`, `pin`, `deal`,
+`mandate`), Prove (`reconcile`, `audit`, `vet`, `badge`, `seal`, `baseline`,
+`compact`, `second-read`, `evidence-pack`, `export`), Save (`distill`, `dedup`,
+`meter`), Hosted (`stamp`, `credits`, `buy`), Serve (`mcp`, `serve`, `connect`,
+`schema`, `open`), This install (`status`, `selftest`, `version`, `doctor`,
+`demo`).
+
+A section whose whole body is a TODO marker naming a batch item is a verb
+registered before its code landed: until that code is in, the verb answers
+`arcaeon <verb>: not built in this checkout` and exit 2, and the release
+check fails until the code and the section are both written.
 
 ---
 
@@ -265,6 +272,10 @@ MATCHED 2 of 2 compared steps
 (The commands that build those two ledgers are in DEAL.md, and the test suite
 runs them.)
 
+## `mandate`
+
+TODO(K074)
+
 ## `reconcile`
 
 Answers: do two independent records of the same calls agree? Takes the
@@ -501,6 +512,18 @@ $ arcaeon compact row.json --pre pre.json --post post.json
 
 The receipt proves what was dropped, never that dropping it was wise.
 
+## `second-read`
+
+TODO(K034)
+
+## `evidence-pack`
+
+TODO(K051)
+
+## `export`
+
+TODO(K061)
+
 ## `distill`
 
 Answers: how do I fit a big tool output into a token budget without losing
@@ -701,6 +724,22 @@ Until 1.0.0, `arcaeon` with no verb and a stdin that is not a terminal also
 starts this server, so `uvx arcaeon` in an older registry listing keeps
 working.
 
+## `serve`
+
+TODO(K004)
+
+## `connect`
+
+TODO(K019)
+
+## `schema`
+
+TODO(K013)
+
+## `open`
+
+TODO(K107)
+
 ## `status`
 
 Answers: what did arcaeon do lately on this machine, and is anything still
@@ -781,3 +820,11 @@ report gets pasted into bug reports), then each moved family's version.
 $ arcaeon version --short
 0.9.1
 ```
+
+## `doctor`
+
+TODO(K115)
+
+## `demo`
+
+TODO(K116)

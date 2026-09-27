@@ -60,6 +60,10 @@ First line out: the site's products.yaml `version` (for id arcaeon) against
 pyproject.toml. A mismatch is a WARN, a missing site checkout (looked for at
 ARCAEON_SITE_ROOT, then ../<any>/projects/arcaeon_site) a COULD NOT LOOK;
 neither changes the exit code.
+
+Second line out: the registered verbs (K001). A verb in cli.LAZY_VERBS whose
+module is not in src/, or a `TODO(K` marker still in docs/VERBS.md, is a FAIL
+(exit 1): a verb that answers "not built in this checkout" must not ship.
 """
 from __future__ import annotations
 
@@ -727,6 +731,75 @@ def site_version_line(pyproject_version: str, root: Path | None = None) -> str:
     return f"OK      site version: products.yaml and pyproject.toml both say {v}"
 
 
+# --- registered verbs: every one built, every section written (K001) -------------
+
+VERBS_DOC = "docs/VERBS.md"
+TODO_MARK = "TODO(K"
+
+
+def lazy_verb_modules(cli_text: str) -> dict[str, str] | None:
+    """{verb: dotted module} from cli.py's LAZY_VERBS literal, read with ast
+    (the check never imports the package it is checking). None if cli.py has
+    no LAZY_VERBS literal it can read."""
+    import ast
+    try:
+        tree = ast.parse(cli_text)
+    except SyntaxError:
+        return None
+    for node in tree.body:
+        target = (node.targets[0] if isinstance(node, ast.Assign) and len(node.targets) == 1
+                  else node.target if isinstance(node, ast.AnnAssign) else None)
+        if isinstance(target, ast.Name) and target.id == "LAZY_VERBS" and node.value is not None:
+            try:
+                table = ast.literal_eval(node.value)
+            except ValueError:
+                return None
+            return {v: (m[0] if isinstance(m, (tuple, list)) else m) for v, m in table.items()}
+    return None
+
+
+def _module_file(root: Path, dotted: str) -> Path | None:
+    base = root / "src" / Path(*dotted.split("."))
+    for cand in (base.with_suffix(".py"), base / "__init__.py"):
+        if cand.is_file():
+            return cand
+    return None
+
+
+def verbs_problems(root: Path = ROOT) -> list[str]:
+    """Why a release must not ship with the verbs as they are: a registered
+    verb whose module is not in src/, or a TODO(K marker left in VERBS.md.
+    Empty when there is nothing to fix. A cli.py or VERBS.md that cannot be
+    read is a problem too: a check that could not look does not pass."""
+    problems = []
+    try:
+        cli_text = (root / CLI_PATH).read_text(encoding="utf-8")
+    except OSError as e:
+        return [f"cannot read {CLI_PATH} ({e.strerror or type(e).__name__})"]
+    table = lazy_verb_modules(cli_text)
+    if table is None:
+        problems.append(f"{CLI_PATH} has no readable LAZY_VERBS table")
+    else:
+        missing = [f"{v} ({m})" for v, m in table.items() if _module_file(root, m) is None]
+        if missing:
+            problems.append("registered verb(s) with no module: " + ", ".join(missing))
+    try:
+        doc = (root / VERBS_DOC).read_text(encoding="utf-8")
+    except OSError as e:
+        problems.append(f"cannot read {VERBS_DOC} ({e.strerror or type(e).__name__})")
+    else:
+        marks = sorted(set(re.findall(re.escape(TODO_MARK) + r"\d*\)?", doc)))
+        if marks:
+            problems.append(f"{VERBS_DOC} still holds {', '.join(marks)}")
+    return problems
+
+
+def verbs_line(problems: list[str]) -> str:
+    if problems:
+        return "FAIL    verbs: " + "; ".join(problems)
+    return "OK      verbs: every registered verb has its module and a written section"
+
+
 # --- main ------------------------------------------------------------------------
 
 def _pyproject_version() -> str:
@@ -756,6 +829,8 @@ def main(argv=None) -> int:
     a = parse(argv)
     version = a.version or _pyproject_version()
     print(site_version_line(_pyproject_version()), flush=True)
+    verb_problems = verbs_problems()
+    print(verbs_line(verb_problems), flush=True)
     key = None if a.stub else _load_publish().credential(a.key_name, Path(a.env_file))
     stub = StubWitness().start()
     stubbed = not key
@@ -790,7 +865,7 @@ def main(argv=None) -> int:
         blocked = paid_path_gate(checks)
         if blocked:
             print(blocked, flush=True)
-        return 1 if blocked or any(x.status == "FAIL" for x in checks) else 0
+        return 1 if blocked or verb_problems or any(x.status == "FAIL" for x in checks) else 0
     except SetupFailed as e:
         print(f"FAIL    setup: {e}", flush=True)
         return 2

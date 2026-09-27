@@ -419,3 +419,79 @@ def test_site_version_line_does_not_trip_publish_step_parsing(tmp_path):
     publish = _load("publish_for_site_version", ROOT / "tools" / "publish.py")
     line = rc.site_version_line("0.9.2", _site(tmp_path, "0.9.1"))
     assert publish.RC_LINE.match(line) is None
+
+
+# --- K001: every registered verb built, every VERBS.md section written ----------
+
+_FAKE_CLI = '''
+VERBS = {"log": ("record", "x"), "serve": ("serve", "y")}
+LAZY_VERBS = {
+    "serve": ("arcaeon.serve.cli", "K004"),
+}
+'''
+
+
+def _verbs_root(tmp_path, *, built: bool, doc: str):
+    (tmp_path / "src" / "arcaeon").mkdir(parents=True)
+    (tmp_path / "src" / "arcaeon" / "cli.py").write_text(_FAKE_CLI, encoding="utf-8")
+    if built:
+        (tmp_path / "src" / "arcaeon" / "serve").mkdir()
+        (tmp_path / "src" / "arcaeon" / "serve" / "cli.py").write_text(
+            "def main(argv):\n    return 0\n", encoding="utf-8")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "VERBS.md").write_text(doc, encoding="utf-8")
+    return tmp_path
+
+
+def test_verbs_ok_when_every_module_exists_and_no_marker_is_left(tmp_path):
+    root = _verbs_root(tmp_path, built=True, doc="## `log`\n\ntext\n\n## `serve`\n\ntext\n")
+    assert rc.verbs_problems(root) == []
+    assert rc.verbs_line([]).startswith("OK      verbs:")
+
+
+def test_verbs_fail_on_a_missing_module_naming_it(tmp_path):
+    root = _verbs_root(tmp_path, built=False, doc="## `serve`\n\ntext\n")
+    probs = rc.verbs_problems(root)
+    assert len(probs) == 1 and "serve (arcaeon.serve.cli)" in probs[0]
+    assert rc.verbs_line(probs).startswith("FAIL    verbs:")
+
+
+def test_verbs_fail_on_a_todo_marker_naming_it(tmp_path):
+    root = _verbs_root(tmp_path, built=True, doc="## `serve`\n\nTODO(K004)\n")
+    probs = rc.verbs_problems(root)
+    assert probs == ["docs/VERBS.md still holds TODO(K004)"]
+
+
+def test_verbs_unreadable_cli_is_a_problem_not_a_pass(tmp_path):
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "VERBS.md").write_text("", encoding="utf-8")
+    probs = rc.verbs_problems(tmp_path)
+    assert probs and "cannot read" in probs[0]
+
+
+def test_verbs_the_real_checkout_names_every_unbuilt_plugin_verb():
+    """The real repo: each LAZY_VERBS module that is absent is named, and each
+    TODO section left in VERBS.md is named; nothing is quietly passed."""
+    table = rc.lazy_verb_modules((ROOT / "src" / "arcaeon" / "cli.py").read_text(encoding="utf-8"))
+    assert table and "serve" in table
+    probs = " ".join(rc.verbs_problems(ROOT))
+    for verb, mod in table.items():
+        if rc._module_file(ROOT, mod) is None:
+            assert f"{verb} ({mod})" in probs
+    doc = (ROOT / "docs" / "VERBS.md").read_text(encoding="utf-8")
+    if "TODO(K" in doc:
+        assert "still holds" in probs
+
+
+def test_main_exits_1_when_a_verb_is_unbuilt(monkeypatch, capsys, tmp_path):
+    """The verbs FAIL line decides the exit even when A, B and C pass."""
+    monkeypatch.setattr(rc, "verbs_problems", lambda root=None: ["registered verb(s) with no module: serve"])
+    monkeypatch.setattr(rc, "site_version_line", lambda v, root=None: "OK      site version: stub")
+    ok = rc.Check("A", "stub", "PASS", "ok")
+    monkeypatch.setattr(rc, "run_checks", lambda run: [ok, ok, ok])
+    monkeypatch.setattr(rc, "paid_path_gate", lambda checks, cwd=None: None)
+    monkeypatch.setattr(rc, "install", lambda house, **kw: Path(sys.executable))
+    wheel = tmp_path / "x.whl"
+    wheel.write_bytes(b"")
+    assert rc.main(["--stub", "--wheel", str(wheel)]) == 1
+    assert "FAIL    verbs: registered verb(s) with no module: serve" in capsys.readouterr().out

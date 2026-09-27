@@ -39,6 +39,7 @@ VERBS = {
     "proxy":     ("record", "wrap an MCP server and record every call at the seam"),
     "pin":       ("record", "record a ledger head with a witness (local file, or --remote)"),
     "deal":      ("record", "a witnessed transaction: mandate, commit, pay, ship, deliver, cancel, dispute, pack"),
+    "mandate":   ("record", "check a call against a mandate, record-only (lint, explain, check)"),
     "reconcile": ("prove",  "two tapes and a counter: MATCHED / MISSING / ALTERED / COULD NOT LOOK"),
     "audit":     ("prove",  "verify a log or export a regulator-ready bundle"),
     "vet":       ("prove",  "check MCP-server source (scan, grade, grade-target, verify, probe)"),
@@ -46,6 +47,9 @@ VERBS = {
     "seal":      ("prove",  "PAID: a badge sealed by the hosted witness (needs ARCAEON_KEY)"),
     "baseline":  ("prove",  "register and compare pre-registered probe sets"),
     "compact":   ("prove",  "verify a compaction receipt"),
+    "second-read": ("prove", "line up two readers' readings of the same claims (criterion, compare, ...)"),
+    "evidence-pack": ("prove", "build or verify an evidence pack for a ledger and a time window"),
+    "export":    ("prove",  "write a ledger out in another record format (agent-audit-trail)"),
     "distill":   ("save",   "cut a tool output down to a token budget, with a drop receipt"),
     "dedup":     ("save",   "drop near-verbatim repeats from a list of texts"),
     "meter":     ("save",   "keyed usage metering: keys, usage, export"),
@@ -53,9 +57,35 @@ VERBS = {
     "credits":   ("remote", "show your witness balance (needs ARCAEON_KEY)"),
     "buy":       ("remote", "print the checkout link for a plan (opens nothing)"),
     "mcp":       ("serve",  "start the MCP connector server on stdio (needs arcaeon[mcp])"),
+    "serve":     ("serve",  "start the local HTTP/JSON API on 127.0.0.1 (loopback only)"),
+    "connect":   ("serve",  "print (or, with --write, apply) the config an AI client needs"),
+    "schema":    ("serve",  "print the API as an OpenAPI document or as tool schemas"),
+    "open":      ("serve",  "open the local dashboard in a browser"),
     "status":    ("check",  "what arcaeon did lately here: last run per verb, open COULD NOT LOOKs"),
     "selftest":  ("check",  "run every bundled selftest"),
     "version":   ("check",  "print arcaeon's version and each family's"),
+    "doctor":    ("check",  "check this install: Python, extras, key set or not, server, clients"),
+    "demo":      ("check",  "a short walk-through: log two rows, verify, change a word, verify again"),
+}
+
+#: Verbs registered up front by the 9/27 plug-in batch (K001), before their
+#: code exists: verb -> (the module whose main(argv) runs it, the batch item
+#: that builds it). Each handler imports its module only when the verb runs,
+#: so `arcaeon --help` stays light. A module that is not there yet answers
+#: "arcaeon <verb>: not built in this checkout" on stderr and exit 2 (usage:
+#: the verb cannot be used here), never a traceback and never a pass.
+#: tools/release_check.py fails while any of these modules is missing.
+LAZY_VERBS = {
+    "mandate":       ("arcaeon.record.mandate_cli", "K074"),
+    "second-read":   ("arcaeon.prove.readings_cli", "K034"),
+    "evidence-pack": ("arcaeon.prove.evidence_pack_cli", "K051"),
+    "export":        ("arcaeon.prove.aat_cli", "K061"),
+    "serve":         ("arcaeon.serve.cli", "K004"),
+    "connect":       ("arcaeon.connect.cli", "K019"),
+    "schema":        ("arcaeon.schema.cli", "K013"),
+    "open":          ("arcaeon.serve.open_cli", "K107"),
+    "doctor":        ("arcaeon.doctor", "K115"),
+    "demo":          ("arcaeon.demo", "K116"),
 }
 
 FAMILY_TITLES = {"record": "Record", "prove": "Prove", "save": "Save", "remote": "Hosted",
@@ -66,11 +96,12 @@ def help_text() -> str:
     lines = [f"arcaeon {__version__}: a record of what an agent did that the agent cannot",
              "quietly rewrite, and a way for anyone who doubts it to check.", "",
              "usage: arcaeon <verb> [args...]      arcaeon <verb> --help", ""]
+    width = max(10, *(len(v) for v in VERBS))
     for fam, title in FAMILY_TITLES.items():
         lines.append(f"{title}:")
         for verb, (f, summary) in VERBS.items():
             if f == fam:
-                lines.append(f"  {verb:<10} {summary}")
+                lines.append(f"  {verb:<{width}} {summary}")
         lines.append("")
     lines += ["Exit codes, every verb: 0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK.",
               "--legacy-exit returns the old tool's own code (0.9.x only)."]
@@ -138,10 +169,12 @@ def main(argv: list[str] | None = None) -> int:
 
 
 #: Verbs the activity journal does not record: `status` reads the journal
-#: (recording it would bury the runs it reports), `mcp` is a server.
-_UNJOURNALED = {"status", "mcp"}
+#: (recording it would bury the runs it reports), `mcp` and `serve` are
+#: servers (serve journals each HTTP call itself, as serve:<route>).
+_UNJOURNALED = {"status", "mcp", "serve"}
 #: Verbs whose first positional word is a subcommand, not the target.
-_SUBCOMMAND_VERBS = {"receipt", "once", "audit", "vet", "baseline", "meter", "deal", "distill"}
+_SUBCOMMAND_VERBS = {"receipt", "once", "audit", "vet", "baseline", "meter", "deal", "distill",
+                     "second-read", "evidence-pack", "mandate"}
 
 
 def _journal_target(verb: str, rest: list[str]) -> str | None:
@@ -1072,12 +1105,27 @@ def _version(argv) -> int:
     return V.EXIT_GOOD
 
 
+def verb_built(verb: str) -> bool:
+    """False only for a LAZY_VERBS verb whose module is not in this install."""
+    return verb not in LAZY_VERBS or _importable(LAZY_VERBS[verb][0])
+
+
+def _lazy(verb: str, argv) -> int:
+    mod = LAZY_VERBS[verb][0]
+    if not _importable(mod):
+        print(f"arcaeon {verb}: not built in this checkout", file=sys.stderr)
+        return V.EXIT_USAGE
+    import importlib
+    return _run(importlib.import_module(mod).main, argv)
+
+
 HANDLERS = {
     "log": _log, "verify": _verify, "receipt": _receipt, "once": _once, "proxy": _proxy,
     "pin": _pin, "deal": _deal, "reconcile": _reconcile, "audit": _audit, "vet": _vet, "badge": _badge,
     "seal": _seal, "baseline": _baseline, "compact": _compact, "distill": _distill,
     "dedup": _dedup, "meter": _meter, "stamp": _stamp, "credits": _credits, "buy": _buy,
     "mcp": _mcp, "status": _status, "selftest": _selftest, "version": _version,
+    **{verb: partial(_lazy, verb) for verb in LAZY_VERBS},
 }
 assert set(HANDLERS) == set(VERBS), "every listed verb has a handler"
 

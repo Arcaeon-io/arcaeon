@@ -54,31 +54,41 @@ def _section(text: str, heading: str) -> str:
 
 # --- docs/VERBS.md -----------------------------------------------------------------
 
+#: A section registered ahead of its code (K001): the marker and nothing else.
+_TODO_BODY = re.compile(r"\s*TODO\(K\d+\)\s*")
+
+
 def test_every_verb_has_a_section_and_nothing_else():
-    sections = re.findall(r"^## `([a-z]+)`\s*$", VERBS_MD, re.M)
+    sections = re.findall(r"^## `([a-z][a-z-]*)`\s*$", VERBS_MD, re.M)
     assert sorted(sections) == sorted(cli.VERBS)
     assert len(sections) == len(set(sections)), "a verb has two sections"
 
 
 def test_every_verb_in_help_text_has_a_heading():
-    listed = re.findall(r"^  ([a-z]+) +\S", cli.help_text(), re.M)
+    listed = re.findall(r"^  ([a-z][a-z-]*) +\S", cli.help_text(), re.M)
     assert listed, "help_text() lists no verbs"
-    headings = set(re.findall(r"^## `([a-z]+)`\s*$", VERBS_MD, re.M))
+    headings = set(re.findall(r"^## `([a-z][a-z-]*)`\s*$", VERBS_MD, re.M))
     missing = [v for v in listed if v not in headings]
     assert not missing, f"verbs in `arcaeon --help` with no docs/VERBS.md heading: {missing}"
 
 
 def test_sections_follow_the_help_order():
-    sections = re.findall(r"^## `([a-z]+)`\s*$", VERBS_MD, re.M)
+    sections = re.findall(r"^## `([a-z][a-z-]*)`\s*$", VERBS_MD, re.M)
     assert sections == list(cli.VERBS)
 
 
 def test_every_section_has_usage_exit_codes_and_an_example():
-    heads = list(re.finditer(r"^## `([a-z]+)`\s*$", VERBS_MD, re.M))
+    heads = list(re.finditer(r"^## `([a-z][a-z-]*)`\s*$", VERBS_MD, re.M))
     for n, h in enumerate(heads):
         end = heads[n + 1].start() if n + 1 < len(heads) else len(VERBS_MD)
         body = VERBS_MD[h.end():end]
         verb = h.group(1)
+        if _TODO_BODY.fullmatch(body):
+            # registered ahead of its code (K001): the section is its TODO
+            # marker alone until the item that builds the verb writes it;
+            # tools/release_check.py fails while any marker is left
+            assert verb in cli.LAZY_VERBS, f"{verb}: only a K001 verb may be a TODO section"
+            continue
         assert "Answers:" in body, verb
         assert "**Usage**" in body, verb
         assert "**Exit codes:**" in body, verb
@@ -93,6 +103,8 @@ def _mcp_sdk() -> bool:
 def test_usage_block_matches_help(verb):
     if verb == "mcp" and not _mcp_sdk():
         pytest.skip("`arcaeon mcp --help` needs the [mcp] extra installed")
+    if _TODO_BODY.fullmatch(_section(VERBS_MD, f"`{verb}`")):
+        pytest.skip(f"docs/VERBS.md section for {verb} is still its TODO marker")
     written = sync.doc_blocks(VERBS_MD).get(verb)
     assert written is not None, f"no usage block for {verb}"
     actual = sync.usage_block(verb)

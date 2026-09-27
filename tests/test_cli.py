@@ -26,7 +26,11 @@ COUNCIL_VERBS = ["log", "verify", "reconcile", "pin", "seal", "stamp", "vet", "b
 #: deal: DEAL_LANE_DESIGN_2026-09-24.md (the witnessed-transaction lane).
 #: status: Daniel's HUD slice 1 (batch lane B, B015), reads the activity journal.
 ADDED_VERBS = ["deal", "status"]
-ALL_VERBS = COUNCIL_VERBS + ADDED_VERBS
+#: Registered up front by the 9/27 plug-in batch (BATCH_OPUS_2026-09-27_PLUGIN.md,
+#: K001), each dispatched lazily to a module a later item builds.
+PLUGIN_VERBS = ["serve", "connect", "schema", "second-read", "evidence-pack", "export",
+                "mandate", "doctor", "demo", "open"]
+ALL_VERBS = COUNCIL_VERBS + ADDED_VERBS + PLUGIN_VERBS
 
 
 def test_every_council_verb_exists_and_nothing_else():
@@ -63,6 +67,8 @@ def test_every_verb_answers_help_without_side_effects(verb, capsys, monkeypatch)
     monkeypatch.delenv("ARCAEON_KEY", raising=False)
     if verb == "mcp":
         pytest.importorskip("mcp")
+    if not cli.verb_built(verb):
+        pytest.skip(f"{verb}: registered, not built in this checkout")
     rc = cli.main([verb, "--help"])
     assert rc == 0, (verb, rc)
     out = capsys.readouterr()
@@ -78,6 +84,8 @@ def test_every_verb_usage_line_names_arcaeon_verb(verb, capsys, monkeypatch):
     monkeypatch.delenv("ARCAEON_KEY", raising=False)
     if verb == "mcp":
         pytest.importorskip("mcp")
+    if not cli.verb_built(verb):
+        pytest.skip(f"{verb}: registered, not built in this checkout")
     assert cli.main([verb, "--help"]) == 0
     out = capsys.readouterr()
     usage = [ln for ln in (out.out + "\n" + out.err).splitlines() if ln.startswith("usage:")]
@@ -97,6 +105,50 @@ def test_every_verb_version_names_arcaeon_verb(verb, capsys, monkeypatch):
     out = capsys.readouterr()
     assert out.out.strip() == f"arcaeon {verb} 0.9.1", (verb, out.out[:200])
     assert out.err == ""
+
+
+def test_plugin_verbs_are_lazy_and_each_names_a_batch_item():
+    assert sorted(cli.LAZY_VERBS) == sorted(PLUGIN_VERBS)
+    for verb, (mod, item) in cli.LAZY_VERBS.items():
+        assert mod.startswith("arcaeon."), verb
+        assert item[0] == "K" and item[1:].isdigit(), verb
+
+
+def test_an_unbuilt_verb_says_so_and_exits_2(capsys, monkeypatch):
+    monkeypatch.setitem(cli.LAZY_VERBS, "serve", ("arcaeon.no_such_module_k001.cli", "K004"))
+    monkeypatch.setenv("ARCAEON_JOURNAL", "0")
+    assert cli.verb_built("serve") is False
+    assert cli.main(["serve", "--port", "0"]) == V.EXIT_USAGE
+    out = capsys.readouterr()
+    assert out.err.strip() == "arcaeon serve: not built in this checkout"
+    assert out.out == ""
+
+
+def test_an_unbuilt_verb_from_the_command_line(tmp_path):
+    env = dict(os.environ, PYTHONPATH=str(ROOT / "src"), ARCAEON_JOURNAL="0")
+    missing = [v for v in PLUGIN_VERBS if not cli.verb_built(v)]
+    if not missing:
+        pytest.skip("every plug-in verb is built in this checkout")
+    verb = missing[0]
+    p = subprocess.run([sys.executable, "-m", "arcaeon", verb], capture_output=True,
+                       text=True, env=env, cwd=str(tmp_path), timeout=120)
+    assert p.returncode == 2
+    assert p.stderr.strip() == f"arcaeon {verb}: not built in this checkout"
+
+
+def test_a_built_lazy_verb_runs_its_module_main(tmp_path, monkeypatch):
+    (tmp_path / "fake_k001_verb.py").write_text(
+        "SEEN = []\n"
+        "def main(argv):\n"
+        "    SEEN.append(list(argv))\n"
+        "    return 3\n", encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    monkeypatch.setitem(cli.LAZY_VERBS, "demo", ("fake_k001_verb", "K116"))
+    monkeypatch.setenv("ARCAEON_JOURNAL", "0")
+    assert cli.verb_built("demo") is True
+    assert cli.main(["demo", "--x", "y"]) == 3
+    import fake_k001_verb
+    assert fake_k001_verb.SEEN == [["--x", "y"]]
 
 
 def test_version_flag_after_a_subcommand_and_dash_v(capsys):

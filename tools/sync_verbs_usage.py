@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 VERBS_MD = ROOT / "docs" / "VERBS.md"
 NO_USAGE = "(this verb's --help prints no usage: line; see the text below)"
 
-_SECTION = re.compile(r"^## `([a-z]+)`\s*$", re.M)
+_SECTION = re.compile(r"^## `([a-z][a-z-]*)`\s*$", re.M)
 _BLOCK = re.compile(r"(\*\*Usage\*\*[^\n]*\n\n```text\n)(.*?)(\n```)", re.S)
 
 
