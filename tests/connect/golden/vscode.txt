@@ -38,9 +38,9 @@ would merge (only the 'arcaeon' entry; every other key stays):
 }
 nothing written (add --write to apply)
 
-## --os linux, home /home/u
+## --os linux, home /fake/u
 arcaeon connect vscode  (VS Code (Copilot agent mode), stdio-mcp, linux)
-file: /home/u/.config/Code/User/mcp.json  (<state>)
+file: /fake/u/.config/Code/User/mcp.json  (<state>)
 confirmed: NO, the client's docs did not state this path; check it before --write
 source: https://code.visualstudio.com/docs/copilot/customization/mcp-servers (read 2026-09-27)
 note: the page confirms the `servers` key and a user-profile mcp.json, but reaches it through `MCP: Open User Configuration`, not by path; a workspace's .vscode/mcp.json takes the same key

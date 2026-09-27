@@ -36,9 +36,9 @@ would merge (only the 'arcaeon' entry; every other key stays):
 }
 nothing written (add --write to apply)
 
-## --os linux, home /home/u
+## --os linux, home /fake/u
 arcaeon connect claude-desktop  (Claude Desktop, stdio-mcp, linux)
-file: /home/u/.config/Claude/claude_desktop_config.json  (<state>)
+file: /fake/u/.config/Claude/claude_desktop_config.json  (<state>)
 confirmed: NO, the client's docs did not state this path; check it before --write
 source: https://modelcontextprotocol.io/quickstart/user (read 2026-09-27)
 note: the page names the macOS and Windows files only; there is no Linux build it documents

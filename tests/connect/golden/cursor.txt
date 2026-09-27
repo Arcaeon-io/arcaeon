@@ -36,9 +36,9 @@ would merge (only the 'arcaeon' entry; every other key stays):
 }
 nothing written (add --write to apply)
 
-## --os linux, home /home/u
+## --os linux, home /fake/u
 arcaeon connect cursor  (Cursor, stdio-mcp, linux)
-file: /home/u/.cursor/mcp.json  (<state>)
+file: /fake/u/.cursor/mcp.json  (<state>)
 confirmed: yes
 source: https://cursor.com/docs/context/mcp (read 2026-09-27)
 note: global file; a project's .cursor/mcp.json takes the same key

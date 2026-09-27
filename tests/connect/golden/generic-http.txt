@@ -18,7 +18,7 @@ openapi: http://127.0.0.1:8787/openapi.json
 token: <ARCAEON_HOME>/serve.token  (`arcaeon serve --print-token` prints it; send it as `Authorization: Bearer <token>`)
 nothing written (add --write to apply)
 
-## --os linux, home /home/u
+## --os linux, home /fake/u
 arcaeon connect generic-http  (Any HTTP / OpenAPI framework, http-openapi, linux)
 confirmed: yes
 source: https://spec.openapis.org/oas/v3.1.0 (read 2026-09-27)

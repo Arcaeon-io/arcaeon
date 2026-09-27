@@ -36,9 +36,9 @@ would merge (only the 'arcaeon' entry; every other key stays):
 }
 nothing written (add --write to apply)
 
-## --os linux, home /home/u
+## --os linux, home /fake/u
 arcaeon connect gemini-cli  (Gemini CLI, stdio-mcp, linux)
-file: /home/u/.gemini/settings.json  (<state>)
+file: /fake/u/.gemini/settings.json  (<state>)
 confirmed: yes
 source: https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md (read 2026-09-27)
 note: user settings; a project's .gemini/settings.json takes the same key

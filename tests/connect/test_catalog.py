@@ -64,8 +64,8 @@ def test_paths_on_a_fake_windows_and_posix_home():
     assert w == r"C:\Users\u\AppData\Roaming\Claude\claude_desktop_config.json"
     m = C.config_path(C.get("claude-desktop"), "macos", "/Users/u")
     assert m == "/Users/u/Library/Application Support/Claude/claude_desktop_config.json"
-    assert C.config_path(C.get("cursor"), "linux", "/home/u") == "/home/u/.cursor/mcp.json"
-    assert C.config_path(C.get("vscode"), "linux", "/home/u") == "/home/u/.config/Code/User/mcp.json"
+    assert C.config_path(C.get("cursor"), "linux", "/fake/u") == "/fake/u/.cursor/mcp.json"
+    assert C.config_path(C.get("vscode"), "linux", "/fake/u") == "/fake/u/.config/Code/User/mcp.json"
     assert C.config_path(C.get("chatgpt"), "windows", r"C:\Users\u") is None
 
 

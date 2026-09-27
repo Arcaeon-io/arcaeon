@@ -14,7 +14,7 @@ note: the page also names a Secure MCP Tunnel, which arcaeon does not set up
 ChatGPT reaches outside tools only at a public HTTPS address (a connector or a GPT Action); arcaeon serve binds 127.0.0.1 only, so it needs a public URL, which is a deploy decision
 nothing written (add --write to apply)
 
-## --os linux, home /home/u
+## --os linux, home /fake/u
 arcaeon connect chatgpt  (ChatGPT, remote-connector, linux)
 confirmed: yes
 source: https://developers.openai.com/plugins/deploy/connect-chatgpt (read 2026-09-27)

@@ -20,7 +20,7 @@ from arcaeon.connect import catalog as C
 from arcaeon.connect import cli
 
 GOLDEN = Path(__file__).resolve().parent / "golden"
-FAKE_HOMES = (("windows", r"C:\Users\u"), ("macos", "/Users/u"), ("linux", "/home/u"))
+FAKE_HOMES = (("windows", r"C:\Users\u"), ("macos", "/Users/u"), ("linux", "/fake/u"))
 NOTHING = "nothing written (add --write to apply)"
 
 
@@ -90,11 +90,11 @@ def test_the_fake_home_is_byte_identical_before_and_after(capsys, tmp_path, monk
 
 
 def test_json_plan_names_the_file_and_the_merge(capsys, monkeypatch):
-    monkeypatch.setenv(C.HOME_ENV, "/home/u")
+    monkeypatch.setenv(C.HOME_ENV, "/fake/u")
     rc, out = _out(capsys, "claude-code", "--os", "linux", "--json")
     d = json.loads(out)
     assert rc == 0 and d["written"] is False
-    assert d["file"] == "/home/u/.claude.json"
+    assert d["file"] == "/fake/u/.claude.json"
     assert d["merge"] == {"mcpServers": {"arcaeon": {"command": "arcaeon", "args": ["mcp"]}}}
 
 
