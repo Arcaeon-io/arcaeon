@@ -274,7 +274,31 @@ runs them.)
 
 ## `mandate`
 
-TODO(K074)
+Answers: what does this mandate file actually allow, and is this one call
+inside it? Reads the mandate file the proxy's gate reads (the same code,
+imported) and says what is in it: `lint` names unknown keys and bad types,
+`explain` prints the mandate in plain sentences, `check` answers one call
+(`--field name=<tool>` and each argument) with the gate's word. Record-only:
+nothing here forwards, blocks or writes a ledger row.
+
+**Usage**
+
+```text
+usage: arcaeon mandate [-h] {lint,explain,check} ...
+```
+
+**Exit codes:** 0 inside (check) or valid (lint, explain). 1 outside (check).
+2 an invalid mandate or bad usage. 3 COULD NOT LOOK (the file is not there
+or cannot be read, or a field the check needs is not readable).
+
+```console
+$ arcaeon mandate lint mandate.json
+mandate.json: valid (tool shape, 0 problem(s), 0 warning(s))
+$ arcaeon mandate check mandate.json --field name=place_order --field total=19.00
+inside: spend: seller, currency, cap and window are inside the mandate
+$ arcaeon mandate check mandate.json --field name=delete_account
+outside: tool 'delete_account' matches no allowed_acts pattern
+```
 
 ## `reconcile`
 
