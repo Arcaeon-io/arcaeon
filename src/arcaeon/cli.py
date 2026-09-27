@@ -1012,6 +1012,14 @@ def _buy(argv) -> int:
     except SystemExit as e:
         return e.code if isinstance(e.code, int) else V.EXIT_USAGE
     from arcaeon import remote
+    if a.plan == "evidence-pack":  # K128: the sealed pack is paid in credits
+        from arcaeon.remote import offers as _offers
+        try:
+            lines = _offers.evidence_pack_lines(remote.load_offers(a.offers))
+        except (OSError, ValueError) as e:
+            return _usage(f"could not read the evidence-pack offer: {e}")
+        print("\n".join(lines))
+        return V.EXIT_GOOD
     try:
         links = remote.checkout_links(remote.load_offers(a.offers))
     except (OSError, ValueError) as e:

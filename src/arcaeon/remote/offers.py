@@ -122,3 +122,65 @@ def upgrade_message(tool: str, free_tools: list[str] | None = None) -> str:
             "Free in this same install, no key needed: " + ", ".join(sorted(free_tools)) + ".",
         ]
     return "\n".join(lines)
+
+
+# --- `arcaeon buy evidence-pack` (K128, 2026-09-27) ---------------------------
+#
+# The sealed pack has no checkout of its own: it is paid in credits (K125,
+# 50 credits), and credits are bought in the hosted-witness packs. So the one
+# link this prints is the smallest credit pack's checkout, read from the
+# offers.json it was handed (not from MINI_PACK above), next to the pack's own
+# status and free window. It opens nothing and charges nothing.
+
+EVIDENCE_PACK_ID = "arcaeon-evidence-pack"
+
+
+def evidence_pack_lines(offers: dict, today=None) -> list[str]:
+    """Plain ASCII lines describing the sealed pack's offer, from `offers`.
+
+    Raises ValueError when offers.json has no evidence-pack entry, so a caller
+    never prints a price nobody wrote down.
+    """
+    import datetime as _dt
+
+    entry = next((p for p in offers.get("products", [])
+                  if p.get("id") == EVIDENCE_PACK_ID), None)
+    if entry is None:
+        raise ValueError(f"offers.json has no {EVIDENCE_PACK_ID!r} entry")
+    pricing = entry.get("pricing") or {}
+    credits = pricing.get("credits")
+    each = pricing.get("credit_usd_at_mini_rate")
+    free_until = pricing.get("free_until")
+    today = today or _dt.date.today()
+    in_free_window = bool(free_until) and today.isoformat() <= free_until
+
+    price = f"{credits} credits"
+    if each is not None:
+        price += f" (${each:.2f} at the mini rate)"
+    if in_free_window:
+        price += f", free through {free_until}, price shown"
+
+    mini = None
+    for product in offers.get("products", []):
+        for tier in product.get("tiers", []) or []:
+            if tier.get("plan") == "mini" and tier.get("checkout"):
+                mini = tier
+                break
+        if mini:
+            break
+
+    lines = [
+        f"{entry['id']}: {entry.get('name', entry['id'])}",
+        f"status: {entry.get('status', 'unknown')}. {entry.get('status_note', '')}".rstrip(),
+        f"price: {price}",
+        "the local pack is free forever, on your own machine, with no account.",
+    ]
+    if in_free_window:
+        lines.append(f"nothing to buy before {free_until}.")
+    if mini:
+        lines.append(f"credits are bought in packs; the smallest is mini, "
+                     f"${mini.get('price_usd')}: {mini['checkout']}")
+    else:
+        lines.append(f"no credit-pack checkout is listed; see {CATALOG_URL}")
+    lines.append("nothing was opened and nothing was charged.")
+    return lines
