@@ -14,6 +14,9 @@ hand-written, through arcaeon.adapters.tool_specs (free check routes only):
            parameters?}, the parameters cut to the OpenAPI subset Gemini's
            Schema reads (one type per node, `nullable` for a null type, no
            empty `required`, no `parameters` on a route that takes none)
+  gpt-action  a GPT Action manifest: the OpenAPI document cut to the free
+           check routes, its server a placeholder to replace with a public
+           url (serve binds 127.0.0.1; a public url is a deploy decision)
 
 `--out` writes the text to a file instead (UTF-8, LF), the way
 docs/openapi.json and docs/schemas/*.json are made; a drift test holds each
@@ -30,7 +33,7 @@ from pathlib import Path
 
 from arcaeon import verdict as V
 
-FORMATS = ("openapi", "claude", "openai", "gemini")
+FORMATS = ("openapi", "claude", "openai", "gemini", "gpt-action")
 
 
 def _dumps(obj) -> str:
@@ -94,8 +97,60 @@ def gemini_functions(doc: dict | None = None) -> list[dict]:
     return out
 
 
+#: The server a GPT Action manifest names until someone deploys one.
+GPT_ACTION_SERVER = "https://REPLACE-WITH-YOUR-PUBLIC-URL"
+#: A GPT holds at most this many operations; the manifest is held under it.
+GPT_ACTION_MAX_OPERATIONS = 30
+GPT_ACTION_NOTE = (
+    " This manifest is for a custom GPT Action. Its server url is a placeholder: "
+    "arcaeon serve binds 127.0.0.1 only, so a GPT can reach it only after whoever "
+    "runs it puts it behind a public https url of their own, which is a deploy "
+    "decision this file does not make. Replace the url, set the Action's auth to "
+    "API key, Bearer, with the serve token. Free check routes only; the paid lane "
+    "is not in this file.")
+
+
+def _refs(node, found: set) -> None:
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/components/schemas/"):
+            found.add(ref.rsplit("/", 1)[-1])
+        for v in node.values():
+            _refs(v, found)
+    elif isinstance(node, list):
+        for v in node:
+            _refs(v, found)
+
+
+def gpt_action(doc: dict | None = None) -> dict:
+    """The OpenAPI document cut to the free check routes, for a GPT Action."""
+    import copy
+    from arcaeon.adapters import free_operations
+    if doc is None:
+        from arcaeon.serve import openapi
+        doc = openapi.build()
+    paths: dict = {}
+    for method, path, op in free_operations(doc):
+        paths.setdefault(path, {})[method.lower()] = copy.deepcopy(op)
+    used: set = set()
+    _refs(paths, used)
+    info = copy.deepcopy(doc["info"])
+    info["description"] = info.get("description", "") + GPT_ACTION_NOTE
+    components = copy.deepcopy(doc.get("components", {}))
+    components["schemas"] = {k: v for k, v in components.get("schemas", {}).items()
+                             if k in used}
+    return {
+        "openapi": doc["openapi"],
+        "info": info,
+        "servers": [{"url": GPT_ACTION_SERVER}],
+        "security": copy.deepcopy(doc.get("security", [])),
+        "paths": paths,
+        "components": components,
+    }
+
+
 _BUILDERS = {"claude": claude_tools, "openai": openai_functions,
-             "gemini": gemini_functions}
+             "gemini": gemini_functions, "gpt-action": gpt_action}
 
 
 def render(fmt: str) -> str:
@@ -116,7 +171,7 @@ def _parser() -> argparse.ArgumentParser:
     ap.add_argument("--format", choices=FORMATS, default="openapi",
                     help="openapi (the default); claude: Claude tool-use definitions; "
                          "openai: OpenAI function tools; gemini: Gemini function "
-                         "declarations")
+                         "declarations; gpt-action: a GPT Action manifest")
     ap.add_argument("--out", default=None, metavar="FILE",
                     help="write the document to FILE instead of printing it")
     return ap
