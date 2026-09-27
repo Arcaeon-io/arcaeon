@@ -33,7 +33,9 @@ def root(tmp_path, monkeypatch):
         _build(r, "l.jsonl", f"packs/{name}")
     rec = r / "packs" / "changed" / "records.jsonl"
     rec.write_bytes(rec.read_bytes().replace(b'"n":1', b'"n":8').replace(b'"n": 1', b'"n": 8'))
-    (r / "packs" / "gone" / "window.jsonl").unlink()
+    # OA1: a file the manifest lists is BROKEN when gone; the sidecar is not
+    # listed, so its absence is the pack that stays COULD NOT LOOK
+    (r / "packs" / "gone" / "manifest.sha256").unlink()
     _build(r, "l.jsonl", "../outside_pack")                  # built outside, via tmp
     return r
 

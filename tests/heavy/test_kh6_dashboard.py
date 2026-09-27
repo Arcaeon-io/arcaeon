@@ -90,7 +90,8 @@ def _seed(base: Path) -> Path:
     (root / "ledgers" / "empty.jsonl").write_text("", encoding="utf-8")
     assert build_pack(main, root / "packs" / "good")["exit"] == 0
     assert build_pack(main, root / "packs" / "gone")["exit"] == 0
-    (root / "packs" / "gone" / "window.jsonl").unlink()
+    # OA1: a listed file gone is BROKEN; the unlisted sidecar gone stays COULD NOT LOOK
+    (root / "packs" / "gone" / "manifest.sha256").unlink()
     _readings(root / "reads" / "a.jsonl", "reader-alpha", "vendor-one",
               [("c1", "yes"), ("c2", "no"), ("c3", "yes"), ("c4", "no")])
     _readings(root / "reads" / "b.jsonl", "reader-beta", "vendor-two",
