@@ -67,8 +67,8 @@ BUNDLE_SCHEMA_VERSION = 2
 # The event categories Article 12 / high-risk-AI recordkeeping care about. Not
 # exhaustive law — a practical vocabulary so exported logs are legible to an auditor.
 EVENT_TYPES = (
-    "system_start", "system_stop",      # periods of use (Art.12(2)(a))
-    "input", "reference_check",          # input data / reference DB (Art.12(2)(c),(b))
+    "system_start", "system_stop",      # periods of use (Art.12(3)(a))
+    "input", "reference_check",          # input data / reference DB (Art.12(3)(c),(b))
     "tool_call", "decision", "output",   # the agent acting
     "human_review", "override",          # human oversight actions
     "error", "flag",                     # anomalies worth a record
@@ -1026,8 +1026,12 @@ because the Act demands them.*
 - **Traceability appropriate to the intended purpose (Art.12(2)):** records carry
   system_id, agent, event type, inputs, outputs, decisions, and the acting
   principal + capability version.
-- **Periods of use (Art.12(2)(a)):** see `system_start`/`system_stop` events and
+- **Periods of use (Art.12(3)(a)):** see `system_start`/`system_stop` events and
   `period_covered` in the manifest.
+- **Reference database checked (Art.12(3)(b)):** see `reference_check` events;
+  what they name is the operator's to record.
+- **Input data that led to a match (Art.12(3)(c)):** see `inputs` on `input`
+  and `reference_check` rows.
 - **Tamper-evidence (beyond Article 12 — the Act does not require this):**
   hash-chaining makes any post-hoc edit, deletion, or reorder detectable and
   locatable — the property a plain log file does not have, and the property that
