@@ -6,7 +6,8 @@ import pytest
 from arcaeon.prove import readings as R
 from arcaeon.record.ledger import verify_file
 
-CRIT = R.sha256_text("Does the claim name a time?")
+SENTENCE = "Does the claim name a time?"
+CRIT = R.sha256_text(SENTENCE)
 READER = {"id": "reader-a", "provider": "acme", "model": "m-1", "endpoint_host": "127.0.0.1"}
 
 
@@ -75,20 +76,26 @@ def test_claim_by_digest_only():
     assert row["claim_sha256"] == "a" * 64
 
 
-def test_written_ledger_verifies(tmp_path):
+def _ledger(tmp_path):
     led = tmp_path / "a.readings.jsonl"
+    R.freeze_criterion(led, SENTENCE)  # K031: a reading cites an earlier criterion
+    return led
+
+
+def test_written_ledger_verifies(tmp_path):
+    led = _ledger(tmp_path)
     for i, word in enumerate(R.READING_WORDS):
         R.write_reading(led, _row(claim_id=f"c{i}", reading=word))
     res = verify_file(led)
-    assert res.ok is True and res.rows == 3 and res.verified_scope == "full"
-    rows = [json.loads(x) for x in led.read_text(encoding="utf-8").splitlines()]
+    assert res.ok is True and res.rows == 4 and res.verified_scope == "full"
+    rows = [json.loads(x) for x in led.read_text(encoding="utf-8").splitlines()][1:]
     assert all("chain" in r for r in rows)
     assert [r["reading"] for r in rows] == list(R.READING_WORDS)
 
 
 def test_written_ledger_verifies_via_cli(tmp_path, capsys):
     from arcaeon import cli
-    led = tmp_path / "a.readings.jsonl"
+    led = _ledger(tmp_path)
     R.write_reading(led, _row())
     code = cli.main(["verify", str(led)])
     out = capsys.readouterr().out
@@ -96,7 +103,7 @@ def test_written_ledger_verifies_via_cli(tmp_path, capsys):
 
 
 def test_edit_breaks_chain(tmp_path):
-    led = tmp_path / "a.readings.jsonl"
+    led = _ledger(tmp_path)
     R.write_reading(led, _row(claim_id="c1"))
     R.write_reading(led, _row(claim_id="c2"))
     led.write_text(led.read_text(encoding="utf-8").replace('"yes"', '"no"', 1), encoding="utf-8")
