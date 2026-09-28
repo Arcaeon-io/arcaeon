@@ -90,6 +90,20 @@ sentence may carry is fixed in the code, not in the pack, so a pack that
 moves a sentence to a stronger class, or leaves one untagged, is BROKEN and
 names the sentence.
 
+A coverage sentence, one that says what the window or the record covers
+rather than what the bytes are, is [asserted] unless it is derived, and an
+[asserted] sentence must name the falsifier a stranger can run, or it is not
+allowed on page one. The falsifier is printed after the class, as in
+"[asserted; falsifier: could_not_look.json, ...]", and README.json carries it
+as `falsifier` beside the sentence. The operator's window statement is
+falsified by the could_not_look.json list and by `arcaeon evidence-pack
+verify`, which re-derives the window from records.jsonl. The system id and
+the provider have no falsifier in the pack, so theirs says so: none
+derivable, compare with the operator's own records. The falsifier of each
+sentence is fixed in the code beside its class, so an [asserted] sentence
+with no falsifier in README.json, or a falsifier naming a file the pack does
+not hold, is BROKEN and names the sentence.
+
 ### The second reader (`second-read`)
 
 - It does not show whether a claim holds. Two readers reading one sentence
