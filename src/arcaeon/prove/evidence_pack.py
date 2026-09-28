@@ -568,12 +568,21 @@ def mandate_rows_bytes_legacy(section: dict) -> bytes:
                                if k not in _MANDATE_ROWS_NEW_KEYS})
 
 
+#: Keys of the manifest's `mandate` block a pack built before the outcome
+#: words does not carry (same pack generation as _MANDATE_ROWS_NEW_KEYS).
+MANDATE_BLOCK_NEW_KEYS = ("outcomes", "no_matching_mandate")
+
+
 def mandate_block(section: dict) -> dict:
-    """The manifest's `mandate` block, read off the section."""
+    """The manifest's `mandate` block, read off the section: the same
+    `outcomes` tally and `no_matching_mandate` count mandate_rows.json has, so
+    the manifest alone shows them."""
     return {"file": MANDATE_ROWS, "copy": section["copy"],
             "mandate_file": section["mandate_file"],
             "mandate_file_sha256": section["mandate_file_sha256"],
-            "counts": section["counts"]}
+            "counts": section["counts"],
+            "outcomes": section["outcomes"],
+            "no_matching_mandate": section["no_matching_mandate"]}
 
 
 def _fold_mandate(out: Path, path: Path, window: list[dict]) -> tuple[dict, list[dict]]:

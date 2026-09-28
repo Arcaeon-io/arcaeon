@@ -388,5 +388,8 @@ def test_pack_summary_carries_no_matching_mandate_and_the_outcomes(tmp_path):
     assert sec["no_matching_mandate"] == 2
     assert sec["outcomes"] == {"could_not_look": 1, "outside_forwarded": 3}
     assert sec["counts"] == {"inside": 1, "outside": 3, "could_not_look": 1}
+    block = json.loads((out / "manifest.json").read_text(encoding="utf-8"))["mandate"]
+    assert block["no_matching_mandate"] == 2
+    assert block["outcomes"] == {"could_not_look": 1, "outside_forwarded": 3}
     v = verify_pack(out)
     assert v["verdict"] == V.VERIFIED, v

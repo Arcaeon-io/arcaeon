@@ -318,13 +318,28 @@ def _step_mandate(pack: Path, manifest: dict) -> dict:
                               mandate_name=claim.get("mandate_file"), mandate_bytes=copy)
     problems = []
     from arcaeon.prove.evidence_pack import mandate_rows_bytes_legacy
-    if rows_p.read_bytes() not in (mandate_rows_bytes(section),
-                                   mandate_rows_bytes_legacy(section)):
+    rows_raw = rows_p.read_bytes()
+    if rows_raw not in (mandate_rows_bytes(section),
+                        mandate_rows_bytes_legacy(section)):
         problems.append(f"{MANDATE_ROWS} differs from the section rebuilt from "
                         "records.jsonl and mandate_file.json")
-    if claim != mandate_block(section):
+    from arcaeon.prove.evidence_pack import MANDATE_BLOCK_NEW_KEYS
+    want_block = mandate_block(section)
+    if (not any(k in claim for k in MANDATE_BLOCK_NEW_KEYS)
+            and rows_raw == mandate_rows_bytes_legacy(section)):
+        # A pack built before the outcome words: neither its block nor its
+        # mandate_rows.json ever had them. A current pack must carry both.
+        want_block = {k: v for k, v in want_block.items()
+                      if k not in MANDATE_BLOCK_NEW_KEYS}
+    if claim != want_block:
+        fields = ([k for k in want_block if k not in claim or claim[k] != want_block[k]]
+                  + [k for k in claim if k not in want_block])
+        named = ", ".join(
+            f"`{k}` says {json.dumps(claim[k]) if k in claim else 'nothing'}, "
+            f"rebuilt {json.dumps(want_block[k]) if k in want_block else 'no such field'}"
+            for k in fields)
         problems.append("the manifest's `mandate` block differs from the one rebuilt "
-                        f"from the records (counts {section['counts']}, sha256 "
+                        f"from the records: {named} (counts {section['counts']}, sha256 "
                         f"{section['mandate_file_sha256']})")
     want = mandate_checks(section)
     names = {c["check"] for c in want} | {"mandate file read",
