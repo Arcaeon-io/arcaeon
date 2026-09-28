@@ -163,6 +163,32 @@ def test_session_lines_are_summed(home, capsys):
             "2 blocked, 1 cap exceeded, 1 mandate file changes") in capsys.readouterr().out
 
 
+def test_no_matching_mandate_is_summed_and_printed_only_when_non_zero(home, capsys):
+    status.note_mandate_session("s-1", {"mandate_inside": 2},
+                                mode="record-only", mandate_status="loaded",
+                                mandate_file_sha256="a" * 64)
+    assert status.main(["--json"]) == 0
+    assert json.loads(capsys.readouterr().out)["mandate"]["no_matching_mandate"] == 0
+    assert status.main([]) == 0
+    out = capsys.readouterr().out
+    assert "no matching mandate" not in out
+    status.note_mandate_session("s-2", {"mandate_inside": 1, "mandate_outside": 1,
+                                        "mandate_no_matching_mandate": 2},
+                                mode="enforce", mandate_status="loaded",
+                                mandate_file_sha256="a" * 64)
+    status.note_mandate_session("s-3", {"mandate_no_matching_mandate": 1},
+                                mode="enforce", mandate_status="loaded",
+                                mandate_file_sha256="a" * 64)
+    assert status.main(["--json"]) == 0
+    m = json.loads(capsys.readouterr().out)["mandate"]
+    assert m["no_matching_mandate"] == 3
+    assert m["last_session"]["no_matching_mandate"] == 1
+    assert status.main([]) == 0
+    assert ("mandate: 3 gated sessions: 3 inside, 1 outside, 0 COULD NOT LOOK, "
+            "0 blocked, 0 cap exceeded, 0 mandate file changes, "
+            "3 no matching mandate") in capsys.readouterr().out
+
+
 def test_session_line_holds_no_path_or_tool(home):
     status.note_mandate_session("s-1", {"mandate_outside": 1, "tool": "refund",
                                         "ledger": "C:/secret/seam.jsonl"},
