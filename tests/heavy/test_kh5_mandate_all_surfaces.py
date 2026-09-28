@@ -265,6 +265,8 @@ def test_record_only_rows_name_each_call_the_gate_did_not_find_inside(runs, surf
                                               "could_not_look"]
     assert all(r["mandate_mode"] == "record-only" for r in rows)
     assert all(r["action"] == "forwarded" for r in judged)
+    assert [r["outcome"] for r in judged] == ["outside_forwarded", "outside_forwarded",
+                                              "outside_forwarded", "could_not_look"]
     cap = judged[2]
     assert (cap["amount"], cap["session_spent_before"], cap["session_spent"],
             cap["session_total_cap"]) == ("9.00", "12.00", "21.00", "20.00")
@@ -346,7 +348,8 @@ def test_enforce_answers_held_calls_itself_and_never_forwards_them(runs, surface
 @pytest.mark.parametrize("surface", sorted(SURFACES))
 def test_enforce_rows_are_the_record_only_rows_with_the_stated_differences(runs, surface):
     """Same calls, same verdicts, same reasons, same order. What moves under
-    enforce, and only that: the mode, the action (blocked), and the cap row's
+    enforce, and only that: the mode, the action (blocked), the outcome
+    (outside_forwarded becomes blocked), and the cap row's
     running total, because a blocked spend never ran and never counts."""
     ro = gate_rows(runs[("record-only", surface)].rows)
     en = gate_rows(runs[("enforce", surface)].rows)
@@ -355,6 +358,8 @@ def test_enforce_rows_are_the_record_only_rows_with_the_stated_differences(runs,
         row = dict(row, mandate_mode="enforce")
         if row["evt"] != "mandate_loaded":
             row["action"] = "blocked"
+            if row["outcome"] == "outside_forwarded":
+                row["outcome"] = "blocked"
         if row["evt"] == "mandate_cap_exceeded":
             row["session_spent"] = None
         expect.append(_drop_none(row))

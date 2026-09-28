@@ -343,14 +343,17 @@ class _MandateWatch:
             return None, "unreadable"
         return hashlib.sha256(data).hexdigest(), "present"
 
-    def check_file(self, msg: dict | None = None) -> None:
-        """Hash the mandate file again; row a change. Never raises."""
+    def check_file(self, msg: dict | None = None) -> str | None:
+        """Hash the mandate file again; row a change. Returns the file's status
+        now ("present", "missing", "unreadable"), or None when it could not
+        be told. Never raises."""
+        status = None
         try:
             now, status = self._file_now()
             with self._lock:
                 before = self._seen_sha256
                 if now == before:
-                    return
+                    return status
                 self._seen_sha256 = now
                 self.changes += 1
             params = (msg or {}).get("params")
@@ -366,9 +369,19 @@ class _MandateWatch:
                       mandate_mode=self.mode)
         except Exception:
             pass
+        return status
 
     def judge(self, msg: dict):
-        self.check_file(msg)
+        status = self.check_file(msg)
+        if self.gate.ok and status in ("missing", "unreadable"):
+            # The file the gate loaded is gone (or cannot be read) now: the
+            # gate cannot run against a mandate nobody can show, so it answers
+            # could_not_look and the row's outcome is never_attempted.
+            from . import mandate_gate
+            return mandate_gate.COULD_NOT_LOOK, (
+                f"the mandate file is {status} now: {self.gate.path}"), {
+                "rule": "mandate_file", "looked_for": "the mandate",
+                "where": self.gate.path or "(no path)", "reason_word": status}
         params = msg.get("params")
         return self.gate.detail(params if params is not None else {})
 
@@ -391,8 +404,15 @@ class _MandateWatch:
         args = params.get("arguments")
         tool = params.get("name")
         rid = msg.get("id")
+        from . import mandate_gate
+        word = mandate_gate.outcome(verdict, action, extra)
+        reason = str(reason)
+        if word == mandate_gate.NEVER_ATTEMPTED:
+            reason = (mandate_gate.GATE_COULD_NOT_RUN if extra.get("rule") == "mandate_file"
+                      else mandate_gate.REFUSED_BEFORE_GATE) + reason
         fields = {
-            "verdict": verdict, "rule": extra.get("rule"), "reason": str(reason),
+            "verdict": verdict, "outcome": word, "rule": extra.get("rule"),
+            "reason": reason,
             "tool": tool if isinstance(tool, str) else None,
             "rpc_id": _render_id(rid) if not isinstance(rid, (dict, list)) else None,
             "args_digest": _safe_digest({} if args is None else args),
