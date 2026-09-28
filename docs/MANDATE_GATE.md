@@ -104,6 +104,43 @@ Every `tools/call` gets one of:
   `looked_for`, `where` and `reason_word`, the same keys every Arcaeon
   COULD NOT LOOK carries. Never counted as inside.
 
+## The five outcomes
+
+The verdict says what the gate answered. Every gate row also carries
+`outcome`, which says what happened to the call, in exactly one word:
+
+- `inside`: the gate looked and nothing said no; the call went through.
+  Counted, not rowed.
+- `outside_forwarded`: record-only. The gate said no and the call went
+  through anyway.
+- `blocked`: enforce. The gate ran and said no, and the call was withheld.
+- `never_attempted`: the call never reached the gate's judgment. Either it
+  was refused before the gate (a frame too big to judge, or a request that is
+  not JSON, under enforce), and `reason` starts `refused before the gate:`;
+  or the gate could not run because the mandate file could not be read (at
+  start, or because it vanished mid-run), and `reason` starts `the gate
+  could not run:`.
+- `could_not_look`: the gate ran, but something it needed (an amount, a time,
+  the call's name) could not be read. `action` says whether the call went
+  through.
+
+`verdict` and `action` stay on every row as before; `outcome` is the one word
+a reader can count without combining them. `arcaeon mandate explain` prints
+the five words with one line each.
+
+### Calls no rule matched (`no_matching_mandate`)
+
+A call no rule of the mandate matched at all is drift, and it is counted
+apart from a call a rule matched and refused. It is either outside because
+its tool name matches no `allowed_acts` pattern, or inside by default because
+the mandate has no `allowed_acts` list and no `forbidden_acts` or
+`spend_cap` rule applied to it. A rowed one carries `no_matching_mandate:
+true`; the session total rides in `session_end` as
+`mandate_no_matching_mandate`, and the evidence pack's `mandate_rows.json`
+carries the window's total as `no_matching_mandate` (with `outcomes`, the
+outcome words of its rowed calls). A call refused by `forbidden_acts`, a
+spend cap or the window is not in it: a rule matched it.
+
 ## Record-only and block
 
 | | record-only (default) | `--mandate-enforce` |
@@ -112,7 +149,8 @@ Every `tools/call` gets one of:
 | could-not-look call | forwarded; `mandate_could_not_look` row | not forwarded; JSON-RPC error; row, `action: blocked` |
 | request that is not JSON (HTTP surfaces) | forwarded; `mandate_could_not_look` row, `judged_reason: unparsed` | not forwarded; JSON-RPC error with id null; row, `action: blocked` |
 | line that is not JSON (stdio) | forwarded; row, `judged_reason: unparsed` | forwarded byte-identical (nothing in it is a call); row, `action: forwarded` |
-| mandate file missing or unreadable | the proxy starts; every call gets a `mandate_could_not_look` row; nothing is ever blocked | the proxy refuses to start and exits 3 (COULD NOT LOOK) |
+| mandate file missing or unreadable | the proxy starts; every call gets a `mandate_could_not_look` row, `outcome: never_attempted`; nothing is ever blocked | the proxy refuses to start and exits 3 (COULD NOT LOOK) |
+| mandate file vanishes mid-run | each later call gets a `mandate_could_not_look` row, rule `mandate_file`, `outcome: never_attempted`; forwarded | the same row; the call is withheld |
 
 ### Before you turn on `--mandate-enforce`
 
@@ -173,15 +211,17 @@ is hashed again; if its bytes moved, a `mandate_changed` row carries
 `from_sha256`, `to_sha256`, `file_status` and `judged_against_sha256`. The gate
 keeps judging against the mandate it loaded at start: the row says the file
 moved, it does not reload it. Restart the session to judge against the new
-file.
+file. A file that is gone or unreadable is different: the gate will not judge
+against a mandate nobody can show, so every call after that is
+could_not_look, rule `mandate_file`, `outcome: never_attempted`.
 
 A request the gate cannot parse gets a `mandate_could_not_look` row with
 `judged_reason: "unparsed"`, never a silent pass.
 
 `session_end` carries `mandate_inside`, `mandate_outside`,
 `mandate_could_not_look` and `mandate_blocked` counts when a mandate was given,
-plus `mandate_cap_exceeded`, `mandate_changes` and `mandate_spent` when there
-was any.
+plus `mandate_cap_exceeded`, `mandate_changes`, `mandate_no_matching_mandate`
+and `mandate_spent` when there was any.
 
 ## Check a mandate before an agent runs under it
 
@@ -200,6 +240,12 @@ One call may spend at most 60.00 USD, and only with acme-store.
 A call counts as a spend when its arguments carry total or amount.
 It holds from 2026-09-01T00:00:00Z until 2026-12-31T23:59:59Z.
 Record-only unless the proxy is started with --mandate-enforce: a call outside this mandate is still forwarded, and the ledger gets a row naming it.
+Each call the gate sees ends as one of five outcomes (the row's `outcome`):
+inside: the gate looked and nothing in the mandate said no; the call went through.
+outside_forwarded: record-only: the gate said no and the call went through anyway.
+blocked: enforce: the gate ran and said no, and the call was withheld from the tool.
+never_attempted: the call never reached the gate's judgment: it was refused before the gate, or the mandate file could not be read (`reason` says which).
+could_not_look: the gate ran but something it needed to decide (an amount, a time, the call itself) could not be read; never counted as inside.
 (exit 0)
 $ arcaeon mandate check mandate.json --field name=place_order --field total=19.00 --field currency=USD --field seller=acme-store --at 2026-10-01T12:00:00Z
 inside: spend: seller, currency, cap and window are inside the mandate

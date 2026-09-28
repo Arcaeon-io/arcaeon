@@ -58,6 +58,20 @@ script can branch on the cause without reading the sentence.
 - `network`: the request to the hosted witness never completed, so the answer is unknown, not no.
 - `redirect_refused`: the endpoint answered with a redirect to another address. It was not followed and the key was not sent there, so there is no answer to record.
 
+## Mandate outcome words
+
+Every row the mandate gate writes carries `outcome`, one of five words, so a
+reader can tell a call that was stopped from a call that went through.
+
+- `inside`: the gate looked and nothing in the mandate said no; the call went through.
+- `outside_forwarded`: record-only. The gate said no and the call went through anyway.
+- `blocked`: enforce. The gate ran and said no, and the call was withheld from the tool.
+- `never_attempted`: the call never reached the gate's judgment. It was refused before the gate, or the gate could not run because the mandate file could not be read; `reason` says which.
+- `could_not_look`: the gate ran, but something it needed to decide (an amount, a time, the call itself) could not be read. Never counted as inside.
+
+Beside them, `no_matching_mandate` counts calls no mandate rule matched at
+all: drift, kept apart from calls a rule matched and refused.
+
 ## Many logs at once
 
 A summary over many logs keeps these words side by side: so many VERIFIED, so
