@@ -8,8 +8,9 @@ import re
 import pytest
 
 from arcaeon import verdict as V
-from arcaeon.prove.evidence_pack import (BEARER_ALLOWED, BEARER_CLASSES, BEARER_FILE,
-                                         build_pack)
+from arcaeon.prove.evidence_pack import (BEARER_ALLOWED, BEARER_CLASSES,
+                                         BEARER_FALSIFIER, BEARER_FILE, build_pack,
+                                         falsifier_files)
 from arcaeon.prove.evidence_pack_verify import main, verify_pack
 
 CHAIN = "It shows what was written and that every row hashes to the next."
@@ -166,3 +167,91 @@ def test_deal_mandate_readings_sections_are_mapped():
                 "mandate.counts", "mandate.rows", "readings.receipt", "readings.verify",
                 "readings.caveat", "window.unplaced"):
         assert BEARER_ALLOWED[sid][0] in BEARER_CLASSES
+
+
+# --- falsifiers: an [asserted] sentence names the check a stranger runs ---
+
+WINDOW_F = ("could_not_look.json, and `arcaeon evidence-pack verify .` re-deriving the "
+            "window from records.jsonl")
+
+
+def _twin(pack):
+    return json.loads((pack / BEARER_FILE).read_text(encoding="utf-8"))
+
+
+def _write_twin(pack, twin):
+    (pack / BEARER_FILE).write_text(json.dumps(twin, indent=2) + "\n", encoding="utf-8")
+
+
+def test_every_asserted_sentence_has_a_falsifier(pack):
+    assert {k for k, v in BEARER_ALLOWED.items() if "asserted" in v} == set(BEARER_FALSIFIER)
+    assert all(f.strip() and "]" not in f for f in BEARER_FALSIFIER.values())
+    text = (pack / "README.md").read_text(encoding="utf-8")
+    for s in _twin(pack)["sentences"]:
+        if s["class"] == "asserted":
+            assert s["falsifier"] == BEARER_FALSIFIER[s["id"]], s["id"]
+            assert f"[asserted; falsifier: {s['falsifier']}]" in text
+            for fn in falsifier_files(s["falsifier"]):
+                assert (pack / fn).is_file(), (s["id"], fn)
+        else:
+            assert "falsifier" not in s, s["id"]
+    assert BEARER_FALSIFIER["window.from"] == BEARER_FALSIFIER["window.to"] == WINDOW_F
+    assert falsifier_files(WINDOW_F) == ["could_not_look.json", "records.jsonl"]
+    from_line = next(l for l in text.split("\n") if l.startswith("- From: "))
+    assert from_line.endswith(f" [asserted; falsifier: {WINDOW_F}]")
+    for sid in ("agent.system_id", "agent.provider"):
+        assert BEARER_FALSIFIER[sid] == \
+            "none derivable; compare with the operator's own records"
+        assert falsifier_files(BEARER_FALSIFIER[sid]) == []
+
+
+def test_twin_with_a_falsifier_removed_is_broken_naming_it(pack):
+    twin = _twin(pack)
+    for s in twin["sentences"]:
+        if s["id"] == "agent.system_id":
+            del s["falsifier"]
+    _write_twin(pack, twin)
+    _seal(pack, BEARER_FILE)
+    res = verify_pack(pack)
+    assert res["verdict"] == V.BROKEN and res["exit"] == 1
+    b = _bearer(res)
+    assert b["verdict"] == V.BROKEN
+    assert "sentence agent.system_id" in b["finding"]
+    assert "is [asserted] with no falsifier in README.json" in b["finding"]
+
+
+def test_falsifier_naming_a_file_not_in_the_pack_is_broken(pack):
+    ghost = "ghost.json, and `arcaeon evidence-pack verify .`"
+    twin = _twin(pack)
+    for s in twin["sentences"]:
+        if s["id"] == "window.from":
+            s["falsifier"] = ghost
+    _write_twin(pack, twin)
+    p = pack / "README.md"
+    lines = p.read_text(encoding="utf-8").split("\n")
+    lines = [l.replace(WINDOW_F, ghost) if l.startswith("- From: ") else l for l in lines]
+    p.write_bytes("\n".join(lines).encode("utf-8"))
+    _seal(pack, BEARER_FILE, "README.md")
+    b = _bearer(verify_pack(pack))
+    assert b["verdict"] == V.BROKEN
+    assert "sentence window.from" in b["finding"]
+    assert "falsifier naming ghost.json, which is not in the pack" in b["finding"]
+
+
+def test_falsifier_file_deleted_from_the_pack_is_broken(pack):
+    (pack / "could_not_look.json").unlink()
+    b = _bearer(verify_pack(pack))
+    assert b["verdict"] == V.BROKEN
+    for sid in ("intro.scope", "agent.selected", "window.from", "window.to"):
+        assert f"sentence {sid} " in b["finding"], sid
+    assert "falsifier naming could_not_look.json, which is not in the pack" in b["finding"]
+
+
+def test_asserted_line_without_its_falsifier_is_broken(pack):
+    p = pack / "README.md"
+    p.write_bytes(p.read_text(encoding="utf-8").replace(
+        "[asserted; falsifier: none derivable; compare with the operator's own records]",
+        "[asserted]").encode("utf-8"))
+    _seal(pack, "README.md")
+    f = _bearer(verify_pack(pack))["finding"]
+    assert "sentence agent.provider" in f and "names no falsifier on its line" in f

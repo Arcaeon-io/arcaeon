@@ -189,7 +189,7 @@ BEARER_FALSIFIER: dict[str, str] = {
     "dns.retention": "none derivable; compare with the holder's own records",
 }
 #: A file name inside a falsifier: verify checks each one is in the pack.
-_FALSIFIER_FILE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*\.(?:jsonl|json|md|sha256|zip)")
+_FALSIFIER_FILE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*\.(?:jsonl|json|md|sha256|zip)\b")
 
 
 def falsifier_files(text: str) -> list[str]:
