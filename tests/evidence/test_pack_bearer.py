@@ -13,7 +13,7 @@ from arcaeon.prove.evidence_pack import (BEARER_ALLOWED, BEARER_CLASSES, BEARER_
 from arcaeon.prove.evidence_pack_verify import main, verify_pack
 
 CHAIN = "It shows what was written and that every row hashes to the next."
-TAG = re.compile(r".* \[(bytes|order|asserted)\]")
+TAG = re.compile(r".* \[(bytes|order|asserted; falsifier: [^\]]+)\]")
 
 
 def _m(out):
@@ -62,7 +62,8 @@ def test_every_sentence_is_tagged(pack):
     assert f"{CHAIN} [bytes]" in text
     assert "With a pin, it also shows the rows up to the pinned head are the ones " \
            "that existed at pin time. [order]" in text
-    assert "- System id given at build: `sys-a` [asserted]" in text
+    assert ("- System id given at build: `sys-a` [asserted; falsifier: none derivable; "
+            "compare with the operator's own records]") in text
 
 
 def test_twin_lists_each_sentence_and_the_counts(pack):

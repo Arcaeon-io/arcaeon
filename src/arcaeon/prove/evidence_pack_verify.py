@@ -670,7 +670,9 @@ def _step_rederived(pack: Path, manifest: dict) -> dict:
     return res
 
 
-_TAGGED = re.compile(r"(.*) \[([A-Za-z_]+)\]")
+#: A page-one line: its text, its class, and (after an [asserted] class)
+#: its falsifier, "[asserted; falsifier: ...]".
+_TAGGED = re.compile(r"(.*) \[([A-Za-z_]+)(?:; falsifier: ([^\]]+))?\]")
 
 
 def _page_one_lines(text: str) -> list[tuple[int, str]]:

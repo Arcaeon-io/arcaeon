@@ -28,6 +28,7 @@ __all__ = ["build_pack", "select_window", "parse_when", "PackUsageError",
            "OPERATOR_AT_T", "OPERATOR_AT_T_NOTE", "PROSE_HASH_ONLY", "render_readme",
            "newest_ts", "rederived_independence", "BEARER_FILE", "BEARER_CLASSES",
            "BEARER_ALLOWED", "BEARER_SCHEMA", "render_page_one", "render_bearer",
+           "BEARER_FALSIFIER", "falsifier_files",
            "page_one_sentences", "sentence_sha256"]
 
 #: The evidence-pack manifest schema. 1 is the first (K053).
@@ -121,7 +122,7 @@ BEARER_CLASSES = ("bytes", "order", "asserted")
 #: The machine-readable twin of README.md: each sentence id, the sha256 of
 #: its text (the line without its bracket), its line and its class.
 BEARER_FILE = "README.json"
-BEARER_SCHEMA = 1
+BEARER_SCHEMA = 2
 #: Every sentence id page one can print and the classes it may carry. Fixed
 #: here, never read from a pack: a pack whose twin says otherwise is BROKEN.
 #: No `bytes` sentence names a pin or an operator's statement.
@@ -158,6 +159,48 @@ BEARER_ALLOWED: dict[str, tuple[str, ...]] = {
     "check.rehash": ("bytes",),
     "check.records": ("bytes",),
 }
+#: The falsifier of every [asserted] sentence: the check a stranger runs to
+#: catch it false. A coverage sentence on page one (what the window or the
+#: record covers, not what the bytes are) is [asserted] unless derived, and
+#: an [asserted] sentence with no falsifier may not be on page one. Where
+#: nothing in the pack can catch it, the falsifier says so ("none derivable")
+#: and names what to compare it with. Fixed here, never read from a pack; a
+#: file it names must be in every pack that prints the sentence.
+_WINDOW_FALSIFIER = ("could_not_look.json, and `arcaeon evidence-pack verify .` "
+                     "re-deriving the window from records.jsonl")
+_OPERATOR_FALSIFIER = "none derivable; compare with the operator's own records"
+BEARER_FALSIFIER: dict[str, str] = {
+    "intro.scope": _WINDOW_FALSIFIER,
+    "legend": ("README.json, and `arcaeon evidence-pack verify .` checking each "
+               "bracket against the fixed map"),
+    "agent.selected": _WINDOW_FALSIFIER,
+    "agent.system_id": _OPERATOR_FALSIFIER,
+    "agent.provider": _OPERATOR_FALSIFIER,
+    "window.from": _WINDOW_FALSIFIER,
+    "window.to": _WINDOW_FALSIFIER,
+    "deal.tapes": ("buyer.deal.jsonl and seller.deal.jsonl, and `arcaeon "
+                   "evidence-pack verify .` re-running the deal"),
+    "readings.caveat": "none derivable; check the claim against its own source",
+    "dns.compliance": "none derivable; compare with the regulator's own reading",
+    "dns.behaved": "none derivable; compare the rows with what the agent did",
+    "dns.independence": "manifest.json, its witness `independence` field",
+    "dns.operator": "manifest.json, its `operator_at_t` field",
+    "dns.aat": "none derivable here; a pack built with --format aat lists the gaps",
+    "dns.retention": "none derivable; compare with the holder's own records",
+}
+#: A file name inside a falsifier: verify checks each one is in the pack.
+_FALSIFIER_FILE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*\.(?:jsonl|json|md|sha256|zip)")
+
+
+def falsifier_files(text: str) -> list[str]:
+    """The pack files a falsifier names, in order, each once."""
+    out: list[str] = []
+    for m in _FALSIFIER_FILE.findall(text):
+        if m not in out:
+            out.append(m)
+    return out
+
+
 #: The does-not-show bullets' sentence ids, in the order of DOES_NOT_SHOW.
 _DNS_IDS = ("dns.compliance", "dns.behaved", "dns.independence", "dns.operator",
             "dns.aat", "dns.retention")
@@ -945,7 +988,9 @@ def render_page_one(res: dict, window: list[dict], *,
                     system_id: str = "", provider: str = "") -> tuple[str, str]:
     """(README.md, README.json): page one with each sentence's bracket at the
     end of its line, and its twin listing each sentence id, the sha256 of its
-    text, its line and its class. One function for build and verify."""
+    text, its line and its class, and for an [asserted] sentence its
+    falsifier, printed after the class: "[asserted; falsifier: ...]". One
+    function for build and verify."""
     out: list[str] = []
     sentences: list[dict] = []
     for item in page_one_sentences(res, window, system_id=system_id, provider=provider):
@@ -954,9 +999,14 @@ def render_page_one(res: dict, window: list[dict], *,
             continue
         sid, text = item
         cls = BEARER_ALLOWED[sid][0]
-        out.append(f"{text} [{cls}]")
-        sentences.append({"id": sid, "line": len(out), "sha256": sentence_sha256(text),
-                          "class": cls})
+        entry = {"id": sid, "line": 0, "sha256": sentence_sha256(text), "class": cls}
+        if cls == "asserted":
+            entry["falsifier"] = BEARER_FALSIFIER[sid]
+            out.append(f"{text} [{cls}; falsifier: {entry['falsifier']}]")
+        else:
+            out.append(f"{text} [{cls}]")
+        entry["line"] = len(out)
+        sentences.append(entry)
     counts = {c: sum(x["class"] == c for x in sentences) for c in BEARER_CLASSES}
     twin = {"bearer_schema": BEARER_SCHEMA, "page": README,
             "classes": list(BEARER_CLASSES), "counts": counts, "sentences": sentences}

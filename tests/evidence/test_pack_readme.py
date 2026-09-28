@@ -62,8 +62,8 @@ def test_does_not_show_bullets_verbatim(pack):
     section = text.split("## What this pack does not show", 1)[1].split("\n## ", 1)[0]
     tagged = [l[2:] for l in section.splitlines() if l.startswith("- ")]
     # each bullet ends in its bearer class, the bullet itself stays verbatim
-    assert all(l.endswith(" [asserted]") for l in tagged)
-    bullets = [l[:-len(" [asserted]")] for l in tagged]
+    assert all(l.endswith("]") and " [asserted; falsifier: " in l for l in tagged)
+    bullets = [l.rsplit(" [asserted; falsifier: ", 1)[0] for l in tagged]
     assert bullets == list(README_DOES_NOT_SHOW)
     # the customer page spells out the internal references, nothing else moves
     assert "(P7)" not in text and "by us" not in text
