@@ -441,6 +441,10 @@ def mandate_section(records_raw: bytes, window_lines: list[int], *,
     """
     lines = _lines(records_raw)
     counts = {"inside": 0, "outside": 0, "could_not_look": 0}
+    # Outcome words on the rowed calls (inside is counted, not rowed), and the
+    # drift count: calls no mandate rule matched at all, summed off session_end.
+    outcomes: dict = {}
+    no_match = 0
     outside, cnl, loaded, changed, named = [], [], [], [], []
     gated, ended = [], []
     for n in window_lines:
@@ -458,6 +462,8 @@ def mandate_section(records_raw: bytes, window_lines: list[int], *,
             if _is_count(row.get("mandate_inside")):
                 counts["inside"] += row["mandate_inside"]
                 ended.append(session)
+                if _is_count(row.get("mandate_no_matching_mandate")):
+                    no_match += row["mandate_no_matching_mandate"]
             continue
         if evt == "mandate_loaded":
             loaded.append(n)
@@ -471,6 +477,8 @@ def mandate_section(records_raw: bytes, window_lines: list[int], *,
                                                                       "could_not_look"):
             key = row["verdict"]
             counts[key] += 1
+            if isinstance(row.get("outcome"), str):
+                outcomes[row["outcome"]] = outcomes.get(row["outcome"], 0) + 1
             (outside if key == "outside" else cnl).append({"line": n, "raw": text})
         else:
             continue
@@ -489,6 +497,12 @@ def mandate_section(records_raw: bytes, window_lines: list[int], *,
         "counts": counts,
         "inside_counted_from": ("the mandate_inside field of the window's session_end "
                                 "rows (an inside call is counted, not rowed)"),
+        "outcomes": dict(sorted(outcomes.items())),
+        "no_matching_mandate": no_match,
+        "no_matching_mandate_counted_from": (
+            "the mandate_no_matching_mandate field of the window's session_end rows: "
+            "calls no mandate rule matched at all, apart from calls a rule matched "
+            "and refused"),
         "sessions_without_end": [x for x in gated if x not in ended],
         "named_sha256": uniq,
         "loaded_lines": loaded,
@@ -540,6 +554,18 @@ def mandate_checks(section: dict) -> list[dict]:
 def mandate_rows_bytes(section: dict) -> bytes:
     """mandate_rows.json's exact bytes (LF, UTF-8), so verify can compare."""
     return (json.dumps(section, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+#: Keys a pack built before the outcome words (0.10.0 and earlier) does not carry.
+_MANDATE_ROWS_NEW_KEYS = ("outcomes", "no_matching_mandate",
+                          "no_matching_mandate_counted_from")
+
+
+def mandate_rows_bytes_legacy(section: dict) -> bytes:
+    """The bytes a pack built before `outcomes` / `no_matching_mandate` holds,
+    so verify still reads an older pack instead of calling it BROKEN."""
+    return mandate_rows_bytes({k: v for k, v in section.items()
+                               if k not in _MANDATE_ROWS_NEW_KEYS})
 
 
 def mandate_block(section: dict) -> dict:

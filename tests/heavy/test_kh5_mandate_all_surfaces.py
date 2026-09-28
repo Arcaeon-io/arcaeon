@@ -274,6 +274,7 @@ def test_record_only_rows_name_each_call_the_gate_did_not_find_inside(runs, surf
     assert end_counts(runs[("record-only", surface)].rows) == _drop_none({
         "mandate_inside": 2, "mandate_outside": 3, "mandate_could_not_look": 1,
         "mandate_blocked": None, "mandate_cap_exceeded": 1, "mandate_changes": None,
+        "mandate_no_matching_mandate": 1,
         "mandate_spent": "21.00"})
 
 
@@ -367,6 +368,7 @@ def test_enforce_rows_are_the_record_only_rows_with_the_stated_differences(runs,
     assert end_counts(runs[("enforce", surface)].rows) == _drop_none({
         "mandate_inside": 2, "mandate_outside": 3, "mandate_could_not_look": 1,
         "mandate_blocked": 4, "mandate_cap_exceeded": 1, "mandate_changes": None,
+        "mandate_no_matching_mandate": 1,
         "mandate_spent": "12.00"})
     assert begin_mandate(runs[("enforce", surface)].rows)["mandate_mode"] == "enforce"
     assert begin_mandate(runs[("record-only", surface)].rows)["mandate_mode"] == "record-only"

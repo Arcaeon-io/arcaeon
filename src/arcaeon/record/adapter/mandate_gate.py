@@ -247,8 +247,10 @@ class MandateGate:
                     "rule": "forbidden_acts"}
         allowed = m.get("allowed_acts") or []
         if allowed and not any(fnmatch.fnmatchcase(name, p) for p in allowed):
+            # No rule of the mandate names this call at all: drift, counted
+            # apart from a call a rule matched and refused.
             return OUTSIDE, f"tool {name!r} matches no allowed_acts pattern", {
-                "rule": "allowed_acts"}
+                "rule": "allowed_acts", "no_matching_mandate": True}
         at = at or _now_iso()
         args = tool_call.get("arguments")
         args = args if isinstance(args, dict) else {}
@@ -303,8 +305,12 @@ class MandateGate:
         if na and when > na:
             return OUTSIDE, f"call at {at} is after the mandate's not_after " \
                             f"{m['not_after']}", {"rule": "window"}
-        return INSIDE, f"tool {name!r} is allowed and the call is inside the window", {
-            "rule": "acts"}
+        extra: dict = {"rule": "acts"}
+        if not allowed:
+            # Inside by default: no allowed_acts list, no forbidden_acts or
+            # spend_cap match. Nothing in the mandate named it.
+            extra["no_matching_mandate"] = True
+        return INSIDE, f"tool {name!r} is allowed and the call is inside the window", extra
 
 
 def load(path: str | Path | None) -> MandateGate:

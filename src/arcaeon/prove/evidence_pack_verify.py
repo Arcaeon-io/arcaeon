@@ -317,7 +317,9 @@ def _step_mandate(pack: Path, manifest: dict) -> dict:
     section = mandate_section(records.read_bytes(), lines,
                               mandate_name=claim.get("mandate_file"), mandate_bytes=copy)
     problems = []
-    if rows_p.read_bytes() != mandate_rows_bytes(section):
+    from arcaeon.prove.evidence_pack import mandate_rows_bytes_legacy
+    if rows_p.read_bytes() not in (mandate_rows_bytes(section),
+                                   mandate_rows_bytes_legacy(section)):
         problems.append(f"{MANDATE_ROWS} differs from the section rebuilt from "
                         "records.jsonl and mandate_file.json")
     if claim != mandate_block(section):

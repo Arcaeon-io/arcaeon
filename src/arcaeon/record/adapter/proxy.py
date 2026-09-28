@@ -273,6 +273,8 @@ class _MandateWatch:
         self.counts = {"inside": 0, "outside": 0, "could_not_look": 0}
         self.blocked = 0
         self.cap_exceeded = 0
+        #: Calls no rule of the mandate matched at all (drift), inside or not.
+        self.no_matching_mandate = 0
         self._lock = threading.Lock()
         self._seen_sha256 = getattr(gate, "file_sha256", None)
         self.changes = 0
@@ -393,6 +395,8 @@ class _MandateWatch:
                 self.blocked += 1
             if extra.get("evt") == "mandate_cap_exceeded":
                 self.cap_exceeded += 1
+            if extra.get("no_matching_mandate"):
+                self.no_matching_mandate += 1
         # A forwarded spend ran, so it counts toward spend_cap.total (K073);
         # a blocked one never reached the tool and does not.
         spent = None
@@ -424,6 +428,8 @@ class _MandateWatch:
                           reason_word=extra.get("reason_word"))
         if extra.get("judged_reason"):
             fields["judged_reason"] = extra["judged_reason"]
+        if extra.get("no_matching_mandate"):
+            fields["no_matching_mandate"] = True
         if extra.get("evt") == "mandate_cap_exceeded":
             fields.update(amount=extra.get("spend_amount"),
                           session_spent_before=extra.get("session_spent_before"),
@@ -459,6 +465,7 @@ class _MandateWatch:
                 "mandate_could_not_look": self.counts["could_not_look"],
                 "mandate_blocked": self.blocked or None,
                 "mandate_cap_exceeded": self.cap_exceeded or None,
+                "mandate_no_matching_mandate": self.no_matching_mandate or None,
                 "mandate_changes": self.changes or None,
                 "mandate_spent": (str(self.gate.spent)
                                   if getattr(self.gate, "total_cap", None) is not None
