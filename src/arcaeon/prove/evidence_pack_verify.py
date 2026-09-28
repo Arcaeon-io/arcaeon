@@ -78,7 +78,10 @@ the constant), BROKEN "readme drift", and README.json, its bearer twin, the
 same way, BROKEN "bearer drift". Every sentence line of README.md must end
 in [bytes], [order] or [asserted], the class README.json lists for it and
 one the fixed map in evidence_pack.BEARER_ALLOWED allows for its id; an
-untagged or misclassed sentence is BROKEN naming the sentence id, and the
+[asserted] sentence names its falsifier (evidence_pack.BEARER_FALSIFIER) on
+its line and in README.json, and a file that falsifier names is in the pack;
+an untagged or misclassed sentence, or an [asserted] one with no falsifier,
+is BROKEN naming the sentence id, and the
 result's `bearer` holds the class counts. ARTICLE_12_SUMMARY.md is re-rendered
 from the records and the witness block, BROKEN "summary drift"; integrity.json
 and the export block are re-derived from records.jsonl. Any other prose file
@@ -689,13 +692,47 @@ def _page_one_lines(text: str) -> list[tuple[int, str]]:
     return out
 
 
+def _falsifier_problems(pack: Path, name: str, n: int, twin_f, line_f, fixed_f,
+                        files_of) -> list[str]:
+    """What is wrong with one [asserted] sentence's falsifier: none in the
+    twin, none on the line, the two apart, not the fixed map's, or naming a
+    file the pack does not hold."""
+    out: list[str] = []
+    if not isinstance(twin_f, str) or not twin_f.strip():
+        out.append(f"{name} (line {n}) is [asserted] with no falsifier in README.json, "
+                   "so no stranger can catch it false")
+        twin_f = None
+    if line_f is None:
+        out.append(f"{name} (line {n}) is [asserted] and names no falsifier on its line")
+    elif twin_f is not None and line_f != twin_f:
+        out.append(f"{name} (line {n}) names falsifier {line_f!r}, README.json says "
+                   f"{twin_f!r}")
+    if twin_f is not None and fixed_f is not None and twin_f != fixed_f:
+        out.append(f"{name} (line {n}) names falsifier {twin_f!r}, not the "
+                   f"{fixed_f!r} the fixed map names")
+    named: list[str] = []
+    for f in (twin_f, line_f):
+        for fn in files_of(f) if isinstance(f, str) else ():
+            if fn not in named:
+                named.append(fn)
+    for fn in named:
+        if not (pack / fn).is_file():
+            out.append(f"{name} (line {n}) has a falsifier naming {fn}, which is not "
+                       "in the pack")
+    return out
+
+
 def _step_bearer(pack: Path, manifest: dict) -> dict:
     """Every sentence on page one carries one of the three bearer words at the
     end of its line, the same word README.json lists for it, and a word the
     fixed map in the code allows for that sentence id. An untagged, unknown
-    or misclassed sentence is BROKEN naming the sentence id."""
+    or misclassed sentence is BROKEN naming the sentence id. An [asserted]
+    sentence must name its falsifier, the check a stranger runs, in
+    README.json and on its line, the one the fixed map names; one with no
+    falsifier, or whose falsifier names a file not in the pack, is BROKEN."""
     from arcaeon.prove.evidence_pack import (BEARER_ALLOWED, BEARER_CLASSES, BEARER_FILE,
-                                             README, sentence_sha256)
+                                             BEARER_FALSIFIER, README, falsifier_files,
+                                             sentence_sha256)
 
     check = "bearer classes"
     rp, bp = pack / README, pack / BEARER_FILE
@@ -720,7 +757,7 @@ def _step_bearer(pack: Path, manifest: dict) -> dict:
     matched: set[int] = set()
     for n, line in _page_one_lines(text):
         m = _TAGGED.fullmatch(line)
-        body, tag = (m.group(1), m.group(2)) if m else (line, None)
+        body, tag, line_f = (m.group(1), m.group(2), m.group(3)) if m else (line, None, None)
         e = by_sha.get(sentence_sha256(body)) or by_line.get(n)
         sid = e.get("id") if e else None
         name = f"sentence {sid}" if isinstance(sid, str) else f"sentence at line {n}"
@@ -746,6 +783,14 @@ def _step_bearer(pack: Path, manifest: dict) -> dict:
         elif tag not in allowed:
             problems.append(f"{name} (line {n}) is tagged [{tag}], which it cannot bear "
                             f"(it may carry: {', '.join(allowed)})")
+        if tag == "asserted":
+            problems += _falsifier_problems(pack, name, n, e.get("falsifier"), line_f,
+                                            BEARER_FALSIFIER.get(sid)
+                                            if isinstance(sid, str) else None,
+                                            falsifier_files)
+        elif line_f is not None:
+            problems.append(f"{name} (line {n}) is [{tag}] and carries a falsifier; "
+                            "only an [asserted] sentence names one")
     for e in entries:
         if id(e) not in matched:
             problems.append(f"{BEARER_FILE} lists sentence {e.get('id')} that README.md "
