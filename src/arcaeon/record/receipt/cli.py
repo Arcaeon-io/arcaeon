@@ -13,6 +13,7 @@
                        [--namespace NS] [--out-dir DIR] [--no-anchor] [--no-witness]
   arcaeon-receipt verify <receipt.json> [--ledger L] [--ots]
   arcaeon-receipt verify --batch <dir|glob|receipt.json ...> [--ledger L] [--ots]
+  arcaeon-receipt verify <aer1.json|aer1.jsonl> [--canonical-bytes FILE ...]
   arcaeon-receipt roster-report <cohort-dir|class-ledger.jsonl> [--out report.csv]
                        [--json] [--ledger L] [--ots]
   arcaeon-receipt archive <cohort-dir|class-ledger.jsonl> --out class.zip
@@ -23,6 +24,10 @@ Exit codes: 0 ok; 1 usage/transport error; 2 verify failed; 3 receipt has
 flagged checks (cite: a citation not found or with an invalid reporter);
 4 (--batch, roster-report and archive): nothing BROKEN but the check
 COULD NOT LOOK at one or more receipts.
+An AER-1 receipt (foreign format, issuer zambo.dev; one JSON object, or JSONL
+of them) prints one line per receipt and exits with the same codes: 0
+VERIFIED, 2 BROKEN, 4 COULD NOT LOOK (worst row wins; `arcaeon receipt`
+translates these to 0/1/3).
 Exit 3 is deliberate: a pre-filing gate should stop on a flag, not on a
 clean receipt. `ballot` has no flagged-check concept (a ballot is already a
 finished, already-graded object) so it only ever exits 0 or 1. Exit 4 is
@@ -40,6 +45,11 @@ from pathlib import Path
 from . import (__version__, approval, archive, authorship, ballot, call, cite,
                roster_report, verify_batch)
 from .core import load_receipt, render_exhibit, save_receipt, verify_receipt
+from .foreign import aer1
+
+#: Direct-entry exit codes for a verdict word (the `arcaeon receipt` front
+#: door maps 2 -> 1 and 4 -> 3 through arcaeon.verdict.LEGACY).
+_AER1_EXIT = {"VERIFIED": 0, "BROKEN": 2, "COULD NOT LOOK": 4}
 
 EXHIBITS = {cite.KIND: cite.exhibit, call.KIND: call.exhibit,
             approval.KIND: approval.exhibit, authorship.KIND: authorship.exhibit,
@@ -58,6 +68,56 @@ def _does_not_prove(scope: dict) -> str:
     own SCOPE dict rather than restated by hand, so this text cannot drift
     from what the issued receipt itself says."""
     return "Does NOT prove: " + "; ".join(scope["does_not_prove"]) + "."
+
+
+def _aer1_rows(text: str):
+    """The AER-1 receipts in `text` (one JSON object, or JSONL with every
+    non-empty line an AER-1 object), else None: not this format."""
+    try:
+        obj = json.loads(text)
+    except (ValueError, RecursionError):
+        obj = None
+        rows = []
+        for ln in text.splitlines():
+            if not ln.strip():
+                continue
+            try:
+                rows.append(json.loads(ln))
+            except (ValueError, RecursionError):
+                return None
+        return rows if len(rows) > 1 and all(aer1.detect(r) for r in rows) else None
+    return [obj] if aer1.detect(obj) else None
+
+
+def _verify_aer1(path: str, byte_paths) -> "int | None":
+    """None when `path` is not AER-1 (our own verify takes over)."""
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    rows = _aer1_rows(text)
+    if rows is None:
+        return None
+    byte_paths = byte_paths or []
+    if byte_paths and len(byte_paths) != len(rows):
+        print(f"error: {len(rows)} AER-1 receipt(s) in {path} but {len(byte_paths)} "
+              "--canonical-bytes file(s); give one per receipt, in order", file=sys.stderr)
+        return 1
+    worst = 0
+    for i, row in enumerate(rows):
+        data = None
+        if byte_paths:
+            try:
+                data = Path(byte_paths[i]).read_bytes()
+            except OSError as ex:
+                print(f"error: {ex}", file=sys.stderr)
+                return 1
+        v = aer1.verify(row, data)
+        print(f"{aer1.FORMAT} (foreign format, issuer {aer1.ISSUER}): {v.word} -- {v.reason}")
+        code = _AER1_EXIT[v.word]
+        # BROKEN (2) outranks COULD NOT LOOK (4), which outranks VERIFIED (0).
+        worst = max(worst, code, key=lambda c: {0: 0, 4: 1, 2: 2}[c])
+    return worst
 
 
 def main(argv=None, prog: str = "arcaeon-receipt") -> int:
@@ -118,6 +178,10 @@ def main(argv=None, prog: str = "arcaeon-receipt") -> int:
                         "against; omit it and each receipt is checked against the "
                         "ledger named on its own face, if that file sits beside it")
     v.add_argument("--ots", action="store_true", help="also run `ots verify` on the anchor")
+    v.add_argument("--canonical-bytes", action="append", default=None, metavar="FILE",
+                   help="AER-1 (foreign format, issuer zambo.dev) only: a file holding "
+                        "the receipt's decoded canonical bytes, as served base64 by the "
+                        "issuer's API; repeat once per receipt for JSONL. Nothing is fetched.")
 
     r = sub.add_parser("roster-report", help="one row per trainee across a class",
                        description="Roster report: one row per trainee across a cohort -- "
@@ -247,6 +311,13 @@ def main(argv=None, prog: str = "arcaeon-receipt") -> int:
         if not a.path:
             print("error: verify needs a receipt path (or --batch for a whole "
                   "class)", file=sys.stderr)
+            return 1
+        foreign_rc = _verify_aer1(a.path, a.canonical_bytes)
+        if foreign_rc is not None:
+            return foreign_rc
+        if a.canonical_bytes:
+            print("error: --canonical-bytes is for AER-1 receipts; this file is not one",
+                  file=sys.stderr)
             return 1
         try:
             rc = load_receipt(a.path)

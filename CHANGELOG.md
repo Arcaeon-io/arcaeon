@@ -6,7 +6,7 @@ that adds a JSON field or a verb.
 
 ## Unreleased
 
-Nothing yet.
+- **AER1 (pending).** `receipt verify` reads AER-1 receipts (foreign format, issuer zambo.dev; one JSON object or JSONL): one line per receipt, VERIFIED/BROKEN by sha256 of `--canonical-bytes` against result_sha256 and output_hash, COULD NOT LOOK without the bytes (nothing is fetched); exits 0/2/4 (0/1/3 through `arcaeon receipt`).
 
 ## 0.10.0 (2026-09-27)
 
