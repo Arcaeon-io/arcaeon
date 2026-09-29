@@ -78,7 +78,7 @@ def test_twin_lists_each_sentence_and_the_counts(pack):
     chain = next(s for s in twin["sentences"] if s["id"] == "intro.chain")
     assert chain["class"] == "bytes"
     assert chain["sha256"] == hashlib.sha256(CHAIN.encode("utf-8")).hexdigest()
-    assert twin["counts"] == {"bytes": 6, "order": 2, "asserted": 13}
+    assert twin["counts"] == {"bytes": 6, "order": 1, "asserted": 14}
     assert _m(pack)["files"][BEARER_FILE] == \
         hashlib.sha256((pack / BEARER_FILE).read_bytes()).hexdigest()
 
@@ -92,11 +92,11 @@ def test_no_bytes_sentence_names_a_pin_or_an_operator():
 def test_verify_counts_the_classes(pack, capsys):
     res = verify_pack(pack)
     assert res["exit"] == 0, res.get("finding")
-    assert res["bearer"] == {"bytes": 6, "order": 2, "asserted": 13}
+    assert res["bearer"] == {"bytes": 6, "order": 1, "asserted": 14}
     assert _bearer(res)["verdict"] == V.VERIFIED
     assert main([str(pack), "--json"]) == 0
     printed = json.loads(capsys.readouterr().out)
-    assert printed["bearer"] == {"bytes": 6, "order": 2, "asserted": 13}
+    assert printed["bearer"] == {"bytes": 6, "order": 1, "asserted": 14}
 
 
 def test_chain_sentence_retagged_order_is_broken_naming_it(pack):
@@ -124,7 +124,7 @@ def test_twin_and_page_both_retagged_still_broken_by_the_map(pack):
     for s in twin["sentences"]:
         if s["id"] == "intro.chain":
             s["class"] = "order"
-    twin["counts"] = {"bytes": 5, "order": 3, "asserted": 13}
+    twin["counts"] = {"bytes": 5, "order": 2, "asserted": 14}
     tp.write_text(json.dumps(twin, indent=2) + "\n", encoding="utf-8")
     _seal(pack, "README.md", BEARER_FILE)
     b = _bearer(verify_pack(pack))
@@ -255,3 +255,121 @@ def test_asserted_line_without_its_falsifier_is_broken(pack):
     _seal(pack, "README.md")
     f = _bearer(verify_pack(pack))["finding"]
     assert "sentence agent.provider" in f and "names no falsifier on its line" in f
+
+
+def test_no_pin_sentence_is_asserted():
+    """"Without a pin, a full rewrite by the holder still checks out": no
+    field in the pack carries it, so under the definitions it is [asserted]."""
+    assert BEARER_ALLOWED["intro.no_pin"] == ("asserted",)
+    assert set(falsifier_files(BEARER_FALSIFIER["intro.no_pin"])) <= {
+        "manifest.json", "records.jsonl"}
+
+
+# --- packs built before the bearer classes (pack schema 1) ---
+
+NO_PIN = "Without a pin, a full rewrite by the holder still checks out."
+
+
+def _untag(text):
+    """README.md as the main-branch builder (pack schema 1) printed it: no
+    brackets, no legend, the four intro sentences as one paragraph."""
+    lines = [TAIL.sub("", l) for l in text.split("\n")]
+    legend = next(i for i, l in enumerate(lines) if l.startswith("Each line ends in"))
+    del lines[legend:legend + 2]
+    start = lines.index("") + 1
+    end = lines.index(NO_PIN) + 1
+    return "\n".join(lines[:start] + [" ".join(lines[start:end])] + lines[end:])
+
+
+TAIL = re.compile(r" \[(bytes|order|asserted)(; falsifier: [^\]]+)?\]$")
+
+
+def _as_schema_1(pack, *, drop_twin=True, untag=True):
+    m = _m(pack)
+    m["pack_schema"] = 1
+    if drop_twin:
+        (pack / BEARER_FILE).unlink()
+        del m["files"][BEARER_FILE]
+    (pack / "manifest.json").write_text(json.dumps(m, indent=2), encoding="utf-8")
+    if untag:
+        p = pack / "README.md"
+        p.write_bytes(_untag(p.read_text(encoding="utf-8")).encode("utf-8"))
+    _seal(pack, "README.md")
+
+
+def test_main_branch_pack_verifies_and_says_classes_not_present(pack, capsys):
+    _as_schema_1(pack)
+    text = (pack / "README.md").read_text(encoding="utf-8")
+    assert "[bytes]" not in text and "Each line ends in" not in text
+    assert ("for one agent and one window of time. It shows what was written and "
+            "that every row hashes to the next. With a pin,") in text
+    res = verify_pack(pack)
+    assert res["verdict"] == V.VERIFIED and res["exit"] == 0, res.get("finding")
+    b = _bearer(res)
+    assert b["verdict"] == V.VERIFIED
+    assert b["info"] == "bearer classes: not present (pack schema 1)"
+    assert res["bearer"] is None
+    assert main([str(pack)]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("VERIFIED: ")
+    assert out.count("bearer classes: not present (pack schema 1)") == 1
+
+
+def test_main_branch_pack_is_still_re_derived_word_for_word(pack):
+    _as_schema_1(pack)
+    p = pack / "README.md"
+    p.write_bytes(p.read_text(encoding="utf-8").replace(
+        "every row hashes to the next", "no row was ever changed").encode("utf-8"))
+    _seal(pack, "README.md")
+    res = verify_pack(pack)
+    assert res["verdict"] == V.BROKEN and "readme drift" in res["finding"]
+
+
+def test_tagged_pack_with_a_tampered_tag_is_broken(pack):
+    p = pack / "README.md"
+    p.write_bytes(p.read_text(encoding="utf-8").replace(
+        f"{NO_PIN} [asserted; falsifier: {BEARER_FALSIFIER['intro.no_pin']}]",
+        f"{NO_PIN} [order]").encode("utf-8"))
+    _seal(pack, "README.md")
+    res = verify_pack(pack)
+    assert res["verdict"] == V.BROKEN
+    assert "sentence intro.no_pin" in _bearer(res)["finding"]
+
+
+def test_schema_1_label_does_not_exempt_a_tampered_tag(pack):
+    """Relabelling a tagged pack as schema 1 keeps it checked in full."""
+    p = pack / "README.md"
+    p.write_bytes(p.read_text(encoding="utf-8").replace(
+        f"{CHAIN} [bytes]", f"{CHAIN} [order]").encode("utf-8"))
+    _as_schema_1(pack, drop_twin=False, untag=False)
+    res = verify_pack(pack)
+    assert res["verdict"] == V.BROKEN
+    b = _bearer(res)
+    assert "info" not in b and "sentence intro.chain" in b["finding"]
+
+
+@pytest.mark.parametrize("schema", [1, 2])
+def test_twin_missing_with_tags_present_is_broken(pack, schema):
+    if schema == 1:
+        _as_schema_1(pack, untag=False)
+    else:
+        (pack / BEARER_FILE).unlink()
+        m = _m(pack)
+        del m["files"][BEARER_FILE]
+        (pack / "manifest.json").write_text(json.dumps(m, indent=2), encoding="utf-8")
+        _seal(pack)
+    res = verify_pack(pack)
+    assert res["verdict"] == V.BROKEN
+    b = _bearer(res)
+    assert "info" not in b and "README.json is missing" in b["finding"]
+
+
+def test_schema_1_with_one_tag_left_is_checked_in_full(pack):
+    _as_schema_1(pack)
+    p = pack / "README.md"
+    text = p.read_text(encoding="utf-8")
+    line = next(l for l in text.split("\n") if l.startswith("- Rows: "))
+    p.write_bytes(text.replace(line, f"{line} [bytes]").encode("utf-8"))
+    _seal(pack, "README.md")
+    b = _bearer(verify_pack(pack))
+    assert b["verdict"] == V.BROKEN and "info" not in b

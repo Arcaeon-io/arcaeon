@@ -85,6 +85,16 @@ many of each the page holds.
   the window and the system, the completeness of the could not look list, and
   that any row is true are this kind. It is the builder's word.
 
+The sentence "Without a pin, a full rewrite by the holder still checks out" is
+[asserted]: it says what nothing in the pack carries, so no field bears it.
+
+A pack built before the classes (its manifest's `pack_schema` is 1, it holds
+no README.json and no bracket on page one) still verifies: its page one is
+re-rendered untagged and compared word for word, and verify prints
+"bearer classes: not present (pack schema 1)" with the verdict unchanged. A
+pack that holds README.json or any bracket is checked in full, whatever
+schema its manifest names.
+
 A line holding two sentences carries the weaker class. The class each
 sentence may carry is fixed in the code, not in the pack, so a pack that
 moves a sentence to a stronger class, or leaves one untagged, is BROKEN and

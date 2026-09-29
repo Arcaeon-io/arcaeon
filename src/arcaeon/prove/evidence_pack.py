@@ -28,11 +28,19 @@ __all__ = ["build_pack", "select_window", "parse_when", "PackUsageError",
            "OPERATOR_AT_T", "OPERATOR_AT_T_NOTE", "PROSE_HASH_ONLY", "render_readme",
            "newest_ts", "rederived_independence", "BEARER_FILE", "BEARER_CLASSES",
            "BEARER_ALLOWED", "BEARER_SCHEMA", "render_page_one", "render_bearer",
-           "BEARER_FALSIFIER", "falsifier_files",
+           "BEARER_FALSIFIER", "falsifier_files", "BEARER_SINCE_SCHEMA",
+           "render_readme_pre_bearer",
            "page_one_sentences", "sentence_sha256"]
 
-#: The evidence-pack manifest schema. 1 is the first (K053).
-PACK_SCHEMA = 1
+#: The evidence-pack manifest schema. 1 is the first (K053); 2 adds the
+#: bearer classes (README.md's brackets and its twin README.json).
+PACK_SCHEMA = 2
+#: The first pack schema whose page one carries bearer classes. A pack whose
+#: manifest names an older schema, with no README.json and no bracket on page
+#: one, was built before them: verify re-renders its page one untagged and
+#: says the classes are not present, the verdict unchanged. One with either
+#: is checked in full.
+BEARER_SINCE_SCHEMA = 2
 #: The manifest's file name. Every OTHER file in the pack is hashed in it.
 MANIFEST = "manifest.json"
 #: Every COULD NOT LOOK the build reached, one entry each; `[]` when none (K054).
@@ -130,7 +138,7 @@ BEARER_ALLOWED: dict[str, tuple[str, ...]] = {
     "intro.scope": ("asserted",),
     "intro.chain": ("bytes",),
     "intro.pin": ("order",),
-    "intro.no_pin": ("order",),
+    "intro.no_pin": ("asserted",),
     "legend": ("asserted",),
     "agent.selected": ("asserted",),
     "agent.names_seen": ("bytes",),
@@ -171,6 +179,9 @@ _WINDOW_FALSIFIER = ("could_not_look.json, and `arcaeon evidence-pack verify .` 
 _OPERATOR_FALSIFIER = "none derivable; compare with the operator's own records"
 BEARER_FALSIFIER: dict[str, str] = {
     "intro.scope": _WINDOW_FALSIFIER,
+    "intro.no_pin": ("none derivable; with no pin in manifest.json, rewrite "
+                     "records.jsonl, rehash it and see `arcaeon evidence-pack "
+                     "verify .` still pass"),
     "legend": ("README.json, and `arcaeon evidence-pack verify .` checking each "
                "bracket against the fixed map"),
     "agent.selected": _WINDOW_FALSIFIER,
@@ -1022,6 +1033,35 @@ def render_readme(res: dict, window: list[dict], *,
     is LF on every OS. One function for build and verify: verify re-renders
     it from the records and compares it word for word (K06xR3)."""
     return render_page_one(res, window, system_id=system_id, provider=provider)[0]
+
+
+def render_readme_pre_bearer(res: dict, window: list[dict], *,
+                             system_id: str = "", provider: str = "") -> str:
+    """README.md as a pack built before the bearer classes (pack schema 1)
+    printed it: the same sentences, no brackets, no legend, the four intro
+    sentences as one paragraph. Verify re-renders an older pack's page one
+    with it, word for word, so the page is still re-derived."""
+    out: list[str] = []
+    intro: list[str] = []
+    skip_blank = False
+    for item in page_one_sentences(res, window, system_id=system_id, provider=provider):
+        if isinstance(item, str):
+            if skip_blank and item == "":
+                skip_blank = False
+                continue
+            if intro:
+                out.append(" ".join(intro))
+                intro = []
+            out.append(item)
+            continue
+        sid, text = item
+        if sid.startswith("intro."):
+            intro.append(text)
+        elif sid == "legend":
+            skip_blank = True
+        else:
+            out.append(text)
+    return "\n".join(out)
 
 
 def render_bearer(res: dict, window: list[dict], *,

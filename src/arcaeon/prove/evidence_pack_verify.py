@@ -82,7 +82,12 @@ one the fixed map in evidence_pack.BEARER_ALLOWED allows for its id; an
 its line and in README.json, and a file that falsifier names is in the pack;
 an untagged or misclassed sentence, or an [asserted] one with no falsifier,
 is BROKEN naming the sentence id, and the
-result's `bearer` holds the class counts. ARTICLE_12_SUMMARY.md is re-rendered
+result's `bearer` holds the class counts. A pack built before the bearer
+classes (its manifest's `pack_schema` older than 2, no README.json and no
+bracket on page one) has its page one re-rendered untagged and compared
+word for word, and prints "bearer classes: not present (pack schema N)",
+its verdict unchanged; one with README.json or any bracket is checked in
+full. ARTICLE_12_SUMMARY.md is re-rendered
 from the records and the witness block, BROKEN "summary drift"; integrity.json
 and the export block are re-derived from records.jsonl. Any other prose file
 must sit in the manifest's `prose` group, reported "not re-derived, hash
@@ -461,7 +466,8 @@ def _step_rederived(pack: Path, manifest: dict) -> dict:
                                              PROSE_HASH_ONLY, REDERIVED_PROSE,
                                              PackUsageError, _STAMP, newest_ts,
                                              parse_when, rederived_independence,
-                                             render_page_one, select_window)
+                                             render_page_one, render_readme_pre_bearer,
+                                             select_window)
     from arcaeon.prove.evidence_pack import BEARER_FILE
     from arcaeon.record.ledger import verify_file
 
@@ -623,9 +629,14 @@ def _step_rederived(pack: Path, manifest: dict) -> dict:
             for k in ("deal", "mandate", "readings"):
                 if manifest.get(k) is not None:
                     res[k] = manifest[k]
+            pre = _pre_bearer_schema(pack, manifest)
             try:
-                readme, twin = render_page_one(res, sel, system_id=system_id,
-                                               provider=provider)
+                if pre is None:
+                    readme, twin = render_page_one(res, sel, system_id=system_id,
+                                                   provider=provider)
+                else:
+                    readme, twin = render_readme_pre_bearer(
+                        res, sel, system_id=system_id, provider=provider), None
             except (KeyError, TypeError, AttributeError):
                 readme = twin = None
             rp = pack / "README.md"
@@ -633,7 +644,9 @@ def _step_rederived(pack: Path, manifest: dict) -> dict:
                 problems.append("readme drift: README.md is not the page re-rendered from the "
                                 "records (its does-not-show bullets from the constant)")
             bp = pack / BEARER_FILE
-            if twin is None or not bp.is_file() or bp.read_bytes() != twin.encode("utf-8"):
+            if pre is not None:
+                pass
+            elif twin is None or not bp.is_file() or bp.read_bytes() != twin.encode("utf-8"):
                 problems.append(f"bearer drift: {BEARER_FILE} is not the twin re-rendered "
                                 "from the records with page one")
     prose = manifest.get("prose", {})
@@ -676,6 +689,27 @@ def _step_rederived(pack: Path, manifest: dict) -> dict:
 #: A page-one line: its text, its class, and (after an [asserted] class)
 #: its falsifier, "[asserted; falsifier: ...]".
 _TAGGED = re.compile(r"(.*) \[([A-Za-z_]+)(?:; falsifier: ([^\]]+))?\]")
+
+
+def _pre_bearer_schema(pack: Path, manifest: dict) -> int | None:
+    """The manifest's `pack_schema` when the pack was built before the bearer
+    classes: that schema is older than BEARER_SINCE_SCHEMA, the pack holds no
+    README.json, and no sentence line of README.md ends in a bracket of any
+    word. None otherwise, so a pack with either is checked in full."""
+    from arcaeon.prove.evidence_pack import BEARER_FILE, BEARER_SINCE_SCHEMA, README
+
+    n = manifest.get("pack_schema")
+    if not isinstance(n, int) or isinstance(n, bool) or n >= BEARER_SINCE_SCHEMA:
+        return None
+    if (pack / BEARER_FILE).exists():
+        return None
+    try:
+        text = (pack / README).read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    if any(_TAGGED.fullmatch(line) for _, line in _page_one_lines(text)):
+        return None
+    return n
 
 
 def _page_one_lines(text: str) -> list[tuple[int, str]]:
@@ -736,6 +770,11 @@ def _step_bearer(pack: Path, manifest: dict) -> dict:
 
     check = "bearer classes"
     rp, bp = pack / README, pack / BEARER_FILE
+    pre = _pre_bearer_schema(pack, manifest)
+    if pre is not None:
+        # built before the classes: nothing to class, and nothing broken by it
+        return {"check": check, "verdict": V.VERIFIED, "counts": None, "pack_schema": pre,
+                "info": f"bearer classes: not present (pack schema {pre})"}
     if not rp.is_file():
         return _cnl(check, README, str(pack), "missing",
                     "the pack has no README.md, so page one has no sentences to class")
@@ -1468,6 +1507,9 @@ def main(argv: list[str] | None = None, *,
         elif res.get("reason"):
             line += f" ({res['reason_word']}: {res['reason']})"
         print(line)
+        for c in res.get("checks") or []:
+            if c.get("info"):
+                print(f"  {c['info']}")
         for r in res.get("could_not_look") or []:
             print(f"  {V.COULD_NOT_LOOK} [{r['reason_word']}] {r['check']}: {r['reason']}")
     return res["exit"]
