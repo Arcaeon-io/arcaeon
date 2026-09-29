@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-Nothing yet.
+- **Mandate outcome words and the drift count (branch mandate-outcomes-2026-09-28).** Every gate row (`mandate_outside`, `mandate_could_not_look`, `mandate_cap_exceeded`) gains `outcome`, one of `inside`, `outside_forwarded`, `blocked`, `never_attempted`, `could_not_look`; a row for a call no mandate rule matched at all also carries `no_matching_mandate: true`. `session_end` gains `mandate_no_matching_mandate` (the drift count; left out when zero). In an evidence pack, `mandate_rows.json` gains `outcomes` (outcome word to count, over the window's gate rows), `no_matching_mandate` (the sum of `mandate_no_matching_mandate` on the window's session_end rows) and `no_matching_mandate_counted_from`; the manifest's `mandate` block gains `outcomes` and `no_matching_mandate`, the same values. Verify re-derives both from records.jsonl and names the field on a mismatch. A pack built before these fields still verifies only when its records carry no outcome words and no drift count; a pack whose records carry them but whose files lack the fields is BROKEN, naming the missing fields. Verdict words and exit codes unchanged.
 
 ## 0.10.0 (2026-09-27)
 

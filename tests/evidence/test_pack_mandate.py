@@ -202,17 +202,86 @@ def test_current_pack_with_the_block_keys_dropped_is_broken(tmp_path):
     assert "`no_matching_mandate` says nothing, rebuilt 1" in v["finding"]
 
 
-def test_pack_built_before_the_outcome_words_still_verifies(tmp_path):
+def _as_older_pack(out):
+    """Rewrite a pack into the form a build before the outcome words wrote:
+    mandate_rows.json and the manifest block without the new fields, every
+    hash fixed."""
     from arcaeon.prove.evidence_pack import mandate_rows_bytes_legacy
-    mandate = _mandate(tmp_path)
-    out = tmp_path / "pack"
-    build_pack(_gated_ledger(tmp_path, mandate, outcomes=True), out, mandate=mandate)
     sec = json.loads((out / MANDATE_ROWS).read_text(encoding="utf-8"))
     (out / MANDATE_ROWS).write_bytes(mandate_rows_bytes_legacy(sec))
     _rehash(out, MANDATE_ROWS)
     _set_manifest(out, lambda b: [b.pop("outcomes"), b.pop("no_matching_mandate")])
+
+
+def test_pack_built_before_the_outcome_words_still_verifies(tmp_path):
+    """An older pack's records carry no outcome words and no drift count, so
+    the tally rebuilt from them is empty and the older form is accepted."""
+    mandate = _mandate(tmp_path)
+    out = tmp_path / "pack"
+    build_pack(_gated_ledger(tmp_path, mandate, outcomes=False), out, mandate=mandate)
+    _as_older_pack(out)
     v = verify_pack(out)
-    assert v["exit"] == 0, v
+    assert v["verdict"] == V.VERIFIED and v["exit"] == 0, v
+
+
+def test_current_pack_rewritten_as_an_older_pack_is_broken(tmp_path):
+    """Records that carry outcome words make a current pack: stripping the
+    fields from both files and fixing every hash does not hide the drift."""
+    mandate = _mandate(tmp_path)
+    out = tmp_path / "pack"
+    build_pack(_gated_ledger(tmp_path, mandate, outcomes=True), out, mandate=mandate)
+    _as_older_pack(out)
+    v = verify_pack(out)
+    assert v["verdict"] == V.BROKEN and v["exit"] == 1, v
+    assert "has no `outcomes` or `no_matching_mandate`" in v["finding"]
+    assert f"{MANDATE_ROWS} differs from the section rebuilt" in v["finding"]
+
+
+def _enforce_ledger(tmp_path, mandate: Path) -> Path:
+    """One enforce session: a call the gate refused and withheld (blocked),
+    and a call refused before the gate could judge it (never_attempted)."""
+    sha = _sha(mandate.read_bytes())
+    p = tmp_path / "seam_enforce.jsonl"
+    lg = Ledger(p)
+    base = {"seam": "mcp_stdio", "session": "s-2", "server": "echo"}
+    lg.append({**base, "evt": "session_begin", "seq": 1})
+    lg.append({**base, "evt": "mandate_loaded", "seq": 2, "mandate": str(mandate),
+               "mandate_status": "loaded", "mandate_file_sha256": sha,
+               "mandate_mode": "enforce"})
+    lg.append({**base, "evt": "mandate_outside", "seq": 3, "verdict": "outside",
+               "rule": "allowed_acts", "reason": "refund is not an allowed act",
+               "tool": "refund", "mandate_file_sha256": sha, "action": "blocked",
+               "mandate_mode": "enforce", "outcome": "blocked"})
+    lg.append({**base, "evt": "mandate_could_not_look", "seq": 4,
+               "verdict": "could_not_look", "rule": "frame", "reason": "unparsed",
+               "looked_for": "a JSON-RPC request", "where": "client stdin",
+               "reason_word": "unreadable", "action": "blocked",
+               "mandate_mode": "enforce", "outcome": "never_attempted"})
+    lg.append({**base, "evt": "session_end", "seq": 5, "reason": "eof",
+               "mandate_inside": 0, "mandate_outside": 1,
+               "mandate_could_not_look": 1, "mandate_no_matching_mandate": 0})
+    return p
+
+
+def test_blocked_and_never_attempted_reach_the_manifest_and_verify(tmp_path):
+    mandate = _mandate(tmp_path)
+    out = tmp_path / "pack"
+    build_pack(_enforce_ledger(tmp_path, mandate), out, mandate=mandate)
+    block = _m(out)["mandate"]
+    assert block["outcomes"] == {"blocked": 1, "never_attempted": 1}
+    assert block["no_matching_mandate"] == 0
+    v = verify_pack(out)
+    assert v["verdict"] == V.VERIFIED and v["exit"] == 0, v
+
+
+def test_manifest_tally_disagreeing_with_the_records_is_broken(tmp_path):
+    mandate = _mandate(tmp_path)
+    out = tmp_path / "pack"
+    build_pack(_enforce_ledger(tmp_path, mandate), out, mandate=mandate)
+    _set_manifest(out, lambda b: b.update(outcomes={"blocked": 2}))
+    v = verify_pack(out)
+    assert v["verdict"] == V.BROKEN and v["exit"] == 1, v
+    assert "`outcomes` says" in v["finding"]
 
 
 def test_changed_byte_in_mandate_copy_is_broken(tmp_path):
