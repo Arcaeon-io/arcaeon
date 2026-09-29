@@ -99,20 +99,28 @@ def _verify_aer1(path: str, byte_paths) -> "int | None":
     if rows is None:
         return None
     byte_paths = byte_paths or []
-    if byte_paths and len(byte_paths) != len(rows):
-        print(f"error: {len(rows)} AER-1 receipt(s) in {path} but {len(byte_paths)} "
-              "--canonical-bytes file(s); give one per receipt, in order", file=sys.stderr)
+    # One bytes file per receipt; a workflow receipt takes one per step.
+    need = [len(r["steps"]) if aer1.detect_workflow(r) else 1 for r in rows]
+    if byte_paths and len(byte_paths) != sum(need):
+        print(f"error: {len(rows)} AER-1 receipt(s) in {path} need {sum(need)} "
+              f"--canonical-bytes file(s) but {len(byte_paths)} given; give one per "
+              "receipt (one per step for a workflow receipt), in order", file=sys.stderr)
         return 1
     worst = 0
+    at = 0
     for i, row in enumerate(rows):
         data = None
         if byte_paths:
             try:
-                data = Path(byte_paths[i]).read_bytes()
+                data = [Path(b).read_bytes() for b in byte_paths[at:at + need[i]]]
             except OSError as ex:
                 print(f"error: {ex}", file=sys.stderr)
                 return 1
-        v = aer1.verify(row, data)
+            at += need[i]
+        if aer1.detect_workflow(row):
+            v = aer1.verify_workflow(row, data)
+        else:
+            v = aer1.verify(row, data[0] if data else None)
         print(f"{aer1.FORMAT} (foreign format, issuer {aer1.ISSUER}): {v.word} -- {v.reason}")
         code = _AER1_EXIT[v.word]
         # BROKEN (2) outranks COULD NOT LOOK (4), which outranks VERIFIED (0).

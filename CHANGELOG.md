@@ -6,6 +6,7 @@ that adds a JSON field or a verb.
 
 ## Unreleased
 
+- **AER1b (pending).** `receipt verify` reads AER-1 -03 Section 8 workflow receipts (merkle_root plus steps): each step digest against its own `--canonical-bytes` (one per step; BROKEN names the step), merkle_root recomputed under an assumed construction (listed order, sha256 of concatenated raw digests, odd leaf duplicated); a root that differs is COULD NOT LOOK "merkle construction unconfirmed against AER-1 -03 section 8", never BROKEN; output hash and goal binding not checked.
 - **AER1 (pending).** `receipt verify` reads AER-1 receipts (foreign format, issuer zambo.dev; one JSON object or JSONL): one line per receipt, VERIFIED/BROKEN by sha256 of `--canonical-bytes` against result_sha256 and output_hash, COULD NOT LOOK without the bytes (nothing is fetched); exits 0/2/4 (0/1/3 through `arcaeon receipt`).
 
 ## 0.10.0 (2026-09-27)

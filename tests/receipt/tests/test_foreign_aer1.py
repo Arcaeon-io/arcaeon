@@ -113,3 +113,71 @@ def test_bytes_count_mismatch_is_usage_error(tmp_path, capsys):
     text = json.dumps(_row()) + "\n" + json.dumps(_row()) + "\n"
     rc, out = _run(tmp_path, capsys, text, [BYTES])
     assert rc == 1 and out == []
+
+
+# --- AER-1 -03 Section 8 workflow receipts (SYNTHETIC; construction assumed) ---
+
+def _h(b: bytes) -> str:
+    return hashlib.sha256(b).hexdigest()
+
+
+def _root(digests):
+    """Our own helper: leaves in listed order, sha256(left || right) over raw
+    digests, odd last node paired with itself."""
+    level = [bytes.fromhex(d) for d in digests]
+    while len(level) > 1:
+        if len(level) % 2:
+            level.append(level[-1])
+        level = [hashlib.sha256(level[i] + level[i + 1]).digest()
+                 for i in range(0, len(level), 2)]
+    return level[0].hex()
+
+
+def _workflow(step_bytes, root=None):
+    steps = [{"receipt_id": f"step-{i + 1}", "result_sha256": _h(b), "output_hash": _h(b)}
+             for i, b in enumerate(step_bytes)]
+    return {"receipt_id": "wf-1", "spec_revision": "-03", "goal": "synthetic",
+            "output_hash": _h(b"workflow output"), "steps": steps,
+            "merkle_root": root or _root([s["result_sha256"] for s in steps])}
+
+
+TWO = [b'{"step":1}', b'{"step":2}']
+THREE = TWO + [b'{"step":3}']
+
+
+def test_workflow_detected():
+    assert aer1.detect_workflow(_workflow(TWO)) and aer1.detect(_workflow(TWO))
+    assert not aer1.detect_workflow(_row())
+    assert not aer1.detect_workflow({"merkle_root": "00", "steps": "x"})
+
+
+@pytest.mark.parametrize("parts", [TWO, THREE], ids=["two", "three"])
+def test_workflow_verified(parts):
+    v = aer1.verify_workflow(_workflow(parts), list(parts))
+    assert v.word == V.VERIFIED and f"all {len(parts)} step digests" in v.reason
+
+
+def test_workflow_step_altered_is_broken_naming_step():
+    wf = _workflow(THREE)
+    wf["steps"][1]["result_sha256"] = _h(b"altered")
+    v = aer1.verify_workflow(wf, list(THREE))
+    assert v.word == V.BROKEN and "step 2 (step-2)" in v.reason
+
+
+def test_workflow_root_other_construction_could_not_look():
+    # e.g. sha256 over the concatenated hex strings: a different construction.
+    other = _h("".join(_h(b) for b in THREE).encode())
+    v = aer1.verify_workflow(_workflow(THREE, root=other), list(THREE))
+    assert v.word == V.COULD_NOT_LOOK
+    assert "merkle construction unconfirmed against AER-1 -03 section 8" in v.reason
+
+
+def test_workflow_no_bytes_could_not_look():
+    assert aer1.verify_workflow(_workflow(TWO), None).word == V.COULD_NOT_LOOK
+
+
+def test_workflow_cli_one_bytes_file_per_step(tmp_path, capsys):
+    rc, out = _run(tmp_path, capsys, json.dumps(_workflow(THREE)), THREE)
+    assert rc == 0 and len(out) == 1 and " VERIFIED -- " in out[0]
+    rc, out = _run(tmp_path, capsys, json.dumps(_workflow(THREE)), TWO)
+    assert rc == 1 and out == []
