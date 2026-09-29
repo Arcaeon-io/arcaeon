@@ -31,8 +31,10 @@ def test_upgrade_message_names_the_registration_grant_not_a_monthly_tier():
     g = offers.REGISTRATION_GRANT
     assert g and g["credits"] == 500 and g["once"] is True
     msg = offers.upgrade_message("witness_pin")
+    # Registration is dark until offers.json switches it on (test_registration_link.py).
     assert ("Every new key comes with 500 credits, one time, per verified email; "
-            "registration is at https://arcaeon.io/pricing.") in msg
+            "the current offer is at https://arcaeon.io/pricing.") in msg
+    assert "regist" not in msg.lower()
     assert "pins/month" not in msg and "no card" not in msg
     assert not hasattr(offers, "FREE_TIER")
     msg.encode("ascii")

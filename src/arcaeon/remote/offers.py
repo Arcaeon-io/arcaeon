@@ -53,11 +53,21 @@ REGISTRATION_GRANT = _load_registration_grant()
 
 
 def registration_sentence() -> str:
-    """The one sentence naming the free door, ASCII only, no dashes."""
+    """The one sentence naming the free door, ASCII only, no dashes.
+
+    Registration itself is dark until the offers document switches it on
+    (arcaeon.remote.registration): until then this names the grant and the
+    pricing page and says nothing about registering; once on, it is the one
+    registration sentence every surface prints.
+    """
+    from arcaeon.remote.registration import registration_line
+    line = registration_line()
+    if line is not None:
+        return line
     if REGISTRATION_GRANT and REGISTRATION_GRANT.get("statement"):
         return (f"Every new key comes with {REGISTRATION_GRANT['statement']}; "
-                f"registration is at {PRICING_URL}.")
-    return f"Registration and the current offer: {PRICING_URL}."
+                f"the current offer is at {PRICING_URL}.")
+    return f"The current offer: {PRICING_URL}."
 
 
 WITNESS_ENDPOINT = "https://witness.arcaeon.io"

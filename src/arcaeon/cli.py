@@ -106,6 +106,10 @@ def help_text() -> str:
         lines.append("")
     lines += ["Exit codes, every verb: 0 good, 1 a bad finding, 2 bad usage, 3 COULD NOT LOOK.",
               "--legacy-exit returns the old tool's own code (0.9.x only)."]
+    from arcaeon.remote.registration import registration_line
+    reg = registration_line()
+    if reg:
+        lines += ["", reg]
     return "\n".join(lines)
 
 
@@ -1012,18 +1016,25 @@ def _buy(argv) -> int:
     except SystemExit as e:
         return e.code if isinstance(e.code, int) else V.EXIT_USAGE
     from arcaeon import remote
+    from arcaeon.remote.registration import registration_line
     if a.plan == "evidence-pack":  # K128: the sealed pack is paid in credits
         from arcaeon.remote import offers as _offers
         try:
-            lines = _offers.evidence_pack_lines(remote.load_offers(a.offers))
+            cat = remote.load_offers(a.offers)
+            lines = _offers.evidence_pack_lines(cat)
         except (OSError, ValueError) as e:
             return _usage(f"could not read the evidence-pack offer: {e}")
-        print("\n".join(lines))
+        reg = registration_line(cat)
+        print("\n".join(lines + ([reg] if reg else [])))
         return V.EXIT_GOOD
     try:
-        links = remote.checkout_links(remote.load_offers(a.offers))
+        cat = remote.load_offers(a.offers)
+        links = remote.checkout_links(cat)
     except (OSError, ValueError) as e:
         return _usage(f"could not read offers.json: {e}")
+    # Dark until the offers document switches registration on: then one
+    # sentence, and never on the single-plan path, whose stdout is one URL.
+    reg = registration_line(cat)
     if a.plan:
         hits = [x for x in links if x["plan"] == a.plan]
         if not hits:
@@ -1033,6 +1044,8 @@ def _buy(argv) -> int:
         return V.EXIT_GOOD
     for x in links:
         print(f"{x['plan']:<10} {x['price']:<10} {x['cap']:<18} {x['checkout']}")
+    if reg:
+        print(reg)
     return V.EXIT_GOOD
 
 

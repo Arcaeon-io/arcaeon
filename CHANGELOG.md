@@ -6,7 +6,7 @@ that adds a JSON field or a verb.
 
 ## Unreleased
 
-Nothing yet.
+- Witness registration link, built dark: `arcaeon.remote.registration.registration_link()` returns the URL only when offers.json carries `"registration": {"enabled": true, "url": ...}`; `arcaeon buy`, `arcaeon --help` and the MCP server's instructions, status notes and keyless refusal print one sentence with it when on and nothing about registration when off (they previously named "registration is at arcaeon.io/pricing" unconditionally).
 
 ## 0.10.0 (2026-09-27)
 

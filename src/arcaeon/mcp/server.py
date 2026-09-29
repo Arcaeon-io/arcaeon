@@ -515,6 +515,22 @@ def _server_class():
             "arcaeon needs the MCP Python SDK: pip install 'mcp>=1.0'") from e
 
 
+def _registration_suffix() -> str:
+    """A space and the registration sentence when the offers document switches
+    it on (arcaeon.remote.registration), else the empty string: dark means not
+    a word of it."""
+    from arcaeon.remote.registration import registration_line
+    line = registration_line()
+    return f" {line}" if line else ""
+
+
+def _grant_note() -> str:
+    """The status note on the credit grant: the registration sentence when it
+    is live, else the grant and the pricing page with no word of registering."""
+    from arcaeon.remote.offers import registration_sentence
+    return registration_sentence()
+
+
 def build_server():
     """Build the server. Separated from serve() so tests drive it with the
     SDK's in-process client instead of spawning a subprocess."""
@@ -531,7 +547,7 @@ def build_server():
             "needs nothing. Call arcaeon_status for versions and the free/paid "
             "split. None of these tools claim your records are TRUE: they prove "
             "a record was not altered, which is a different and smaller thing."
-        ),
+        ) + _registration_suffix(),
     )
 
     # --- ledger, re-exported whole ---------------------------------------
@@ -623,7 +639,7 @@ def build_server():
             "the hosted witness, a party you cannot advance — the only thing that "
             "catches TRUNCATION, which a hash chain alone cannot. Returns the "
             "stored pin, the public commit, and the history URL. Without a key it "
-            "returns a plain note with the registration grant and the $5 pack; it never "
+            "returns a plain note with the credit grant and the $5 pack; it never "
             "silently does nothing. Proves no-truncation only relative to what the "
             "witness saw and only as recently as the last pin: the pin gap IS the "
             "security parameter."),
@@ -641,7 +657,7 @@ def build_server():
             "exactly (a mismatch is refused, 409 renewal_head_mismatch) — a renewal "
             "moves the cadence deadline and can never launder a re-mint or erase a "
             "deadline that was already missed. Without a key it returns a plain "
-            "note with the registration grant and the $5 pack."),
+            "note with the credit grant and the $5 pack."),
     )
     def witness_renew(namespace: str, rows: int, chain: str):
         args = {"namespace": namespace, "rows": rows, "chain": chain}
@@ -858,8 +874,7 @@ def _status_payload() -> dict:
             "Everything except witness_* is free forever and needs no key; "
             "the witness LIBRARY is self-hostable free too, the paid part is "
             "us hosting it.",
-            "Every new key comes with 500 credits, one time, per verified "
-            "email; registration is at https://arcaeon.io/pricing.",
+            _grant_note(),
             "Auth is bearer-key only (auth_level bearer-stage0): a leaked key "
             "can pin and renew in your name. Owner-signature auth is designed, "
             "not built.",
