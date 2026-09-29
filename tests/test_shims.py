@@ -315,7 +315,8 @@ LEGACY_CASES = [
     ("arcaeon-audit", "arcaeon-audit", ["verify", "pre.jsonl"], {"pre.jsonl": '{"a": 1}\n'},
      2, "audit", "verify"),
     # a receipt whose body does not verify. Old arcaeon-receipt: 2.
-    ("arcaeon-receipt", "arcaeon-receipt", ["verify", "r.json"], {"r.json": "{}"},
+    ("arcaeon-receipt", "arcaeon-receipt", ["verify", "r.json"],
+     {"r.json": '{"receipt_version": "arcaeon-receipt/0.1"}'},
      2, "receipt", "verify"),
     # a probe with no server command: could not connect. Old mcp-vet: 2.
     ("arcaeon-mcp-vet", "mcp-vet", ["probe"], {}, 2, "vet", "probe"),

@@ -32,7 +32,8 @@ from typing import Iterable, List, Optional
 
 from arcaeon import verdict as _v
 
-from .core import ANCHOR_POSITIVE, verify_receipt
+from .core import (ANCHOR_POSITIVE, JSONL_REASON, looks_like_jsonl, not_our_format,
+                   verify_receipt)
 
 #: Published cap on receipts per free bulk verification pass
 #: (docs/VENDOR_PACKAGE_SPEC.md 2.5). Printed on the surface next to the
@@ -190,12 +191,21 @@ def verify_one(path: Path, *, ledger_path: Optional[str | Path] = None,
         return _could_not_look(row, "UTF-8 text", str(path), "unreadable")
     try:
         rc = json.loads(text)
-    except ValueError as exc:
+    except (ValueError, RecursionError) as exc:
+        if looks_like_jsonl(text):
+            row["reason"] = JSONL_REASON
+            return _could_not_look(row, "one receipt per file", str(path), "unreadable")
         row["reason"] = f"not readable JSON: {str(exc)[:120]}"
         return _could_not_look(row, "a JSON receipt", str(path), "unreadable")
     if not isinstance(rc, dict):
         row["reason"] = "not a JSON object: a receipt is an object at the top level"
         return _could_not_look(row, "a JSON object", str(path), "unreadable")
+    foreign = not_our_format(rc)
+    if foreign:
+        # Another vendor's file: not BROKEN, because it was never ours to break.
+        row["reason"] = foreign
+        return _could_not_look(row, "an Arcaeon receipt (receipt_version arcaeon-receipt/*)",
+                               str(path), "name_not_found")
 
     led_path, claims_ledger = resolve_ledger(rc, path, ledger_path)
     try:

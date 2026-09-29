@@ -21,8 +21,12 @@
 
 Exit codes: 0 ok; 1 usage/transport error; 2 verify failed; 3 receipt has
 flagged checks (cite: a citation not found or with an invalid reporter);
-4 (--batch, roster-report and archive): nothing BROKEN but the check
-COULD NOT LOOK at one or more receipts.
+4 (verify, --batch, roster-report and archive): nothing BROKEN but the check
+COULD NOT LOOK at one or more receipts. Single-file `verify` answers COULD NOT
+LOOK (4) for a file that is not an Arcaeon receipt (another vendor's format),
+a JSONL file (one receipt per line: not supported, pass one per file), or
+text that is not readable JSON. The `arcaeon receipt` front door translates
+these to the one table: 0 VERIFIED, 1 BROKEN, 3 COULD NOT LOOK.
 Exit 3 is deliberate: a pre-filing gate should stop on a flag, not on a
 clean receipt. `ballot` has no flagged-check concept (a ballot is already a
 finished, already-graded object) so it only ever exits 0 or 1. Exit 4 is
@@ -39,7 +43,15 @@ from pathlib import Path
 
 from . import (__version__, approval, archive, authorship, ballot, call, cite,
                roster_report, verify_batch)
-from .core import load_receipt, render_exhibit, save_receipt, verify_receipt
+from arcaeon import verdict as V
+
+from .core import (JSONL_REASON, DuplicateKeyError, load_receipt, loads_strict,
+                   looks_like_jsonl, not_our_format, render_exhibit, save_receipt,
+                   verify_receipt)
+
+#: Direct-entry (`arcaeon-receipt`) exit codes for single-file verify. The
+#: `arcaeon receipt` front door maps them through arcaeon.verdict.LEGACY.
+VERIFY_EXIT = {V.VERIFIED: 0, V.BROKEN: 2, V.COULD_NOT_LOOK: 4}
 
 EXHIBITS = {cite.KIND: cite.exhibit, call.KIND: call.exhibit,
             approval.KIND: approval.exhibit, authorship.KIND: authorship.exhibit,
@@ -58,6 +70,62 @@ def _does_not_prove(scope: dict) -> str:
     own SCOPE dict rather than restated by hand, so this text cannot drift
     from what the issued receipt itself says."""
     return "Does NOT prove: " + "; ".join(scope["does_not_prove"]) + "."
+
+
+def _verify_help(prog: str) -> str:
+    codes = ("0 VERIFIED, 1 BROKEN, 3 COULD NOT LOOK" if prog != "arcaeon-receipt"
+             else "0 VERIFIED, 2 BROKEN, 4 COULD NOT LOOK")
+    return (f"Verdicts and exit codes: {codes}. Each prints one line on stderr "
+            "(VERDICT: path -- reason) and the report as JSON on stdout. "
+            "COULD NOT LOOK is never a pass: the file is not an Arcaeon receipt "
+            "(another vendor's format), is JSONL (one receipt per line: not "
+            "supported, pass one receipt per file), is not readable JSON, or "
+            "(--batch) makes a claim this run could not check.")
+
+
+def _say(word: str, path: str, reason: str = "") -> None:
+    """The one verdict line, the same shape for all three words."""
+    print(f"{word}: {path}" + (f" -- {reason}" if reason else ""), file=sys.stderr)
+
+
+def _verify_could_not_look(path: str, looked_for: str, reason_word: str, reason: str) -> int:
+    _say(V.COULD_NOT_LOOK, path, reason)
+    print(json.dumps({"ok": False, "verdict": V.COULD_NOT_LOOK,
+                      **V.could_not_look(looked_for, path, reason_word, reason)}, indent=1))
+    return VERIFY_EXIT[V.COULD_NOT_LOOK]
+
+
+def _verify_single(path: str, ledger, ots: bool) -> int:
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except UnicodeDecodeError as ex:
+        return _verify_could_not_look(path, "UTF-8 text", "unreadable",
+                                      f"not UTF-8 text: {str(ex)[:120]}")
+    except OSError as ex:
+        print(f"error: {ex}", file=sys.stderr)
+        return 1
+    try:
+        rc = loads_strict(text)
+    except DuplicateKeyError:
+        # Ours or not is decided below; verify_receipt re-reads `text`
+        # strictly and fails the ambiguity with its own note.
+        rc = json.loads(text)
+    except (ValueError, RecursionError) as ex:
+        if looks_like_jsonl(text):
+            return _verify_could_not_look(path, "one receipt per file", "unreadable",
+                                          JSONL_REASON)
+        return _verify_could_not_look(path, "a JSON receipt", "unreadable",
+                                      f"not readable JSON: {str(ex)[:120]}")
+    foreign = not_our_format(rc)
+    if foreign:
+        return _verify_could_not_look(
+            path, "an Arcaeon receipt (receipt_version arcaeon-receipt/*)",
+            "name_not_found", foreign)
+    res = verify_receipt(rc, ledger_path=ledger, ots=ots, source_text=text)
+    word = V.VERIFIED if res["ok"] else V.BROKEN
+    _say(word, path, "" if res["ok"] else "; ".join(res["notes"])[:240])
+    print(json.dumps({"verdict": word, **res}, indent=1))
+    return VERIFY_EXIT[word]
 
 
 def main(argv=None, prog: str = "arcaeon-receipt") -> int:
@@ -108,7 +176,8 @@ def main(argv=None, prog: str = "arcaeon-receipt") -> int:
     v = sub.add_parser("verify", help="recompute a receipt's digests",
                        description="Verify one receipt, or a whole class at once with "
                                    f"--batch (cap: {verify_batch.CAP} receipts per pass, "
-                                   "refused past it, never truncated).")
+                                   "refused past it, never truncated).",
+                       epilog=_verify_help(prog))
     v.add_argument("path", nargs="?", default=None)
     v.add_argument("--batch", nargs="+", default=None, metavar="TARGET",
                    help="verify every receipt in a directory, glob, or explicit "
@@ -248,14 +317,7 @@ def main(argv=None, prog: str = "arcaeon-receipt") -> int:
             print("error: verify needs a receipt path (or --batch for a whole "
                   "class)", file=sys.stderr)
             return 1
-        try:
-            rc = load_receipt(a.path)
-        except (OSError, ValueError) as ex:
-            print(f"error: {ex}", file=sys.stderr)
-            return 1
-        res = verify_receipt(rc, ledger_path=a.ledger, ots=a.ots)
-        print(json.dumps(res, indent=1))
-        return 0 if res["ok"] else 2
+        return _verify_single(a.path, a.ledger, a.ots)
 
     if a.cmd == "roster-report":
         # Pages in runs of the published cap rather than refusing a class of

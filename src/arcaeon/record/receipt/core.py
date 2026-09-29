@@ -537,6 +537,54 @@ def build_receipt(kind: str, subject: dict, checks: list, scope: dict, *,
     return receipt
 
 
+#: The fields every receipt this format issues carries (build_receipt writes
+#: all of them). A JSON object that is not ours is told by receipt_version.
+REQUIRED_FIELDS = BODY_FIELDS + ("body_digest",)
+RECEIPT_VERSION_PREFIX = "arcaeon-receipt/"
+
+#: The one line `receipt verify` gives for a JSONL input (one receipt per line).
+JSONL_REASON = "JSONL is not supported; pass one receipt per file"
+
+
+def not_our_format(receipt: Any) -> Optional[str]:
+    """None when `receipt` is an Arcaeon receipt (a JSON object whose
+    receipt_version is arcaeon-receipt/*), else the one-line reason it is not.
+
+    Another vendor's file is not a broken Arcaeon receipt: calling it BROKEN
+    or "body digest mismatch" accuses a file of failing a check it was never
+    under. A file that IS ours (its receipt_version says so) and then lacks a
+    field is a tampered receipt, and stays BROKEN."""
+    if not isinstance(receipt, dict):
+        return "not an Arcaeon receipt: a receipt is a JSON object at the top level"
+    ver = receipt.get("receipt_version")
+    if isinstance(ver, str) and ver.startswith(RECEIPT_VERSION_PREFIX):
+        return None
+    if "receipt_version" in receipt:
+        return (f"not an Arcaeon receipt: receipt_version {str(ver)[:60]!r} is not "
+                f"{RECEIPT_VERSION_PREFIX}*")
+    missing = [f for f in REQUIRED_FIELDS if f not in receipt]
+    return "not an Arcaeon receipt: missing " + ", ".join(missing)
+
+
+def looks_like_jsonl(text: str) -> bool:
+    """True when the first non-empty line parses as JSON on its own and more
+    than one line does: one receipt per line, which verify does not take."""
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if len(lines) < 2:
+        return False
+
+    def _parses(ln: str) -> bool:
+        try:
+            json.loads(ln)
+            return True
+        except (ValueError, RecursionError):
+            return False
+
+    if not _parses(lines[0]):
+        return False
+    return sum(1 for ln in lines[1:] if _parses(ln)) >= 1
+
+
 def verify_receipt(receipt: Any, *, ledger_path: Optional[str | Path] = None,
                    ots: bool = False, source_text: Optional[str] = None) -> dict:
     """Recompute what can be recomputed. Typed, never raises.
@@ -557,6 +605,12 @@ def verify_receipt(receipt: Any, *, ledger_path: Optional[str | Path] = None,
                  "claimed": [], "notes": []}
     if not isinstance(receipt, dict):
         res["notes"].append("receipt must be a JSON object")
+        return res
+    foreign = not_our_format(receipt)
+    if foreign:
+        # Not ours: no digest check was ever owed, so none is reported.
+        res["not_arcaeon_receipt"] = foreign
+        res["notes"].append(foreign)
         return res
     dup = None
     if source_text is not None:
