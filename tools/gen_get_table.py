@@ -126,6 +126,7 @@ def _nl(page: str) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    assert __doc__ is not None, "gen_get_table.py needs its module docstring"
     ap = argparse.ArgumentParser(prog="gen_get_table.py", description=__doc__.splitlines()[0])
     ap.add_argument("--site", help="the site checkout holding get.html")
     g = ap.add_mutually_exclusive_group()

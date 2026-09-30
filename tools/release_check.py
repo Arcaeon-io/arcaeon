@@ -135,7 +135,10 @@ FIXTURE = (
 
 
 def _load_publish():
-    spec = importlib.util.spec_from_file_location("arcaeon_publish_tool", TOOLS / "publish.py")
+    path = TOOLS / "publish.py"
+    spec = importlib.util.spec_from_file_location("arcaeon_publish_tool", path)
+    assert spec is not None, f"no module spec for {path}"
+    assert spec.loader is not None, f"module spec for {path} has no loader"
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -164,6 +167,7 @@ class StubWitness:
 
     @property
     def url(self) -> str:
+        assert self._server is not None, "stub witness not started"
         host, port = self._server.server_address[:2]
         return f"http://{host}:{port}"
 
@@ -1080,6 +1084,7 @@ def _pyproject_version() -> str:
 
 
 def parse(argv):
+    assert __doc__ is not None, "release_check.py needs its module docstring"
     ap = argparse.ArgumentParser(prog="release_check.py", description=__doc__.split("\n\n")[0])
     ap.add_argument("--version", default=None, help="default: pyproject.toml's version")
     ap.add_argument("--wheel", default=None, help="default: dist/arcaeon-<version>-py3-none-any.whl")
@@ -1099,7 +1104,9 @@ def parse(argv):
 
 def main(argv=None) -> int:
     try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        r = getattr(sys.stdout, "reconfigure", None)
+        if r:
+            r(encoding="utf-8", errors="replace")
     except Exception:
         pass
     a = parse(argv)

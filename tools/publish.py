@@ -81,6 +81,14 @@ class StepFailed(Exception):
     pass
 
 
+def _must_match(pattern: str, text: str, flags: int = 0) -> re.Match[str]:
+    """re.search that names the pattern when it finds nothing, instead of an
+    AttributeError on None."""
+    m = re.search(pattern, text, flags)
+    assert m is not None, f"no match for {pattern!r} in {text[:200]!r}"
+    return m
+
+
 # --- plumbing ---------------------------------------------------------------------
 
 def _run(cmd, **kw):
@@ -277,7 +285,7 @@ def _readme_first_run():
     m = re.search(r"^## A 60-second first run\s*$(.*?)(?=^## |\Z)", readme, re.M | re.S)
     if not m:
         raise StepFailed("first run: README has no '## A 60-second first run' section")
-    block = re.search(r"```console\n(.*?)```", m.group(1), re.S)
+    block = _must_match(r"```console\n(.*?)```", m.group(1), re.S)
     steps = []
     for line in block.group(1).splitlines():
         if line.startswith("$ "):
@@ -324,7 +332,7 @@ def step_venv(ctx) -> str:
                 if want not in out:
                     raise StepFailed(f"first run: `{s['cmd']}` did not print {want}")
             seen += re.findall(r'"verdict": "([A-Z ]+)"', p.stdout)
-        readme_says = [re.search(r'"verdict": "([A-Z ]+)"', w).group(1)
+        readme_says = [_must_match(r'"verdict": "([A-Z ]+)"', w).group(1)
                        for s in readme_steps for w in s["expect"] if '"verdict"' in w]
         if seen != ["VERIFIED", "BROKEN"] or readme_says != ["VERIFIED", "BROKEN"]:
             raise StepFailed(f"first run: verdicts {seen}, README says {readme_says}, want VERIFIED then BROKEN")
@@ -368,7 +376,9 @@ def _members(path: Path):
         with tarfile.open(path, "r:gz") as tf:
             for m in tf.getmembers():
                 if m.isfile():
-                    yield m.name, tf.extractfile(m).read()
+                    f = tf.extractfile(m)
+                    assert f is not None, f"no file object for regular member {m.name}"
+                    yield m.name, f.read()
 
 
 def step_scan(ctx) -> str:
@@ -555,6 +565,7 @@ class Ctx:
 
 
 def parse(argv):
+    assert __doc__ is not None, "publish.py needs its module docstring"
     ap = argparse.ArgumentParser(prog="publish.py", description=__doc__.split("\n\n")[0])
     ap.add_argument("--upload", action="store_true", help="actually upload (needs --i-mean-it)")
     ap.add_argument("--i-mean-it", dest="i_mean_it", action="store_true")
@@ -568,7 +579,9 @@ def parse(argv):
 
 def main(argv=None) -> int:
     try:
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        r = getattr(sys.stdout, "reconfigure", None)
+        if r:
+            r(encoding="utf-8", errors="replace")
     except Exception:
         pass
     a = parse(argv)
