@@ -130,7 +130,10 @@ class Report:
 
     def to_markdown(self) -> str:
         def cell(s: str) -> str:
-            return str(s).replace("|", "\\|").replace("\n", " ")
+            # double any backslashes right before a pipe, then escape the pipe,
+            # so "\|" in a value cannot close the cell; "\r" goes the way of "\n"
+            s = re.sub(r"(\\*)\|", lambda m: m.group(1) * 2 + "\\|", str(s))
+            return s.replace("\r", " ").replace("\n", " ")
 
         head = ["#", "Claim", "Where the pack makes it", "Claimed", "Recomputed",
                 "Verdict", "Algorithm", "How"]

@@ -189,6 +189,35 @@ def test_markdown_escapes_a_pipe_and_a_newline_in_a_value(pack):
     assert "s.pipe \\| and newline" in md
 
 
+def test_markdown_escapes_a_carriage_return_and_a_backslash_pipe_in_a_value(pack):
+    """Same twin trick: one value holds "\\r" and "\\r\\n", the other a literal
+    backslash followed by "|". A pipe counts as escaped only when an odd number
+    of backslashes precede it; every table line keeps the same count."""
+    import hashlib
+    import re
+    line_text = "Rows and columns."
+    readme = pack / "README.md"
+    readme.write_text(readme.read_text(encoding="utf-8") + line_text + " [bytes]\n",
+                      encoding="utf-8", newline="\n")
+    n = len(readme.read_text(encoding="utf-8").split("\n")) - 1
+    cr = "s.cr\rone\r\ntwo"
+    bs = "s.bs a\\|b"
+    twin = {"bearer_schema": 1, "page": "README.md", "sentences": [
+        {"id": cr, "line": n, "class": "bytes",
+         "sha256": hashlib.sha256(line_text.encode()).hexdigest()},
+        {"id": bs, "line": n, "class": "back\\|slash", "sha256": "0" * 64}]}
+    (pack / "README.json").write_text(json.dumps(twin), encoding="utf-8")
+    rep = second_reader(pack)
+    assert any(cr in r.where for r in rep.rows) and any(bs in r.where for r in rep.rows)
+    md = rep.to_markdown()
+    assert "\r" not in md
+    table = [x for x in md.splitlines() if x.startswith("|")]
+    assert len(table) == 2 + len(rep.rows)
+    unescaped = re.compile(r"(?<!\\)(?:\\\\)*\|")
+    seps = {len(unescaped.findall(x)) for x in table}
+    assert seps == {9}, [(len(unescaped.findall(x)), x) for x in table]
+
+
 def test_zip_reads_the_same_as_the_folder(pack, pins, tmp_path):
     z = pack.parent / "pack.zip"
     assert z.is_file()
