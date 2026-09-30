@@ -71,6 +71,7 @@ changes to existing behaviour are named under 0.10.0 in MIGRATION.md.
 - **K066 (e93d599).** `evidence-pack --mandate FILE` adds the mandate rows section, rebuilt on verify.
 - **K065 (ef5a276, 0c2dd15).** `evidence-pack --deal ID` folds the deal pack in.
 - **K064 (ec401d4).** `evidence-pack --format aat` puts the AAT export inside the pack, checked on verify.
+- **K06xR3 (6d24666, 1e0a472, 1bc6551).** Pack verify trusts no manifest field: it re-derives `independence`, `operator_at_t`, `built_at`, integrity.json, README.md and ARTICLE_12_SUMMARY.md; `witness.independence` reads `self_asserted`; `build_pack` refuses `--namespace` without `--witness`.
 - **K06xR2 (0acee96).** `evidence-pack verify --witness` with no pin listed searches the pin file; a pin beyond the head is BROKEN.
 - **K06xR1 (7a46836).** Pack verify re-derives the build findings; a manifest without `checks` or `counts` is BROKEN; every pack writes `manifest.sha256`.
 - **K063 (cf81832).** The AAT export writes `<name>_gaps.json` and the which-chain line.

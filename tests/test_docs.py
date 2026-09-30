@@ -334,9 +334,7 @@ _VERSION_HEADING = re.compile(r"^## (\d+\.\d+\.\d+)\b.*$", re.M)
 #: version -> ids MIGRATION names that the released CHANGELOG section does not, left as
 #: they are rather than rewriting a release's notes; the test fails if one is fixed
 #: without being taken off this list.
-_KNOWN_CHANGELOG_GAPS: dict[str, set[str]] = {
-    "0.10.0": {"K06xR3"},  # 1e0a472 and two more commits; the CHANGELOG has no line
-}
+_KNOWN_CHANGELOG_GAPS: dict[str, set[str]] = {}
 
 
 def _docs_text(env: str, name: str) -> str:
