@@ -343,6 +343,7 @@ def test_the_mcp_instructions_start_at_the_door(monkeypatch, tmp_path):
     _server_env(monkeypatch, tmp_path)
     from arcaeon.mcp.server import build_server
     instr = build_server().instructions
+    assert isinstance(instr, str), f"server instructions missing: {instr!r}"
     assert instr.startswith("Start with arcaeon_front_door.")
     assert "regist" not in instr.lower()
 
