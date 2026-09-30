@@ -355,7 +355,7 @@ class _Handler(BaseHTTPRequestHandler):
                 resp = conn.getresponse()
             except (OSError, http.client.HTTPException) as e:
                 err = e
-        if err is not None:
+        if err is not None or resp is None:  # resp is set whenever err is not
             conn.close()
             srv.count("upstream_errors")
             srv.close_calls(opened, f"upstream_error:{type(err).__name__}")
@@ -560,7 +560,7 @@ class ForwardServer(ThreadingHTTPServer):
 
     # -- the mandate gate (K071) --------------------------------------------
 
-    def _judge_body(self, body: bytes):
+    def _judge_body(self, w, body: bytes):
         """(msgs, was_list, judged) for one POST body. `judged` maps a message
         index to the gate's (verdict, reason, extra) for each tools/call."""
         from .observer import _parse
@@ -569,12 +569,12 @@ class ForwardServer(ThreadingHTTPServer):
         except (ValueError, UnicodeDecodeError, RecursionError):
             return [], False, {}
         msgs = _parse(body)
-        judged = {i: self.mandate.judge(m) for i, m in enumerate(msgs)
+        judged = {i: w.judge(m) for i, m in enumerate(msgs)
                   if m.get("method") == "tools/call"}
         return msgs, isinstance(parsed, list), judged
 
-    def _record_oversize(self, action: str) -> None:
-        self.mandate.record({}, "could_not_look",
+    def _record_oversize(self, w, action: str) -> None:
+        w.record({}, "could_not_look",
                             f"a request body over {self.max_frame} bytes cannot be judged",
                             {"rule": "frame", "looked_for": "a complete frame",
                              "where": "the POST body", "reason_word": "bounded"},
@@ -589,13 +589,13 @@ class ForwardServer(ThreadingHTTPServer):
             return
         try:
             if len(body) > self.max_frame:
-                self._record_oversize("forwarded")
+                self._record_oversize(w, "forwarded")
                 return
             from .proxy import _unparsed
             if _unparsed(body):
                 w.record_unparsed("forwarded", "the POST body")
                 return
-            msgs, _, judged = self._judge_body(body)
+            msgs, _, judged = self._judge_body(w, body)
             for i, (v, why, extra) in judged.items():
                 w.record(msgs[i], v, why, extra, "forwarded")
         except Exception:
@@ -611,7 +611,7 @@ class ForwardServer(ThreadingHTTPServer):
                 or self._ended is not None):
             return False
         if len(body) > self.max_frame:
-            self._record_oversize("blocked")
+            self._record_oversize(w, "blocked")
             self._plain_reply(handler, 413, b"arcaeon-adapter: request body too large "
                                             b"for the mandate gate to judge" + NL)
             return True
@@ -632,7 +632,7 @@ class ForwardServer(ThreadingHTTPServer):
                 self.count("relay_errors")
                 handler.close_connection = True
             return True
-        msgs, was_list, judged = self._judge_body(body)
+        msgs, was_list, judged = self._judge_body(w, body)
         if not any(v[0] != "inside" for v in judged.values()):
             for i, (v, why, extra) in judged.items():
                 w.record(msgs[i], v, why, extra, "forwarded")

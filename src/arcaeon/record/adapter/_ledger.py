@@ -81,7 +81,7 @@ def digest_json(value: Any) -> str:
     name and recipe version, so a stranger holding only the row can reconstruct
     the computation. We never emit a bare hex hash.
     """
-    if _HAVE_LEDGER:
+    if _HAVE_LEDGER and _real_digest_json is not None:
         return _real_digest_json(value)
     return _row_digest_json(value)
 
@@ -163,7 +163,7 @@ class _FallbackLedger:
 
 def open_ledger(path: str | Path):
     """The seam ledger. Real library when present, fallback when not."""
-    if _HAVE_LEDGER:
+    if _HAVE_LEDGER and _RealLedger is not None:
         return _RealLedger(path)
     return _FallbackLedger(path)
 
@@ -213,7 +213,7 @@ def verify_seam_log(path: str | Path):
     library, and its `first_break` string is deliberately formatted identically
     (`"line N: chain mismatch"`) so tests read the same either way.
     """
-    if _HAVE_LEDGER:
+    if _HAVE_LEDGER and _real_verify_file is not None:
         return _real_verify_file(Path(path))
     prev = _GENESIS
     rows = 0
