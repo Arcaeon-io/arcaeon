@@ -100,8 +100,11 @@ def _verify_could_not_look(path: str, looked_for: str, reason_word: str, reason:
 
 def _verify_single(path: str, ledger, ots: bool) -> int:
     text, cannot = read_receipt_input(path)
-    if cannot:
-        looked_for, reason_word, reason = cannot
+    if cannot or text is None:
+        # read_receipt_input gives text exactly when cannot is None; no text
+        # and no reason cannot happen, and would be the empty-file answer.
+        looked_for, reason_word, reason = cannot or (
+            "a JSON receipt", "empty", f"empty file: {path}")
         return _verify_could_not_look(path, looked_for, reason_word, reason)
     try:
         rc = loads_strict(text)

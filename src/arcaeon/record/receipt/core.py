@@ -34,7 +34,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, cast
 
 from arcaeon.record.ledger import (Ledger, WitnessStore, chain_at, digest_json,
                             publish_head, verify_file)
@@ -384,7 +384,7 @@ def _pin_self_digest(pin: dict) -> str:
     recipe, and falls back to the same recipe written out."""
     fn = getattr(WitnessStore, "_digest_record", None)
     if callable(fn):
-        return fn(pin)
+        return cast(str, fn(pin))
     return body_digest(pin, ("prev", "self"))
 
 
@@ -408,7 +408,9 @@ def _check_witness(receipt: dict, ledger_status: str) -> dict:
         return {"verdict": ATTACH_INCONSISTENT, "problems": ["the witness block is not an object"]}
     if wit.get("status") == "skipped" and not any(k in wit for k in ("kind", "pin", "rows", "chain")):
         return {"verdict": ATTACH_ABSENT, "note": "no witness was requested at issue"}
-    led = receipt.get("ledger") if isinstance(receipt.get("ledger"), dict) else {}
+    led = receipt.get("ledger")
+    if not isinstance(led, dict):
+        led = {}
     problems = []
     for k in ("rows", "chain", "namespace"):
         if k in wit and k in led and wit[k] != led[k]:

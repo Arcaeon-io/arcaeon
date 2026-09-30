@@ -158,7 +158,7 @@ def resolve_ledger(receipt: dict, receipt_path: Path,
     if explicit is not None:
         p = Path(explicit)
         return (p if p.exists() else None), claims
-    if not claims:
+    if not claims or not isinstance(led, dict):  # claims implies a dict
         return None, False
     name = Path(str(led.get("path") or "")).name
     if not name:
@@ -182,8 +182,11 @@ def verify_one(path: Path, *, ledger_path: Optional[str | Path] = None,
     # Missing, a directory, permission denied, not UTF-8 or empty: the same
     # COULD NOT LOOK reasons single-file verify gives (core.read_receipt_input).
     text, cannot = read_receipt_input(path)
-    if cannot:
-        looked_for, reason_word, row["reason"] = cannot
+    if cannot or text is None:
+        # read_receipt_input gives text exactly when cannot is None; no text
+        # and no reason cannot happen, and would be the empty-file answer.
+        looked_for, reason_word, row["reason"] = cannot or (
+            "a JSON receipt", "empty", f"empty file: {path}")
         return _could_not_look(row, looked_for, str(path), reason_word)
     try:
         rc = json.loads(text)
