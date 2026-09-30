@@ -201,8 +201,10 @@ def _call_guard(args: dict) -> dict:
                     "retryable": True, "operation": e.operation,
                     "detail": str(e)}
         if g.already_executed:
+            # _resolve_duplicate sets the receipt with the flag; a missing one
+            # is still a refusal, never a claim.
             return {"claimed": False, "reason": "already_executed",
-                    "receipt": g.receipt.to_dict()}
+                    "receipt": g.receipt.to_dict() if g.receipt is not None else None}
         return {"claimed": True, "key": key, "ledger_path": str(ledger_path)}
 
     if action == "complete":

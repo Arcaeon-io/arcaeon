@@ -605,7 +605,7 @@ def derive_finding(vr: Any, wv: Any) -> str:
     truncation_checked = wv is not None and wv.verdict != "no_record"
     truncation_ok = ({"consistent": True, "truncated": False,
                       "rewritten": False}.get(wv.verdict)
-                     if truncation_checked else None)
+                     if truncation_checked and wv is not None else None)
     if wv is not None and wv.verdict == "rewritten":
         verdict = "REWRITE_DETECTED"
     elif wv is not None and wv.verdict == "truncated":

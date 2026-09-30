@@ -627,7 +627,7 @@ def _reconcile(tape_a, tape_b, *, pins=None, pin_path=None) -> Reconciliation:
     matched = 0
     can_align = (agent is not None and tool is not None and agent in readable
                  and tool in readable and (agent.rows or tool.rows))
-    if can_align:
+    if can_align and agent is not None and tool is not None:  # can_align implies both
         agent.side, tool.side = "agent", "tool"
         matched = _align(agent.calls, tool.calls, findings)
 

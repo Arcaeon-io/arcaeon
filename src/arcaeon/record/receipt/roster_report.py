@@ -120,16 +120,23 @@ def _check(receipt: dict) -> dict:
     return checks[0] if checks and isinstance(checks[0], dict) else {}
 
 
+def _dict_at(receipt: dict, key: str) -> dict:
+    """receipt[key] when it is a dict, else an empty one (the stated-field
+    fallback `_facts` has always used)."""
+    value = receipt.get(key)
+    return value if isinstance(value, dict) else {}
+
+
 def _facts(receipt: Optional[dict]) -> dict:
     """The stated fields of one receipt. Everything here is copied out, never
     derived: a report that recomputes a trainee's score is a second grader."""
     if not isinstance(receipt, dict):
         return {"receipt_id": "", "issuer": "", "cohort": "", "trainee": "",
                 "scenario": "", "score": "", "issued_at": "", "scope": ""}
-    extra = receipt.get("extra") if isinstance(receipt.get("extra"), dict) else {}
-    subject = receipt.get("subject") if isinstance(receipt.get("subject"), dict) else {}
+    extra = _dict_at(receipt, "extra")
+    subject = _dict_at(receipt, "subject")
     check = _check(receipt)
-    scope = receipt.get("scope") if isinstance(receipt.get("scope"), dict) else {}
+    scope = _dict_at(receipt, "scope")
     return {
         "receipt_id": str(receipt.get("body_digest") or ""),
         "issuer": str(extra.get("issuer") or ""),
