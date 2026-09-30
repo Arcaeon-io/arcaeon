@@ -17,6 +17,8 @@ pytest.importorskip("mcp", reason="the connector IS an MCP server")
 
 from mcp import Client  # noqa: E402
 
+from _counts import EXPECTED_TOOL_COUNT  # noqa: E402
+
 from arcaeon.mcp.server import (  # noqa: E402
     ALL_TOOLS,
     FREE_TOOLS,
@@ -71,9 +73,14 @@ def test_the_tool_list_counts_the_two_new_tools():
     names = _tool_names()
     assert SECOND_READ_TOOLS == ("second_read_submit", "second_read_compare")
     assert "second_read_submit" in names and "second_read_compare" in names
-    assert names == sorted(ALL_TOOLS) and len(names) == 20  # K069 added two, the second reader one
+    assert names == sorted(ALL_TOOLS) and len(names) == EXPECTED_TOOL_COUNT  # K069 added two, the second reader one
     assert set(SECOND_READ_TOOLS) <= set(FREE_TOOLS)
     assert not set(SECOND_READ_TOOLS) & set(PAID_TOOLS)
+
+
+def test_expected_tool_count_is_pinned_to_all_tools():
+    """A new tool is a deliberate one-line change to tests/connector/_counts.py."""
+    assert EXPECTED_TOOL_COUNT == len(ALL_TOOLS), (EXPECTED_TOOL_COUNT, ALL_TOOLS)
 
 
 def test_two_agents_submit_over_mcp_and_compare_lines_them_up(tmp_path):
