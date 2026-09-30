@@ -1,0 +1,17 @@
+{
+  "exclude": [
+    "tests/vet/fixtures/mcp_atlassian_4067d1d",
+    "tests/vet/tests/fixtures/recorders",
+    "build",
+    "dist",
+    "**/__pycache__",
+    "**/node_modules",
+    "**/.*"
+  ],
+  "extraPaths": [
+    "src",
+    "tests/heavy",
+    "tests/receipt/tools",
+    "tests/vet/bench"
+  ]
+}

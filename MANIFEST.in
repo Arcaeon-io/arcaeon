@@ -3,5 +3,6 @@
 prune tests
 prune tools
 exclude conftest.py
+exclude pyrightconfig.json
 exclude MIGRATION.md
 prune registry
