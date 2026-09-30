@@ -370,8 +370,11 @@ def _rows_for(pack: Path, manifest: dict, verify_res: dict, witness) -> list[Row
                   claimed, {"latest_rows": r.get("pin_file_latest_rows")}, alg,
                   r.get("finding", ""), word=MISMATCH)
         else:
+            how = r.get("reason", "")
+            if witness is not None and alg == ALG_WITNESS:
+                how = f"{how} (pin file {witness})"
             t.add("pin", f"the witness holds the pin for {ns!r}", f"manifest.json pins[{ns}]",
-                  claimed, None, alg, r.get("reason", ""))
+                  claimed, None, alg, how)
 
     # 8. what the verify steps re-derive and no single value holds
     for name, claim in (("build-time findings",

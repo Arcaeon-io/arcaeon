@@ -265,6 +265,52 @@ def test_cli_a_pack_zip_that_is_not_a_zip_exits_as_plain_verify(pack, tmp_path, 
     assert "COULD NOT LOOK: second reader" in out and "Traceback" not in err
 
 
+def _bad_witness(pack, tmp_path, capsys, witness):
+    """A --witness path the reader cannot use: the pin row is COULD NOT LOOK
+    and names the file, every other row is as the no-witness run has it, exit
+    3, no traceback, through the library, verify's main and the verb."""
+    plain = second_reader(pack)
+    rep = second_reader(pack, witness=witness)
+    pin_rows = _by(rep, "pin")
+    assert len(pin_rows) == 1
+    pin = pin_rows[0]
+    assert pin.verdict == COULD_NOT_LOOK and pin.recomputed is None
+    assert str(witness) in pin.how, pin.how
+    assert rep.witness is not None and rep.witness == str(witness)
+    others = [r.to_dict() for r in rep.rows if r.kind != "pin"]
+    assert others == [r.to_dict() for r in plain.rows if r.kind != "pin"]
+    assert rep.verdict == V.COULD_NOT_LOOK and rep.exit == 3
+    capsys.readouterr()
+    code = evidence_pack_verify.main([str(pack), "--second-reader", "--witness", str(witness)])
+    out, err = capsys.readouterr()
+    assert code == 3
+    assert "COULD NOT LOOK: second reader" in out and str(witness) in out
+    assert "Traceback" not in err and "Traceback" not in out
+    from arcaeon.prove import evidence_pack_cli
+    code = evidence_pack_cli.main(["verify", str(pack), "--second-reader",
+                                   "--witness", str(witness)])
+    out, err = capsys.readouterr()
+    assert code == 3
+    assert "COULD NOT LOOK: second reader" in out and "Traceback" not in err
+    assert "Traceback" not in out
+
+
+def test_a_witness_path_that_does_not_exist_is_could_not_look(pack, tmp_path, capsys):
+    _bad_witness(pack, tmp_path, capsys, tmp_path / "no-such-pins.jsonl")
+
+
+def test_a_witness_path_that_is_a_directory_is_could_not_look(pack, tmp_path, capsys):
+    d = tmp_path / "pins-dir"
+    d.mkdir()
+    _bad_witness(pack, tmp_path, capsys, d)
+
+
+def test_a_witness_file_that_is_not_json_is_could_not_look(pack, tmp_path, capsys):
+    f = tmp_path / "pins.txt"
+    f.write_text("this is not a pin file\n{not json either\n", encoding="utf-8")
+    _bad_witness(pack, tmp_path, capsys, f)
+
+
 # --- the CLI ----------------------------------------------------------------
 
 def test_cli_prints_the_table_and_writes_json_and_markdown(pack, pins, tmp_path, capsys):
