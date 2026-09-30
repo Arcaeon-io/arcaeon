@@ -194,7 +194,7 @@ def test_initialize_and_tools_list_over_http_equal_stdio(http_server, tmp_path):
     status, listed = _post(port, LIST, token=token)
     assert status == 200, listed
     over_http = listed["result"]["tools"]
-    assert len(over_http) == 19
+    assert len(over_http) == 20  # the second reader made it twenty
 
     over_stdio = _stdio_tools(tmp_path / "stdio")
     assert sorted(t["name"] for t in over_http) == sorted(t["name"] for t in over_stdio)

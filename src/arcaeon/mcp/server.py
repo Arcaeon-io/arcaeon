@@ -105,7 +105,7 @@ WITNESS_TOOLS = ("witness_pin", "witness_renew")
 DEAL_TOOLS = ("deal_mandate", "deal_commit", "deal_dispute")
 MANDATE_TOOLS = ("mandate_check",)
 SECOND_READ_TOOLS = ("second_read_submit", "second_read_compare")
-EVIDENCE_TOOLS = ("evidence_pack_build", "evidence_pack_verify")
+EVIDENCE_TOOLS = ("evidence_pack_build", "evidence_pack_verify", "evidence_pack_second_reader")
 PAID_TOOLS = WITNESS_TOOLS
 STATUS_TOOL = "arcaeon_status"
 
@@ -499,6 +499,23 @@ def _evidence_pack_verify(args: dict) -> dict:
                               namespace=args.get("namespace")))
 
 
+_SR_FORMATS = ("json", "markdown", "table")
+
+
+def _evidence_pack_second_reader(args: dict) -> dict:
+    from arcaeon.prove.second_reader import second_reader  # lazy
+    if args.get("witness_path") is not None and not isinstance(args["witness_path"], str):
+        raise ValueError("`witness_path` must be a string")
+    fmt = args.get("format", "json")
+    if fmt not in _SR_FORMATS:
+        raise ValueError(f"`format` must be one of {', '.join(_SR_FORMATS)}")
+    rep = second_reader(args["pack_path"], witness=args.get("witness_path"))
+    if fmt == "json":
+        return _plain(rep.to_dict())
+    text = rep.to_markdown() if fmt == "markdown" else rep.to_table()
+    return {"verdict": rep.verdict, "exit": rep.exit, "format": fmt, fmt: text}
+
+
 def _server_class():
     """The SDK's server class under whichever name the installed version uses
     (2.x: MCPServer; 1.x: FastMCP). Same probe mcp-vet ships."""
@@ -816,6 +833,25 @@ def build_server():
         args = {"pack": pack, "witness": witness, "namespace": namespace, "remote": remote}
         outcome = _attempt(_evidence_pack_verify, args)
         return _record_call("evidence_pack_verify", args, outcome)
+
+    @_tool(
+        name="evidence_pack_second_reader",
+        description=(
+            "The second reader of an evidence pack: every claim the pack makes (each "
+            "file's sha256, manifest.sha256, the chain head recomputed from the rows' "
+            "content, row counts, the window, the export's counts and period, each "
+            "pin) recomputed from the bytes, one row each with the claimed value, the "
+            "recomputed value, the algorithm and VERIFIED, MISMATCH or COULD NOT LOOK. "
+            "pack_path is the folder or the .zip; witness_path the local pin file (a "
+            "local pin without it is COULD NOT LOOK). format json (the report), "
+            "markdown or table. Overall VERIFIED, BROKEN (any MISMATCH) or COULD NOT "
+            "LOOK, exit 0, 1 or 3. Reads only."),
+    )
+    def evidence_pack_second_reader(pack_path: str, witness_path: str | None = None,
+                                    format: str = "json") -> dict:
+        args = {"pack_path": pack_path, "witness_path": witness_path, "format": format}
+        outcome = _attempt(_evidence_pack_second_reader, args)
+        return _record_call("evidence_pack_second_reader", args, outcome)
 
     # --- what is in here, and what costs money ----------------------------
 

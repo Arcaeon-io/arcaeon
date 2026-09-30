@@ -87,7 +87,8 @@ def _one(tool, args):
 def test_both_tools_are_listed_and_free(monkeypatch, tmp_path):
     _isolate(monkeypatch, tmp_path)
     names, _ = _session([])
-    assert EVIDENCE_TOOLS == ("evidence_pack_build", "evidence_pack_verify")
+    assert EVIDENCE_TOOLS == ("evidence_pack_build", "evidence_pack_verify",
+                              "evidence_pack_second_reader")
     assert set(EVIDENCE_TOOLS) <= set(names) and names == sorted(ALL_TOOLS)
     assert set(EVIDENCE_TOOLS) <= set(FREE_TOOLS)
 

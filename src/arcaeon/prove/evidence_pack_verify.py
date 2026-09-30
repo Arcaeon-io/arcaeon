@@ -2,6 +2,11 @@
 """`arcaeon evidence-pack verify PACK`: check an evidence pack someone handed you.
 
     arcaeon evidence-pack verify PACK [--witness PINS] [--remote] [--json]
+    arcaeon evidence-pack verify PACK --second-reader [--witness PINS]
+                                 [--json OUT.json] [--markdown OUT.md]
+
+`--second-reader` prints the claim table instead: every claim the pack makes,
+recomputed from the bytes (arcaeon.prove.second_reader).
 
 Step 1 (K056): rehash every file the manifest lists and compare. A changed
 byte is BROKEN naming the file; a listed file that is gone is BROKEN naming
@@ -1305,6 +1310,11 @@ def _parser(prog: str) -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None, *,
          prog: str = "arcaeon evidence-pack verify") -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if "--second-reader" in argv:
+        # every claim recomputed, one row each; --json and --markdown take a path
+        from arcaeon.prove import second_reader
+        return second_reader.main(argv, prog=prog)
     a = _parser(prog).parse_args(argv)
     res = verify_pack(a.pack, witness=a.witness, remote=a.remote,
                       namespace=a.namespace)

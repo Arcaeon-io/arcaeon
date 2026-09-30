@@ -112,6 +112,7 @@ def test_one_install_exposes_the_full_tool_list():
         "deal_dispute",
         "deal_mandate",
         "evidence_pack_build",
+        "evidence_pack_second_reader",
         "evidence_pack_verify",
         "ledger_append",
         "ledger_declare_break",

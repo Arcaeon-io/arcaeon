@@ -6,7 +6,7 @@ that adds a JSON field or a verb.
 
 ## Unreleased
 
-Nothing yet.
+- **Second reader (branch second-reader-2026-09-29).** `arcaeon evidence-pack verify PACK --second-reader [--witness PINS] [--json OUT] [--markdown OUT]` and `arcaeon.prove.second_reader.second_reader(pack_path, witness=None)` recompute every claim a pack makes from its bytes, one row each with the claimed value, the recomputed value, the algorithm and VERIFIED, MISMATCH (overall BROKEN) or COULD NOT LOOK; the chain head is recomputed from the rows' content, never read off the stored field; also the MCP tool `evidence_pack_second_reader` (the connector lists 20 tools); docs/SECOND_READER.md.
 
 ## 0.10.0 (2026-09-27)
 
