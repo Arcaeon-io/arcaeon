@@ -110,6 +110,23 @@ Answers: can I hand someone a single file that proves a check ran, and let
 them verify it without me? Issues receipts (`cite`, `ballot`,
 `roster-report`, `archive`, `exhibit`) and checks them (`verify`).
 
+`arcaeon receipt verify FILE [--canonical-bytes BYTES ...]` also reads
+AER-1 receipts (foreign format, issuer zambo.dev): one JSON object, a
+workflow receipt (`merkle_root` over `steps`), or JSONL of them. It prints
+one line per receipt, `AER-1 (foreign format, issuer zambo.dev): WORD --
+reason`. `--canonical-bytes` names a file holding a receipt's decoded
+canonical bytes (the issuer's API serves them base64); repeat it once per
+receipt, in order, and once per step for a workflow receipt. VERIFIED means
+the sha256 of the bytes you supplied equals both `result_sha256` and
+`output_hash`; the issuer's anchors and chain are not checked. Without the
+bytes the answer is COULD NOT LOOK, naming the issuer's API address; nothing
+is fetched. A workflow `merkle_root` is recomputed under an assumed
+construction, so a root that differs is COULD NOT LOOK, never BROKEN. Exit 0
+VERIFIED, 1 BROKEN, 3 COULD NOT LOOK (worst row wins; `arcaeon-receipt`
+gives 0, 2, 4). `--canonical-bytes` with a file that is not AER-1, a number
+of bytes files that does not match, or a bytes file that cannot be read is a
+usage error that exits 1, not 2.
+
 **Usage**
 
 ```text

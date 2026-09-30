@@ -110,6 +110,7 @@ Three families. The full reference, with usage lines and examples, is
 - `log`: add one JSON row to a ledger.
 - `verify`: check a ledger's chain. VERIFIED, BROKEN or COULD NOT LOOK.
 - `receipt`: issue or check a portable receipt someone else can verify.
+- `receipt verify FILE --canonical-bytes BYTES`: check another issuer's AER-1 receipt (zambo.dev) against canonical bytes you supply. Nothing is fetched.
 - `once`: prove a side effect (a refund, an email) ran once, not twice.
 - `proxy`: sit in front of an MCP server and record every tool call.
 - `pin`: hand a ledger's current head to a witness, a local file or the hosted one.
