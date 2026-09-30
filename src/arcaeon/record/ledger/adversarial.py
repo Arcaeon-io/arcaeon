@@ -263,9 +263,14 @@ def fuzz_line(cmd: Sequence[str], name: str, line: bytes, *, timeout: float = 30
     expected_before = 1 if init else 0  # the initialize reply
     timed_out = False
     try:
+        # stdin=PIPE, so Popen always opens it; a missing one takes the same
+        # path as a write that fails.
+        stdin = proc.stdin
         try:
-            proc.stdin.write(data)
-            proc.stdin.flush()
+            if stdin is None:
+                raise BrokenPipeError("child stdin was not opened")
+            stdin.write(data)
+            stdin.flush()
         except (BrokenPipeError, OSError):
             pass  # the process died on the way in; the exit code says so
         deadline = time.monotonic() + grace
@@ -274,7 +279,8 @@ def fuzz_line(cmd: Sequence[str], name: str, line: bytes, *, timeout: float = 30
                 break
             time.sleep(0.02)
         try:
-            proc.stdin.close()
+            if stdin is not None:
+                stdin.close()
         except OSError:
             pass
         proc.wait(timeout=timeout)
@@ -295,7 +301,7 @@ def sanity(cmd: Sequence[str], *, timeout: float = 30.0, env=None, cwd=None) -> 
                      init=False, env=env, cwd=cwd)
 
 
-def run_all(cmd: Sequence[str], *, cases: Iterable = None, timeout: float = 30.0,
+def run_all(cmd: Sequence[str], *, cases: Optional[Iterable] = None, timeout: float = 30.0,
             init: bool = False, tool: str = "ledger_verify", env=None,
             cwd=None, grace: float = 5.0) -> list:
     return [fuzz_line(cmd, name, line, timeout=timeout, init=init, tool=tool,

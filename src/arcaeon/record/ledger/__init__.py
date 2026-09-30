@@ -74,6 +74,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -213,8 +214,11 @@ def _append_lock(path: Path):
             try:
                 if _msvcrt is not None:
                     _msvcrt.locking(fd, _msvcrt.LK_NBLCK, 1)
-                else:
+                elif sys.platform != "win32" and _fcntl is not None:
                     _fcntl.flock(fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+                else:                    # pragma: no cover - the early return above
+                    yield False          # already takes the no-primitive path
+                    return
                 break
             except OSError:
                 if time.monotonic() >= deadline:
@@ -230,9 +234,10 @@ def _append_lock(path: Path):
             yield True
         finally:
             try:
+                # Same branch as the acquire above: the lock held is released.
                 if _msvcrt is not None:
                     _msvcrt.locking(fd, _msvcrt.LK_UNLCK, 1)
-                else:
+                elif sys.platform != "win32" and _fcntl is not None:
                     _fcntl.flock(fd, _fcntl.LOCK_UN)
             except OSError:              # pragma: no cover - best effort
                 pass

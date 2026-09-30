@@ -628,7 +628,8 @@ class HostedWitness:
             raise HostedWitnessError(
                 f"witness did not record the pin (HTTP {status}): "
                 f"{str(data.get('error') or data)[:200]}", status, data)
-        pin = data.get("pin") if isinstance(data.get("pin"), dict) else {}
+        raw_pin = data.get("pin")
+        pin: dict = raw_pin if isinstance(raw_pin, dict) else {}
         if (pin.get("rows"), str(pin.get("chain", "")).lower()) != (head.rows, head.chain.lower()):
             raise HostedWitnessError(
                 f"witness recorded a different head (rows={pin.get('rows')!r}, "

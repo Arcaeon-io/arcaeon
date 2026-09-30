@@ -93,6 +93,7 @@ from __future__ import annotations
 import contextlib
 import functools
 import os
+import sys
 import socket
 import sqlite3
 import time
@@ -238,7 +239,7 @@ def _index_setup_lock(lock_path: Path):
             try:
                 if _msvcrt is not None:
                     _msvcrt.locking(fd, _msvcrt.LK_NBLCK, 1)
-                elif _fcntl is not None:
+                elif sys.platform != "win32" and _fcntl is not None:
                     _fcntl.flock(fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
                 else:                      # pragma: no cover - exotic platform
                     yield False
@@ -255,9 +256,10 @@ def _index_setup_lock(lock_path: Path):
             yield True
         finally:
             try:
+                # Same branch as the acquire above: the lock held is released.
                 if _msvcrt is not None:
                     _msvcrt.locking(fd, _msvcrt.LK_UNLCK, 1)
-                else:
+                elif sys.platform != "win32" and _fcntl is not None:
                     _fcntl.flock(fd, _fcntl.LOCK_UN)
             except OSError:                # pragma: no cover - best effort
                 pass
