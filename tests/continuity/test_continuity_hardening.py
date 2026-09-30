@@ -58,12 +58,14 @@ def _copy(d):
 @pytest.mark.parametrize("msg", [[1], "x", 7, None, 1.5])
 def test_non_object_message_is_an_invalid_request_not_a_crash(msg):
     resp = m.handle(msg)
+    assert resp is not None, f"handle({msg!r}) drew no reply"
     assert resp["error"]["code"] == -32600 and resp["id"] is None
 
 
 @pytest.mark.parametrize("params", [[1], "x", 7])
 def test_non_object_params_is_invalid_params(params):
     resp = m.handle({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": params})
+    assert resp is not None, f"tools/call (id 4) with params {params!r} drew no reply"
     assert resp["id"] == 4 and resp["error"]["code"] == -32602
 
 
@@ -71,6 +73,7 @@ def test_non_object_params_is_invalid_params(params):
 def test_non_object_arguments_is_invalid_params(args):
     resp = m.handle({"jsonrpc": "2.0", "id": 5, "method": "tools/call",
                      "params": {"name": "continuity_snapshot", "arguments": args}})
+    assert resp is not None, f"tools/call (id 5) with arguments {args!r} drew no reply"
     assert resp["id"] == 5 and resp["error"]["code"] == -32602
 
 
@@ -91,6 +94,7 @@ def test_honest_tool_call_still_works():
     resp = m.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                      "params": {"name": "continuity_snapshot",
                                 "arguments": {"manifest": MANIFEST}}})
+    assert resp is not None, "tools/call (id 1) drew no reply"
     assert "isError" not in resp["result"], resp
     body = json.loads(resp["result"]["content"][0]["text"])
     assert body["schema"] == ac.SNAPSHOT_SCHEMA and body["digest"]

@@ -1072,6 +1072,7 @@ def test_classify_checkpoint_containment_only_is_not_labeled_faithful():
     restated["canon_pointers:0"] = MANIFEST["canon_pointers"][0].upper()
     receipt = ac.classify_checkpoint(snap, attempted=True, receipt_stored=True,
                                      restated=restated, strict=False)
+    assert receipt.verdict is not None, "a stored receipt with a restatement carries a verdict"
     assert receipt.verdict.comparison == "containment_only"
     assert receipt.outcome == "receipt_received_contained", (
         f"got {receipt.outcome!r} — a containment-only pass must not "
@@ -1095,6 +1096,7 @@ def test_classify_checkpoint_strict_false_never_yields_faithful():
     restated = _restated(snap)
     receipt = ac.classify_checkpoint(snap, attempted=True, receipt_stored=True,
                                      restated=restated, strict=False)
+    assert receipt.verdict is not None, "a stored receipt with a restatement carries a verdict"
     assert receipt.verdict.comparison == "containment_only"
     assert receipt.outcome == "receipt_received_contained"
     assert receipt.outcome != "receipt_received_faithful"
