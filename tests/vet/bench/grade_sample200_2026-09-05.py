@@ -162,6 +162,7 @@ def grade_row(name: str, url: str, subfolder: str | None, work: Path) -> dict:
     if gstate == "unparsed":
         out.update(outcome="UNPARSED", reason=err, verdict=None, findings=[])
         return out
+    assert parsed is not None, f"{name}: graded with no parsed JSON"
     out.update(outcome="GRADED", verdict=parsed["verdict"],
                 findings=[{"check": f["check"], "severity": f["severity"]} for f in parsed["findings"]],
                 files_scanned=len(parsed["files_scanned"]), checks_run=parsed["checks_run"],
@@ -184,6 +185,7 @@ def grade_ours() -> list[dict]:
         elif gstate == "unparsed":
             row.update(outcome="UNPARSED", reason=err, verdict=None, findings=[])
         else:
+            assert parsed is not None, f"ours:{name}: graded with no parsed JSON"
             row.update(outcome="GRADED", verdict=parsed["verdict"],
                        findings=[{"check": f["check"], "severity": f["severity"]} for f in parsed["findings"]],
                        files_scanned=len(parsed["files_scanned"]), checks_run=parsed["checks_run"],

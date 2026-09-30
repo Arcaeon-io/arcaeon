@@ -44,6 +44,7 @@ server.tool("add", { a: 1 }, async ({ a }) => {
   return { content: [{ type: "text", text: String(a) }] };
 });
 '''))
+    assert f.gates is not None, f
     assert f.severity == "high"
     assert f.gates["presence"] is False
     assert "gate 1 (presence)" in f.detail
@@ -56,6 +57,7 @@ server.tool("add", { a: 1 }, async ({ a }) => {
   return { content: [] };
 });
 '''))
+    assert f.gates is not None, f
     assert f.gates["presence"] is False
 
 
@@ -66,6 +68,7 @@ server.tool("add", { a: 1 }, async ({ a }) => {
   return { content: [] };
 });
 '''))
+    assert f.gates is not None, f
     assert f.gates["presence"] is True
 
 
@@ -76,6 +79,7 @@ server.setRequestHandler(CallToolRequestSchema, async (req) => {
   return {};
 });
 '''))
+    assert f.gates is not None, f
     assert f.gates["presence"] is True
     assert f.gates["completeness"] is False
     assert "gate 2 (completeness)" in f.detail
@@ -106,6 +110,7 @@ server.tool("add", { a: 1 }, async (args) => {
   return { content: [] };
 });
 '''))
+    assert f.gates is not None, f
     assert f.gates["presence"] is True
     assert f.gates["completeness"] is True
 
@@ -120,6 +125,7 @@ function mid(rec) { persist(rec); }
 function record(name) { mid({ tool: name, ts: Date.now() }); }
 server.tool("add", { a: 1 }, async (args) => { record("add"); return { content: [] }; });
 '''))
+    assert f.gates is not None, f
     assert f.gates["presence"] is False
 
 
@@ -131,6 +137,7 @@ async function handleCall(req) {
 }
 server.setRequestHandler(CallToolRequestSchema, handleCall);
 '''))
+    assert f.gates is not None, f
     assert f.gates["completeness"] is True
 
 
@@ -143,6 +150,7 @@ server.registerTool("sub", { inputSchema: {} }, async (args) => {
   return { content: [] };
 });
 '''))
+    assert f.gates is not None, f
     assert f.gates["completeness"] is True
     assert "gate 3 (tamper-evidence)" in f.detail
 
@@ -155,6 +163,7 @@ server.addTool({
   },
 });
 '''))
+    assert f.gates is not None, f
     assert f.gates["completeness"] is True
 
 
@@ -166,6 +175,7 @@ server.tool("add", { a: 1 }, async (args) => {
   return { content: [] };
 });
 '''))
+    assert f.gates is not None, f
     assert f.gates["completeness"] is True
 
 
@@ -198,6 +208,7 @@ server.tool("add", { a: 1 }, async (args) => {
   return { content: [] };
 });
 '''))
+    assert f.gates is not None, f
     assert f.gates["tamper_evidence"] is True
     assert f.gates["reconstructability"] is False
     assert f.severity == "low"
@@ -214,8 +225,11 @@ server.tool("add", { a: 1 }, async (args) => {
 '''
     bad = good.replace('  fs.appendFileSync("audit.jsonl", JSON.stringify({ tool: "add", ts: Date.now(), args }));\n', "")
     assert bad != good
-    assert _gate(_scan(good)).gates["presence"] is True
-    assert _gate(_scan(bad)).gates["presence"] is False
+    fg, fb = _gate(_scan(good)), _gate(_scan(bad))
+    assert fg.gates is not None, fg
+    assert fb.gates is not None, fb
+    assert fg.gates["presence"] is True
+    assert fb.gates["presence"] is False
 
 
 # --- surface ------------------------------------------------------------------

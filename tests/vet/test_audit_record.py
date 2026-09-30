@@ -110,6 +110,7 @@ def test_no_record_at_all_is_high():
 def test_print_is_not_a_record():
     """A print() is stdout, not an audit trail. Precision case #1."""
     f = _one(PRINT_ONLY)
+    assert f.gates is not None, f
     assert f.severity == "high", f
     assert f.gates["presence"] is False, f.gates
 
@@ -117,12 +118,14 @@ def test_print_is_not_a_record():
 def test_logging_without_the_tool_name_is_not_a_record():
     """A log line that cannot say WHICH tool ran cannot answer MCP08."""
     f = _one(BARE_LOG)
+    assert f.gates is not None, f
     assert f.severity == "high", f
     assert f.gates["presence"] is False, f.gates
 
 
 def test_plain_unchained_log_is_medium():
     f = _one(PLAIN_LOG)
+    assert f.gates is not None, f
     assert f.severity == "medium", f
     assert f.gates["presence"] is True and f.gates["completeness"] is True, f.gates
     assert f.gates["tamper_evidence"] is False, f.gates
@@ -130,6 +133,7 @@ def test_plain_unchained_log_is_medium():
 
 def test_chained_but_unverifiable_is_low():
     f = _one(CHAINED_NO_VERIFY)
+    assert f.gates is not None, f
     assert f.severity == "low", f
     assert f.gates["tamper_evidence"] is True, f.gates
     assert f.gates["reconstructability"] is False, f.gates
@@ -218,6 +222,7 @@ def test_arcaeon_ledger_mcp_server_is_the_reference_record():
     if not fs:
         return  # passed all four; nothing to explain
     f = fs[0]
+    assert f.gates is not None, f
     assert f.gates["presence"] is True, f.gates
     assert f.gates["tamper_evidence"] is True, f.gates
     assert f.gates["reconstructability"] is True, f.gates
