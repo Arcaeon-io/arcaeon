@@ -33,6 +33,7 @@ from typing import Iterable, List, Optional
 from arcaeon import verdict as _v
 
 from .core import (ANCHOR_POSITIVE, JSONL_REASON, looks_like_jsonl, not_our_format,
+                   read_receipt_input,
                    verify_receipt)
 
 #: Published cap on receipts per free bulk verification pass
@@ -178,17 +179,12 @@ def verify_one(path: Path, *, ledger_path: Optional[str | Path] = None,
     row = {"id": path.name, "path": str(path), "verdict": UNDETERMINED,
            "ledger": "not_checked", "anchor": None, "reason": "",
            "looked_for": None, "where": None, "reason_word": None}
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        row["reason"] = f"unreadable file: {str(exc)[:120]}"
-        return _could_not_look(row, "the receipt file", str(path),
-                               "missing" if isinstance(exc, FileNotFoundError) else "unreadable")
-    except UnicodeDecodeError as exc:
-        # A ValueError, not an OSError: without this, one non-UTF-8 file
-        # raised out of verify_one and killed the whole batch.
-        row["reason"] = f"not UTF-8 text: {str(exc)[:120]}"
-        return _could_not_look(row, "UTF-8 text", str(path), "unreadable")
+    # Missing, a directory, permission denied, not UTF-8 or empty: the same
+    # COULD NOT LOOK reasons single-file verify gives (core.read_receipt_input).
+    text, cannot = read_receipt_input(path)
+    if cannot:
+        looked_for, reason_word, row["reason"] = cannot
+        return _could_not_look(row, looked_for, str(path), reason_word)
     try:
         rc = json.loads(text)
     except (ValueError, RecursionError) as exc:

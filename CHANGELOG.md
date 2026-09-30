@@ -6,6 +6,7 @@ that adds a JSON field or a verb.
 
 ## Unreleased
 
+- **2026-09-29.** `receipt verify` answers COULD NOT LOOK (exit 3; 4 from `arcaeon-receipt`) for a path it cannot read: missing ("no such file: <path>"), a directory, permission denied or an empty file, each with the path and the cause on the one `VERDICT: path -- reason` line, where it exited 1 before; `--batch` counts a missing file as COULD NOT LOOK with the same reason; exit 1 stays for usage errors.
 - **2026-09-28.** `receipt verify` answers COULD NOT LOOK (exit 3; 4 from `arcaeon-receipt`) with a one-line reason for a file that is not an Arcaeon receipt ("not an Arcaeon receipt: missing <field>", never "body digest mismatch"), a JSONL file ("JSONL is not supported; pass one receipt per file") and unparseable text, never BROKEN or a traceback; single-file verify prints a `VERDICT: path -- reason` line on stderr for all three words and adds `verdict` to its JSON; `--help` names the codes.
 
 ## 0.10.0 (2026-09-27)

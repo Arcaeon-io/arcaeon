@@ -585,6 +585,40 @@ def looks_like_jsonl(text: str) -> bool:
     return sum(1 for ln in lines[1:] if _parses(ln)) >= 1
 
 
+
+def read_receipt_input(path: str | Path) -> tuple[Optional[str], Optional[tuple[str, str, str]]]:
+    """Read one receipt input path. Never raises.
+
+    Returns (text, None) when there is text to parse, else (None, (looked_for,
+    reason_word, reason)) for a path verify cannot look at: missing, a
+    directory, unreadable (permission denied or any other OSError), not UTF-8,
+    or empty. Each reason names the cause and the path. These are COULD NOT
+    LOOK, not usage errors: the command was well formed, the file was not
+    there to check (R943 residual)."""
+    p = Path(path)
+    where = str(path)
+    try:
+        if p.is_dir():
+            return None, ("a receipt file", "unreadable",
+                          f"is a directory, not a receipt file: {where}")
+        text = p.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return None, ("the receipt file", "missing", f"no such file: {where}")
+    except IsADirectoryError:
+        return None, ("a receipt file", "unreadable",
+                      f"is a directory, not a receipt file: {where}")
+    except PermissionError:
+        return None, ("the receipt file", "unreadable", f"permission denied: {where}")
+    except UnicodeDecodeError as ex:
+        return None, ("UTF-8 text", "unreadable", f"not UTF-8 text: {str(ex)[:120]}")
+    except (OSError, ValueError) as ex:
+        cause = getattr(ex, "strerror", None) or str(ex)[:120] or type(ex).__name__
+        return None, ("the receipt file", "unreadable", f"cannot read {where}: {cause}")
+    if not text.strip():
+        return None, ("a JSON receipt", "empty", f"empty file: {where}")
+    return text, None
+
+
 def verify_receipt(receipt: Any, *, ledger_path: Optional[str | Path] = None,
                    ots: bool = False, source_text: Optional[str] = None) -> dict:
     """Recompute what can be recomputed. Typed, never raises.

@@ -172,3 +172,85 @@ def test_help_names_could_not_look_and_its_code(front, capsys):
     text = " ".join(capsys.readouterr().out.split())
     assert "COULD NOT LOOK" in text and "JSONL" in text
     assert ("3 COULD NOT LOOK" if front else "4 COULD NOT LOOK") in text
+
+
+# --- 4. a path verify cannot read (R943 residual) ----------------------------
+# Missing, a directory, permission denied, empty: COULD NOT LOOK with the path
+# and the cause, exit 3 (front door) / 4 (direct), never exit 1. Exit 1 stays
+# for usage errors only.
+
+BALLOTS = Path(__file__).resolve().parent.parent / "examples" / "ballots"
+
+
+def _assert_could_not_look_path(p, capsys, cause, reason_word):
+    rc, out, err = _front([str(p)], capsys)
+    assert rc == V.EXIT_COULD_NOT_LOOK == 3
+    assert "Traceback" not in err and "error:" not in err
+    assert err.strip().splitlines() == [f"COULD NOT LOOK: {p} -- {cause}: {p}"]
+    rep = json.loads(out)
+    assert rep["verdict"] == "COULD NOT LOOK" and rep["ok"] is False
+    assert rep["reason"] == f"{cause}: {p}" and rep["reason_word"] == reason_word
+    assert rep["where"] == str(p)
+    assert RCLI.main(["verify", str(p)]) == 4
+    capsys.readouterr()
+
+
+def test_missing_path_is_could_not_look_not_usage(tmp_path, capsys):
+    _assert_could_not_look_path(tmp_path / "gone.json", capsys, "no such file", "missing")
+
+
+def test_directory_is_could_not_look_not_usage(tmp_path, capsys):
+    d = tmp_path / "a_folder"
+    d.mkdir()
+    _assert_could_not_look_path(d, capsys, "is a directory, not a receipt file",
+                                "unreadable")
+
+
+def test_permission_denied_is_could_not_look_not_usage(tmp_path, capsys, monkeypatch):
+    p = _write(tmp_path, "locked.json", VALID.read_text(encoding="utf-8"))
+    real = Path.read_text
+
+    def denied(self, *a, **kw):
+        if Path(self) == p:
+            raise PermissionError(13, "Permission denied", str(self))
+        return real(self, *a, **kw)
+
+    monkeypatch.setattr(Path, "read_text", denied)
+    _assert_could_not_look_path(p, capsys, "permission denied", "unreadable")
+
+
+@pytest.mark.parametrize("body", ["", "  \n\n"])
+def test_empty_file_is_could_not_look_not_usage(tmp_path, capsys, body):
+    p = _write(tmp_path, "empty.json", body)
+    _assert_could_not_look_path(p, capsys, "empty file", "empty")
+
+
+def test_usage_errors_still_exit_1_or_argparse(capsys):
+    # no argument: usage, exit 1 (unchanged)
+    assert RCLI.main(["verify"]) == 1
+    assert "verify needs a receipt path" in capsys.readouterr().err
+    # a bad flag: argparse usage error, never a verdict
+    with pytest.raises(SystemExit) as e:
+        RCLI.main(["verify", "--no-such-flag", str(VALID)])
+    assert e.value.code not in (0, 3, 4)
+    assert "COULD NOT LOOK" not in capsys.readouterr().err
+
+
+def test_batch_one_missing_among_good_counts_as_could_not_look(tmp_path, capsys):
+    good = sorted(p for p in BALLOTS.glob("*.receipt.json") if "anchored" not in p.name)[:3]
+    assert len(good) == 3
+    missing = tmp_path / "gone.receipt.json"
+    targets = [str(good[0]), str(missing), str(good[1]), str(good[2])]
+    ledger = str(BALLOTS / "ledger.jsonl")
+    result = verify_batch.verify_batch(targets, ledger_path=ledger)
+    assert (result["verified"], result["failed"], result["undetermined"]) == (3, 0, 1)
+    row = next(r for r in result["rows"] if r["path"] == str(missing))
+    assert row["verdict"] == UNDETERMINED and row["reason_word"] == "missing"
+    assert row["reason"] == f"no such file: {missing}"
+    text = verify_batch.render(result)
+    assert text.splitlines()[-1] == "4 receipts: 3 VERIFIED, 0 BROKEN, 1 COULD NOT LOOK"
+    assert verify_batch.exit_code(result) == 4
+    assert RCLI.main(["verify", "--batch", *targets, "--ledger", ledger]) == 4
+    assert "4 receipts: 3 VERIFIED, 0 BROKEN, 1 COULD NOT LOOK" in capsys.readouterr().out
+    assert ARC.main(["receipt", "verify", "--batch", *targets, "--ledger", ledger]) == 3
+    capsys.readouterr()

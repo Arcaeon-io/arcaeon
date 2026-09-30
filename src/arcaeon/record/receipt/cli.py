@@ -24,8 +24,9 @@ flagged checks (cite: a citation not found or with an invalid reporter);
 4 (verify, --batch, roster-report and archive): nothing BROKEN but the check
 COULD NOT LOOK at one or more receipts. Single-file `verify` answers COULD NOT
 LOOK (4) for a file that is not an Arcaeon receipt (another vendor's format),
-a JSONL file (one receipt per line: not supported, pass one per file), or
-text that is not readable JSON. The `arcaeon receipt` front door translates
+a JSONL file (one receipt per line: not supported, pass one per file),
+text that is not readable JSON, or a path it cannot read (missing, a
+directory, permission denied, empty). Exit 1 is for usage errors only. The `arcaeon receipt` front door translates
 these to the one table: 0 VERIFIED, 1 BROKEN, 3 COULD NOT LOOK.
 Exit 3 is deliberate: a pre-filing gate should stop on a flag, not on a
 clean receipt. `ballot` has no flagged-check concept (a ballot is already a
@@ -46,8 +47,8 @@ from . import (__version__, approval, archive, authorship, ballot, call, cite,
 from arcaeon import verdict as V
 
 from .core import (JSONL_REASON, DuplicateKeyError, load_receipt, loads_strict,
-                   looks_like_jsonl, not_our_format, render_exhibit, save_receipt,
-                   verify_receipt)
+                   looks_like_jsonl, not_our_format, read_receipt_input, render_exhibit,
+                   save_receipt, verify_receipt)
 
 #: Direct-entry (`arcaeon-receipt`) exit codes for single-file verify. The
 #: `arcaeon receipt` front door maps them through arcaeon.verdict.LEGACY.
@@ -76,10 +77,12 @@ def _verify_help(prog: str) -> str:
     codes = ("0 VERIFIED, 1 BROKEN, 3 COULD NOT LOOK" if prog != "arcaeon-receipt"
              else "0 VERIFIED, 2 BROKEN, 4 COULD NOT LOOK")
     return (f"Verdicts and exit codes: {codes}. Each prints one line on stderr "
-            "(VERDICT: path -- reason) and the report as JSON on stdout. "
+            "(VERDICT: path -- reason) and the report as JSON on stdout; exit 1 is "
+            "a usage error only (a bad flag, no path). "
             "COULD NOT LOOK is never a pass: the file is not an Arcaeon receipt "
             "(another vendor's format), is JSONL (one receipt per line: not "
-            "supported, pass one receipt per file), is not readable JSON, or "
+            "supported, pass one receipt per file), is not readable JSON, is "
+            "missing, a directory, unreadable or empty, or "
             "(--batch) makes a claim this run could not check.")
 
 
@@ -96,14 +99,10 @@ def _verify_could_not_look(path: str, looked_for: str, reason_word: str, reason:
 
 
 def _verify_single(path: str, ledger, ots: bool) -> int:
-    try:
-        text = Path(path).read_text(encoding="utf-8")
-    except UnicodeDecodeError as ex:
-        return _verify_could_not_look(path, "UTF-8 text", "unreadable",
-                                      f"not UTF-8 text: {str(ex)[:120]}")
-    except OSError as ex:
-        print(f"error: {ex}", file=sys.stderr)
-        return 1
+    text, cannot = read_receipt_input(path)
+    if cannot:
+        looked_for, reason_word, reason = cannot
+        return _verify_could_not_look(path, looked_for, reason_word, reason)
     try:
         rc = loads_strict(text)
     except DuplicateKeyError:
