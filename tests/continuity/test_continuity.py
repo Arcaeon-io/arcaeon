@@ -1477,6 +1477,24 @@ def test_witness_liveness_lost_is_forward_only_never_retroactive():
     print("PASS witness_liveness_lost is forward-only: rows 1..N stay bound, never re-flagged")
 
 
+def test_liveness_lost_without_pin_refuses_by_name():
+    """The dataclass constructor is public, so a witness_liveness_lost built
+    directly (not via the named constructor) can carry no last_live_pin. Its
+    row boundary cannot be read, and that must be the same named ValueError
+    binds_row() already raises, not a bare TypeError from subscripting None."""
+    bare = ac.DeliveryReceipt(schema=ac.DELIVERY_SCHEMA,
+                              outcome="witness_liveness_lost", evidence={})
+    for attempt in (lambda: bare.determinate_through_row,
+                    lambda: bare.binds_row(1),
+                    lambda: bare.to_dict()):
+        try:
+            attempt()
+            assert False, "a liveness loss with no pin reported a row boundary"
+        except ValueError as e:
+            assert "last_live_pin" in str(e)
+    print("PASS liveness loss without a pin refuses with a named ValueError")
+
+
 def test_dunder_version_matches_pyproject():
     """Caught release-checking arcaeon-audit 0.1.5 the same night: a version
     bump that only touches pyproject.toml leaves __version__ claiming the

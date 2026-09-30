@@ -161,7 +161,7 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Sequence, TypeVar
 
 __version__ = "0.2.4"
 __all__ = [
@@ -220,6 +220,8 @@ try:
 except ImportError:
     _HAVE_BASELINE = False
     Probe = None  # type: ignore[assignment]
+    _baseline_compare = _baseline_register = None
+    CallableRunner = RunnerError = None
 
 try:
     from arcaeon.prove.compact import CompactionReceipt as _CompactionReceipt
@@ -227,6 +229,7 @@ try:
     _HAVE_COMPACT = True
 except ImportError:
     _HAVE_COMPACT = False
+    _CompactionReceipt = _compact_verify_receipt = None
 
 
 def digest_json(value: Any) -> str:
@@ -234,17 +237,33 @@ def digest_json(value: Any) -> str:
     when installed (byte-identical recipe, so digests are ecosystem-portable);
     falls back to an in-package copy of the same pinned recipe otherwise, so
     `.digest` still works with only arcaeon-continuity installed."""
-    if _HAVE_LEDGER:
+    if _HAVE_LEDGER and _ledger_digest_json is not None:
         return _ledger_digest_json(value)
     return _digest_json_fallback(value)
 
 
+def _missing(package: str, feature: str) -> ContinuityDependencyError:
+    return ContinuityDependencyError(
+        f"{feature} needs `{package}`, which isn't installed. "
+        f"Run: pip install {package}"
+    )
+
+
 def _require(flag: bool, package: str, feature: str) -> None:
     if not flag:
-        raise ContinuityDependencyError(
-            f"{feature} needs `{package}`, which isn't installed. "
-            f"Run: pip install {package}"
-        )
+        raise _missing(package, feature)
+
+
+_T = TypeVar("_T")
+
+
+def _dep(obj: _T | None, flag: bool, package: str, feature: str) -> _T:
+    """`_require`, returning the guarded import. Each optional import binds
+    its names to None when absent, so the name a feature uses is checked in
+    the same step as the flag, with the same error."""
+    if not flag or obj is None:
+        raise _missing(package, feature)
+    return obj
 
 
 # ---------------------------------------------------------------------------
@@ -350,7 +369,7 @@ def _derive_probes(manifest: dict, *, id_scheme: str = "index") -> list:
     per element (id `key:idx` by default — see `id_scheme=` and per-item
     `{"id": ..., "value": ...}` for stable-id alternatives), scalar values
     become one probe (id `key`)."""
-    _require(_HAVE_BASELINE, "arcaeon-baseline", "deriving probes from a manifest")
+    probe_cls = _dep(Probe, _HAVE_BASELINE, "arcaeon-baseline", "deriving probes from a manifest")
     if id_scheme not in ("index", "content"):
         raise ValueError(f"id_scheme must be 'index' or 'content', got {id_scheme!r}")
     probes = []
@@ -360,11 +379,11 @@ def _derive_probes(manifest: dict, *, id_scheme: str = "index") -> list:
             seen: dict = {}
             for idx, item in enumerate(value):
                 pid, answer, prompt = _list_item_probe_spec(key, idx, item, id_scheme, seen)
-                probes.append(Probe(id=pid, prompt=prompt,
-                                    scoring={"type": "exact_match", "answer": answer}))
+                probes.append(probe_cls(id=pid, prompt=prompt,
+                                        scoring={"type": "exact_match", "answer": answer}))
         else:
             answer = _stringify(value)
-            probes.append(Probe(
+            probes.append(probe_cls(
                 id=key,
                 prompt=f"Restate the declared manifest field {key!r} exactly.",
                 scoring={"type": "exact_match", "answer": answer},
@@ -402,13 +421,13 @@ def restate(manifest: dict, *, id_scheme: str = "index") -> dict[str, str]:
 def _coerce_probes(probes: Any) -> list:
     """Accept a list of arcaeon_baseline.Probe, or a list of probe dicts
     ({"id", "prompt", "scoring"}), and return a list of Probe objects."""
-    _require(_HAVE_BASELINE, "arcaeon-baseline", "supplying custom probes")
+    probe_cls = _dep(Probe, _HAVE_BASELINE, "arcaeon-baseline", "supplying custom probes")
     out = []
     for p in probes:
-        if isinstance(p, Probe):
+        if isinstance(p, probe_cls):
             out.append(p)
         elif isinstance(p, dict):
-            out.append(Probe(id=str(p["id"]), prompt=str(p["prompt"]), scoring=p["scoring"]))
+            out.append(probe_cls(id=str(p["id"]), prompt=str(p["prompt"]), scoring=p["scoring"]))
         else:
             raise TypeError(f"probe must be a Probe or dict, got {type(p).__name__}")
     return out
@@ -437,14 +456,16 @@ def _write_probes_jsonl(probes: Sequence[dict], path: Path) -> None:
 
 
 def _identity_runner(prompt_to_answer: dict):
-    _require(_HAVE_BASELINE, "arcaeon-baseline", "sealing a snapshot's baseline")
+    feature = "sealing a snapshot's baseline"
+    runner_error = _dep(RunnerError, _HAVE_BASELINE, "arcaeon-baseline", feature)
+    callable_runner = _dep(CallableRunner, _HAVE_BASELINE, "arcaeon-baseline", feature)
 
     def fn(prompt: str) -> str:
         try:
             return prompt_to_answer[prompt]
         except KeyError as e:
-            raise RunnerError(f"no declared answer for prompt: {prompt!r}") from e
-    return CallableRunner(fn, label="manifest-declared")
+            raise runner_error(f"no declared answer for prompt: {prompt!r}") from e
+    return callable_runner(fn, label="manifest-declared")
 
 
 class _RecordingRunner:
@@ -461,6 +482,9 @@ class _RecordingRunner:
     def __init__(self, inner: Any):
         self._inner = inner
         self.answers: dict[str, str] = {}
+        # Built only by verify_continuation(), after its baseline check.
+        self._runner_error = _dep(RunnerError, _HAVE_BASELINE, "arcaeon-baseline",
+                                  "verify_continuation()")
 
     def describe(self) -> dict:
         try:
@@ -471,7 +495,7 @@ class _RecordingRunner:
     def run(self, prompt: str) -> str:
         out = self._inner.run(prompt)
         if not isinstance(out, str):
-            raise RunnerError(
+            raise self._runner_error(
                 f"runner returned {type(out).__name__}, not str, for prompt "
                 f"{prompt[:60]!r}")
         self.answers[prompt] = out
@@ -571,15 +595,17 @@ def _restated_runner(prompts: dict, restated: dict):
     """Wrap a plain {probe_id: answer} dict as a Runner, so a stranger with
     only a collected transcript of the next instance's restatement — no live
     model access — can still call verify_continuation()."""
-    _require(_HAVE_BASELINE, "arcaeon-baseline", "scoring restated answers")
+    feature = "scoring restated answers"
+    runner_error = _dep(RunnerError, _HAVE_BASELINE, "arcaeon-baseline", feature)
+    callable_runner = _dep(CallableRunner, _HAVE_BASELINE, "arcaeon-baseline", feature)
     prompt_to_id = {v: k for k, v in prompts.items()}
 
     def fn(prompt: str) -> str:
         pid = prompt_to_id.get(prompt)
         if pid is None or pid not in restated:
-            raise RunnerError(f"no restated answer for prompt: {prompt!r}")
+            raise runner_error(f"no restated answer for prompt: {prompt!r}")
         return restated[pid]
-    return CallableRunner(fn, label="restated")
+    return callable_runner(fn, label="restated")
 
 
 # ---------------------------------------------------------------------------
@@ -780,7 +806,8 @@ def snapshot(manifest: dict, *, ledger_path: str | Path | None = None,
     arcaeon-ledger log at that path — the tamper-evidence spine. Omit it for
     a snapshot that's sealed (baseline-registered) but not chained.
     """
-    _require(_HAVE_BASELINE, "arcaeon-baseline", "snapshot() (probe registration)")
+    baseline_register = _dep(_baseline_register, _HAVE_BASELINE, "arcaeon-baseline",
+                             "snapshot() (probe registration)")
     if not isinstance(manifest, dict):
         raise TypeError("manifest must be a dict")
 
@@ -793,7 +820,7 @@ def snapshot(manifest: dict, *, ledger_path: str | Path | None = None,
     runner = _identity_runner(prompt_to_answer)
 
     with tempfile.TemporaryDirectory() as td:
-        reg, _reg_path = _baseline_register(
+        reg, _reg_path = baseline_register(
             probe_objs, label=label, runner=runner,
             out_dir=Path(td) / "registrations", ledger_path=None)
     reg.pop("_file", None)
@@ -835,7 +862,7 @@ def snapshot(manifest: dict, *, ledger_path: str | Path | None = None,
 
     chain = None
     if ledger_path is not None:
-        _require(_HAVE_LEDGER, "arcaeon-ledger", "ledger_path= chaining")
+        ledger_cls = _dep(Ledger, _HAVE_LEDGER, "arcaeon-ledger", "ledger_path= chaining")
         row = {
             "kind": "continuity_snapshot",
             "label": label,
@@ -843,7 +870,7 @@ def snapshot(manifest: dict, *, ledger_path: str | Path | None = None,
             "probe_set_digest": reg["probe_set_digest"],
             "aggregate_mean": reg["aggregate"]["mean"],
         }
-        chain = Ledger(ledger_path).append(row)
+        chain = ledger_cls(ledger_path).append(row)
 
     return ContinuitySnapshot(
         schema=SNAPSHOT_SCHEMA, label=label, manifest=manifest,
@@ -1285,7 +1312,9 @@ def verify_continuation(snap: ContinuitySnapshot, *, probes: Any = None,
     `faithful` always None — supersedes that doc's "faithful unchanged"
     clause, per ColonistOne's demonstrated remedy).
     """
-    _require(_HAVE_BASELINE, "arcaeon-baseline", "verify_continuation()")
+    feature = "verify_continuation()"
+    callable_runner = _dep(CallableRunner, _HAVE_BASELINE, "arcaeon-baseline", feature)
+    baseline_compare = _dep(_baseline_compare, _HAVE_BASELINE, "arcaeon-baseline", feature)
     if (runner is None) == (restated is None):
         raise ValueError("pass exactly one of runner= or restated=")
 
@@ -1314,7 +1343,7 @@ def verify_continuation(snap: ContinuitySnapshot, *, probes: Any = None,
     elif isinstance(runner, str):
         raise TypeError("runner must be a Runner/callable, not a string — did you mean restated=?")
     else:
-        inner = (CallableRunner(runner, label="continuation")
+        inner = (callable_runner(runner, label="continuation")
                  if (callable(runner) and not hasattr(runner, "run")) else runner)
         run = _RecordingRunner(inner)
 
@@ -1325,7 +1354,7 @@ def verify_continuation(snap: ContinuitySnapshot, *, probes: Any = None,
         reg_path = tdp / "registration.json"
         reg_path.write_text(json.dumps(snap.registration, ensure_ascii=False), encoding="utf-8")
 
-        diff, _diff_path = _baseline_compare(
+        diff, _diff_path = baseline_compare(
             reg_path, runner=run, probes_path=probes_path,
             out_dir=tdp / "comparisons", ledger_path=None)
 
@@ -1398,7 +1427,7 @@ def verify_continuation(snap: ContinuitySnapshot, *, probes: Any = None,
             probe_set_digest=snap.probe_set_digest, policy=policy)
 
     if ledger_path is not None:
-        _require(_HAVE_LEDGER, "arcaeon-ledger", "ledger_path= chaining")
+        ledger_cls = _dep(Ledger, _HAVE_LEDGER, "arcaeon-ledger", "ledger_path= chaining")
         # 0.2.0 (design: Excelsior): the row carries schema, comparison,
         # policy, and the verdict envelope digest. Before this, two
         # verifications of the same snapshot — one strict, one loose, both
@@ -1407,7 +1436,7 @@ def verify_continuation(snap: ContinuitySnapshot, *, probes: Any = None,
         # contradict you. Now the policy is read from inside the digested
         # envelope, and any edit to it breaks the row's chain hash like any
         # other tamper.
-        Ledger(ledger_path).append({
+        ledger_cls(ledger_path).append({
             "kind": "continuity_verify",
             "label": snap.label,
             "manifest_digest": snap.manifest_digest,
@@ -1734,6 +1763,17 @@ class DeliveryReceipt:
         forever). `None` for every other outcome."""
         if self.outcome != "witness_liveness_lost":
             return None
+        return self._pinned_rows()
+
+    def _pinned_rows(self) -> int:
+        # The dataclass constructor is public, so a witness_liveness_lost can
+        # arrive without the pin the named constructor requires. Refuse it by
+        # name, as binds_row() refuses an undefined question.
+        if self.last_live_pin is None:
+            raise ValueError(
+                "witness_liveness_lost carries no last_live_pin, so its row "
+                "boundary cannot be read; build it with "
+                "DeliveryReceipt.witness_liveness_lost(last_live_pin=...)")
         return self.last_live_pin["rows"]
 
     def binds_row(self, row: int) -> bool:
@@ -1748,7 +1788,7 @@ class DeliveryReceipt:
                 f"not {self.outcome!r}")
         if not isinstance(row, int) or isinstance(row, bool) or row < 1:
             raise ValueError("row must be a positive int (1-based ledger row)")
-        return row <= self.last_live_pin["rows"]
+        return row <= self._pinned_rows()
 
     def to_dict(self) -> dict:
         return {
@@ -2065,8 +2105,9 @@ class DropReceipt:
 
     def verify(self, pre_content: Sequence[Any] | None = None,
                post_content: Sequence[Any] | None = None) -> dict:
-        _require(_HAVE_COMPACT, "arcaeon-compact", "DropReceipt.verify()")
-        return _compact_verify_receipt(self.row, pre_content, post_content)
+        verify_receipt = _dep(_compact_verify_receipt, _HAVE_COMPACT, "arcaeon-compact",
+                              "DropReceipt.verify()")
+        return verify_receipt(self.row, pre_content, post_content)
 
 
 def drop_receipt(before: Sequence[Any], after: Sequence[Any], *,
@@ -2079,8 +2120,8 @@ def drop_receipt(before: Sequence[Any], after: Sequence[Any], *,
     ledger chaining. `before`/`after` are lists of str/bytes/JSON-serializable
     items — never raw content in the receipt, digests only (privacy by
     construction, inherited from arcaeon-compact)."""
-    _require(_HAVE_COMPACT, "arcaeon-compact", "drop_receipt()")
-    r = _CompactionReceipt.open(before)
+    receipt_cls = _dep(_CompactionReceipt, _HAVE_COMPACT, "arcaeon-compact", "drop_receipt()")
+    r = receipt_cls.open(before)
     r.record_kept(after)
     row = r.seal(ledger_path, compactor=compactor, method=method)
     return DropReceipt(row=row)
