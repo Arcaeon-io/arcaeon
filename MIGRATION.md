@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-Nothing yet.
+Nothing was removed or renamed.
+
+- **MCP tool `arcaeon_front_door` and `arcaeon mcp --print-front-door` (front door).** New free tool in `arcaeon.mcp.server` (`FRONT_DOOR_TOOL`), taking no arguments; like every connector tool it writes one call-record row. The new flag `arcaeon mcp --print-front-door` prints the same object as JSON and exits 0 (no server, no stdio, no network, no MCP SDK needed). Both return `arcaeon.mcp.front_door.front_door()`, shape `arcaeon-front-door/v1`: `schema`, `arcaeon_version`, `no_key` (`summary`, `network`, and the free tools grouped as `record`, `verify`, `evidence_pack`, `second_reader`, `about`, each `what` and `tools`), `with_a_key` (`key_env_var`, `tools`, `what_it_does`, `price_per_pin_usd`, and when the offers document has them `smallest_pack` with `plan`, `price_usd`, `pins`, `checkout`, `grant` and `grant_status`), `get_a_key` (`url`, `how`: the registration link when the offers document switches registration on, else the pricing page), `can_and_cannot` (`source`, `cannot` sections of `heading` and `items`, `can`) and `offers_url`. Every price is read from the offers document, none is typed. The server's instructions now start at this tool. The MCP connector lists 20 tools (was 19). See docs/FRONT_DOOR.md. Additive.
 
 ## 0.10.0 (2026-09-27)
 
