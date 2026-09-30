@@ -35,12 +35,51 @@ from arcaeon.record.deal import _amount, check_mandate
 from arcaeon.record.row import digest_bytes, digest_json
 
 __all__ = ["INSIDE", "OUTSIDE", "COULD_NOT_LOOK", "VERDICTS", "CAP_EXCEEDED_EVT",
-           "MandateGate", "load", "evaluate"]
+           "OUTSIDE_FORWARDED", "BLOCKED", "NEVER_ATTEMPTED", "OUTCOMES",
+           "OUTCOME_MEANINGS", "outcome", "MandateGate", "load", "evaluate"]
 
 INSIDE = "inside"
 OUTSIDE = "outside"
 COULD_NOT_LOOK = "could_not_look"
 VERDICTS = (INSIDE, OUTSIDE, COULD_NOT_LOOK)
+
+# What happened to a call, one word per gate row (`outcome`). The verdict says
+# what the gate answered; the outcome also says whether the call went through.
+OUTSIDE_FORWARDED = "outside_forwarded"
+BLOCKED = "blocked"
+NEVER_ATTEMPTED = "never_attempted"
+OUTCOMES = (INSIDE, OUTSIDE_FORWARDED, BLOCKED, NEVER_ATTEMPTED, COULD_NOT_LOOK)
+
+#: One line per outcome word; `arcaeon mandate explain` prints these.
+OUTCOME_MEANINGS = {
+    INSIDE: "the gate looked and nothing in the mandate said no; the call went through.",
+    OUTSIDE_FORWARDED: "record-only: the gate said no and the call went through anyway.",
+    BLOCKED: "enforce: the gate ran and said no, and the call was withheld from the tool.",
+    NEVER_ATTEMPTED: "the call never reached the gate's judgment: it was refused before "
+                     "the gate, or the mandate file could not be read (`reason` says which).",
+    COULD_NOT_LOOK: "the gate ran but something it needed to decide (an amount, a time, "
+                    "the call itself) could not be read; never counted as inside.",
+}
+
+#: `reason` prefixes on a never_attempted row, naming which of the two it was.
+REFUSED_BEFORE_GATE = "refused before the gate: "
+GATE_COULD_NOT_RUN = "the gate could not run: "
+
+
+def outcome(verdict: str, action: str, extra: dict | None = None) -> str:
+    """The outcome word for one judged call. `action` is "forwarded" or
+    "blocked"; `extra` is the gate's detail dict (its `rule` decides whether
+    the gate ran at all)."""
+    rule = (extra or {}).get("rule")
+    if rule == "mandate_file":
+        return NEVER_ATTEMPTED
+    if rule == "frame" and action == "blocked":
+        return NEVER_ATTEMPTED
+    if verdict == INSIDE:
+        return INSIDE
+    if verdict == OUTSIDE:
+        return BLOCKED if action == "blocked" else OUTSIDE_FORWARDED
+    return COULD_NOT_LOOK
 
 _AMOUNT_ARGS = ("total", "amount")
 _CURRENCY_ARGS = ("currency",)
@@ -208,8 +247,10 @@ class MandateGate:
                     "rule": "forbidden_acts"}
         allowed = m.get("allowed_acts") or []
         if allowed and not any(fnmatch.fnmatchcase(name, p) for p in allowed):
+            # No rule of the mandate names this call at all: drift, counted
+            # apart from a call a rule matched and refused.
             return OUTSIDE, f"tool {name!r} matches no allowed_acts pattern", {
-                "rule": "allowed_acts"}
+                "rule": "allowed_acts", "no_matching_mandate": True}
         at = at or _now_iso()
         args = tool_call.get("arguments")
         args = args if isinstance(args, dict) else {}
@@ -234,6 +275,11 @@ class MandateGate:
             carry = {"spend_amount": str(spend)} if spend is not None else {}
             if inside is True and cap.get("total") is not None:
                 total = _amount(cap["total"])
+                # Neither can be None here: _normalize refused an unreadable
+                # spend_cap.total at load, and check_mandate answered True only
+                # after reading this same amount with the same _amount.
+                assert total is not None and spend is not None, \
+                    "spend_cap.total and the spend were read before the cap check"
                 with self._spent_lock:
                     before = self.spent
                 if before + spend > total:
@@ -264,8 +310,12 @@ class MandateGate:
         if na and when > na:
             return OUTSIDE, f"call at {at} is after the mandate's not_after " \
                             f"{m['not_after']}", {"rule": "window"}
-        return INSIDE, f"tool {name!r} is allowed and the call is inside the window", {
-            "rule": "acts"}
+        extra: dict = {"rule": "acts"}
+        if not allowed:
+            # Inside by default: no allowed_acts list, no forbidden_acts or
+            # spend_cap match. Nothing in the mandate named it.
+            extra["no_matching_mandate"] = True
+        return INSIDE, f"tool {name!r} is allowed and the call is inside the window", extra
 
 
 def load(path: str | Path | None) -> MandateGate:
@@ -282,7 +332,7 @@ def load(path: str | Path | None) -> MandateGate:
     except OSError as e:
         return MandateGate(p, status="unreadable", error=f"{type(e).__name__}: {e}")
     sha = hashlib.sha256(data).hexdigest()
-    fp = {"file_sha256": sha, "file_digest": digest_bytes(data)}
+    fp: dict[str, Any] = {"file_sha256": sha, "file_digest": digest_bytes(data)}
     try:
         obj = json.loads(data.decode("utf-8"))
     except (ValueError, UnicodeDecodeError, RecursionError) as e:

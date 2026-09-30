@@ -336,11 +336,16 @@ def _cmd_explain(a) -> int:
         print(f"{a.mandate}: invalid; run `arcaeon mandate lint` for the list", file=sys.stderr)
         return V.EXIT_USAGE
     lines = explain(obj)
+    from arcaeon.record.adapter import mandate_gate
+    outcomes = {w: mandate_gate.OUTCOME_MEANINGS[w] for w in mandate_gate.OUTCOMES}
     if a.json:
         print(json.dumps({"mandate": a.mandate, "sentences": lines,
-                          "warnings": res["warnings"]}, indent=1))
+                          "outcomes": outcomes, "warnings": res["warnings"]}, indent=1))
     else:
         print("\n".join(lines))
+        print("Each call the gate sees ends as one of five outcomes (the row's `outcome`):")
+        for w, meaning in outcomes.items():
+            print(f"{w}: {meaning}")
         for w in res["warnings"]:
             print(f"warning: {w}")
     return V.EXIT_GOOD

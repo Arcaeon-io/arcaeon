@@ -330,12 +330,43 @@ def _step_mandate(pack: Path, manifest: dict) -> dict:
     section = mandate_section(records.read_bytes(), lines,
                               mandate_name=claim.get("mandate_file"), mandate_bytes=copy)
     problems = []
-    if rows_p.read_bytes() != mandate_rows_bytes(section):
+    from arcaeon.prove.evidence_pack import MANDATE_BLOCK_NEW_KEYS, mandate_rows_bytes_legacy
+    # The older-pack form (no outcome fields) is accepted only when the tally
+    # rebuilt from the records is empty: an older pack's records carry no
+    # outcome words and no drift count, so its rebuilt tally is empty by
+    # construction. Records that do carry them make a current pack, which
+    # must carry the fields.
+    tally_empty = section["outcomes"] == {} and section["no_matching_mandate"] == 0
+    rows_raw = rows_p.read_bytes()
+    legacy_rows = mandate_rows_bytes_legacy(section)
+    if rows_raw != mandate_rows_bytes(section) and not (
+            tally_empty and rows_raw == legacy_rows):
         problems.append(f"{MANDATE_ROWS} differs from the section rebuilt from "
                         "records.jsonl and mandate_file.json")
-    if claim != mandate_block(section):
+    want_block = mandate_block(section)
+    missing = [k for k in MANDATE_BLOCK_NEW_KEYS if k not in claim]
+    if len(missing) == len(MANDATE_BLOCK_NEW_KEYS) and rows_raw == legacy_rows:
+        if tally_empty:
+            # A pack built before the outcome words: neither its block nor its
+            # mandate_rows.json ever had them, and its records carry none.
+            want_block = {k: v for k, v in want_block.items()
+                          if k not in MANDATE_BLOCK_NEW_KEYS}
+    if missing and not tally_empty:
+        problems.append("the manifest's `mandate` block has no "
+                        + " or ".join(f"`{k}`" for k in missing)
+                        + ", but the records carry outcome words or a drift count "
+                        f"(rebuilt outcomes {json.dumps(section['outcomes'])}, "
+                        f"no_matching_mandate {section['no_matching_mandate']}), so this "
+                        "is not a pack built before the outcome words")
+    if claim != want_block:
+        fields = ([k for k in want_block if k not in claim or claim[k] != want_block[k]]
+                  + [k for k in claim if k not in want_block])
+        named = ", ".join(
+            f"`{k}` says {json.dumps(claim[k]) if k in claim else 'nothing'}, "
+            f"rebuilt {json.dumps(want_block[k]) if k in want_block else 'no such field'}"
+            for k in fields)
         problems.append("the manifest's `mandate` block differs from the one rebuilt "
-                        f"from the records (counts {section['counts']}, sha256 "
+                        f"from the records: {named} (counts {section['counts']}, sha256 "
                         f"{section['mandate_file_sha256']})")
     want = mandate_checks(section)
     names = {c["check"] for c in want} | {"mandate file read",

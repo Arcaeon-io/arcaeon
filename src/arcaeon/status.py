@@ -9,7 +9,9 @@
                          request is made
     mandate              counts from every mandate-gated session that ended on
                          this machine (K077): inside, outside, could not look,
-                         blocked, cap exceeded, mandate file changed
+                         blocked, cap exceeded, mandate file changed, and
+                         (only when non-zero) no matching mandate: calls no
+                         rule of the mandate named at all (drift)
 
 Mandate counts. Every surface that runs the mandate gate (the stdio proxy,
 the HTTP forward proxy, call_proxy) appends one line per session, at session
@@ -47,7 +49,7 @@ NO_KEY = "not checked, no key"
 MANDATE_FILENAME = "mandate_sessions.jsonl"
 #: The counts a session line carries, in the order `status` prints them.
 MANDATE_COUNTS = ("inside", "outside", "could_not_look", "blocked", "cap_exceeded",
-                  "changes")
+                  "changes", "no_matching_mandate")
 
 
 def mandate_path():
@@ -219,7 +221,9 @@ def render(s: dict) -> str:
                          f"{m['inside']} inside, {m['outside']} outside, "
                          f"{m['could_not_look']} COULD NOT LOOK, {m['blocked']} blocked, "
                          f"{m['cap_exceeded']} cap exceeded, "
-                         f"{m['changes']} mandate file changes")
+                         f"{m['changes']} mandate file changes"
+                         + (f", {m['no_matching_mandate']} no matching mandate"
+                            if m.get("no_matching_mandate") else ""))
     b = s["balance"]
     lines.append("balance: " + (b["sentence"] if b.get("checked") else b["reason"]))
     return "\n".join(lines)

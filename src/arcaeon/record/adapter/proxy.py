@@ -143,6 +143,7 @@ class _Corruptor:
         if self.mode == "strip_newline":
             return chunk.replace(b"\n", b"")
         out = bytearray()
+        assert self._split is not None  # mode is reserialize: __init__ built it
         for frame in self._split.feed(chunk):
             try:
                 out += json.dumps(json.loads(frame.decode("utf-8")), sort_keys=True,
@@ -206,6 +207,7 @@ def relay(src, dst, observe=None, *, on_eof=None, corruptor=None,
                 dst.write(out)
                 dst.flush()
             if splitter is not None:
+                assert observe is not None  # a splitter exists only when observe does
                 for frame in splitter.feed(chunk):
                     try:
                         observe(frame)
@@ -232,6 +234,7 @@ def relay(src, dst, observe=None, *, on_eof=None, corruptor=None,
             except Exception:
                 pass
         if splitter is not None:
+            assert observe is not None  # a splitter exists only when observe does
             for frame in splitter.close():
                 try:
                     observe(frame)
@@ -273,6 +276,8 @@ class _MandateWatch:
         self.counts = {"inside": 0, "outside": 0, "could_not_look": 0}
         self.blocked = 0
         self.cap_exceeded = 0
+        #: Calls no rule of the mandate matched at all (drift), inside or not.
+        self.no_matching_mandate = 0
         self._lock = threading.Lock()
         self._seen_sha256 = getattr(gate, "file_sha256", None)
         self.changes = 0
@@ -343,14 +348,17 @@ class _MandateWatch:
             return None, "unreadable"
         return hashlib.sha256(data).hexdigest(), "present"
 
-    def check_file(self, msg: dict | None = None) -> None:
-        """Hash the mandate file again; row a change. Never raises."""
+    def check_file(self, msg: dict | None = None) -> str | None:
+        """Hash the mandate file again; row a change. Returns the file's status
+        now ("present", "missing", "unreadable"), or None when it could not
+        be told. Never raises."""
+        status = None
         try:
             now, status = self._file_now()
             with self._lock:
                 before = self._seen_sha256
                 if now == before:
-                    return
+                    return status
                 self._seen_sha256 = now
                 self.changes += 1
             params = (msg or {}).get("params")
@@ -366,9 +374,19 @@ class _MandateWatch:
                       mandate_mode=self.mode)
         except Exception:
             pass
+        return status
 
     def judge(self, msg: dict):
-        self.check_file(msg)
+        status = self.check_file(msg)
+        if self.gate.ok and status in ("missing", "unreadable"):
+            # The file the gate loaded is gone (or cannot be read) now: the
+            # gate cannot run against a mandate nobody can show, so it answers
+            # could_not_look and the row's outcome is never_attempted.
+            from . import mandate_gate
+            return mandate_gate.COULD_NOT_LOOK, (
+                f"the mandate file is {status} now: {self.gate.path}"), {
+                "rule": "mandate_file", "looked_for": "the mandate",
+                "where": self.gate.path or "(no path)", "reason_word": status}
         params = msg.get("params")
         return self.gate.detail(params if params is not None else {})
 
@@ -380,6 +398,8 @@ class _MandateWatch:
                 self.blocked += 1
             if extra.get("evt") == "mandate_cap_exceeded":
                 self.cap_exceeded += 1
+            if extra.get("no_matching_mandate"):
+                self.no_matching_mandate += 1
         # A forwarded spend ran, so it counts toward spend_cap.total (K073);
         # a blocked one never reached the tool and does not.
         spent = None
@@ -387,12 +407,20 @@ class _MandateWatch:
             spent = self.gate.add_spend(extra["spend_amount"])
         if verdict == "inside":
             return
-        params = msg.get("params") if isinstance(msg.get("params"), dict) else {}
+        params = msg.get("params")
+        params = params if isinstance(params, dict) else {}
         args = params.get("arguments")
         tool = params.get("name")
         rid = msg.get("id")
+        from . import mandate_gate
+        word = mandate_gate.outcome(verdict, action, extra)
+        reason = str(reason)
+        if word == mandate_gate.NEVER_ATTEMPTED:
+            reason = (mandate_gate.GATE_COULD_NOT_RUN if extra.get("rule") == "mandate_file"
+                      else mandate_gate.REFUSED_BEFORE_GATE) + reason
         fields = {
-            "verdict": verdict, "rule": extra.get("rule"), "reason": str(reason),
+            "verdict": verdict, "outcome": word, "rule": extra.get("rule"),
+            "reason": reason,
             "tool": tool if isinstance(tool, str) else None,
             "rpc_id": _render_id(rid) if not isinstance(rid, (dict, list)) else None,
             "args_digest": _safe_digest({} if args is None else args),
@@ -404,6 +432,8 @@ class _MandateWatch:
                           reason_word=extra.get("reason_word"))
         if extra.get("judged_reason"):
             fields["judged_reason"] = extra["judged_reason"]
+        if extra.get("no_matching_mandate"):
+            fields["no_matching_mandate"] = True
         if extra.get("evt") == "mandate_cap_exceeded":
             fields.update(amount=extra.get("spend_amount"),
                           session_spent_before=extra.get("session_spent_before"),
@@ -439,6 +469,7 @@ class _MandateWatch:
                 "mandate_could_not_look": self.counts["could_not_look"],
                 "mandate_blocked": self.blocked or None,
                 "mandate_cap_exceeded": self.cap_exceeded or None,
+                "mandate_no_matching_mandate": self.no_matching_mandate or None,
                 "mandate_changes": self.changes or None,
                 "mandate_spent": (str(self.gate.spent)
                                   if getattr(self.gate, "total_cap", None) is not None
@@ -794,7 +825,8 @@ def run(command: list[str], ledger_path: str, *, server: str | None = None,
     def close_child_stdin():
         """Client hung up: pass the hangup on, which is how an MCP server is told to exit."""
         try:
-            child.stdin.close()
+            if child.stdin is not None:
+                child.stdin.close()
         except Exception:
             pass
 
