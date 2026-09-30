@@ -96,3 +96,47 @@ def test_a_session_that_writes_to_the_watched_home_fails_by_name(tmp_path):
                         str(proj)], cwd=proj, capture_output=True, text=True, timeout=120)
     assert p.returncode == 1, p.stdout + p.stderr
     assert "REAL HOME WRITTEN" in p.stdout and "activity.jsonl (new, 1 bytes)" in p.stdout
+
+
+# --- the front door in-process, under a redirected home (2026-09-29) ---------------
+
+def _real_journal_size(g):
+    return g.snapshot(g.watch).get(str(g.real_home / ".arcaeon" / "activity.jsonl"))
+
+
+def test_cli_main_under_a_redirected_home_writes_there_and_not_to_the_real_one(
+        real_home_guard, monkeypatch, tmp_path):
+    """arcaeon.cli.main in-process (the path test_front_door_exit and friends
+    take): every journaled verb, the front-door crash catch included, lands in
+    the redirected ARCAEON_HOME and the real ~/.arcaeon/activity.jsonl is
+    untouched."""
+    from arcaeon import cli
+    g = real_home_guard
+    home = tmp_path / "own_home"
+    monkeypatch.setenv("ARCAEON_HOME", str(home))
+    monkeypatch.delenv("ARCAEON_JOURNAL", raising=False)
+    before = _real_journal_size(g)
+
+    def boom(_rest):
+        raise RuntimeError("front door")
+
+    monkeypatch.setitem(cli.HANDLERS, "version-crash", boom)
+    assert cli.main(["version"]) == 0
+    assert cli.main(["version-crash"]) == 3
+    assert cli.main(["verify", str(tmp_path / "missing.jsonl")]) != 0
+    rows = (home / "activity.jsonl").read_text(encoding="utf-8").splitlines()
+    assert [r.split('"verb":"')[1].split('"')[0] for r in rows] == \
+        ["version", "version-crash", "verify"]
+    assert _real_journal_size(g) == before
+
+
+def test_rows_added_names_time_and_verb_of_new_journal_rows(real_home_guard, tmp_path):
+    g = real_home_guard
+    j = tmp_path / ".arcaeon" / "activity.jsonl"
+    j.parent.mkdir()
+    j.write_text('{"t":"T0","verb":"old","target":"x"}\n', encoding="utf-8")
+    before = g.snapshot([j.parent])
+    with open(j, "a", encoding="utf-8", newline="\n") as f:
+        f.write('{"t":"T1","verb":"evidence-pack","target":"abc"}\nnot json\n')
+    assert g.rows_added(before, g.snapshot([j.parent])) == ["T1 evidence-pack"]
+    assert g.rows_added(before, before) == []

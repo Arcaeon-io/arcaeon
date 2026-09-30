@@ -91,6 +91,35 @@ def home_changes(before: dict, after: dict) -> list:
     return changed
 
 
+def journal_rows_added(before: dict, after: dict) -> list:
+    """For each activity.jsonl that grew, "<t> <verb>" of the rows appended
+    since the start snapshot. The verb and time are enough to tell a test's
+    run from a hand-run `arcaeon ...` by another process during the session;
+    the target (a sha256) is left out. Read-only; never raises."""
+    import json as _json
+    out = []
+    for name in sorted(after):
+        if not name.endswith("activity.jsonl"):
+            continue
+        a, b = before.get(name) or 0, after.get(name)
+        if b is None or b <= a:
+            continue
+        try:
+            with open(name, "rb") as f:
+                f.seek(a)
+                tail = f.read(b - a).decode("utf-8", "replace")
+        except OSError:
+            continue
+        for line in tail.splitlines():
+            try:
+                row = _json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict):
+                out.append(f"{row.get('t')} {row.get('verb')}")
+    return out
+
+
 def _is_real(value, real: Path) -> bool:
     if not value:
         return True
@@ -146,18 +175,23 @@ def real_home_guard():
     return types.SimpleNamespace(real_home=REAL_HOME, watch=REAL_WATCH, before=REAL_BEFORE,
                                  session_home=SESSION_HOME, vet_ledger=SESSION_VET_LEDGER,
                                  snapshot=home_snapshot, changes=home_changes,
-                                 is_real=_is_real)
+                                 is_real=_is_real, rows_added=journal_rows_added)
 
 
 def pytest_sessionfinish(session, exitstatus):
     if os.environ.get("ARCAEON_REAL_HOME_GUARD") == "0":
         return
-    changed = home_changes(REAL_BEFORE, home_snapshot(REAL_WATCH))
+    after = home_snapshot(REAL_WATCH)
+    changed = home_changes(REAL_BEFORE, after)
     if not changed:
         return
     tr = session.config.pluginmanager.get_plugin("terminalreporter")
     msg = ("REAL HOME WRITTEN: the suite changed " + str(len(changed)) + " file(s) under the "
            "real home (ARCAEON_REAL_HOME_GUARD=0 skips this check): " + "; ".join(changed))
+    rows = journal_rows_added(REAL_BEFORE, after)
+    if rows:
+        msg += (" | rows appended (a hand-run `arcaeon` elsewhere also lands here): "
+                + ", ".join(rows[:20]) + (" ..." if len(rows) > 20 else ""))
     if tr is not None:
         tr.write_line(msg, red=True)
     else:
