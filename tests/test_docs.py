@@ -25,6 +25,7 @@ import pytest
 
 from arcaeon import cli
 from arcaeon import verdict as V
+from _load import load_module
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -34,10 +35,7 @@ MIGRATION = (ROOT / "MIGRATION.md").read_text(encoding="utf-8")
 SHIMS_README = (ROOT / "shims" / "README.md").read_text(encoding="utf-8")
 PYPROJECT = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
-_spec = importlib.util.spec_from_file_location("sync_verbs_usage",
-                                               ROOT / "tools" / "sync_verbs_usage.py")
-sync = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(sync)
+sync = load_module("sync_verbs_usage", ROOT / "tools" / "sync_verbs_usage.py")
 
 OLD_NAMES = ["arcaeon-ledger", "arcaeon-adapter", "arcaeon-receipt", "arcaeon-audit",
              "arcaeon-mcp-vet", "arcaeon-once", "arcaeon-compact", "arcaeon-continuity",

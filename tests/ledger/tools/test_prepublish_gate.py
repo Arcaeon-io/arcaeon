@@ -12,21 +12,17 @@ defect (a wrong version, a wheel older than HEAD) and asserts FAIL, by name.
 """
 from __future__ import annotations
 
-import importlib.util
 import os
 import shutil
 import subprocess
-import sys
 import zipfile
 from pathlib import Path
 
 import pytest
+from _load import load_module
 
 _HERE = Path(__file__).resolve().parent
-_spec = importlib.util.spec_from_file_location("prepublish_gate", _HERE / "prepublish_gate.py")
-gate = importlib.util.module_from_spec(_spec)
-sys.modules["prepublish_gate"] = gate
-_spec.loader.exec_module(gate)
+gate = load_module("prepublish_gate", _HERE / "prepublish_gate.py", register=True)
 
 PKG = "fake_pkg"
 VER = "0.7.5"

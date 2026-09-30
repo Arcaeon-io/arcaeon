@@ -6,10 +6,10 @@ Nothing here uploads: every test that could reach twine replaces publish._run.
 """
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 
 import pytest
+from _load import load_module
 
 ROOT = Path(__file__).resolve().parents[1]
 FAKE_TIP = "f" * 40
@@ -18,9 +18,7 @@ FAKE_TOKEN = "pypi-NOT-A-REAL-TOKEN-0123456789"
 
 @pytest.fixture()
 def publish(monkeypatch, tmp_path):
-    spec = importlib.util.spec_from_file_location("publish_under_test", ROOT / "tools" / "publish.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    mod = load_module("publish_under_test", ROOT / "tools" / "publish.py")
     for name in ("PYPI_TOKEN", "TESTPYPI_TOKEN", "TWINE_USERNAME", "TWINE_PASSWORD"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(mod, "git_state", lambda: ("main", FAKE_TIP, ""))
@@ -240,9 +238,7 @@ def test_upload_sends_only_the_shims_not_already_there(publish, tmp_path, monkey
 
 def test_index_has_reads_the_status_only(monkeypatch):
     import urllib.error
-    spec = importlib.util.spec_from_file_location("publish_index_has", ROOT / "tools" / "publish.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    mod = load_module("publish_index_has", ROOT / "tools" / "publish.py")
     seen = []
 
     class R:

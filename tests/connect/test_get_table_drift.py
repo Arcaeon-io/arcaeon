@@ -8,7 +8,6 @@ block does not depend on this machine's home, OS or connect override.
 """
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import re
@@ -19,12 +18,10 @@ import pytest
 
 from arcaeon.connect import catalog as C
 from arcaeon.connect import cli as CC
+from _load import load_module
 
 ROOT = Path(__file__).resolve().parents[2]
-_spec = importlib.util.spec_from_file_location("gen_get_table",
-                                               ROOT / "tools" / "gen_get_table.py")
-gen = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(gen)
+gen = load_module("gen_get_table", ROOT / "tools" / "gen_get_table.py")
 
 
 def _site_page() -> Path:

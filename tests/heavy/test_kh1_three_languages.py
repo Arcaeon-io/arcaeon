@@ -34,7 +34,6 @@ Nothing here reaches past 127.0.0.1; the server is stopped at teardown.
 """
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import queue
@@ -47,6 +46,7 @@ import threading
 from pathlib import Path
 
 import pytest
+from _load import load_module
 
 REPO = Path(__file__).resolve().parents[2]
 SRC = REPO / "src"
@@ -64,10 +64,7 @@ LANGS = ("py", "js", "curl")
 
 
 def _gen():
-    spec = importlib.util.spec_from_file_location("gen_curl_examples", GEN)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return load_module("gen_curl_examples", GEN)
 
 
 # --- the one server ---------------------------------------------------------------

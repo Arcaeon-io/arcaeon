@@ -17,6 +17,11 @@ from pathlib import Path
 SRC = str(Path(__file__).resolve().parent / "src")
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
+# tests/ on the path (appended) so `from _load import load_module` resolves
+# from every test directory, packaged or not.
+TESTS_DIR = str(Path(__file__).resolve().parent / "tests")
+if TESTS_DIR not in sys.path:
+    sys.path.append(TESTS_DIR)
 _pp = os.environ.get("PYTHONPATH", "")
 if SRC not in _pp.split(os.pathsep):
     os.environ["PYTHONPATH"] = SRC + (os.pathsep + _pp if _pp else "")

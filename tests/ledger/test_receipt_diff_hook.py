@@ -15,18 +15,14 @@ reading stderr sees the gap rather than a quiet, clean-looking run.
 """
 from __future__ import annotations
 
-import importlib.util
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
+from _load import load_module
 
 _HERE = Path(__file__).resolve().parent
-_spec = importlib.util.spec_from_file_location("receipt_diff", _HERE / "hooks" / "receipt_diff.py")
-receipt_diff = importlib.util.module_from_spec(_spec)
-sys.modules["receipt_diff"] = receipt_diff
-_spec.loader.exec_module(receipt_diff)
+receipt_diff = load_module("receipt_diff", _HERE / "hooks" / "receipt_diff.py", register=True)
 
 
 def _git(repo: Path, *args: str) -> str:

@@ -16,7 +16,6 @@ the script it calls.
 """
 from __future__ import annotations
 
-import importlib.util
 import json
 import os
 import sys
@@ -24,6 +23,7 @@ from pathlib import Path
 
 import pytest
 import yaml
+from _load import load_module
 
 ROOT = Path(__file__).resolve().parent
 ACTION_DIR = ROOT / "action"
@@ -46,11 +46,7 @@ def add(a, b):
 
 
 def _load_run_vet():
-    spec = importlib.util.spec_from_file_location("mcp_vet_action_run_vet",
-                                                  ACTION_DIR / "run_vet.py")
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return load_module("mcp_vet_action_run_vet", ACTION_DIR / "run_vet.py")
 
 
 run_vet = _load_run_vet()
