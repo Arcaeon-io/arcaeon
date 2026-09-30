@@ -225,6 +225,46 @@ def test_no_pack_at_all_is_could_not_look(tmp_path):
     assert rep.rows == [] and rep.verdict == V.COULD_NOT_LOOK and rep.exit == 3
 
 
+def _not_a_zip(pack, tmp_path, kind):
+    """A pack.zip that is not a zip: zero bytes, or the first 100 bytes of a real one."""
+    z = tmp_path / kind / "pack.zip"
+    z.parent.mkdir()
+    z.write_bytes(b"" if kind == "empty" else (pack.parent / "pack.zip").read_bytes()[:100])
+    return z
+
+
+@pytest.mark.parametrize("kind", ["empty", "truncated"])
+def test_a_pack_zip_that_is_not_a_zip_is_could_not_look(pack, tmp_path, kind):
+    """zipfile.ZipFile raises BadZipFile on both; verify turns that into a
+    COULD NOT LOOK "pack zip" check (unreadable), and the reader, given no
+    folder to read, has no rows and says the same."""
+    z = _not_a_zip(pack, tmp_path, kind)
+    plain = verify_pack(z)
+    assert plain["verdict"] == V.COULD_NOT_LOOK and plain["exit"] == 3
+    assert [c.get("check") for c in plain["checks"]] == ["pack zip"]
+    rep = second_reader(z)
+    assert rep.rows == [] and rep.verdict == V.COULD_NOT_LOOK
+    assert rep.exit == plain["exit"] == 3 and rep.pack == str(z)
+    assert rep.pack_verify["verdict"] == V.COULD_NOT_LOOK
+    assert "could not be read as a zip" in rep.pack_verify.get("reason", "")
+
+
+@pytest.mark.parametrize("kind", ["empty", "truncated"])
+def test_cli_a_pack_zip_that_is_not_a_zip_exits_as_plain_verify(pack, tmp_path, kind, capsys):
+    z = _not_a_zip(pack, tmp_path, kind)
+    plain = evidence_pack_verify.main([str(z)])
+    capsys.readouterr()
+    code = evidence_pack_verify.main([str(z), "--second-reader"])
+    out, err = capsys.readouterr()
+    assert code == plain == 3
+    assert "COULD NOT LOOK: second reader" in out
+    assert "Traceback" not in err and "Traceback" not in out
+    from arcaeon.prove import evidence_pack_cli
+    assert evidence_pack_cli.main(["verify", str(z), "--second-reader"]) == 3
+    out, err = capsys.readouterr()
+    assert "COULD NOT LOOK: second reader" in out and "Traceback" not in err
+
+
 # --- the CLI ----------------------------------------------------------------
 
 def test_cli_prints_the_table_and_writes_json_and_markdown(pack, pins, tmp_path, capsys):
