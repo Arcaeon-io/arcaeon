@@ -105,6 +105,7 @@ def test_distill_is_deterministic_across_repeated_calls(value, budget):
     assert r1.content == r2.content
     assert r1.strategy == r2.strategy
     assert r1.truncated == r2.truncated
+    assert r1.receipt is not None and r2.receipt is not None, "distill(receipt=True) returned no receipt"
     assert _strip_stamp(r1.receipt.to_dict()) == _strip_stamp(r2.receipt.to_dict())
 
 
@@ -133,6 +134,7 @@ def test_distill_content_is_a_json_fixpoint(value, budget):
 @given(value=_distillable_top_level(), budget=st.integers(min_value=1, max_value=200))
 def test_every_receipt_self_verifies(value, budget):
     result = distill(value, budget=budget, receipt=True)
+    assert result.receipt is not None, "distill(receipt=True) returned no receipt"
     v = verify_receipt(result.receipt)
     assert v["ok"], v["notes"]
     # truncated flag agrees with whether the strategy actually recorded drops
@@ -162,6 +164,7 @@ def test_generous_budget_never_truncates_small_input(value):
     result = distill(value, budget=huge_budget)
     assert result.truncated is False
     assert result.content == value
+    assert result.receipt is not None, "distill(receipt=True) returned no receipt"
     assert result.receipt.drops == []
 
 
@@ -226,6 +229,7 @@ def test_line_separator_class_text_strategy_is_deterministic(s, budget):
     r1 = distill(s, budget=budget, schema_hint="text")
     r2 = distill(s, budget=budget, schema_hint="text")
     assert r1.content == r2.content
+    assert r1.receipt is not None and r2.receipt is not None, "distill(receipt=True) returned no receipt"
     assert _strip_stamp(r1.receipt.to_dict()) == _strip_stamp(r2.receipt.to_dict())
 
 
@@ -238,6 +242,7 @@ def test_line_separator_class_digest_is_stable(s):
     value = {"body": s}
     r1 = distill(value, budget=1000)
     r2 = distill(value, budget=1000)
+    assert r1.receipt is not None and r2.receipt is not None, "distill(receipt=True) returned no receipt"
     assert r1.receipt.full["digest"] == r2.receipt.full["digest"]
 
 
@@ -288,6 +293,7 @@ def test_line_separator_class_survives_seal_and_ledger_readback(s):
     with tempfile.TemporaryDirectory() as tmp:
         result = distill({"body": s}, budget=100_000)
         ledger_path = Path(tmp) / "test_seal.jsonl"
+        assert result.receipt is not None, "distill(receipt=True) returned no receipt"
         sealed_row = result.receipt.seal(str(ledger_path))
         assert sealed_row["full"]["digest"] == result.receipt.full["digest"]
 

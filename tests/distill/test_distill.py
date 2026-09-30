@@ -320,6 +320,7 @@ def test_verify_receipt_rejects_malformed_dropped_count():
     or absent and the receipt still stamped 'self-consistent'. The claimed
     predicate exceeded the delivered one on the package's own honesty hook."""
     result = distill(_big_rows(), budget=400, schema_hint="tabular")
+    assert result.receipt is not None, "distill(receipt=True) returned no receipt"
     base = result.receipt.to_dict()
     assert verify_receipt(base)["ok"], "control: genuine receipt must verify"
 
@@ -356,6 +357,7 @@ def test_tabular_text_preserves_leading_and_trailing_newlines():
     # output must be byte-identical to the input — including the newlines.
     result = distill(padded, budget=2000, schema_hint="tabular")
     assert result.strategy == "tabular"
+    assert result.receipt is not None, "distill(receipt=True) returned no receipt"
     assert result.receipt.drops == [], "control: nothing should drop here"
     assert result.receipt.truncated is False
     assert result.content == padded, (
@@ -367,6 +369,7 @@ def test_tabular_text_preserves_leading_and_trailing_newlines():
     big_rows = [f"{i},{i*3},row-{i}" for i in range(200)]
     big_padded = "\n" + "\n".join([header] + big_rows) + "\n\n"
     result2 = distill(big_padded, budget=300, schema_hint="tabular")
+    assert result2.receipt is not None, "distill(receipt=True) returned no receipt"
     assert result2.receipt.drops, "rows should drop under this budget"
     assert result2.content.startswith("\n" + header), \
         "leading newline lost on the truncating path"
@@ -889,7 +892,9 @@ def test_verify_receipt_declares_that_its_scope_is_structural_only():
     nothing in the result naming how narrow that check was. The caller branches
     on `ok`, so the result object has to carry its own scope.
     """
-    r = distill({"a": "b" * 500}, budget=10).receipt.to_dict()
+    rc = distill({"a": "b" * 500}, budget=10).receipt
+    assert rc is not None, "distill(receipt=True) returned no receipt"
+    r = rc.to_dict()
 
     honest = verify_receipt(r)
     assert honest["ok"] is True
@@ -942,7 +947,9 @@ def test_verify_receipt_fails_safe_on_malformed_shapes_instead_of_raising():
     that is not an object at all used to escape as AttributeError/TypeError
     from `.get`/`dict()`; each is a malformed receipt and must be reported
     as one."""
-    good = distill({"a": "b" * 500}, budget=10).receipt.to_dict()
+    rc = distill({"a": "b" * 500}, budget=10).receipt
+    assert rc is not None, "distill(receipt=True) returned no receipt"
+    good = rc.to_dict()
     bad_shapes = {
         "full is a str": dict(good, full="x"),
         "distilled is None": dict(good, distilled=None),
@@ -1033,8 +1040,10 @@ def test_mcp_server_survives_non_object_jsonrpc_lines():
     from arcaeon.save.distill import mcp_server
     for msg in ([1, 2], "x", 123, None):
         resp = mcp_server.handle(msg)
+        assert resp is not None, f"handle({msg!r}) drew no reply"
         assert resp["id"] is None and resp["error"]["code"] == -32600, resp
     bad_params = mcp_server.handle({"id": 7, "method": "tools/call", "params": [1]})
+    assert bad_params is not None, "tools/call (id 7) with list params drew no reply"
     assert bad_params["id"] == 7 and bad_params["error"]["code"] == -32602
 
     lines = ('[1,2]\n"x"\n123\nnull\n'
@@ -1071,6 +1080,7 @@ def test_mcp_server_every_tool_call_leaves_a_chained_record(tmp_path, monkeypatc
     monkeypatch.setenv("ARCAEON_CALL_RECORD", str(rec))
     r = mcp_server.handle({"id": 1, "method": "tools/call", "params": {
         "name": "distill_tool_output", "arguments": {"tool_output": "a b c", "budget": 5}}})
+    assert r is not None, "tools/call (id 1) drew no reply"
     assert "isError" not in r["result"]
     rows = _calls_rows(rec)
     assert len(rows) == 1
@@ -1093,8 +1103,10 @@ def test_mcp_server_records_failed_calls_and_a_tampered_record_fails_verify(tmp_
         "name": "distill_tool_output", "arguments": {"tool_output": "x"}}})
     bad = mcp_server.handle({"id": 2, "method": "tools/call", "params": {
         "name": "distill_tool_output", "arguments": {}}})
+    assert bad is not None, "tools/call (id 2) with no arguments drew no reply"
     assert bad["result"]["isError"] is True
     unk = mcp_server.handle({"id": 3, "method": "tools/call", "params": {"name": "nope"}})
+    assert unk is not None, "tools/call (id 3) to an unknown tool drew no reply"
     assert unk["result"]["isError"] is True
     rows = _calls_rows(rec)
     assert [r["ok"] for r in rows] == [True, False, False]
