@@ -77,13 +77,20 @@ def available() -> bool:
 
 _LANG = {}
 
+_UNAVAILABLE = "TypeScript front end unavailable: pip install 'arcaeon[ts]'"
 
-def _language(rel: str):
+
+def _parser(rel: str):
+    """The one gate on the optional binding: a tree-sitter Parser for `rel`,
+    or None when `available()` is False. None is the caller's NOT SCANNED
+    path (COULD NOT LOOK), never a clean."""
+    if not available() or _ts is None or _tst is None:
+        return None
     key = "tsx" if rel.lower().endswith(".tsx") else "ts"
     if key not in _LANG:
         fn = _tst.language_tsx if key == "tsx" else _tst.language_typescript
         _LANG[key] = _ts.Language(fn())
-    return _LANG[key]
+    return _ts.Parser(_LANG[key])
 
 
 # --- vocabulary specific to the JS side ------------------------------------
@@ -390,7 +397,11 @@ def _imports(root) -> list:
 
 
 def _parse(source: str, rel: str):
-    return _ts.Parser(_language(rel)).parse(source.encode("utf-8")).root_node
+    parser = _parser(rel)
+    if parser is None:
+        # The caller records a file it cannot parse as unparsed, not clean.
+        raise RuntimeError(_UNAVAILABLE)
+    return parser.parse(source.encode("utf-8")).root_node
 
 
 def _link_siblings(root, rel: str, local: dict, resolve,
@@ -582,9 +593,10 @@ def _reconstructable(root):
 def audit_record_applies(source: str, rel: str = "x.ts") -> bool:
     """TS twin of checks.audit_record_applies: handlers AND an entrypoint, or
     the empty finding list means "not asked", not "clean"."""
-    if not available():
+    parser = _parser(rel)
+    if parser is None:
         return False
-    root = _ts.Parser(_language(rel)).parse(source.encode("utf-8")).root_node
+    root = parser.parse(source.encode("utf-8")).root_node
     return bool(_handler_roots(root)) and _has_entrypoint(root)
 
 
@@ -917,10 +929,11 @@ def ts_except_success_coverage(source: str, rel: str = "<source>",
     cov = {"handler_roots": 0, "bodies_examined": 0,
            "catch_clauses_examined": 0, "files_unparsed": 0,
            "sites_reported": 0, "handlers_reaching": 0}
-    if not available():
+    parser = _parser(rel)
+    if parser is None:
         cov["files_unparsed"] = 1        # not scanned; never report it as clean
         return cov
-    root = _ts.Parser(_language(rel)).parse(source.encode("utf-8")).root_node
+    root = parser.parse(source.encode("utf-8")).root_node
     if root.has_error and not any(c.type != "ERROR" for c in root.children):
         cov["files_unparsed"] = 1
         return cov
@@ -1017,10 +1030,9 @@ def scan_source_ts_ex(source: str, rel: str,
     runs and the second element is [] -- a grade must read that, never assume.
     `resolve` (optional) follows relative imports into sibling files; see
     `file_resolver` and the module docstring."""
-    if not available():
-        return [Finding("parse", "info", rel, 0,
-                        "TypeScript front end unavailable: pip install 'arcaeon[ts]'")], []
-    parser = _ts.Parser(_language(rel))
+    parser = _parser(rel)
+    if parser is None:
+        return [Finding("parse", "info", rel, 0, _UNAVAILABLE)], []
     tree = parser.parse(source.encode("utf-8"))
     root = tree.root_node
     if root.has_error and not any(c.type != "ERROR" for c in root.children):
