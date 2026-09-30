@@ -29,8 +29,8 @@ HERE = Path(__file__).resolve().parent
 SRC = str(HERE.parent / "src")
 HEAVY = HERE / "heavy"
 STUB = str(HEAVY / "kh5_stub_tool.py")
-sys.path.insert(0, str(HEAVY))
-import kh5_stub_tool  # noqa: E402  the KH5 fixture
+sys.path.insert(0, str(HERE))
+from heavy import kh5_stub_tool  # noqa: E402  the KH5 fixture (tests/heavy is a package)
 
 from arcaeon.record.adapter import mandate_gate  # noqa: E402
 
@@ -100,6 +100,7 @@ class _Stdio:
                                   stderr=subprocess.PIPE, env=env)
 
     def send(self, body: bytes, reply: bool = True):
+        assert self.p.stdin is not None and self.p.stdout is not None  # both PIPE
         self.p.stdin.write(body + b"\n")
         self.p.stdin.flush()
         if not reply:
@@ -108,6 +109,7 @@ class _Stdio:
 
     def close(self):
         try:
+            assert self.p.stdin is not None  # stdin=PIPE
             self.p.stdin.close()
             self.p.wait(timeout=60)
         finally:
@@ -174,7 +176,7 @@ class _CallProxy:
         try:
             self.srv.shutdown()
             self.srv.server_close()
-            self.srv.mandate_close()
+            getattr(self.srv, "mandate_close")()  # set on the server by build_server
             self.t.join(timeout=10)
         finally:
             self.up.close()

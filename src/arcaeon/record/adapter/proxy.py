@@ -143,6 +143,7 @@ class _Corruptor:
         if self.mode == "strip_newline":
             return chunk.replace(b"\n", b"")
         out = bytearray()
+        assert self._split is not None  # mode is reserialize: __init__ built it
         for frame in self._split.feed(chunk):
             try:
                 out += json.dumps(json.loads(frame.decode("utf-8")), sort_keys=True,
@@ -206,6 +207,7 @@ def relay(src, dst, observe=None, *, on_eof=None, corruptor=None,
                 dst.write(out)
                 dst.flush()
             if splitter is not None:
+                assert observe is not None  # a splitter exists only when observe does
                 for frame in splitter.feed(chunk):
                     try:
                         observe(frame)
@@ -232,6 +234,7 @@ def relay(src, dst, observe=None, *, on_eof=None, corruptor=None,
             except Exception:
                 pass
         if splitter is not None:
+            assert observe is not None  # a splitter exists only when observe does
             for frame in splitter.close():
                 try:
                     observe(frame)
@@ -404,7 +407,8 @@ class _MandateWatch:
             spent = self.gate.add_spend(extra["spend_amount"])
         if verdict == "inside":
             return
-        params = msg.get("params") if isinstance(msg.get("params"), dict) else {}
+        params = msg.get("params")
+        params = params if isinstance(params, dict) else {}
         args = params.get("arguments")
         tool = params.get("name")
         rid = msg.get("id")
@@ -821,7 +825,8 @@ def run(command: list[str], ledger_path: str, *, server: str | None = None,
     def close_child_stdin():
         """Client hung up: pass the hangup on, which is how an MCP server is told to exit."""
         try:
-            child.stdin.close()
+            if child.stdin is not None:
+                child.stdin.close()
         except Exception:
             pass
 

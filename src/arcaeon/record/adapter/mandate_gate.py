@@ -275,6 +275,11 @@ class MandateGate:
             carry = {"spend_amount": str(spend)} if spend is not None else {}
             if inside is True and cap.get("total") is not None:
                 total = _amount(cap["total"])
+                # Neither can be None here: _normalize refused an unreadable
+                # spend_cap.total at load, and check_mandate answered True only
+                # after reading this same amount with the same _amount.
+                assert total is not None and spend is not None, \
+                    "spend_cap.total and the spend were read before the cap check"
                 with self._spent_lock:
                     before = self.spent
                 if before + spend > total:
@@ -327,7 +332,7 @@ def load(path: str | Path | None) -> MandateGate:
     except OSError as e:
         return MandateGate(p, status="unreadable", error=f"{type(e).__name__}: {e}")
     sha = hashlib.sha256(data).hexdigest()
-    fp = {"file_sha256": sha, "file_digest": digest_bytes(data)}
+    fp: dict[str, Any] = {"file_sha256": sha, "file_digest": digest_bytes(data)}
     try:
         obj = json.loads(data.decode("utf-8"))
     except (ValueError, UnicodeDecodeError, RecursionError) as e:
