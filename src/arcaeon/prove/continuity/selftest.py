@@ -224,7 +224,9 @@ def run() -> int:
         ckpt_snap, attempted=True, receipt_stored=True, restated=ckpt_good)
     check("stored + faithful restatement -> receipt_received_faithful",
           faithful_receipt.outcome == "receipt_received_faithful" and
-          not faithful_receipt.is_unresolved and faithful_receipt.verdict.faithful,
+          not faithful_receipt.is_unresolved and
+          faithful_receipt.verdict is not None and
+          faithful_receipt.verdict.faithful,
           faithful_receipt.outcome)
 
     ckpt_drifted = dict(ckpt_good)
@@ -235,6 +237,7 @@ def run() -> int:
     check("stored + drifted restatement -> receipt_received_divergent, "
           "naming the drifted id",
           divergent_receipt.outcome == "receipt_received_divergent" and
+          divergent_receipt.verdict is not None and
           divergent_receipt.verdict.divergences[0]["id"] == a_ckpt_key,
           f"got {divergent_receipt.outcome}")
 

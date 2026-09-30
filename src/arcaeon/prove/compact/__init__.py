@@ -475,9 +475,10 @@ def verify_receipt(row: dict, pre_content: Sequence[Any] | None = None,
                              "pre_content — receipt claims a drop of an item "
                              "the pre-content never contained")
     post_digests = None
+    post_sizes: list[int] = []  # filled with post_digests below
     if post_content is not None:
         checked = True
-        post_digests, _sizes, whole, total = _digest_content(post_content)
+        post_digests, post_sizes, whole, total = _digest_content(post_content)
         for label, got, want in [("post.digest", whole, post.get("digest")),
                                  ("post.count", len(post_digests), post["count"]),
                                  ("post.bytes", total, post["bytes"])]:
@@ -513,7 +514,7 @@ def verify_receipt(row: dict, pre_content: Sequence[Any] | None = None,
                          f"{introduced['count']}")
         elif schema_version == "v2":
             post_size_by_digest: dict[str, int] = {}
-            for d, n in zip(post_digests, _sizes):
+            for d, n in zip(post_digests, post_sizes):
                 post_size_by_digest.setdefault(d, n)
             actual_introduced_bytes = sum(
                 cnt * post_size_by_digest[d] for d, cnt in remaining.items() if cnt > 0)

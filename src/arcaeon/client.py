@@ -196,6 +196,10 @@ def _make(name: str):
     return fn
 
 
-for _name in ROUTE_METHODS:
-    setattr(Client, _name, _make(_name))
-del _name
+def _install_routes() -> None:
+    for name in ROUTE_METHODS:
+        setattr(Client, name, _make(name))
+
+
+_install_routes()
+del _install_routes
