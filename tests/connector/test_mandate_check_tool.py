@@ -29,10 +29,11 @@ from arcaeon.mcp.server import (  # noqa: E402
     verify_call_record,
 )
 from arcaeon.record import mandate_cli  # noqa: E402
+from _load import must_match  # noqa: E402
 
 DOC = (Path(__file__).resolve().parents[2] / "docs" / "MANDATE_GATE.md").read_text(
     encoding="utf-8")
-EXAMPLE = json.loads(re.search(r"```json\n(.*?)```", DOC, re.S).group(1))
+EXAMPLE = json.loads(must_match(r"```json\n(.*?)```", DOC, re.S).group(1))
 AT = "2026-10-01T12:00:00Z"            # inside the example's window
 
 

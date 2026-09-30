@@ -17,10 +17,11 @@ import pytest
 
 from arcaeon import cli
 from arcaeon.serve import h_mandate
+from _load import must_match
 
 DOC = (Path(__file__).resolve().parents[1] / "docs" / "MANDATE_GATE.md").read_text(
     encoding="utf-8")
-EXAMPLE = json.loads(re.search(r"```json\n(.*?)```", DOC, re.S).group(1))
+EXAMPLE = json.loads(must_match(r"```json\n(.*?)```", DOC, re.S).group(1))
 AT = "2026-10-01T12:00:00Z"            # inside the example's window
 
 

@@ -14,6 +14,7 @@ import re
 from pathlib import Path
 
 import arcaeon
+from _load import must_match
 
 ROOT = Path(__file__).resolve().parents[1]
 REGISTRY = ROOT / "registry"
@@ -24,9 +25,9 @@ ENTRY = json.loads(RAW)
 SCHEMA = json.loads(SCHEMA_FILE.read_text(encoding="utf-8"))
 PYPROJECT_TEXT = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 # the floor is 3.10, which has no tomllib; the three fields read by pattern
-PY_NAME = re.search(r'^name = "([^"]+)"', PYPROJECT_TEXT, re.M).group(1)
-PY_VERSION = re.search(r'^version = "([^"]+)"', PYPROJECT_TEXT, re.M).group(1)
-PY_MCP_EXTRA = re.search(r'^mcp = \["([^"]+)"\]', PYPROJECT_TEXT, re.M).group(1)
+PY_NAME = must_match(r'^name = "([^"]+)"', PYPROJECT_TEXT, re.M).group(1)
+PY_VERSION = must_match(r'^version = "([^"]+)"', PYPROJECT_TEXT, re.M).group(1)
+PY_MCP_EXTRA = must_match(r'^mcp = \["([^"]+)"\]', PYPROJECT_TEXT, re.M).group(1)
 PKG = ENTRY["packages"][0]
 
 

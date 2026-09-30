@@ -40,6 +40,7 @@ import pytest
 
 from arcaeon.record.ledger import Ledger, verify_file
 from readings.stub_llm import StubLLM
+from _load import must_match
 
 HERE = Path(__file__).resolve().parent
 CLAIMS = HERE / "kh2_claims.jsonl"
@@ -73,7 +74,7 @@ def _answers(hasty: bool):
     by_text = {c["claim"]: c for c in _fixture()}
 
     def answer(_i, body):
-        claim = by_text[_CLAIM_IN_PROMPT.search(_prompt_of(body)).group(1)]
+        claim = by_text[must_match(_CLAIM_IN_PROMPT, _prompt_of(body)).group(1)]
         if hasty and claim["claim_id"] in HASTY_DIFFERS:
             return HASTY_DIFFERS[claim["claim_id"]]
         return {"yes": "Yes, it names a time.", "no": "no"}[claim["expect"]]

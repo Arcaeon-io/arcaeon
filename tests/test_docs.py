@@ -25,7 +25,7 @@ import pytest
 
 from arcaeon import cli
 from arcaeon import verdict as V
-from _load import load_module
+from _load import load_module, must_match
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -122,7 +122,7 @@ def _pyproject_extras() -> set[str]:
         import tomllib
         return set(tomllib.loads(PYPROJECT)["project"]["optional-dependencies"])
     except ImportError:  # Python 3.10
-        block = re.search(r"^\[project\.optional-dependencies\]\n(.*?)(?=^\[)", PYPROJECT,
+        block = must_match(r"^\[project\.optional-dependencies\]\n(.*?)(?=^\[)", PYPROJECT,
                           re.M | re.S).group(1)
         return set(re.findall(r"^([a-z]+)\s*=", block, re.M))
 
@@ -131,7 +131,7 @@ def test_readme_install_line_and_floor_match_pyproject():
     install = _section(README, "Install")
     assert "pip install arcaeon\n" in install
     assert re.search(r'^name = "arcaeon"$', PYPROJECT, re.M)
-    floor = re.search(r'^requires-python = ">=(\d+\.\d+)"$', PYPROJECT, re.M).group(1)
+    floor = must_match(r'^requires-python = ">=(\d+\.\d+)"$', PYPROJECT, re.M).group(1)
     assert f"Python {floor} or newer" in install
     assert re.search(r"^dependencies = \[\]$", PYPROJECT, re.M), "base install has deps"
     assert "zero dependencies" in install
@@ -169,7 +169,7 @@ def test_site_get_page_has_the_same_install_lines(line):
 
 def _first_run_steps():
     body = _section(README, "A 60-second first run")
-    block = re.search(r"```console\n(.*?)```", body, re.S).group(1)
+    block = must_match(r"```console\n(.*?)```", body, re.S).group(1)
     steps = []
     for line in block.splitlines():
         if line.startswith("$ "):

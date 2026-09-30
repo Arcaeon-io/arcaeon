@@ -45,6 +45,7 @@ from arcaeon.serve import auth
 from arcaeon.serve import dashboard as D
 from arcaeon.serve import h_core
 from serve import _pages as P
+from _load import must_match
 
 CNL = V.COULD_NOT_LOOK
 CRITERION = "Does the claim say the delivery arrived on time?"
@@ -257,8 +258,8 @@ def check_page(label, reply, base: Path, home: Path):
                      urllib.parse.quote(s), urllib.parse.quote(s.replace("\\", "/"))}
     for v in variants:
         assert v.lower() not in html.lower(), (label, "path shown")
-    assert not _DRIVE.search(html), (label, _DRIVE.search(html).group(0))
-    assert not _POSIX.search(html), (label, _POSIX.search(html).group(0))
+    assert not _DRIVE.search(html), (label, must_match(_DRIVE, html).group(0))
+    assert not _POSIX.search(html), (label, must_match(_POSIX, html).group(0))
     assert "outside.json" not in html, label
     assert "file:" not in html.lower(), label
 

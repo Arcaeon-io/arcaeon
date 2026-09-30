@@ -14,6 +14,7 @@ from arcaeon.prove import readings_cli as CLI
 from arcaeon.prove.readers import DEFAULT_TIMEOUT
 from arcaeon.record.ledger import verify_file
 from readings.stub_llm import StubLLM
+from _load import must_match
 
 SENTENCE = "Does the claim state the dispatch time?"
 _N = re.compile(r"claim number (\d+)")
@@ -38,7 +39,7 @@ def _run(capsys, argv):
 
 
 def _every_third_claim_fails(i, body):
-    n = int(_N.search(body["messages"][0]["content"]).group(1))
+    n = int(must_match(_N, body["messages"][0]["content"]).group(1))
     return StubLLM.FAIL if n % 3 == 0 else ("yes" if n % 2 else "no")
 
 

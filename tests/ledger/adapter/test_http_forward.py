@@ -38,6 +38,7 @@ import pytest
 from arcaeon.record.adapter import http_forward as HF
 from arcaeon.record.adapter.proxy import FAULT_ENV
 from arcaeon.record.adapter.tape import TapeWriter, request_digest, response_digest
+from _load import must_match
 
 ROOT = Path(__file__).resolve().parent          # adapter/
 LEDGER_ROOT = ROOT.parent                       # arcaeon-ledger checkout
@@ -358,7 +359,7 @@ class ShortUpstream:
                 while b"\r\n\r\n" not in data:
                     data += c.recv(65536)
                 head, _, rest = data.partition(b"\r\n\r\n")
-                n = int(re.search(rb"(?i)content-length:\s*(\d+)", head).group(1))
+                n = int(must_match(rb"(?i)content-length:\s*(\d+)", head).group(1))
                 while len(rest) < n:
                     rest += c.recv(65536)
                 mid = json.loads(rest)["id"]

@@ -13,11 +13,12 @@ import pytest
 
 from arcaeon import cli
 from arcaeon.record import mandate_cli as mc
+from _load import must_match
 
 DOC = (Path(__file__).resolve().parents[1] / "docs" / "MANDATE_GATE.md").read_text(
     encoding="utf-8")
 #: The first ```json block in the doc: the mandate example.
-EXAMPLE = json.loads(re.search(r"```json\n(.*?)```", DOC, re.S).group(1))
+EXAMPLE = json.loads(must_match(r"```json\n(.*?)```", DOC, re.S).group(1))
 
 
 @pytest.fixture

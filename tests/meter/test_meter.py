@@ -13,6 +13,7 @@ from pathlib import Path
 import arcaeon.save.meter
 from arcaeon.save.meter import Meter, MeterDenied, key_id_of
 from arcaeon.save.meter.keys import add_key, list_keys, revoke_key
+from _load import must_match
 
 
 def _mk(d: Path, **meter_kw):
@@ -1135,7 +1136,7 @@ def test_dunder_version_matches_pyproject_and_cli():
     import re
     from arcaeon.save.meter.cli import main
     text = (Path(__file__).parent / "pyproject.toml").read_text(encoding="utf-8")
-    pinned = re.search(r'^version = "([^"]+)"', text, re.M).group(1)
+    pinned = must_match(r'^version = "([^"]+)"', text, re.M).group(1)
     assert arcaeon.save.meter.__version__ == pinned, (arcaeon.save.meter.__version__, pinned)
     out = io.StringIO()
     with contextlib.redirect_stdout(out):

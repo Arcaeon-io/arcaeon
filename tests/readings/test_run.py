@@ -10,6 +10,7 @@ from arcaeon.prove import readings as R
 from arcaeon.prove import readings_cli as CLI
 from arcaeon.record.ledger import verify_file
 from readings.stub_llm import StubLLM
+from _load import must_match
 
 SENTENCE = "Does the claim state the dispatch time?"
 _N = re.compile(r"claim number (\d+)")
@@ -30,7 +31,7 @@ def _crit(tmp_path):
 
 
 def _n(body):
-    return int(_N.search(body["messages"][0]["content"]).group(1))
+    return int(must_match(_N, body["messages"][0]["content"]).group(1))
 
 
 def _b_answers(i, body):
