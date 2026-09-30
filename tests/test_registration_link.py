@@ -116,6 +116,7 @@ def test_an_unreadable_offers_file_is_dark(tmp_path, monkeypatch):
 
 def test_the_sentence_is_one_ascii_line_with_the_link_and_the_grant():
     line = registration_line(_cat({"enabled": True, "url": URL}))
+    assert line is not None, f"registration_line returned {line!r} with the switch on"
     assert URL in line and "\n" not in line
     assert "500 credits, one time, per verified email" in line
     line.encode("ascii")
