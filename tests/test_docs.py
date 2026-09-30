@@ -320,6 +320,78 @@ def test_migration_exit_column_agrees_with_verdict_legacy():
         assert changed == (verb is not None and verb in V.LEGACY), name
 
 
+# --- CHANGELOG.md names every item id MIGRATION.md names ------------------------------
+#
+# For each released version with a section in both files, every K###, KH### and OA###
+# id MIGRATION names (suffixes kept: K015b, K06xR2, KH7R2) must appear in CHANGELOG.
+# "K100 to K109" is a range in either file. CHANGELOG may name more (test-only items).
+# ARCAEON_DOCS_CHANGELOG / ARCAEON_DOCS_MIGRATION point the check at other copies.
+
+_ITEM_ID = r"(?:OA|KH|K)\d+[A-Za-z0-9]*"
+_ITEM_RANGE = re.compile(rf"\b((?:OA|KH|K))(\d+) to \1(\d+)\b")
+_VERSION_HEADING = re.compile(r"^## (\d+\.\d+\.\d+)\b.*$", re.M)
+
+#: version -> ids MIGRATION names that the released CHANGELOG section does not, left as
+#: they are rather than rewriting a release's notes; the test fails if one is fixed
+#: without being taken off this list.
+_KNOWN_CHANGELOG_GAPS: dict[str, set[str]] = {
+    "0.10.0": {"K06xR3"},  # 1e0a472 and two more commits; the CHANGELOG has no line
+}
+
+
+def _docs_text(env: str, name: str) -> str:
+    return Path(os.environ.get(env) or ROOT / name).read_text(encoding="utf-8")
+
+
+def _version_sections(text: str) -> dict[str, str]:
+    heads = list(re.finditer(r"^## .*$", text, re.M))
+    out = {}
+    for i, h in enumerate(heads):
+        m = _VERSION_HEADING.match(h.group(0))
+        if m:
+            end = heads[i + 1].start() if i + 1 < len(heads) else len(text)
+            out[m.group(1)] = text[h.end():end]
+    return out
+
+
+def _item_ids(text: str) -> set[str]:
+    ids = set()
+    for m in _ITEM_RANGE.finditer(text):
+        prefix, lo, hi = m.group(1), int(m.group(2)), int(m.group(3))
+        width = len(m.group(2))
+        ids.update(f"{prefix}{n:0{width}d}" for n in range(lo, hi + 1))
+    ids.update(re.findall(rf"\b{_ITEM_ID}\b", text))
+    return ids
+
+
+def _changelog_gaps(changelog: str, migration: str) -> dict[str, set[str]]:
+    """version -> MIGRATION ids the CHANGELOG section lacks, for versions in both."""
+    cl, mig = _version_sections(changelog), _version_sections(migration)
+    return {v: _item_ids(mig[v]) - _item_ids(cl[v]) for v in mig if v in cl}
+
+
+def test_item_ids_parse_ranges_and_suffixes():
+    got = _item_ids("- **K100 to K103 (a to b).** x, KH7R2, K06xR1, K015b, OA4; ARCAEON_KEY.")
+    assert got == {"K100", "K101", "K102", "K103", "KH7R2", "K06xR1", "K015b", "OA4"}
+    assert _item_ids("K020 to K022") == {"K020", "K021", "K022"}
+
+
+def test_changelog_and_migration_share_a_released_version():
+    assert _changelog_gaps(_docs_text("ARCAEON_DOCS_CHANGELOG", "CHANGELOG.md"),
+                           _docs_text("ARCAEON_DOCS_MIGRATION", "MIGRATION.md"))
+
+
+def test_changelog_names_every_item_id_migration_names():
+    gaps = _changelog_gaps(_docs_text("ARCAEON_DOCS_CHANGELOG", "CHANGELOG.md"),
+                           _docs_text("ARCAEON_DOCS_MIGRATION", "MIGRATION.md"))
+    unexpected = {v: sorted(ids - _KNOWN_CHANGELOG_GAPS.get(v, set()))
+                  for v, ids in gaps.items()}
+    assert not any(unexpected.values()), f"CHANGELOG.md lacks MIGRATION ids: {unexpected}"
+    stale = {v: sorted(known - gaps.get(v, set()))
+             for v, known in _KNOWN_CHANGELOG_GAPS.items()}
+    assert not any(stale.values()), f"now in CHANGELOG, drop from the known gaps: {stale}"
+
+
 # --- docs/WORDS.md -------------------------------------------------------------------
 
 WORDS_MD = (ROOT / "docs" / "WORDS.md").read_text(encoding="utf-8")
