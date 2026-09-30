@@ -6,7 +6,7 @@ that adds a JSON field or a verb.
 
 ## Unreleased
 
-Nothing yet.
+- **Bearer classes (branch bearer-class-2026-09-27).** Every sentence on an evidence pack's README.md ends in `[bytes]`, `[order]` or `[asserted]` (an `[asserted]` one names its falsifier), and a new `README.json` twin lists each sentence id, its sha256, line and class. `evidence-pack verify` breaks an untagged, misclassed or falsifier-less sentence naming its id and reports the counts under `bearer`. `pack_schema` is now 2; a schema 1 pack with no README.json and no brackets still verifies and prints "bearer classes: not present (pack schema 1)".
 
 ## 0.10.0 (2026-09-27)
 
