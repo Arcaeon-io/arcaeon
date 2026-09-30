@@ -164,7 +164,7 @@ offers file bundled with the package and makes no request.
   Payment happens on Stripe's page.
 
 `ARCAEON_KEY` is the one setting. Treat it like a password: a leaked key can
-pin in your name. For plans and prices, see arcaeon.io/pricing.
+pin in your name. For plans and prices, see arcaeon.io/pricing. Registration opens from the pricing page when it is available.
 
 ## The AI door
 

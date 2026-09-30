@@ -35,7 +35,9 @@ instead.
 
 THE PAID LANE. Exactly two tools spend money on our side, and both are gated on
 ARCAEON_KEY. With no key they return a plain sentence naming the registration
-grant (500 credits, one time, per verified email), the $5 pack and the link — the refusal is a product surface, not an exception.
+grant (500 credits, one time, per verified email) and the $5 pack; the
+registration link comes from the offers document when enabled
+(arcaeon.remote.registration). The refusal is a product surface, not an exception.
 
 THE LICENSE GATE (idea I-daniel-17), OFF BY DEFAULT. A second, optional gate
 sits in front of the same two tools and answers a different question: not "does
