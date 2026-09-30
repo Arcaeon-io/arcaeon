@@ -236,7 +236,9 @@ def _rows_for(pack: Path, manifest: dict, verify_res: dict, witness) -> list[Row
           "manifest.sha256 is not in the pack or not '<hex>  manifest.json'")
 
     # 2. every file the manifest lists
-    listed = manifest.get("files") if isinstance(manifest.get("files"), dict) else {}
+    listed = manifest.get("files")
+    if not isinstance(listed, dict):
+        listed = {}
     for name in sorted(listed):
         p = pack / name
         present = Path(name).name == name and p.is_file()
@@ -256,8 +258,10 @@ def _rows_for(pack: Path, manifest: dict, verify_res: dict, witness) -> list[Row
     links, stop = _fold_chain(raw) if raw is not None else ([], None)
 
     # 3. the chain head: recomputed from the rows' content, not read off them
-    head = manifest.get("chain_head") if isinstance(manifest.get("chain_head"), dict) else {}
-    if raw is None:
+    head = manifest.get("chain_head")
+    if not isinstance(head, dict):
+        head = {}
+    if raw is None or vr is None:  # vr is None exactly when raw is
         t.add("chain", "the records chain ends at this head", "manifest.json chain_head.chain",
               head.get("chain"), None, ALG_CHAIN, "records.jsonl is not in the pack")
         t.add("chain", "the records hold this many rows", "manifest.json chain_head.rows",
@@ -297,7 +301,9 @@ def _rows_for(pack: Path, manifest: dict, verify_res: dict, witness) -> list[Row
               None, None, ALG_SHA256, "integrity.json is not in the pack or not JSON")
 
     # 5. the window, re-selected from the records with the manifest's bounds
-    w = manifest.get("window") if isinstance(manifest.get("window"), dict) else {}
+    w = manifest.get("window")
+    if not isinstance(w, dict):
+        w = {}
     sel = None
     if raw is not None:
         try:
@@ -322,7 +328,9 @@ def _rows_for(pack: Path, manifest: dict, verify_res: dict, witness) -> list[Row
           ws.get("reason") or "window.jsonl or records.jsonl is not in the pack")
 
     # 6. the export block, re-derived from the records
-    ae = manifest.get("audit_export") if isinstance(manifest.get("audit_export"), dict) else {}
+    ae = manifest.get("audit_export")
+    if not isinstance(ae, dict):
+        ae = {}
     if raw is not None:
         rows, unreadable = A._read_rows(raw)
         s = A._summ(rows)
@@ -342,9 +350,12 @@ def _rows_for(pack: Path, manifest: dict, verify_res: dict, witness) -> list[Row
               "records.jsonl is not in the pack")
 
     # 7. pins: first the records at the pinned row (recomputed), then the witness
-    wb = integ.get("witness") if isinstance(integ, dict) and isinstance(
-        integ.get("witness"), dict) else {}
-    pins = manifest.get("pins") if isinstance(manifest.get("pins"), list) else []
+    wb = integ.get("witness") if isinstance(integ, dict) else None
+    if not isinstance(wb, dict):
+        wb = {}
+    pins = manifest.get("pins")
+    if not isinstance(pins, list):
+        pins = []
     for x in pins:
         if not isinstance(x, dict):
             continue
@@ -404,7 +415,7 @@ def _rows_for(pack: Path, manifest: dict, verify_res: dict, witness) -> list[Row
             ln = s.get("line")
             text = page[ln - 1] if page and isinstance(ln, int) and 0 < ln <= len(page) else None
             m = _BRACKET.search(text) if text is not None else None
-            body = text[:m.start()] if m else text
+            body = text[:m.start()] if m and text is not None else text
             t.add("sentence", f"README.md line {ln} is sentence {s.get('id')}",
                   f"README.json sentences[{s.get('id')}]", s.get("sha256"),
                   _sha(body.encode("utf-8")) if body is not None else None, ALG_SHA256,
@@ -428,8 +439,8 @@ def _combine(rows: list[Row], verify_word: str) -> str:
 
 def _report(pack_label: str, folder: Path | None, verify_res: dict, witness) -> Report:
     manifest = _load(folder / "manifest.json") if folder is not None else None
-    rows = _rows_for(folder, manifest, verify_res, witness) if isinstance(manifest, dict) \
-        else []
+    rows = _rows_for(folder, manifest, verify_res, witness) \
+        if folder is not None and isinstance(manifest, dict) else []
     word = _combine(rows, verify_res.get("verdict", V.COULD_NOT_LOOK))
     pv = {"verdict": verify_res.get("verdict"), "exit": verify_res.get("exit")}
     for k in ("finding", "reason_word", "reason"):
