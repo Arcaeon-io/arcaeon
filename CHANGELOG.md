@@ -6,7 +6,7 @@ that adds a JSON field or a verb.
 
 ## Unreleased
 
-Nothing yet.
+- **Mandate outcome words and the drift count (branch mandate-outcomes-2026-09-28).** Every mandate gate row carries `outcome`, one of `inside`, `outside_forwarded`, `blocked`, `never_attempted` or `could_not_look`, on the stdio proxy, http_forward and call_proxy, and calls no mandate rule matched are counted apart as `no_matching_mandate` (session_end, `arcaeon status`, and an evidence pack's mandate_rows.json and manifest `mandate` block). `arcaeon mandate explain`, WORDS.md and MANDATE_GATE.md list the five words. Pack verify re-derives the outcome tally and drift count from records.jsonl and breaks on a mismatch naming the field; a pack built before these fields verifies only when its records carry none of them. Verdict words and exit codes unchanged.
 
 ## 0.10.0 (2026-09-27)
 
