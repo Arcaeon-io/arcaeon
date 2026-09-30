@@ -6,7 +6,7 @@ that adds a JSON field or a verb.
 
 ## Unreleased
 
-Nothing yet.
+- **B021 (74a4a60).** When the suite fails the session for writing to the real home, the REAL HOME WRITTEN line now also lists the time and verb of each row appended to any activity.jsonl there (up to 20, target hash left out), so a test's write can be told from a hand-run `arcaeon` elsewhere; tests/test_real_home_guard.py covers it.
 
 ## 0.10.0 (2026-09-27)
 
