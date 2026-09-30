@@ -24,8 +24,11 @@ from ._version import IMPL, VERSION
 from .observer import SEAM, FrameSplitter, SeamObserver
 
 __version__ = VERSION
+# main, relay and run are public and resolve through the PEP 562 __getattr__
+# below, which pyright cannot see; tests/ledger/adapter/test_all_exports.py
+# proves the star import works.
 __all__ = ["SEAM", "IMPL", "VERSION", "__version__",
-           "FrameSplitter", "SeamObserver", "main", "relay", "run"]
+           "FrameSplitter", "SeamObserver", "main", "relay", "run"]  # pyright: ignore[reportUnsupportedDunderAll]
 
 # `proxy` is imported LAZILY, and that is load-bearing rather than tidy.
 # `python -m arcaeon_adapter.proxy` runs this package's __init__ first; if we
