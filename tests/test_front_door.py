@@ -171,16 +171,25 @@ def _first_difference(ours, site):
     return None
 
 
-def test_can_and_cannot_matches_the_site_page():
+def _site_can_and_cannot_page():
+    """The site's can-and-cannot page, or a named skip that says parity went unchecked."""
     raw = os.environ.get("ARCAEON_SITE_CAN_AND_CANNOT")
+    source = "ARCAEON_SITE_CAN_AND_CANNOT"
     if not raw and os.environ.get("ARCAEON_SITE_ROOT"):
         raw = str(Path(os.environ["ARCAEON_SITE_ROOT"]) / "can-and-cannot.html")
+        source = "ARCAEON_SITE_ROOT"
     if not raw:
-        pytest.skip("neither ARCAEON_SITE_CAN_AND_CANNOT nor ARCAEON_SITE_ROOT is set; "
-                    "no site page to compare")
+        pytest.skip("can-and-cannot parity NOT checked: neither ARCAEON_SITE_CAN_AND_CANNOT "
+                    "nor ARCAEON_SITE_ROOT is set; no site page to compare")
     page = Path(raw)
     if not page.is_file():
-        pytest.skip("ARCAEON_SITE_CAN_AND_CANNOT does not name a file")
+        pytest.skip(f"can-and-cannot parity NOT checked: site page absent at {page} "
+                    f"(from {source})")
+    return page
+
+
+def test_can_and_cannot_matches_the_site_page():
+    page = _site_can_and_cannot_page()
     p = _SiteList()
     p.feed(page.read_text(encoding="utf-8"))
     site = {"cannot": p.cannot, "can": p.can}
@@ -198,16 +207,45 @@ def test_the_difference_is_named():
     assert msg and "something else" in msg
 
 
+def test_an_absent_site_folder_is_a_named_skip_not_a_pass(tmp_path, monkeypatch):
+    """A fresh clone has no site folder: every parity test skips and names the missing path."""
+    empty = tmp_path / "no_site_here"
+    empty.mkdir()
+    monkeypatch.delenv("ARCAEON_SITE_CAN_AND_CANNOT", raising=False)
+    monkeypatch.setenv("ARCAEON_SITE_ROOT", str(empty))
+    checks = [
+        (test_can_and_cannot_matches_the_site_page, empty / "can-and-cannot.html"),
+        (test_key_section_matches_the_site_offers_json, empty / ".well-known" / "offers.json"),
+        (test_key_section_matches_the_site_pricing_page, empty / "pricing.html"),
+    ]
+    for test, missing in checks:
+        with pytest.raises(pytest.skip.Exception) as skipped:
+            test()
+        reason = str(skipped.value)
+        assert "NOT checked" in reason and str(missing) in reason, (test.__name__, reason)
+    with pytest.raises(pytest.skip.Exception) as skipped:
+        test_the_key_section_parity_catches_a_changed_grant(monkeypatch)
+    assert str(empty / ".well-known" / "offers.json") in str(skipped.value)
+
+    page = tmp_path / "gone.html"
+    monkeypatch.setenv("ARCAEON_SITE_CAN_AND_CANNOT", str(page))
+    with pytest.raises(pytest.skip.Exception) as skipped:
+        test_can_and_cannot_matches_the_site_page()
+    assert str(page) in str(skipped.value) and "ARCAEON_SITE_CAN_AND_CANNOT" in str(skipped.value)
+
+
 # --- the key section, held to the site's pricing page and offers.json --------------
 
 def _site_file(rel):
     """A file under $ARCAEON_SITE_ROOT, or a named skip."""
     root = os.environ.get("ARCAEON_SITE_ROOT")
     if not root:
-        pytest.skip("ARCAEON_SITE_ROOT is not set; no site copy to compare the key section with")
+        pytest.skip("key section parity NOT checked: ARCAEON_SITE_ROOT is not set; "
+                    "no site copy to compare the key section with")
     path = Path(root) / rel
     if not path.is_file():
-        pytest.skip(f"ARCAEON_SITE_ROOT has no {rel}")
+        pytest.skip(f"key section parity NOT checked: site file absent at {path} "
+                    f"(from ARCAEON_SITE_ROOT)")
     return path
 
 
@@ -278,7 +316,8 @@ def test_the_key_section_parity_catches_a_changed_grant(monkeypatch):
     changed["with_a_key"]["grant"] = door["with_a_key"]["grant"].replace("500", "250")
     monkeypatch.setattr(sys.modules[__name__], "front_door", lambda *a, **k: changed)
     if not os.environ.get("ARCAEON_SITE_ROOT"):
-        pytest.skip("ARCAEON_SITE_ROOT is not set; no site copy to compare the key section with")
+        pytest.skip("key section parity NOT checked: ARCAEON_SITE_ROOT is not set; "
+                    "no site copy to compare the key section with")
     with pytest.raises(AssertionError):
         test_key_section_matches_the_site_offers_json()
     with pytest.raises(AssertionError):
