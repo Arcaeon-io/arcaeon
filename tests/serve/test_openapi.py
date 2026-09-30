@@ -25,6 +25,13 @@ def _ops(doc):
     return [(m.upper(), p, op) for p, item in doc["paths"].items() for m, op in item.items()]
 
 
+def _route(method: str, path: str) -> R.Route:
+    """R.find that fails naming the method and path, not on None later."""
+    r = R.find(method, path)
+    assert r is not None, f"no route for {method} {path}"
+    return r
+
+
 def test_every_route_appears_once_and_every_doc_path_is_a_route():
     doc = O.build()
     ops = _ops(doc)
@@ -39,9 +46,9 @@ def test_every_route_appears_once_and_every_doc_path_is_a_route():
 def test_operation_ids_are_unique_and_named():
     ids = [op["operationId"] for _, _, op in _ops(O.build())]
     assert len(ids) == len(set(ids)) == len(R.ROUTES)
-    assert O.operation_id(R.find("POST", "/v1/audit/verify")) == "audit_verify"
-    assert O.operation_id(R.find("GET", "/")) == "index"
-    assert O.operation_id(R.find("GET", "/openapi.json")) == "openapi"
+    assert O.operation_id(_route("POST", "/v1/audit/verify")) == "audit_verify"
+    assert O.operation_id(_route("GET", "/")) == "index"
+    assert O.operation_id(_route("GET", "/openapi.json")) == "openapi"
 
 
 def test_header_security_and_components():
@@ -51,7 +58,7 @@ def test_header_security_and_components():
         **doc["components"]["securitySchemes"]["bearer"], "type": "http", "scheme": "bearer"}
     schemas = doc["components"]["schemas"]
     for m, p, op in _ops(doc):
-        r = R.find(m, p)
+        r = _route(m, p)
         assert op["security"] == ([] if r.open else [{"bearer": []}]), p
         assert ("401" in op["responses"]) is (not r.open), p
         ref = next(iter(op["responses"]["200"]["content"].values()))["schema"]["$ref"]

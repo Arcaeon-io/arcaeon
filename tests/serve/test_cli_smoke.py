@@ -62,9 +62,11 @@ def test_serve_subprocess_token_and_fence(tmp_path):
     try:
         found: dict = {}
         seen: list[str] = []
+        stdout = proc.stdout
+        assert stdout is not None, "Popen(stdout=PIPE) gave no stdout pipe"
 
         def reader():
-            for line in proc.stdout:
+            for line in stdout:
                 seen.append(line)
                 m = LISTEN.search(line)
                 if m and "port" not in found:

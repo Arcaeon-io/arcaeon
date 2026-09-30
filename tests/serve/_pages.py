@@ -72,7 +72,8 @@ def get(srv, path, *, cookie=None, headers=None) -> Reply:
     return request(srv, path, headers=h)
 
 
-def post_form(srv, path, fields: dict, *, cookie=None, origin="self", headers=None) -> Reply:
+def post_form(srv, path, fields: dict, *, cookie=None, origin: str | None = "self",
+              headers=None) -> Reply:
     """A browser's form post. `origin` "self" sends the server's own Origin,
     as a browser posting from the page does (K108); None sends none."""
     h = {"Content-Type": "application/x-www-form-urlencoded"}
@@ -102,8 +103,9 @@ def sign_in(srv) -> str:
 
 
 class Node:
-    def __init__(self, tag, attrs, parent=None):
-        self.tag, self.attrs, self.parent = tag, dict(attrs), parent
+    def __init__(self, tag, attrs, parent: Node | None = None):
+        self.tag, self.attrs = tag, dict(attrs)
+        self.parent: Node | None = parent
         self.children: list = []
 
     @property
@@ -127,7 +129,7 @@ class _Tree(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.root = Node("#root", [])
-        self.cur = self.root
+        self.cur: Node = self.root
 
     def handle_starttag(self, tag, attrs):
         n = Node(tag, attrs, self.cur)
@@ -138,8 +140,10 @@ class _Tree(HTMLParser):
     def handle_endtag(self, tag):
         n = self.cur
         while n is not self.root and n.tag != tag:
+            assert n.parent is not None, f"<{n.tag}> below the root has no parent"
             n = n.parent
         if n is not self.root:
+            assert n.parent is not None, f"<{n.tag}> below the root has no parent"
             self.cur = n.parent
 
     def handle_data(self, data):

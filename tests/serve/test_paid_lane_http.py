@@ -180,4 +180,6 @@ def test_the_body_cannot_grant_allow_paid(srv, root, fake, monkeypatch):
 
 def test_outside_a_request_the_paid_lane_is_refused(root, monkeypatch, fake):
     monkeypatch.setenv("ARCAEON_KEY", KEY)
-    assert h_pin.paid_refusal("seal")["reason"] == h_pin.NOT_ALLOWED
+    refusal = h_pin.paid_refusal("seal")
+    assert refusal is not None, "paid_refusal('seal') outside a request allowed the spend"
+    assert refusal["reason"] == h_pin.NOT_ALLOWED

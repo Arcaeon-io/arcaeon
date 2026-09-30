@@ -122,7 +122,9 @@ def test_status_headline_is_server_rendered(session):
     _check_scripts(tree, r.text)
     head = P.by_class(tree, "headline")[0].text()
     assert head.startswith("You checked 1 file today.") and "could not be read" in head
-    assert "state-ok" not in P.by_class(tree, "headline")[0].parent.classes
+    parent = P.by_class(tree, "headline")[0].parent
+    assert parent is not None, "the headline has no parent element"
+    assert "state-ok" not in parent.classes
 
 
 def test_home_reads_without_script(session):

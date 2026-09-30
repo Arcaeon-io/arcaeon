@@ -7,6 +7,13 @@ import pytest
 from arcaeon.serve import routes as R
 from arcaeon.serve import schema_check as S
 
+
+def _route(method: str, path: str) -> R.Route:
+    """R.find that fails naming the method and path, not on None later."""
+    r = R.find(method, path)
+    assert r is not None, f"no route for {method} {path}"
+    return r
+
 #: Section 0 of BATCH_OPUS_2026-09-27_PLUGIN.md, verbatim (handshake as its
 #: three KH7 paths).
 SECTION_0 = [
@@ -64,7 +71,7 @@ def test_only_seal_is_paid_and_only_health_and_openapi_are_open():
 
 
 def test_find_and_methods_for():
-    assert R.find("POST", "/v1/verify").handler == "arcaeon.serve.h_record:verify"
+    assert _route("POST", "/v1/verify").handler == "arcaeon.serve.h_record:verify"
     assert R.find("GET", "/v1/verify") is None
     assert R.methods_for("/v1/verify") == ["POST"]
     assert R.methods_for("/nope") == []
@@ -80,7 +87,7 @@ def test_no_overclaim_words_in_any_summary():
 # --- the validator -----------------------------------------------------------
 
 def test_validator_rejects_a_missing_required_field_by_name():
-    msg = R.validate(R.find("POST", "/v1/log"), {"fields": {"a": 1}})
+    msg = R.validate(_route("POST", "/v1/log"),{"fields": {"a": 1}})
     assert msg is not None and "'ledger'" in msg
 
 
@@ -112,8 +119,8 @@ def test_validator_type_enum_maxlength_and_nesting():
                              "l": {"type": "array", "items": {"type": "integer"}}}}
     assert S.first_problem(schema, {"a": "abc"}) is None
     assert S.first_problem(schema, []) == "body must be object, got array"
-    assert "over the limit of 3" in S.first_problem(schema, {"a": "abcd"})
-    assert "body.k must be one of" in S.first_problem(schema, {"a": "x", "k": "zzz"})
+    assert "over the limit of 3" in (S.first_problem(schema, {"a": "abcd"}) or "")
+    assert "body.k must be one of" in (S.first_problem(schema, {"a": "x", "k": "zzz"}) or "")
     assert S.first_problem(schema, {"a": "x", "n": True}) == "body.n must be integer, got boolean"
     assert S.first_problem(schema, {"a": "x", "o": {}}) == "missing required field 'z' in body.o"
     assert S.first_problem(schema, {"a": "x", "l": [1, "2"]}) == "body.l[1] must be integer, got string"
@@ -144,9 +151,9 @@ def test_importing_the_table_pulls_in_no_handler():
 def test_evidence_pack_verify_takes_witness_and_remote_and_aat_needs_out():
     """Lane D (K060, K061): verify_pack(pack, witness=, remote=) and
     export_aat(ledger, out); the route schemas carry the same fields."""
-    r = R.find("POST", "/v1/evidence-pack/verify")
+    r = _route("POST", "/v1/evidence-pack/verify")
     assert {"pack", "witness", "remote"} <= set(r.request_schema["properties"])
     assert R.validate(r, {"pack": "p", "remote": "yes"}) is not None
     assert R.validate(r, {"pack": "p", "witness": "w.jsonl", "remote": True}) is None
-    aat = R.find("POST", "/v1/export/aat")
+    aat = _route("POST", "/v1/export/aat")
     assert "'out'" in (R.validate(aat, {"ledger": "l.jsonl"}) or "")

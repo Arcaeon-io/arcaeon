@@ -132,8 +132,8 @@ def test_static_serves_only_named_files(srv):
 def test_the_page_loads_nothing_from_elsewhere(srv):
     cookie = P.sign_in(srv)
     tree = P.parse(P.get(srv, "/", cookie=cookie).text)
-    refs = [n.attrs.get(a) for n in tree.walk() for a in ("src", "href", "action")
-            if n.attrs.get(a)]
+    refs = [ref for n in tree.walk() for a in ("src", "href", "action")
+            if (ref := n.attrs.get(a))]
     assert refs, "the page links its stylesheet and script"
     for ref in refs:
         assert ref.startswith("/") and not ref.startswith("//"), ref

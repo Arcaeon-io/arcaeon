@@ -72,6 +72,7 @@ def test_the_fixture_journal_gives_that_sentence(home, root):
     tree = P.parse(r.text)
     head = P.by_class(tree, "headline")
     assert [n.text() for n in head] == [SENTENCE]
+    assert head[0].parent is not None, "the headline has no parent element"
     assert "state-unknown" in head[0].parent.classes and "state-ok" not in head[0].parent.classes
 
 
@@ -96,6 +97,7 @@ def test_no_checks_today_is_not_a_pass(home, root):
     tree = P.parse(r.text)
     head = P.by_class(tree, "headline")[0]
     assert head.text() == "You have not checked any files today."
+    assert head.parent is not None, "the headline has no parent element"
     assert "state-ok" not in head.parent.classes
     assert "No activity recorded yet." in r.text
 
