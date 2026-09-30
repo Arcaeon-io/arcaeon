@@ -103,7 +103,9 @@ class Served:
         self.token = tok.stdout.strip()
 
     def _drain(self, lines):
-        for line in self.proc.stdout:
+        stdout = self.proc.stdout
+        assert stdout is not None, "arcaeon serve was started with stdout=PIPE"
+        for line in stdout:
             lines.put(line)
         lines.put(None)
 
@@ -274,6 +276,7 @@ def run_js(served, tmp: Path) -> list:
         'const out = [];\n'
         'for (const k of spec) out.push(await c[k.m](k.body));\n'
         'process.stdout.write(JSON.stringify({ url: c.url, out }));\n', encoding="utf-8")
+    assert NODE is not None, "run_js needs node; its test skips when node is not on PATH"
     r = subprocess.run([NODE, str(driver), str(spec)], env=served.env, capture_output=True,
                        text=True, encoding="utf-8", timeout=300)
     assert r.returncode == 0, r.stderr[-2000:]

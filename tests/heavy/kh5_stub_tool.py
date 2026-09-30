@@ -22,7 +22,9 @@ def answer(msg: dict) -> dict | None:
         return None
     if msg.get("method") != "tools/call":
         return {"jsonrpc": "2.0", "id": msg["id"], "result": {}}
-    params = msg.get("params") if isinstance(msg.get("params"), dict) else {}
+    params = msg.get("params")
+    if not isinstance(params, dict):
+        params = {}
     name = params.get("name")
     return {"jsonrpc": "2.0", "id": msg["id"], "result": {
         "content": [{"type": "text", "text": f"ran {name}"}]}}
@@ -30,7 +32,9 @@ def answer(msg: dict) -> dict | None:
 
 def tool_name(msg) -> str | None:
     if isinstance(msg, dict) and msg.get("method") == "tools/call":
-        params = msg.get("params") if isinstance(msg.get("params"), dict) else {}
+        params = msg.get("params")
+        if not isinstance(params, dict):
+            params = {}
         name = params.get("name")
         return name if isinstance(name, str) else "?"
     return None

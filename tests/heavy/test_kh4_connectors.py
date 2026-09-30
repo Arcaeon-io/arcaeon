@@ -77,7 +77,15 @@ OTHER_SPANS = ('"filesystem": {"command": "npx", "args": ["-y", "@kh4/fs", "/dat
                '"search": {\n      "command": "search-server",\n      "env": {"LEVEL": "2"}\n    }')
 
 
+def _entry(name: str) -> C.Entry:
+    """C.get(name), asserted present: every name here comes from the catalog."""
+    e = C.get(name)
+    assert e is not None, f"{name!r} is not in the connect catalog"
+    return e
+
+
 def _seed_for(entry: C.Entry, os_name: str) -> bytes:
+    assert entry.key is not None, f"{entry.name} writes no config file, so it has no key"
     text = SEED.replace("KEY", entry.key)
     if os_name == "windows":
         text = text.replace("\n", "\r\n")
@@ -131,7 +139,9 @@ def _needs_path(entry: C.Entry, os_name: str) -> bool:
 
 
 def _target(entry: C.Entry, os_name: str) -> Path:
-    return Path(C.config_path(entry, os_name))
+    path = C.config_path(entry, os_name)
+    assert path is not None, f"{entry.name} keeps no config file on {os_name}"
+    return Path(path)
 
 
 def _action(capsys, entry, os_name, action, *extra) -> tuple[int, str, str]:
@@ -162,7 +172,7 @@ def _golden_text(capsys, monkeypatch, tmp_path, os_name) -> str:
         parts.append(f"## connect {name}\n{out}")
     home = _fake_home(tmp_path, monkeypatch, os_name)
     for name in FILE_CLIENTS:
-        e = C.get(name)
+        e = _entry(name)
         target = _target(e, os_name)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(_seed_for(e, os_name))
@@ -206,7 +216,7 @@ def test_golden_list_has_eight_rows(capsys, monkeypatch):
 def test_round_trip_keeps_other_servers(capsys, monkeypatch, tmp_path, os_name, name):
     _as_os(monkeypatch, os_name)
     home = _fake_home(tmp_path, monkeypatch, os_name)
-    e = C.get(name)
+    e = _entry(name)
     target = _target(e, os_name)
     assert home in target.parents, f"{target} is outside the fake home"
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -249,7 +259,7 @@ def test_round_trip_keeps_other_servers(capsys, monkeypatch, tmp_path, os_name, 
 def test_round_trip_from_nothing(capsys, monkeypatch, tmp_path, os_name, name):
     _as_os(monkeypatch, os_name)
     home = _fake_home(tmp_path, monkeypatch, os_name)
-    e = C.get(name)
+    e = _entry(name)
     before = _snapshot(home)
     assert before == {}
     rc, out, _ = _action(capsys, e, os_name, "--write")
@@ -280,7 +290,7 @@ def test_no_file_clients_refuse_every_action(capsys, monkeypatch, tmp_path, os_n
 def test_unconfirmed_path_refused_without_path(capsys, monkeypatch, tmp_path, os_name):
     _as_os(monkeypatch, os_name)
     home = _fake_home(tmp_path, monkeypatch, os_name)
-    unconfirmed = [n for n in FILE_CLIENTS if _needs_path(C.get(n), os_name)]
+    unconfirmed = [n for n in FILE_CLIENTS if _needs_path(_entry(n), os_name)]
     assert "vscode" in unconfirmed                   # the catalog marks it NO everywhere
     for name in unconfirmed:
         rc, out, _ = _run(capsys, name, "--write", "--json")
@@ -293,7 +303,7 @@ def test_check_goes_stale_when_the_command_stops_resolving(capsys, monkeypatch, 
                                                            uvx_pinned):
     _as_os(monkeypatch, "linux")
     _fake_home(tmp_path, monkeypatch, "linux")
-    e = C.get("cursor")
+    e = _entry("cursor")
     assert _action(capsys, e, "linux", "--write")[0] == 0
     monkeypatch.setattr(shutil, "which", lambda name, *a, **k: None)
     rc, out, _ = _action(capsys, e, "linux", "--check")

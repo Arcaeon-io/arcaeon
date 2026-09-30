@@ -189,12 +189,14 @@ def test_initialize_and_tools_list_over_http_equal_stdio(http_server, tmp_path):
     port, token = http_server["port"], http_server["token"]
     status, init = _post(port, INIT, token=token)
     assert status == 200, init
+    assert isinstance(init, dict), f"initialize over HTTP gave no JSON object: {init!r}"
     assert init["result"]["serverInfo"]["name"]
     assert "tools" in init["result"]["capabilities"]
     status, _ = _post(port, INITIALIZED, token=token)
     assert status in (200, 202)
     status, listed = _post(port, LIST, token=token)
     assert status == 200, listed
+    assert isinstance(listed, dict), f"tools/list over HTTP gave no JSON object: {listed!r}"
     over_http = listed["result"]["tools"]
     assert len(over_http) == 19
 
@@ -212,9 +214,11 @@ def test_no_token_and_wrong_token_are_refused(http_server):
     port = http_server["port"]
     status, body = _post(port, INIT)
     assert status == 401
+    assert isinstance(body, dict), f"the no-token refusal gave no JSON object: {body!r}"
     assert body["error"] == auth.NO_TOKEN
     status, body = _post(port, INIT, token="not-the-token")
     assert status == 401
+    assert isinstance(body, dict), f"the wrong-token refusal gave no JSON object: {body!r}"
     assert body["error"] == auth.WRONG_TOKEN
     assert http_server["token"] not in json.dumps(body)
     ok, _ = _post(port, INIT, token=http_server["token"])
