@@ -198,6 +198,93 @@ def test_the_difference_is_named():
     assert msg and "something else" in msg
 
 
+# --- the key section, held to the site's pricing page and offers.json --------------
+
+def _site_file(rel):
+    """A file under $ARCAEON_SITE_ROOT, or a named skip."""
+    root = os.environ.get("ARCAEON_SITE_ROOT")
+    if not root:
+        pytest.skip("ARCAEON_SITE_ROOT is not set; no site copy to compare the key section with")
+    path = Path(root) / rel
+    if not path.is_file():
+        pytest.skip(f"ARCAEON_SITE_ROOT has no {rel}")
+    return path
+
+
+def _site_witness():
+    doc = json.loads(_site_file(".well-known/offers.json").read_text(encoding="utf-8"))
+    for prod in doc["products"]:
+        if prod.get("id") == "hosted-witness":
+            return prod, next(t for t in prod["tiers"] if t.get("plan") == "mini")
+    raise AssertionError("site offers.json has no hosted-witness")
+
+
+def _page_text(html):
+    import re
+    html = re.sub(r"<!--.*?-->", "", html, flags=re.S)
+    return " ".join(re.sub(r"<[^>]+>", " ", html).split())
+
+
+def _grant_sentences(door):
+    """The package's grant as its two sentences, each without the closing period."""
+    first, second = door["with_a_key"]["grant"].rstrip(".").split(". ")
+    return first, second
+
+
+def test_key_section_matches_the_site_offers_json():
+    witness, mini = _site_witness()
+    door = front_door()
+    key = door["with_a_key"]
+    assert key["price_per_pin_usd"] == mini["price_per_pin_usd"]
+    assert key["smallest_pack"] == {"plan": "mini", "price_usd": mini["price_usd"],
+                                    "pins": mini["cap"], "checkout": mini["checkout"]}
+    grant = witness["registration_grant"]
+    first, second = _grant_sentences(door)
+    assert first == f"Every new key comes with {grant['statement']}"
+    assert grant["note"].startswith(first + ":"), grant["note"]
+    assert f"{second};" in grant["note"] or f"{second}." in grant["note"], grant["note"]
+    assert key["grant_status"] == grant["status"]
+    # the grant replaces the calendar window; the site says so, the door names none
+    assert "no free window by calendar" in grant["note"]
+    assert "calendar" not in json.dumps(door).lower()
+
+
+def test_key_section_matches_the_site_pricing_page():
+    import re
+    html = _site_file("pricing.html").read_text(encoding="utf-8")
+    text = _page_text(html)
+    door = front_door()
+    key = door["with_a_key"]
+    pack = key["smallest_pack"]
+    canon = re.search(r'<link rel="canonical" href="([^"]+)"', html)
+    assert canon and canon.group(1) == door["get_a_key"]["url"]
+    row = re.search(r"<tr><td><b>Mini</b></td>(.*?)</tr>", html, flags=re.S)
+    assert row, "no Mini row on the pricing page"
+    cells = re.findall(r"<td>(.*?)</td>", row.group(1), flags=re.S)
+    assert cells[:3] == [f"${pack['price_usd']:g}", pack["pins"].split()[0],
+                         f"${key['price_per_pin_usd']:g}"], cells
+    assert f'href="{pack["checkout"]}"' in row.group(1)
+    assert f"{pack['pins']}, ${key['price_per_pin_usd']:g} per pin." in html
+    first, second = _grant_sentences(door)
+    assert f"{first}, {key['grant_status'].split(',')[0]}:" in text, first
+    assert f"{second}," in text or f"{second}." in text, second
+    assert "no date promised" in text and "no date promised" in key["grant_status"]
+    assert "calendar" not in text.lower()
+
+
+def test_the_key_section_parity_catches_a_changed_grant(monkeypatch):
+    door = front_door()
+    changed = json.loads(json.dumps(door))
+    changed["with_a_key"]["grant"] = door["with_a_key"]["grant"].replace("500", "250")
+    monkeypatch.setattr(sys.modules[__name__], "front_door", lambda *a, **k: changed)
+    if not os.environ.get("ARCAEON_SITE_ROOT"):
+        pytest.skip("ARCAEON_SITE_ROOT is not set; no site copy to compare the key section with")
+    with pytest.raises(AssertionError):
+        test_key_section_matches_the_site_offers_json()
+    with pytest.raises(AssertionError):
+        test_key_section_matches_the_site_pricing_page()
+
+
 # --- the instructions -------------------------------------------------------------
 
 def test_instructions_are_three_short_paragraphs_with_no_dashes_or_marketing():
