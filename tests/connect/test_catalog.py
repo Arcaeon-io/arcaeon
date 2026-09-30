@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from arcaeon.connect import catalog as C
+from _connect import entry_for
 
 ROOT = Path(__file__).resolve().parents[2]
 CLIENTS = ["claude-desktop", "claude-code", "cursor", "windsurf", "vscode", "gemini-cli",
@@ -23,7 +24,7 @@ def test_the_eight_clients_in_order():
 
 @pytest.mark.parametrize("name", CLIENTS)
 def test_every_entry_is_complete(name):
-    e = C.get(name)
+    e = entry_for(name)
     assert e.transport in C.TRANSPORTS
     assert e.doc_url.startswith("https://")
     assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", e.read_date)
@@ -43,10 +44,10 @@ def test_keys_per_client():
 
 
 def test_unconfirmed_paths_are_marked():
-    assert C.confirmed_for(C.get("vscode"), "windows") is False
-    assert C.confirmed_for(C.get("claude-desktop"), "linux") is False
-    assert C.confirmed_for(C.get("claude-desktop"), "windows") is True
-    assert C.confirmed_for(C.get("cursor"), "macos") is True
+    assert C.confirmed_for(entry_for("vscode"), "windows") is False
+    assert C.confirmed_for(entry_for("claude-desktop"), "linux") is False
+    assert C.confirmed_for(entry_for("claude-desktop"), "windows") is True
+    assert C.confirmed_for(entry_for("cursor"), "macos") is True
 
 
 def test_connect_home_overrides_every_base(tmp_path, monkeypatch):
@@ -60,13 +61,13 @@ def test_connect_home_overrides_every_base(tmp_path, monkeypatch):
 
 
 def test_paths_on_a_fake_windows_and_posix_home():
-    w = C.config_path(C.get("claude-desktop"), "windows", r"C:\Users\u")
+    w = C.config_path(entry_for("claude-desktop"), "windows", r"C:\Users\u")
     assert w == r"C:\Users\u\AppData\Roaming\Claude\claude_desktop_config.json"
-    m = C.config_path(C.get("claude-desktop"), "macos", "/Users/u")
+    m = C.config_path(entry_for("claude-desktop"), "macos", "/Users/u")
     assert m == "/Users/u/Library/Application Support/Claude/claude_desktop_config.json"
-    assert C.config_path(C.get("cursor"), "linux", "/fake/u") == "/fake/u/.cursor/mcp.json"
-    assert C.config_path(C.get("vscode"), "linux", "/fake/u") == "/fake/u/.config/Code/User/mcp.json"
-    assert C.config_path(C.get("chatgpt"), "windows", r"C:\Users\u") is None
+    assert C.config_path(entry_for("cursor"), "linux", "/fake/u") == "/fake/u/.cursor/mcp.json"
+    assert C.config_path(entry_for("vscode"), "linux", "/fake/u") == "/fake/u/.config/Code/User/mcp.json"
+    assert C.config_path(entry_for("chatgpt"), "windows", r"C:\Users\u") is None
 
 
 def _run(*args, env_extra=None):

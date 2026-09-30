@@ -23,6 +23,7 @@ import pytest
 from arcaeon.connect import catalog as C
 from arcaeon.connect import cli
 from arcaeon.connect import write as W
+from _connect import entry_for
 
 GOLDEN = Path(__file__).resolve().parent / "golden"
 FAKE_HOMES = (("windows", r"C:\Users\u"), ("macos", "/Users/u"), ("linux", "/fake/u"))
@@ -33,7 +34,8 @@ SEED = '{\n  "theme": "dark",\n  "KEY": {\n    "other": {"command": "other-serve
 
 
 def _write_section(name: str) -> str:
-    e = C.get(name)
+    e = entry_for(name)
+    assert e.key is not None, f"{name} is in WRITE_GOLDEN, so it writes a keyed file"
     new, changed = W.merge_text(SEED.replace("KEY", e.key), e.key, cli.ENTRY_NAME,
                                 cli.server_entry(e))
     lines = ["## --write into a config holding one other server (every OS)"]
@@ -96,7 +98,9 @@ def _snapshot(root: Path) -> dict:
 def test_the_fake_home_is_byte_identical_before_and_after(capsys, tmp_path, monkeypatch):
     home = tmp_path / "home"
     monkeypatch.setenv(C.HOME_ENV, str(home))
-    cursor = Path(C.config_path(C.get("cursor")))
+    cursor_path = C.config_path(entry_for("cursor"))
+    assert cursor_path is not None, "cursor keeps a config file on every OS"
+    cursor = Path(cursor_path)
     cursor.parent.mkdir(parents=True)
     cursor.write_bytes(b'{"mcpServers": {"other": {"command": "x"}}}\r\n')
     (home / ".gemini").mkdir()

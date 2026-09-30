@@ -16,6 +16,7 @@ import pytest
 from arcaeon.connect import catalog as C
 from arcaeon.connect import cli
 from arcaeon.connect import write as W
+from _connect import entry_for
 
 TWO_SERVERS = (
     '{\n'
@@ -37,7 +38,9 @@ def _run(capsys, *argv) -> tuple[int, str]:
 
 
 def _cursor() -> Path:
-    return Path(C.config_path(C.get("cursor")))
+    path = C.config_path(entry_for("cursor"))
+    assert path is not None, "cursor keeps a config file on every OS"
+    return Path(path)
 
 
 def _seed(text: str | bytes) -> Path:
@@ -79,7 +82,7 @@ def test_two_other_servers_stay_byte_equal(capsys):
     doc = json.loads(after)
     assert doc["theme"] == "dark" and doc["tail"] == [1, 2, 3]
     assert set(doc["mcpServers"]) == {"alpha", "beta", "arcaeon"}
-    assert doc["mcpServers"]["arcaeon"] == cli.server_entry(C.get("cursor"))
+    assert doc["mcpServers"]["arcaeon"] == cli.server_entry(entry_for("cursor"))
     # everything before the splice point is the original, byte for byte
     cut = TWO_SERVERS.index("}}") + 2
     assert after[:cut] == TWO_SERVERS[:cut]
@@ -123,7 +126,7 @@ def test_a_missing_file_is_created_with_an_absent_marker(capsys):
     rc, out = _run(capsys, "cursor", "--write", "--json")
     d = json.loads(out)
     assert rc == 0 and d["written"] and d["backup_kind"] == "absent"
-    assert json.loads(f.read_text(encoding="utf-8")) == cli.merge_json(C.get("cursor"))
+    assert json.loads(f.read_text(encoding="utf-8")) == cli.merge_json(entry_for("cursor"))
     marker = Path(d["backup"])
     assert marker.name.endswith(W.ABSENT) and marker.parent == f.parent
     assert str(f.parent) in json.loads(marker.read_text(encoding="utf-8"))["created_dirs"]
@@ -136,11 +139,11 @@ def test_an_old_arcaeon_entry_is_replaced_only(capsys):
     assert rc == 0 and "changed: mcpServers.arcaeon (replaced)" in out
     new = f.read_text(encoding="utf-8")
     assert new.endswith(', "z": {"command": "zz"}}}')
-    assert json.loads(new)["mcpServers"]["arcaeon"] == cli.server_entry(C.get("cursor"))
+    assert json.loads(new)["mcpServers"]["arcaeon"] == cli.server_entry(entry_for("cursor"))
 
 
 def test_the_same_entry_already_there_writes_nothing(capsys):
-    f = _seed(json.dumps(cli.merge_json(C.get("cursor"))))
+    f = _seed(json.dumps(cli.merge_json(entry_for("cursor"))))
     before = f.read_bytes()
     rc, out = _run(capsys, "cursor", "--write")
     assert rc == 0 and "already there" in out

@@ -11,6 +11,7 @@ import pytest
 from arcaeon.connect import catalog as C
 from arcaeon.connect import cli
 from arcaeon.connect import write as W
+from _connect import entry_for
 
 UVX = {"command": "uvx", "args": ["--from", "arcaeon[mcp]", "arcaeon", "mcp"]}
 
@@ -41,7 +42,7 @@ def test_no_uv_gives_the_absolute_interpreter(uv_absent):
 
 @pytest.mark.parametrize("name", [e.name for e in C.CATALOG if e.writes_file])
 def test_every_file_client_uses_the_form(name, uv_present):
-    e = C.get(name)
+    e = entry_for(name)
     entry = cli.server_entry(e)
     assert {k: entry[k] for k in ("command", "args")} == UVX
     assert entry.get("type") == ("stdio" if e.key == "servers" else None)
@@ -63,5 +64,5 @@ def test_a_written_interpreter_form_checks_present(capsys, uv_absent):
 def test_a_written_uvx_form_is_stale_once_uv_is_gone(capsys, monkeypatch, uv_present):
     assert cli.main(["cursor", "--write"]) == 0
     monkeypatch.setattr(shutil, "which", lambda name, *a, **k: None)
-    assert W.check(C.config_path(C.get("cursor")), "mcpServers", "arcaeon")["state"] == "stale"
+    assert W.check(C.config_path(entry_for("cursor")), "mcpServers", "arcaeon")["state"] == "stale"
     capsys.readouterr()

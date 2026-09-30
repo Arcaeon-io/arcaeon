@@ -17,6 +17,7 @@ import pytest
 from arcaeon.connect import catalog as C
 from arcaeon.connect import cli
 from arcaeon.connect import write as W
+from _connect import entry_for
 
 OTHERS = '{\n  "mcpServers": {\n    "alpha": {"command": "a"},\n    "beta": {"command": "b"}\n  }\n}\n'
 
@@ -39,7 +40,9 @@ def _snapshot(root: Path) -> dict:
 
 
 def _seed(entry_name: str, text: str) -> Path:
-    f = Path(C.config_path(C.get(entry_name)))
+    path = C.config_path(entry_for(entry_name))
+    assert path is not None, f"{entry_name} keeps no config file on this OS"
+    f = Path(path)
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_bytes(text.encode("utf-8"))
     return f
@@ -55,7 +58,8 @@ def test_write_then_undo_is_byte_identical(capsys, name, seeded):
     home.mkdir(parents=True, exist_ok=True)
     (home / "keep.txt").write_bytes(b"not arcaeon's\r\n")
     if seeded:
-        e = C.get(name)
+        e = entry_for(name)
+        assert e.key is not None, f"{name} writes a file, so it has a key"
         _seed(name, OTHERS.replace("mcpServers", e.key))
     before = _snapshot(home)
     assert _run(capsys, name, "--check")[0] in (0, 1)
@@ -109,7 +113,9 @@ def test_two_real_writes_undo_back_to_the_start(tmp_path):
 
 
 def test_undo_refuses_to_delete_a_new_file_the_user_added_to(capsys):
-    f = Path(C.config_path(C.get("cursor")))
+    path = C.config_path(entry_for("cursor"))
+    assert path is not None, "cursor keeps a config file on every OS"
+    f = Path(path)
     assert not f.exists()
     assert _run(capsys, "cursor", "--write")[0] == 0
     doc = json.loads(f.read_text(encoding="utf-8"))
@@ -205,6 +211,6 @@ def test_doctor_asks_connect_check(monkeypatch):
                 "exit": 1}
 
     monkeypatch.setattr(W, "check", fake)
-    c = doctor.check_client(C.get("cursor"))
-    assert seen == [(C.config_path(C.get("cursor")), "mcpServers", "arcaeon")]
+    c = doctor.check_client(entry_for("cursor"))
+    assert seen == [(C.config_path(entry_for("cursor")), "mcpServers", "arcaeon")]
     assert c["state"] == "stale" and "'gone'" in c["detail"]
