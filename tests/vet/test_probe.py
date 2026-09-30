@@ -149,7 +149,8 @@ def test_artifact_carries_the_framing_fields(probed):
     assert probed["call_cap"] == probe_mod.DEFAULT_MAX_CALLS
     # observed_at is a real, timezone-aware ISO-8601 UTC instant
     ts = datetime.fromisoformat(probed["observed_at"])
-    assert ts.tzinfo is not None and ts.utcoffset().total_seconds() == 0
+    off = ts.utcoffset()
+    assert ts.tzinfo is not None and off is not None and off.total_seconds() == 0, ts
     assert "one observation" in probed["scope_note"].lower()
     assert "what we were allowed to test binds" in probed["scope_note"]
     assert "TOOL NAME" in probed["site_convention"]

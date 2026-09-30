@@ -647,6 +647,7 @@ def test_one_site_two_handlers_is_one_finding_with_two_routes(tmp_path):
     fs = _tree_hits(pkg)
     assert len(fs) == 1, fs
     assert fs[0].file == "jira/projects.py"
+    assert fs[0].via is not None, fs[0]
     assert len(fs[0].via) == 2, fs[0].via
     assert {v["handler"] for v in fs[0].via} == {"get_all_projects", "list_projects"}
     assert "and 1 more tool handler(s)" in fs[0].detail, fs[0].detail

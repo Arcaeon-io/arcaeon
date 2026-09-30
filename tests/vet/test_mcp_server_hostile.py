@@ -123,6 +123,7 @@ def _feed(line: bytes, tmp_path, *, grace=5.0, timeout=60.0):
     proc = subprocess.Popen([sys.executable, "-m", "arcaeon.prove.vet", "serve"],
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, env=env)
+    assert proc.stdin is not None, "mcp-vet serve spawned without a stdin pipe"
     out, err = [], []
 
     def pump(stream, sink):

@@ -424,6 +424,7 @@ def test_action_matches_standalone_copy():
     Anything else means the copy step was skipped, done partially, or
     the standalone copy was hand-edited directly (which the next sync would
     silently clobber anyway -- this catches the drift before that happens)."""
+    assert STANDALONE_REPO is not None, "skipif should have skipped: ARCAEON_VET_ACTION_REPO unset"
     ours = ACTION_YML.read_bytes()
     theirs = (STANDALONE_REPO / "action.yml").read_bytes()
     assert ours == theirs, (
@@ -436,6 +437,7 @@ def test_action_matches_standalone_copy():
                             "action checkout")
 def test_run_vet_matches_standalone_copy():
     """Same drift check as above, for the script action.yml actually calls."""
+    assert STANDALONE_REPO is not None, "skipif should have skipped: ARCAEON_VET_ACTION_REPO unset"
     ours = (ACTION_DIR / "run_vet.py").read_bytes()
     theirs = (STANDALONE_REPO / "run_vet.py").read_bytes()
     assert ours == theirs, (
