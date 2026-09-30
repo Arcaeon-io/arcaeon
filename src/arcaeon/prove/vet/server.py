@@ -272,7 +272,7 @@ def _server_class():
     except ImportError:
         pass
     try:
-        from mcp.server.fastmcp import FastMCP  # SDK 1.x
+        from mcp.server.fastmcp import FastMCP  # SDK 1.x  # pyright: ignore[reportMissingImports]
         return FastMCP
     except ImportError as e:  # pragma: no cover - depends on missing optional dep
         raise RuntimeError(
