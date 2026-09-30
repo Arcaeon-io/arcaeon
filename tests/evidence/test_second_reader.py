@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -401,3 +402,64 @@ def test_bearer_twin_sentences_are_recomputed(pack):
         ("README.json sentences[s.ok].class", VERIFIED),
         ("README.json sentences[s.bad]", MISMATCH),
         ("README.json sentences[s.bad].class", MISMATCH)]
+
+
+REAL_TWIN = Path(__file__).parent / "fixtures" / "bearer_readme_real.json"
+# page one's legend: schema 1 (this branch) prints no legend, so its text is
+# written here; the test checks it against the real twin's sha256 first.
+LEGEND = ("Each line ends in what bears it: [bytes] is a hash over frozen content, [order] "
+          "is a commitment made before the act, [asserted] is the builder's word and no "
+          "field in the pack carries it.")
+
+
+def test_real_bearer_twin_from_the_bearer_branch(pack):
+    """The README.json the bearer branch built from this same demo ledger (see
+    fixtures/bearer_readme_real.SOURCE.txt). Only the twin was copied, so page
+    one is rebuilt from this branch's own schema 1 page: every twin sentence is
+    found there by its sha256 (the legend excepted, which schema 1 omits), then
+    set at the twin's line with the twin's bracket. Each sentence then gives the
+    two rows the hand-written twin's s.ok gives, both VERIFIED, including the
+    [asserted; falsifier: ...] brackets the hand-written twin never has."""
+    import hashlib
+    import re
+    twin = json.loads(REAL_TWIN.read_text(encoding="utf-8"))
+    sents = twin["sentences"]
+    assert twin["bearer_schema"] == 2 and twin["page"] == "README.md"
+    assert len(sents) == sum(twin["counts"].values()) == 21
+
+    def sha(t):
+        return hashlib.sha256(t.encode("utf-8")).hexdigest()
+
+    readme = pack / "README.md"
+    known = {sha(LEGEND): LEGEND}
+    for line in readme.read_text(encoding="utf-8").split("\n"):
+        for t in [line, *re.split(r"(?<=\.) ", line)]:
+            known[sha(t)] = t
+    missing = [s["id"] for s in sents if s["sha256"] not in known]
+    assert missing == [], missing
+
+    page = [""] * max(s["line"] for s in sents)
+    for s in sents:
+        bracket = s["class"] + (f"; falsifier: {s['falsifier']}" if "falsifier" in s else "")
+        page[s["line"] - 1] = f"{known[s['sha256']]} [{bracket}]"
+    readme.write_text("\n".join(page), encoding="utf-8", newline="\n")
+    shutil.copyfile(REAL_TWIN, pack / "README.json")
+
+    rows = [r for r in second_reader(pack).rows if r.kind == "sentence"]
+    expect = []
+    for s in sents:
+        expect += [(f"README.json sentences[{s['id']}]", VERIFIED),
+                   (f"README.json sentences[{s['id']}].class", VERIFIED)]
+    assert [(r.where, r.verdict) for r in rows] == expect, \
+        [(r.where, r.claimed, r.recomputed) for r in rows if r.verdict != VERIFIED]
+    assert [r.recomputed for r in rows[1::2]] == [s["class"] for s in sents]
+
+
+def test_real_bearer_twin_beside_a_schema_1_page_is_mismatch(pack):
+    """The twin copied into this branch's pack as it is, page one untouched:
+    a schema 1 page bears no brackets, so no class row can verify."""
+    shutil.copyfile(REAL_TWIN, pack / "README.json")
+    rows = [r for r in second_reader(pack).rows if r.kind == "sentence"]
+    assert len(rows) == 42
+    assert all(r.verdict == MISMATCH for r in rows[1::2])
+    assert {r.recomputed for r in rows[1::2]} <= {"no bracket", None}

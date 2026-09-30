@@ -1,0 +1,156 @@
+{
+  "bearer_schema": 2,
+  "page": "README.md",
+  "classes": [
+    "bytes",
+    "order",
+    "asserted"
+  ],
+  "counts": {
+    "bytes": 6,
+    "order": 1,
+    "asserted": 14
+  },
+  "sentences": [
+    {
+      "id": "intro.scope",
+      "line": 3,
+      "sha256": "5fb02a81bca77e2555ac73e1996f56c34ce87a5d9635daf295b814841e43aa6f",
+      "class": "asserted",
+      "falsifier": "could_not_look.json, and `arcaeon evidence-pack verify .` re-deriving the window from records.jsonl"
+    },
+    {
+      "id": "intro.chain",
+      "line": 4,
+      "sha256": "77d31a05191fbda43f0b0efcaaff41559a4c60b4963531869979256e42f898e0",
+      "class": "bytes"
+    },
+    {
+      "id": "intro.pin",
+      "line": 5,
+      "sha256": "cb2eed92113a7f251e26049e0a2cbaef407c1d2e19aea9778247a74b473dd4ed",
+      "class": "order"
+    },
+    {
+      "id": "intro.no_pin",
+      "line": 6,
+      "sha256": "59b7ca5df0f063f2aa4e733a2a44e3e57f41034c121d3d3a0f6d3fe730efb043",
+      "class": "asserted",
+      "falsifier": "none derivable; with no pin in manifest.json, rewrite records.jsonl, rehash it and see `arcaeon evidence-pack verify .` still pass"
+    },
+    {
+      "id": "legend",
+      "line": 8,
+      "sha256": "c278c0184f786cca7cced0b78cdcafbd8af31bfa74a6d0819a63f0a542b0d702",
+      "class": "asserted",
+      "falsifier": "README.json, and `arcaeon evidence-pack verify .` checking each bracket against the fixed map"
+    },
+    {
+      "id": "agent.selected",
+      "line": 12,
+      "sha256": "f62a631f1b194d81301f01dac3315c10173b213a49dcd9dd603745fcfcc325ed",
+      "class": "asserted",
+      "falsifier": "could_not_look.json, and `arcaeon evidence-pack verify .` re-deriving the window from records.jsonl"
+    },
+    {
+      "id": "agent.names_seen",
+      "line": 13,
+      "sha256": "16fd830519cc31e1b3faaf1e52a70f46d993f208e548520dd0a03113493a4153",
+      "class": "bytes"
+    },
+    {
+      "id": "agent.system_id",
+      "line": 14,
+      "sha256": "5bd0423cf01123fd66e2693e9fa4662ce88bb817d0293096fe977e8767b4f0b8",
+      "class": "asserted",
+      "falsifier": "none derivable; compare with the operator's own records"
+    },
+    {
+      "id": "agent.provider",
+      "line": 15,
+      "sha256": "248be0216a1fdeaafb54b53d8156b894d8cb92015365322e53bc169cc5c93294",
+      "class": "asserted",
+      "falsifier": "none derivable; compare with the operator's own records"
+    },
+    {
+      "id": "window.from",
+      "line": 19,
+      "sha256": "c83897be59db1595fbb50d0619fb22a9302e35c8dc547fc0b5ab9eceb751d8b8",
+      "class": "asserted",
+      "falsifier": "could_not_look.json, and `arcaeon evidence-pack verify .` re-deriving the window from records.jsonl"
+    },
+    {
+      "id": "window.to",
+      "line": 20,
+      "sha256": "8d70e441f6f13fafe0b76453e5aa17e322f016e6f3700f7c56450ffa8e8ce29e",
+      "class": "asserted",
+      "falsifier": "could_not_look.json, and `arcaeon evidence-pack verify .` re-deriving the window from records.jsonl"
+    },
+    {
+      "id": "window.rows",
+      "line": 21,
+      "sha256": "604b78b58e3d06422b8416599939e87ed6f7bba042cab179a37f2a1ffb6d6f87",
+      "class": "bytes"
+    },
+    {
+      "id": "verdict",
+      "line": 25,
+      "sha256": "777a84a7cd3efaa8651f2a93bd41ef02863c0453cce8d04f1fd97c3e18b608db",
+      "class": "bytes"
+    },
+    {
+      "id": "dns.compliance",
+      "line": 29,
+      "sha256": "4b8e643216da671c2c7abe07db43e8f5cb86dfe097bc53167a916e543f3725f1",
+      "class": "asserted",
+      "falsifier": "none derivable; compare with the regulator's own reading"
+    },
+    {
+      "id": "dns.behaved",
+      "line": 30,
+      "sha256": "203f6f45c475f45f05d6585495f1f08c0e47f08429531eb0678d94a996712fcc",
+      "class": "asserted",
+      "falsifier": "none derivable; compare the rows with what the agent did"
+    },
+    {
+      "id": "dns.independence",
+      "line": 31,
+      "sha256": "b4e5592c3dae72fe57bcdfc71b93cc02cb0ff154d4d6f0e6f0640331c4590a57",
+      "class": "asserted",
+      "falsifier": "manifest.json, its witness `independence` field"
+    },
+    {
+      "id": "dns.operator",
+      "line": 32,
+      "sha256": "e43a092fecc5d3a720fe1ca8f0e6140a8c8dd895c82d977bdf2076932eea0762",
+      "class": "asserted",
+      "falsifier": "manifest.json, its `operator_at_t` field"
+    },
+    {
+      "id": "dns.aat",
+      "line": 33,
+      "sha256": "1a9d032c7d90c5127229e6a0e1bc4e4d281b2c068cf4de1e0c32728ba30cf178",
+      "class": "asserted",
+      "falsifier": "none derivable here; a pack built with --format aat lists the gaps"
+    },
+    {
+      "id": "dns.retention",
+      "line": 34,
+      "sha256": "733c553438f1933c91a66e7d40af7f8f72536ac954b945c694cb5d2751cea10f",
+      "class": "asserted",
+      "falsifier": "none derivable; compare with the holder's own records"
+    },
+    {
+      "id": "check.rehash",
+      "line": 38,
+      "sha256": "fcee4800b0aba10fadb0f43bbb26074868788019c04ab279c2d6f1f45b1bcf6f",
+      "class": "bytes"
+    },
+    {
+      "id": "check.records",
+      "line": 44,
+      "sha256": "25c4514958fa9ec65a89d83f7194599af307e4b59cb0035ee211cef15e03cab0",
+      "class": "bytes"
+    }
+  ]
+}
