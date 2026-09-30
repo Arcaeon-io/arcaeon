@@ -254,3 +254,40 @@ def test_batch_one_missing_among_good_counts_as_could_not_look(tmp_path, capsys)
     assert "4 receipts: 3 VERIFIED, 0 BROKEN, 1 COULD NOT LOOK" in capsys.readouterr().out
     assert ARC.main(["receipt", "verify", "--batch", *targets, "--ledger", ledger]) == 3
     capsys.readouterr()
+
+
+# --- B158: a "kind" that is not a string -----------------------------------
+# cli._exhibit used receipt["kind"] as a dict key, so a list or object kind
+# raised TypeError (a traceback). Every path answers it without one.
+
+@pytest.mark.parametrize("kind", [["x"], {"a": 1}], ids=["list", "object"])
+def test_non_string_kind_verify_single_is_broken_no_traceback(tmp_path, capsys, kind):
+    rc_obj = json.loads(VALID.read_text(encoding="utf-8"))
+    rc_obj["kind"] = kind
+    p = _write(tmp_path, "r.json", json.dumps(rc_obj))
+    assert RCLI.main(["verify", str(p)]) == 2
+    err = capsys.readouterr().err
+    assert err.startswith(f"{V.BROKEN}: ") and "Traceback" not in err
+
+
+@pytest.mark.parametrize("kind", [["x"], {"a": 1}], ids=["list", "object"])
+def test_non_string_kind_verify_batch_is_broken_no_traceback(tmp_path, capsys, kind):
+    rc_obj = json.loads(VALID.read_text(encoding="utf-8"))
+    rc_obj["kind"] = kind
+    p = _write(tmp_path, "r.receipt.json", json.dumps(rc_obj))
+    assert RCLI.main(["verify", "--batch", str(p)]) == 2
+    cap = capsys.readouterr()
+    assert "0 VERIFIED, 1 BROKEN, 0 COULD NOT LOOK" in cap.out
+    assert "Traceback" not in cap.err
+
+
+@pytest.mark.parametrize("kind", [["x"], {"a": 1}], ids=["list", "object"])
+def test_non_string_kind_exhibit_is_an_error_line_not_a_traceback(tmp_path, capsys, kind):
+    rc_obj = json.loads(VALID.read_text(encoding="utf-8"))
+    rc_obj["kind"] = kind
+    p = _write(tmp_path, "r.json", json.dumps(rc_obj))
+    assert RCLI.main(["exhibit", str(p)]) == 1
+    cap = capsys.readouterr()
+    assert cap.out == ""
+    assert cap.err.startswith("error: ") and '"kind"' in cap.err
+    assert "Traceback" not in cap.err

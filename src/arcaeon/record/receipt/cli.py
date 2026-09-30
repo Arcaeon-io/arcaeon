@@ -60,7 +60,10 @@ EXHIBITS = {cite.KIND: cite.exhibit, call.KIND: call.exhibit,
 
 
 def _exhibit(receipt: dict) -> str:
-    return EXHIBITS.get(receipt.get("kind"), render_exhibit)(receipt)
+    kind = receipt.get("kind")
+    if kind is not None and not isinstance(kind, str):
+        raise ValueError(f'receipt field "kind" must be a string, not {type(kind).__name__}')
+    return EXHIBITS.get(kind, render_exhibit)(receipt)
 
 
 def _does_not_prove(scope: dict) -> str:
