@@ -226,6 +226,18 @@ def write_baseline(name: str, mapping: Dict[str, bool]) -> Path:
 
 # --- the check itself ---------------------------------------------------------
 
+class _PrivatePieceMissing(ImportError):
+    """A gate's matcher lives in a private checkout that is not present here."""
+
+
+def _private_piece_report(name: str, e: ImportError) -> "DriftReport":
+    return DriftReport(
+        gate=name, status=STATUS_NO_COVERAGE,
+        message=(f"COULD NOT LOOK: {e}. This gate's matcher is not available "
+                 "here, so it has no coverage; reported as NO COVERAGE, never "
+                 "as 'no flips'."))
+
+
 @dataclass
 class DriftReport:
     gate: str
@@ -261,7 +273,10 @@ def check_gate(name: str, corpus: Optional[List[str]] = None) -> DriftReport:
                 "worse than no check."))
 
     matcher = resolve_matcher(gate)
-    current = {s: bool(matcher(s)) for s in corpus}
+    try:
+        current = {s: bool(matcher(s)) for s in corpus}
+    except _PrivatePieceMissing as e:
+        return _private_piece_report(name, e)
 
     baseline = load_baseline(name)
     if baseline is None:
@@ -317,7 +332,10 @@ def update_baseline_from_corpus(name: str) -> DriftReport:
         return DriftReport(gate=name, status=STATUS_NO_COVERAGE,
                             message=f"corpus is EMPTY at {_corpus_path(name)} — refusing to write a baseline from nothing")
     matcher = resolve_matcher(GATES[name])
-    mapping = {s: bool(matcher(s)) for s in corpus}
+    try:
+        mapping = {s: bool(matcher(s)) for s in corpus}
+    except _PrivatePieceMissing as e:
+        return _private_piece_report(name, e)
     write_baseline(name, mapping)
     return DriftReport(gate=name, status=STATUS_OK,
                         message=f"baseline written for {len(mapping)} corpus entries")
@@ -389,14 +407,21 @@ def _seal_chain():
     import sys as _sys
     # PRIVATE PIECE, not in this package: seal_chain lives in the private repo's
     # bridge/. Reached only when ARCAEON_VET_PRIVATE_ROOT names that checkout;
-    # otherwise the import below fails and the two seal_chain gates report that.
+    # otherwise _PrivatePieceMissing is raised, and check_gate and
+    # update_baseline_from_corpus turn it into NO_COVERAGE for these two gates.
     root = os.environ.get("ARCAEON_VET_PRIVATE_ROOT", "")
     if not root:
-        raise ImportError("seal_chain gates need the private bridge checkout "
-                          "(set ARCAEON_VET_PRIVATE_ROOT); not shipped in arcaeon")
+        raise _PrivatePieceMissing("seal_chain gates need the private bridge checkout "
+                                   "(set ARCAEON_VET_PRIVATE_ROOT); not shipped in arcaeon")
     if root not in _sys.path:
         _sys.path.insert(0, root)
-    from bridge.witness import seal_chain as _sc
+    try:
+        # Optional, never shipped: guarded here, degrades to NO_COVERAGE.
+        from bridge.witness import seal_chain as _sc  # pyright: ignore[reportMissingImports]
+    except ImportError as e:
+        raise _PrivatePieceMissing(
+            f"seal_chain gates need bridge/witness/seal_chain.py under "
+            f"ARCAEON_VET_PRIVATE_ROOT ({e}); not shipped in arcaeon") from e
     return _sc
 
 
