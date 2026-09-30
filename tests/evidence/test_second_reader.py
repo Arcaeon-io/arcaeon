@@ -170,6 +170,39 @@ def test_zip_reads_the_same_as_the_folder(pack, pins, tmp_path):
     assert b.verdict == V.VERIFIED and b.pack == str(z)
 
 
+def test_a_zip_edited_after_zip_wrote_it_is_broken_on_the_changed_rows(pack, pins, tmp_path):
+    """The demo tamper, made inside the .zip: each entry rewritten in the same
+    order with a fresh CRC, so the zip is sound and verify's "pack zip" check
+    passes. The reader must recompute from the entry bytes, not trust the
+    manifest's stored digests or the stored `chain` field."""
+    import zipfile
+    clean, z = pack.parent / "pack.zip", tmp_path / "tampered.zip"
+    edits = {"records.jsonl": (b"lookup", b"lookuq"), "README.md": (b"folder", b"fo1der")}
+    with zipfile.ZipFile(clean) as src, zipfile.ZipFile(z, "w", zipfile.ZIP_DEFLATED) as dst:
+        for info in src.infolist():
+            raw = src.read(info)
+            if info.filename in edits:
+                a, b = edits[info.filename]
+                assert raw.count(a) == 1, info.filename
+                raw = raw.replace(a, b)
+            dst.writestr(info, raw)
+    for witness in (None, pins):
+        rep = second_reader(z, witness=witness)
+        assert rep.rows, rep.pack_verify
+        assert not any(c.get("check") == "pack zip"
+                       for c in verify_pack(z, witness=witness).get("checks") or [])
+        bad_files = sorted(r.where for r in _by(rep, "file") if r.verdict == MISMATCH)
+        assert bad_files == ["manifest.json files[README.md]",
+                             "manifest.json files[records.jsonl]"], bad_files
+        assert _file(rep, "README.md").recomputed == TAMPERED_README_SHA
+        assert _file(rep, "records.jsonl").recomputed == TAMPERED_RECORDS_SHA
+        head = _head(rep)
+        assert head.verdict == MISMATCH and head.claimed == DEMO_HEAD
+        assert head.recomputed != DEMO_HEAD
+        assert rep.verdict == V.BROKEN and rep.exit == 1 and rep.verdict != V.VERIFIED
+        assert rep.pack_verify["verdict"] == V.BROKEN and rep.pack == str(z)
+
+
 def test_a_listed_file_that_is_gone_is_could_not_look_on_its_row_and_broken(pack):
     (pack / "window.jsonl").unlink()
     rep = second_reader(pack)
