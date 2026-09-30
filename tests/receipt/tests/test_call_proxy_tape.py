@@ -626,6 +626,10 @@ def run_chain(tmp_path, mcp, mode, stream=None):
     Returns (reconcile JSON, exit code, agent rows, tool rows)."""
     s = _proxy(tmp_path, mcp.server_address[1])
     hop = _Hop(s.server_address[1], mode)
+    # Not an assert: the break arms run this inside pytest.raises(AssertionError),
+    # which would swallow one. needs_forward already skips when LEDGER is None.
+    if LEDGER is None:
+        raise TypeError("run_chain needs the arcaeon-ledger checkout (LEDGER is None)")
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join([str(LEDGER), str(LEDGER / "adapter"),
                                          env.get("PYTHONPATH", "")])
@@ -637,8 +641,12 @@ def run_chain(tmp_path, mcp, mode, stream=None):
          "--tape-namespace", "demo-agent",
          "--http-forward", hop.url + "/mcp", "--listen", "127.0.0.1:0"],
         stderr=subprocess.PIPE, env=env, **kw)
+    agent_err = agent.stderr
+    if agent_err is None:  # never with stderr=PIPE; raised, not asserted (see above)
+        agent.kill()
+        raise RuntimeError("adapter Popen with stderr=PIPE gave no stderr pipe")
     try:
-        line = agent.stderr.readline().decode(errors="replace")
+        line = agent_err.readline().decode(errors="replace")
         m = re.search(r"listening on http://127\.0\.0\.1:(\d+)", line)
         assert m, line
         for msg in (STREAM if stream is None else stream):
@@ -648,7 +656,7 @@ def run_chain(tmp_path, mcp, mode, stream=None):
     finally:
         if agent.poll() is None:
             agent.kill()
-        agent.stderr.close()
+        agent_err.close()
         hop.close()
         s.shutdown()
         s.server_close()
@@ -725,7 +733,7 @@ def _answers_lost(body, header_items):
 
 
 def _answers_as_bytes(body, header_items):
-    real = _REAL_ANSWERS(body, header_items)
+    real = _real_answers(body, header_items)
     return [(k, {"result": body.decode("utf-8", "replace")}) for k, _ in real]
 
 
@@ -733,9 +741,9 @@ def _first_answer_per_id(body, header_items):
     """The pre-fix reading: one answer per id (the first), so a reused id's
     second call was closed with the FIRST call's answer."""
     first = {}
-    for k, a in _REAL_ANSWERS(body, header_items):
+    for k, a in _real_answers(body, header_items):
         first.setdefault(k, a)
-    return [(k, first[k]) for k, _ in _REAL_ANSWERS(body, header_items)]
+    return [(k, first[k]) for k, _ in _real_answers(body, header_items)]
 
 
 def _overwrite(self, key, idx):
@@ -743,6 +751,15 @@ def _overwrite(self, key, idx):
 
 
 _REAL_ANSWERS = call_proxy._tape_answers if hasattr(call_proxy, "_tape_answers") else None
+
+
+def _real_answers(body, header_items):
+    """The real _tape_answers captured at import. Raises TypeError, as calling
+    None did, when it was absent: never AssertionError, because the liars run
+    inside pytest.raises(AssertionError) and one would pass for the wrong reason."""
+    if _REAL_ANSWERS is None:
+        raise TypeError("call_proxy has no _tape_answers to wrap")
+    return _REAL_ANSWERS(body, header_items)
 
 
 @needs_ledger
