@@ -161,6 +161,33 @@ def test_markdown_is_one_table_with_every_row(pack):
     assert f"`{DEMO_README_SHA}`" in md
 
 
+def test_markdown_escapes_a_pipe_and_a_newline_in_a_value(pack):
+    """A README sentence whose id and class carry both "|" and a newline: the
+    markdown is still one table row per claim, every table line with the same
+    number of unescaped "|" column separators. Twin written by hand as in
+    test_bearer_twin_sentences_are_recomputed."""
+    import hashlib
+    import re
+    line_text = "Rows | columns\nand a second line."
+    readme = pack / "README.md"
+    readme.write_text(readme.read_text(encoding="utf-8") + "Rows | columns [bytes]\n",
+                      encoding="utf-8", newline="\n")
+    n = len(readme.read_text(encoding="utf-8").split("\n")) - 1
+    odd = "s.pipe | and\nnewline"
+    twin = {"bearer_schema": 1, "page": "README.md", "sentences": [
+        {"id": odd, "line": n, "class": "by|tes\nor not",
+         "sha256": hashlib.sha256(line_text.encode()).hexdigest()}]}
+    (pack / "README.json").write_text(json.dumps(twin), encoding="utf-8")
+    rep = second_reader(pack)
+    assert any(odd in r.where for r in rep.rows)
+    md = rep.to_markdown()
+    table = [x for x in md.splitlines() if x.startswith("|")]
+    assert len(table) == 2 + len(rep.rows)
+    seps = {len(re.findall(r"(?<!\\)\|", x)) for x in table}
+    assert seps == {9}, [(len(re.findall(r"(?<!\\)\|", x)), x) for x in table]
+    assert "s.pipe \\| and newline" in md
+
+
 def test_zip_reads_the_same_as_the_folder(pack, pins, tmp_path):
     z = pack.parent / "pack.zip"
     assert z.is_file()
