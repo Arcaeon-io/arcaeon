@@ -141,6 +141,7 @@ def test_on_duplicate_return_receipt_never_raises_and_matches_original(key, payl
         with guard(key, ledger_path=path, on_duplicate="return_receipt",
                    store_outcome=True) as g2:
             assert g2.already_executed is True
+            assert g2.receipt is not None, f"duplicate guard on {key!r} carries no receipt"
             assert g2.receipt.executed_chain == original.executed_chain
             assert g2.receipt.outcome == payload
 

@@ -33,6 +33,7 @@ class StubLLM:
 
     @property
     def url(self):
+        assert self._server is not None, "StubLLM.url read outside its with block"
         host, port = self._server.server_address[:2]
         return f"http://{host}:{port}"
 
@@ -81,6 +82,7 @@ class StubLLM:
         return self
 
     def __exit__(self, *exc):
+        assert self._server is not None and self._thread is not None, "StubLLM exited without entering"
         self._server.shutdown()
         self._server.server_close()
         self._thread.join(timeout=5)

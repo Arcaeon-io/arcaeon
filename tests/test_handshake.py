@@ -222,6 +222,7 @@ def test_the_four_words_and_their_exits():
 def test_handlers_are_the_routes_declared_and_answer_with_exit(tmp_path):
     for op in ("propose", "accept", "verify"):
         route = R.find("POST", f"/v1/handshake/{op}")
+        assert route is not None, f"no POST /v1/handshake/{op} route declared"
         assert route.resolve() is getattr(h_handshake, op)
     a, b = str(tmp_path / "a.jsonl"), str(tmp_path / "b.jsonl")
     p = h_handshake.propose({"ledger": a, "terms": TERMS, "agent": "agent-a"})

@@ -38,7 +38,9 @@ def test_each_spec_carries_the_route_schema_and_a_call():
             assert s.parameters == {"type": "object", "properties": {}}
     # a copy, never the route table's own dict
     by_name["log"].parameters["properties"]["x"] = {}
-    assert "x" not in R.find("POST", "/v1/log").request_schema["properties"]
+    log_route = R.find("POST", "/v1/log")
+    assert log_route is not None, "no POST /v1/log route declared"
+    assert "x" not in log_route.request_schema["properties"]
 
 
 def test_building_the_list_does_no_io(monkeypatch, tmp_path):

@@ -32,6 +32,7 @@ def test_every_tool_call_leaves_a_chained_record(tmp_path, monkeypatch):
     monkeypatch.setenv("ARCAEON_CALL_RECORD", str(rec))
     r = mcp_server.handle({"id": 1, "method": "tools/call", "params": {
         "name": "guard_side_effect", "arguments": GOOD_ARGS}})
+    assert r is not None, "tools/call (id 1) drew no reply"
     assert "isError" not in r["result"], r
     rows = _calls_rows(rec)
     assert len(rows) == 1
@@ -53,8 +54,10 @@ def test_failed_calls_are_recorded_and_tampering_is_caught(tmp_path, monkeypatch
         "name": "guard_side_effect", "arguments": GOOD_ARGS}})
     bad = mcp_server.handle({"id": 2, "method": "tools/call", "params": {
         "name": "guard_side_effect", "arguments": {}}})
+    assert bad is not None, "tools/call (id 2) with no arguments drew no reply"
     assert bad["result"]["isError"] is True
     unk = mcp_server.handle({"id": 3, "method": "tools/call", "params": {"name": "nope"}})
+    assert unk is not None, "tools/call (id 3) to an unknown tool drew no reply"
     assert unk["result"]["isError"] is True
     rows = _calls_rows(rec)
     assert [r["ok"] for r in rows] == [True, False, False]

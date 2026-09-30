@@ -266,6 +266,7 @@ def test_9_pins_catch_a_rewrite_in_agreement(tmp_path):
     r = dispute("d-t1", b, s, pins=pins)
     assert r.verdict == V.ALTERED, r.to_dict()
     assert {c["result"] for c in r.pins_checked} == {"head_differs"}
+    assert r.at is not None, f"an ALTERED verdict names no row: {r.to_dict()}"
     assert r.at.startswith("row#") and "rewritten after the pin" in r.reason
     assert "call" not in r.reason
     # the same pins from the witness file itself, targeted by namespace

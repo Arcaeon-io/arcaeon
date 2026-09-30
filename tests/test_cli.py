@@ -147,7 +147,9 @@ def test_a_built_lazy_verb_runs_its_module_main(tmp_path, monkeypatch):
     monkeypatch.setenv("ARCAEON_JOURNAL", "0")
     assert cli.verb_built("demo") is True
     assert cli.main(["demo", "--x", "y"]) == 3
-    import fake_k001_verb
+    # Written to tmp_path and put on sys.path by syspath_prepend above, so it
+    # only exists at run time; no static path can resolve it.
+    import fake_k001_verb  # pyright: ignore[reportMissingImports]
     assert fake_k001_verb.SEEN == [["--x", "y"]]
 
 
@@ -233,6 +235,7 @@ def _handshake(argv, tmp_path):
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, env=env, text=True,
                             encoding="utf-8", bufsize=1)
+    assert proc.stdin is not None and proc.stdout is not None, f"Popen({argv!r}) with PIPE gave no stdin/stdout"
     watchdog = threading.Timer(60.0, proc.kill)
     watchdog.start()
     try:

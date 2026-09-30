@@ -191,6 +191,7 @@ def run_op_property(n_ops=N_OPS, seed=SEED, use_ledger=False, verbose=False):
     receipt_ok = None
     if use_ledger:
         from arcaeon.record.ledger import verify_file
+        assert ledger_path is not None, "use_ledger is set but no ledger path was made"
         ledger_ok = bool(verify_file(ledger_path))
         g = v = 0
         for raw in ledger_path.read_text(encoding="utf-8").splitlines():

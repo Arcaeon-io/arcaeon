@@ -56,6 +56,7 @@ def test_duplicate_return_receipt_mode_skips_without_raising():
 
         with guard(key, ledger_path=path, on_duplicate="return_receipt") as g2:
             assert g2.already_executed is True
+            assert g2.receipt is not None, f"duplicate guard on {key!r} carries no receipt"
             assert g2.receipt.state == "executed"
             # caller is expected to check already_executed and skip the effect;
             # calling done() here would be a programmer error, not attempted.
