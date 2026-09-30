@@ -1055,7 +1055,9 @@ def _mcp(argv) -> int:
     try:
         import mcp  # noqa: F401  (the SDK; the [mcp] extra)
     except ImportError:
-        if "--http" in argv:  # KH8: --http fails closed as COULD NOT LOOK, exit 3
+        # KH8: --http fails closed as COULD NOT LOOK, exit 3. --print-front-door
+        # needs no SDK: it prints the front door object and starts nothing.
+        if "--http" in argv or "--print-front-door" in argv:
             from arcaeon.mcp import __main__ as mcp_main
             return _run(partial(mcp_main.main, prog="arcaeon mcp"), argv)
         print("arcaeon mcp needs the MCP Python SDK: pip install 'arcaeon[mcp]'",

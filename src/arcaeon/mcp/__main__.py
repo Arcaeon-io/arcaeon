@@ -26,6 +26,9 @@ def main(argv=None, prog: str = "arcaeon-mcp") -> int:
     ap.add_argument("--tools", action="store_true",
                     help="print the tool list and the free/paid split, then exit "
                          "(no server, no stdio) — for checking an install")
+    ap.add_argument("--print-front-door", action="store_true",
+                    help="print the object the arcaeon_front_door tool returns, as JSON, "
+                         "then exit (no server, no stdio, no network)")
     ap.add_argument("--http", action="store_true",
                     help="serve over streamable HTTP on 127.0.0.1 instead of stdio "
                          "(needs arcaeon[mcp]; same token as `arcaeon serve`; loopback "
@@ -41,6 +44,11 @@ def main(argv=None, prog: str = "arcaeon-mcp") -> int:
         os.environ["ARCAEON_LEDGER_LOG"] = args.log
     if args.ns_dir:
         os.environ["ARCAEON_LEDGER_NS_DIR"] = args.ns_dir
+
+    if args.print_front_door:
+        from .front_door import front_door
+        print(json.dumps(front_door(), indent=2))
+        return 0
 
     if args.http and not args.tools:
         from . import http_transport

@@ -810,16 +810,19 @@ https://buy.stripe.com/6oUaEYd987LP3xy21b0RG04
 
 Answers: how does an agent use all this? Starts the MCP server on stdio with
 the ledger, vet and witness tools. Needs `arcaeon[mcp]`. `--tools` prints the
-tool list and exits without starting a server.
+tool list and exits without starting a server. `--print-front-door` prints, as
+JSON, the object the `arcaeon_front_door` tool returns (what works with no key,
+what a key adds and costs, where to get one, the can and cannot list) and
+exits; it needs no extra.
 
 **Usage**
 
 ```text
-usage: arcaeon mcp [-h] [--log LOG] [--ns-dir NS_DIR] [--tools] [--http]
-                   [--port PORT]
+usage: arcaeon mcp [-h] [--log LOG] [--ns-dir NS_DIR] [--tools]
+                   [--print-front-door] [--http] [--port PORT]
 ```
 
-**Exit codes:** 0 the server closed cleanly, or `--tools` printed. 2 the MCP
+**Exit codes:** 0 the server closed cleanly, or `--tools` or `--print-front-door` printed. 2 the MCP
 SDK is not installed (`pip install "arcaeon[mcp]"`). With `--http` (KH8: the
 same server over streamable HTTP on `http://127.0.0.1:<port>/mcp`, the serve
 token required, loopback only; `--port 0` picks one and prints it) a missing

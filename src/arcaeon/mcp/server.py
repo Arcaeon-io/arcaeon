@@ -82,6 +82,7 @@ from arcaeon.prove.vet.server import scan_recorded as _vet_scan_recorded
 from arcaeon.prove.vet.server import verify_audit_ledger as _vet_verify_audit_ledger
 
 from . import __version__
+from . import front_door as _front_door
 from arcaeon.remote import licensing
 from arcaeon.remote import witness
 from arcaeon.remote.offers import CATALOG_URL, upgrade_message
@@ -108,10 +109,11 @@ SECOND_READ_TOOLS = ("second_read_submit", "second_read_compare")
 EVIDENCE_TOOLS = ("evidence_pack_build", "evidence_pack_verify")
 PAID_TOOLS = WITNESS_TOOLS
 STATUS_TOOL = "arcaeon_status"
+FRONT_DOOR_TOOL = _front_door.TOOL_NAME
 
 ALL_TOOLS = sorted([*LEDGER_TOOLS.values(), *VET_TOOLS.values(), *WITNESS_TOOLS,
                     *DEAL_TOOLS, *MANDATE_TOOLS, *SECOND_READ_TOOLS, *EVIDENCE_TOOLS,
-                    STATUS_TOOL])
+                    STATUS_TOOL, FRONT_DOOR_TOOL])
 FREE_TOOLS = [n for n in ALL_TOOLS if n not in PAID_TOOLS]
 
 
@@ -531,23 +533,35 @@ def _grant_note() -> str:
     return registration_sentence()
 
 
+# What an agent reads first. Three short paragraphs, plain words, no dashes:
+# the door, the free core, the one paid lane (tests/test_front_door.py).
+INSTRUCTIONS = (
+    "Start with arcaeon_front_door. It returns one object: what works here with "
+    "no key, what a key adds and what it costs, where to get a key, what these "
+    "tools can and cannot prove, and the address of the offers document."
+    "\n\n"
+    "With no key and no account, the local core works and every check runs on "
+    "this machine. ledger_* writes a hash chained record of what an agent did and "
+    "checks it, or checks a log another agent hands you. vet_* reads MCP server "
+    "source before you connect to it. deal_* and mandate_check record and check a "
+    "deal. evidence_pack_* builds a pack and verifies one. second_read_* records a "
+    "second reading of a claim and compares two. arcaeon_status gives versions "
+    "and paths."
+    "\n\n"
+    "witness_pin and witness_renew are the only tools that need ARCAEON_KEY. They "
+    "pin your ledger head with the hosted witness, a party you cannot advance, "
+    "which is the one thing that catches a record cut short. No tool here shows a "
+    "record is true: a check shows it was not changed, which is a smaller thing."
+)
+
+
 def build_server():
     """Build the server. Separated from serve() so tests drive it with the
     SDK's in-process client instead of spawning a subprocess."""
     mcp = _server_class()(
         name=SERVER_NAME,
         version=__version__,
-        instructions=(
-            "Arcaeon's toolbox on one connector. ledger_* keeps a tamper-evident, "
-            "hash-chained record of what an agent did and judges another agent's "
-            "exported log. vet_* statically checks MCP-server source before you "
-            "connect to it. witness_* pins your ledger head with a party you "
-            "cannot advance (the only thing that catches truncation) and is the "
-            "one paid lane — it needs ARCAEON_KEY; everything else is free and "
-            "needs nothing. Call arcaeon_status for versions and the free/paid "
-            "split. None of these tools claim your records are TRUE: they prove "
-            "a record was not altered, which is a different and smaller thing."
-        ) + _registration_suffix(),
+        instructions=INSTRUCTIONS + _registration_suffix(),
     )
 
     # --- ledger, re-exported whole ---------------------------------------
@@ -846,6 +860,19 @@ def build_server():
     def arcaeon_status() -> dict:
         outcome = _attempt(_status_payload)
         return _record_call("arcaeon_status", {}, outcome)
+
+    @_tool(
+        name=FRONT_DOOR_TOOL,
+        description=(
+            "Call this first. One object: what works with no key (record, verify, "
+            "evidence pack, second reader; every check runs on this machine), what a "
+            "key adds and its price per pin from the offers document, where to get a "
+            "key, what these tools can and cannot prove, and the offers document's "
+            "address. Reads only; opens no connection."),
+    )
+    def arcaeon_front_door() -> dict:
+        outcome = _attempt(_front_door.front_door)
+        return _record_call(FRONT_DOOR_TOOL, {}, outcome)
 
     return mcp
 

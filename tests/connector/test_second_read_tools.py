@@ -71,7 +71,7 @@ def test_the_tool_list_counts_the_two_new_tools():
     names = _tool_names()
     assert SECOND_READ_TOOLS == ("second_read_submit", "second_read_compare")
     assert "second_read_submit" in names and "second_read_compare" in names
-    assert names == sorted(ALL_TOOLS) and len(names) == 19  # K069 added two
+    assert names == sorted(ALL_TOOLS) and len(names) == 20  # K069 added two, the front door one
     assert set(SECOND_READ_TOOLS) <= set(FREE_TOOLS)
     assert not set(SECOND_READ_TOOLS) & set(PAID_TOOLS)
 

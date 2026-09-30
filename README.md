@@ -178,6 +178,11 @@ vet and witness tools. `arcaeon mcp --tools` lists them without starting
 anything; it needs the `[mcp]` extra too (on the base install it prints the
 `pip install 'arcaeon[mcp]'` hint and exits 2).
 
+An agent should call `arcaeon_front_door` first: one object saying what works
+with no key, what a key adds and what it costs, where to get a key, and what
+these tools can and cannot prove. `arcaeon mcp --print-front-door` prints the
+same object as JSON, so you can read it without an MCP client.
+
 A note for MCP registry listings: before 0.9, `uvx arcaeon` started this
 server. It still does for 30 days after this release, when there is no verb
 and stdin is not a terminal. Point your client at `arcaeon mcp` now. The

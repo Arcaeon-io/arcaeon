@@ -6,6 +6,7 @@ that adds a JSON field or a verb.
 
 ## Unreleased
 
+- MCP front door: new tool `arcaeon_front_door` (and `arcaeon mcp --print-front-door`, same object as JSON, no SDK needed) says what works with no key, what a key adds with its price per pin and grant read from offers.json, where to get a key (the registration link when offers.json switches it on, else the pricing page), the site's can and cannot list, and the offers URL; the server's instructions are rewritten as three plain paragraphs that start at the door. See docs/FRONT_DOOR.md.
 - Witness registration link, built dark: `arcaeon.remote.registration.registration_link()` returns the URL only when offers.json carries `"registration": {"enabled": true, "url": ...}`; `arcaeon buy`, `arcaeon --help` and the MCP server's instructions, status notes and keyless refusal print one sentence with it when on and nothing about registration when off (they previously named "registration is at arcaeon.io/pricing" unconditionally).
 
 ## 0.10.0 (2026-09-27)
