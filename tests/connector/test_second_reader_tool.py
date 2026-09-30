@@ -134,3 +134,68 @@ def test_a_bad_format_is_a_tool_error(monkeypatch, tmp_path, demo):
     _, [(err, payload)] = _session([
         ("evidence_pack_second_reader", {"pack_path": str(pack), "format": "yaml"})])
     assert err and "format" in str(payload)
+
+
+def _call_record_isolation(monkeypatch, tmp_path):
+    """test_connector_call_record.py's isolation, then this file's (which adds
+    ARCAEON_HOME and the journal switch), so nothing touches ~/.arcaeon.
+    Returns the call-record path."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from test_connector_call_record import _isolate as _cr_isolate
+    rec = _cr_isolate(monkeypatch, tmp_path)
+    _isolate(monkeypatch, tmp_path)
+    return rec
+
+
+def _call_rows(rec):
+    from test_connector_call_record import _rows
+    return _rows(rec)
+
+
+def test_a_pack_path_that_does_not_exist_is_could_not_look(monkeypatch, tmp_path):
+    """No pack at all is an answer (COULD NOT LOOK, exit 3), not an MCP
+    exception, and the call still leaves its ok:true row."""
+    rec = _call_record_isolation(monkeypatch, tmp_path)
+    missing = tmp_path / "no-such-pack"
+    _, out = _session([
+        ("evidence_pack_second_reader", {"pack_path": str(missing)}),
+        ("evidence_pack_second_reader", {"pack_path": str(missing), "format": "table"}),
+    ])
+    (e1, got), (e2, tb) = out
+    assert not (e1 or e2), out
+    assert got["verdict"] == "COULD NOT LOOK" and got["exit"] == 3, got
+    assert got == json.loads(second_reader(missing).to_json())
+    assert tb["verdict"] == "COULD NOT LOOK" and tb["exit"] == 3, tb
+    rows = _call_rows(rec)
+    assert [r["tool"] for r in rows] == ["evidence_pack_second_reader"] * 2, rows
+    assert all(r["ok"] is True and "error" not in r for r in rows), rows
+
+
+def test_a_witness_path_that_cannot_be_read_is_could_not_look(monkeypatch, tmp_path, demo):
+    """A pin file that is missing, a directory or not JSON: exit 3 through the
+    tool, the pin row's reason names the file (976a00c), no MCP exception, and
+    one ok:true call-record row per call."""
+    rec = _call_record_isolation(monkeypatch, tmp_path)
+    pack, _, _ = demo
+    pins_dir = tmp_path / "pins-dir"
+    pins_dir.mkdir()
+    not_json = tmp_path / "pins.txt"
+    not_json.write_text("this is not a pin file\n{not json either\n", encoding="utf-8")
+    witnesses = [tmp_path / "no-such-pins.jsonl", pins_dir, not_json]
+    _, out = _session([
+        ("evidence_pack_second_reader", {"pack_path": str(pack), "witness_path": str(w)})
+        for w in witnesses])
+    for (err, got), w in zip(out, witnesses):
+        assert not err, got
+        assert got["verdict"] == "COULD NOT LOOK" and got["exit"] == 3, got
+        assert got["witness"] == str(w)
+        pin = [r for r in got["rows"] if r["kind"] == "pin"]
+        assert len(pin) == 1, got["rows"]
+        assert pin[0]["verdict"] == "COULD NOT LOOK" and pin[0]["recomputed"] is None
+        assert f"(pin file {w})" in pin[0]["how"], pin[0]["how"]
+        assert got == json.loads(second_reader(pack, witness=w).to_json())
+    rows = _call_rows(rec)
+    assert [r["tool"] for r in rows] == ["evidence_pack_second_reader"] * 3, rows
+    assert all(r["ok"] is True and "error" not in r for r in rows), rows
