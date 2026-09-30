@@ -47,7 +47,7 @@ def arcaeon_tools(client=None) -> list:
     is not installed (`pip install langchain-core`)."""
     from arcaeon.adapters import missing
     try:
-        from langchain_core.tools import StructuredTool
+        from langchain_core.tools import StructuredTool  # pyright: ignore[reportMissingImports]  # optional: user installs langchain-core (docs/ADAPTERS.md), not a declared extra
     except ImportError as e:
         raise missing("langchain", "langchain-core", e) from e
     from arcaeon.adapters import tool_specs

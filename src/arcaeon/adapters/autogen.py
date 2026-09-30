@@ -47,7 +47,7 @@ def arcaeon_tools(client=None) -> list:
     is not installed (`pip install autogen-core`)."""
     from arcaeon.adapters import missing
     try:
-        from autogen_core.tools import BaseTool
+        from autogen_core.tools import BaseTool  # pyright: ignore[reportMissingImports]  # optional: user installs autogen-core (docs/ADAPTERS.md), not a declared extra
     except ImportError as e:
         raise missing("autogen", "autogen-core", e) from e
     from arcaeon.adapters import tool_specs

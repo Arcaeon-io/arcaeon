@@ -157,7 +157,7 @@ def _probe() -> str | None:
     except ImportError:
         pass
     try:
-        import nacl.signing  # noqa: F401
+        import nacl.signing  # noqa: F401  # pyright: ignore[reportMissingImports]  # PyNaCl fallback when cryptography is absent
         return "pynacl"
     except ImportError:
         return None
@@ -196,7 +196,7 @@ def _sign_bytes(seed: bytes, message: bytes) -> bytes:
     if backend == "cryptography":
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
         return Ed25519PrivateKey.from_private_bytes(seed).sign(message)
-    import nacl.signing
+    import nacl.signing  # pyright: ignore[reportMissingImports]  # PyNaCl fallback when cryptography is absent
     return nacl.signing.SigningKey(seed).sign(message).signature
 
 
@@ -210,8 +210,8 @@ def _verify_bytes(pubkey: bytes, message: bytes, signature: bytes) -> bool:
             return True
         except (InvalidSignature, ValueError):
             return False
-    import nacl.exceptions
-    import nacl.signing
+    import nacl.exceptions  # pyright: ignore[reportMissingImports]  # PyNaCl fallback when cryptography is absent
+    import nacl.signing  # pyright: ignore[reportMissingImports]  # PyNaCl fallback when cryptography is absent
     try:
         nacl.signing.VerifyKey(pubkey).verify(message, signature)
         return True
@@ -230,7 +230,7 @@ def public_key_from_seed(seed: bytes) -> bytes:
             Encoding, PublicFormat)
         return (Ed25519PrivateKey.from_private_bytes(seed).public_key()
                 .public_bytes(Encoding.Raw, PublicFormat.Raw))
-    import nacl.signing
+    import nacl.signing  # pyright: ignore[reportMissingImports]  # PyNaCl fallback when cryptography is absent
     return bytes(nacl.signing.SigningKey(seed).verify_key)
 
 

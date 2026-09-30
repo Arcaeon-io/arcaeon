@@ -46,7 +46,7 @@ def arcaeon_tools(client=None) -> list:
     llama-index-core is not installed (`pip install llama-index-core`)."""
     from arcaeon.adapters import missing
     try:
-        from llama_index.core.tools import FunctionTool, ToolMetadata
+        from llama_index.core.tools import FunctionTool, ToolMetadata  # pyright: ignore[reportMissingImports]  # optional: user installs llama-index-core (docs/ADAPTERS.md), not a declared extra
     except ImportError as e:
         raise missing("llamaindex", "llama-index-core", e) from e
     from arcaeon.adapters import tool_specs

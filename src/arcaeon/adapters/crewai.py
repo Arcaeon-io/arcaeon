@@ -43,7 +43,7 @@ def arcaeon_tools(client=None) -> list:
     installed (`pip install crewai`)."""
     from arcaeon.adapters import missing
     try:
-        from crewai.tools import BaseTool
+        from crewai.tools import BaseTool  # pyright: ignore[reportMissingImports]  # optional: user installs crewai (docs/ADAPTERS.md), not a declared extra
     except ImportError as e:
         raise missing("crewai", "crewai", e) from e
     from arcaeon.adapters import tool_specs

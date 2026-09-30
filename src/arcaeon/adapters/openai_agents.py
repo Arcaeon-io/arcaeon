@@ -53,7 +53,7 @@ def arcaeon_tools(client=None) -> list:
     installed (`pip install openai-agents`)."""
     from arcaeon.adapters import missing
     try:
-        from agents import FunctionTool
+        from agents import FunctionTool  # pyright: ignore[reportMissingImports]  # optional: user installs openai-agents (docs/ADAPTERS.md), not a declared extra
     except ImportError as e:
         raise missing("openai_agents", "openai-agents", e) from e
     from arcaeon.adapters import tool_specs

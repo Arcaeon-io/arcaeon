@@ -153,7 +153,7 @@ def send_invoice_items(items: list[dict[str, Any]], *, api_key: str) -> list[Any
     """Create one Stripe InvoiceItem per item. Idempotent: re-running with the
     same (key_id, month) resolves to the same InvoiceItem instead of a
     duplicate charge, because `idempotency_key` is stable per (key_id, month)."""
-    import stripe  # local import: never required for build/dry-run/selftest
+    import stripe  # local import: never required for build/dry-run/selftest  # pyright: ignore[reportMissingImports]  # example, stripe not a dependency
 
     stripe.api_key = api_key
     created = []
@@ -175,7 +175,7 @@ def create_and_finalize_invoices(customer_ids: list[str], *, api_key: str,
     invoice-item side; a second invoice would only pick up whatever pending
     items exist at that moment, so re-running after a successful finalize is
     safe (nothing pending left to collect)."""
-    import stripe  # local import: never required for build/dry-run/selftest
+    import stripe  # local import: never required for build/dry-run/selftest  # pyright: ignore[reportMissingImports]  # example, stripe not a dependency
 
     stripe.api_key = api_key
     invoices = []
