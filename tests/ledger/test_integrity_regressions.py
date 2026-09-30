@@ -497,12 +497,15 @@ def test_fabricated_prepend_strict_hard_fails_cli_and_mcp(capsys):
         msg = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                "params": {"name": "ledger_verify", "arguments": {"strict": True}}}
         resp = handle(msg, Ledger(p))
+        assert resp is not None, "tools/call ledger_verify (id 1, strict) drew no reply"
         payload = json.loads(resp["result"]["content"][0]["text"])
         assert payload["ok"] is False and "prechain" in payload["first_break"]
 
         # and the MCP default (non-strict) reports the bounded shape, not green
         msg["params"]["arguments"] = {}
-        payload = json.loads(handle(msg, Ledger(p))["result"]["content"][0]["text"])
+        resp = handle(msg, Ledger(p))
+        assert resp is not None, "tools/call ledger_verify (id 1, default) drew no reply"
+        payload = json.loads(resp["result"]["content"][0]["text"])
         assert payload["ok"] is None
         assert payload["verified_scope"] == "bounded_prechain_skipped"
 

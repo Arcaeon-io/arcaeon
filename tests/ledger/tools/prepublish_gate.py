@@ -137,6 +137,7 @@ def check_version_agreement(repo: Path, version: str) -> Verdict:
         return FAIL, "; ".join(problems + unverifiable)
     if unverifiable:
         return UNVERIFIABLE, "; ".join(unverifiable)
+    assert pkg is not None, "a missing package dir is recorded as unverifiable above"
     return PASS, f"pyproject, {pkg.name}/__init__.py and CHANGELOG.md all say {version}"
 
 

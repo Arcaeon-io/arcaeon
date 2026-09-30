@@ -235,7 +235,9 @@ def test_undigestible_payload_records_the_reason_never_a_fake_hash():
     o.observe_client_frame(_call(1, "weird"))
     # NaN can't be produced by json.dumps here, so drive the observer's own path:
     from arcaeon.record.adapter.observer import _safe_digest
-    assert _safe_digest(float("nan")).startswith("undigestible:")
+    reason = _safe_digest(float("nan"))
+    assert reason is not None, "_safe_digest(nan) returned None, not a reason"
+    assert reason.startswith("undigestible:")
     o.observe_server_frame(_resp(1))
     assert len(rows) == 1  # and the ordinary path still works
 

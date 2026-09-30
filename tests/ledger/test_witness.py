@@ -185,7 +185,9 @@ def test_witness_store_is_append_only_history():
         publish_head(store, "ns", log)
         hist = store.history("ns")
         assert len(hist) == 2 and hist[0]["rows"] == 2 and hist[1]["rows"] == 3, hist
-        assert store.latest("ns")["rows"] == 3
+        latest = store.latest("ns")
+        assert latest is not None, "two pins on 'ns' left no latest pin"
+        assert latest["rows"] == 3
     print("PASS witness keeps append-only pin history; latest() returns the newest")
 
 

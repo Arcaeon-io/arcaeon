@@ -298,7 +298,9 @@ def test_the_local_reference_store_still_pins_a_tape_without_extras(tmp_path):
     store = WitnessStore(tmp_path / "w.jsonl")
     pin = TP.pin_tape(tape(tmp_path), store, pair="demo-agent")
     assert pin["rows"] == 4 and pin["extra_fields"] == "not_sent"
-    assert store.latest("demo-tool")["rows"] == 4
+    latest = store.latest("demo-tool")
+    assert latest is not None, "pin_tape left no pin on 'demo-tool'"
+    assert latest["rows"] == 4
 
 
 def test_the_key_is_never_in_the_result(tmp_path, witness):

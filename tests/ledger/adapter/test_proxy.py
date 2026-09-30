@@ -192,7 +192,9 @@ def test_version_is_declared_in_exactly_one_place():
     from arcaeon.record.adapter import _version, observer, proxy
     assert arcaeon.record.adapter.VERSION is _version.VERSION is proxy.VERSION
     assert proxy.IMPL == f"arcaeon-adapter/{proxy.VERSION}"
-    assert observer.SeamObserver.__init__.__kwdefaults__["impl"] == _version.IMPL
+    kwdefaults = observer.SeamObserver.__init__.__kwdefaults__
+    assert kwdefaults is not None, "SeamObserver.__init__ has no keyword-only defaults"
+    assert kwdefaults["impl"] == _version.IMPL
     pkg = pathlib.Path(arcaeon.record.adapter.__file__).parent
     offenders = [
         "%s:%d: %s" % (py.name, lineno, line.strip())

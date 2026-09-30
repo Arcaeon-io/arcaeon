@@ -284,7 +284,9 @@ def test_an_unparseable_line_is_a_named_break_not_a_crash(tmp_path):
 def test_latest_and_history_still_work_with_the_chain(tmp_path):
     """The chain must not change what the store is FOR."""
     store, _ = _pins(tmp_path, 3)
-    assert store.latest("ns")["rows"] == 3
+    latest = store.latest("ns")
+    assert latest is not None, "three pins on 'ns' left no latest pin"
+    assert latest["rows"] == 3
     assert [h["rows"] for h in store.history("ns")] == [1, 2, 3]
     assert store.latest("absent") is None
 
@@ -708,7 +710,9 @@ def test_monotonic_guard_refuses_backward_pin(tmp_path):
 
     # The disproof pin is still the latest -- the attack left no trace as
     # accepted state, and verification against the REAL log still passes.
-    assert store.latest("ns")["rows"] == 5
+    latest = store.latest("ns")
+    assert latest is not None, "the disproof pin on 'ns' is gone"
+    assert latest["rows"] == 5
     v = verify_against_witness(store, "ns", lg)
     assert v.verdict == "consistent"
 
@@ -726,7 +730,9 @@ def test_monotonic_guard_allows_equal_and_advancing_pins(tmp_path):
     publish_head(store, "ns", lg)          # equal re-pin: allowed
     lg.append({"e": 3})
     publish_head(store, "ns", lg)          # advancing pin: allowed
-    assert store.latest("ns")["rows"] == 4
+    latest = store.latest("ns")
+    assert latest is not None, "three pins on 'ns' left no latest pin"
+    assert latest["rows"] == 4
     assert len(store.history("ns")) == 3
 
 
@@ -751,7 +757,9 @@ def test_monotonic_guard_uses_high_water_not_latest(tmp_path):
     legacy["rows"] = 2
     with store.path.open("a", encoding="utf-8") as fh:
         fh.write(_json.dumps(legacy) + "\n")
-    assert store.latest("legacy")["rows"] == 2  # latest is the LOW pin
+    latest = store.latest("legacy")
+    assert latest is not None, "the planted legacy pin was not read back"
+    assert latest["rows"] == 2  # latest is the LOW pin
 
     # A 3-row pin clears latest() but NOT the high-water of 5: must refuse.
     log3 = tmp_path / "log3.jsonl"
