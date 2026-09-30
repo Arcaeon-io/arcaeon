@@ -41,12 +41,14 @@ class Client:
         self._id = 0
 
     def _send(self, obj: dict) -> None:
+        assert self.proc.stdin is not None, "server spawned without a stdin pipe"
         self.proc.stdin.write(json.dumps(obj) + "\n")
         self.proc.stdin.flush()
 
     def request(self, method: str, params: dict | None = None) -> dict:
         self._id += 1
         self._send({"jsonrpc": "2.0", "id": self._id, "method": method, "params": params or {}})
+        assert self.proc.stdout and self.proc.stderr, "server spawned without its pipes"
         line = self.proc.stdout.readline()
         if not line:
             err = self.proc.stderr.read()
@@ -57,6 +59,7 @@ class Client:
         return self.request("tools/call", {"name": name, "arguments": arguments})["result"]
 
     def close(self) -> None:
+        assert self.proc.stdin is not None, "server spawned without a stdin pipe"
         try:
             self.proc.stdin.close()
         except OSError:

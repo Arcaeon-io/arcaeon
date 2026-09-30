@@ -86,6 +86,7 @@ def test_stdio_swap_mid_session(tmp_path):
                           str(ledger), "--mandate", str(mandate), "--"] + ECHO,
                          stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                          stderr=subprocess.PIPE, env=env)
+    assert p.stdin and p.stdout, "adapter proxy spawned without its pipes"
     try:
         p.stdin.write(_frame(1) + b"\n")
         p.stdin.flush()

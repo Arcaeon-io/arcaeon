@@ -397,16 +397,18 @@ def test_the_installed_entry_point_serves_over_real_stdio(tmp_path):
         [sys.executable, "-m", "arcaeon.mcp"],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         env=env, text=True, encoding="utf-8", bufsize=1)
+    stdin, stdout, stderr = proc.stdin, proc.stdout, proc.stderr
+    assert stdin and stdout and stderr, "arcaeon.mcp spawned without its pipes"
     watchdog = threading.Timer(60.0, proc.kill)
     watchdog.start()
 
     def send(msg):
-        proc.stdin.write(json.dumps(msg) + "\n")
-        proc.stdin.flush()
+        stdin.write(json.dumps(msg) + "\n")
+        stdin.flush()
 
     def expect(id_):
-        line = proc.stdout.readline()
-        assert line, f"server died before answering id={id_}; stderr:\n{proc.stderr.read()}"
+        line = stdout.readline()
+        assert line, f"server died before answering id={id_}; stderr:\n{stderr.read()}"
         msg = json.loads(line)
         assert msg.get("id") == id_, msg
         assert "error" not in msg, msg
@@ -433,7 +435,7 @@ def test_the_installed_entry_point_serves_over_real_stdio(tmp_path):
         gated_text = "".join(c.get("text", "") for c in expect(4)["content"])
     finally:
         watchdog.cancel()
-        proc.stdin.close()
+        stdin.close()
         proc.kill()
         proc.wait(timeout=15)
 

@@ -143,12 +143,14 @@ def _stdio_tools(tmp_path):
         [sys.executable, "-m", "arcaeon", "mcp"], stdin=subprocess.PIPE,
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, encoding="utf-8",
         env=_env(tmp_path), cwd=str(tmp_path))
+    stdin = proc.stdin
+    assert stdin is not None, "arcaeon mcp spawned without a stdin pipe"
     q = queue.Queue()
     threading.Thread(target=_lines, args=(proc.stdout, q), daemon=True).start()
 
     def send(msg):
-        proc.stdin.write(json.dumps(msg) + "\n")
-        proc.stdin.flush()
+        stdin.write(json.dumps(msg) + "\n")
+        stdin.flush()
 
     def answer(want_id):
         deadline = time.monotonic() + 60

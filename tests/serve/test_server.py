@@ -212,6 +212,7 @@ def test_the_real_command_serves_health_on_a_random_port(tmp_path):
                ARCAEON_HOME=str(tmp_path), PYTHONUNBUFFERED="1")
     p = subprocess.Popen([sys.executable, "-m", "arcaeon", "serve", "--port", "0"],
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+    assert p.stdout is not None, "arcaeon serve spawned without a stdout pipe"
     try:
         line = p.stdout.readline()
         assert "listening on http://127.0.0.1:" in line, line

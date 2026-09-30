@@ -54,6 +54,7 @@ def record_session(d: Path, texts=("alpha", "bravo", "charlie")) -> dict:
     for obs in (agent, tool):
         obs.flush_pending(reason="session_end")
         obs.session_end(reason="test_done", exit_code=0)
+        assert obs.tape is not None, f"observer {obs.session!r} built without a tape"
         obs.tape.flush()
     return paths
 

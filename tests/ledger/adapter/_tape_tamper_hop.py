@@ -21,6 +21,8 @@ def main() -> int:
     mode = sys.argv[1]
     cmd = sys.argv[sys.argv.index("--") + 1:]
     child = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, bufsize=0)
+    to_child, from_child = child.stdin, child.stdout
+    assert to_child and from_child, f"{cmd!r} spawned without its pipes"
     cin, cout = sys.stdin.buffer, sys.stdout.buffer
 
     def up():
@@ -33,12 +35,12 @@ def main() -> int:
                         continue
                 except ValueError:
                     pass
-            child.stdin.write(line)
-            child.stdin.flush()
-        child.stdin.close()
+            to_child.write(line)
+            to_child.flush()
+        to_child.close()
 
     threading.Thread(target=up, daemon=True).start()
-    for line in iter(child.stdout.readline, b""):
+    for line in iter(from_child.readline, b""):
         if mode == "alter_response":
             line = line.replace(b"alter me", b"ALTERED!")
         elif mode == "reserialize" and line.strip():
