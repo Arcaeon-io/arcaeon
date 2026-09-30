@@ -65,4 +65,5 @@ def test_deeply_nested_line_is_answered_not_a_recursion_error():
 
 def test_handle_non_dict_params_direct():
     resp = handle({"id": 7, "method": "tools/call", "params": "nope"})
+    assert resp is not None, "tools/call (id 7) with string params drew no reply"
     assert resp["id"] == 7 and resp["result"]["isError"] is True

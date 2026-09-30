@@ -77,6 +77,7 @@ def test_handle_answers_a_non_object_message_with_invalid_request(tmp_path, msg)
 def test_handle_answers_non_object_params_with_invalid_params(tmp_path, params):
     resp = handle({"jsonrpc": "2.0", "id": 9, "method": "tools/call", "params": params},
                   Ledger(tmp_path / "a.jsonl"))
+    assert resp is not None, f"tools/call (id 9) with params={params!r} drew no reply"
     assert resp["error"]["code"] == -32602, resp
     assert resp["id"] == 9
 
@@ -88,6 +89,7 @@ def test_handle_refuses_string_arguments_in_words(tmp_path):
     resp = handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                    "params": {"name": "ledger_verify", "arguments": "x"}},
                   Ledger(tmp_path / "a.jsonl"))
+    assert resp is not None, "tools/call (id 3) with string arguments drew no reply"
     assert resp["result"]["isError"] is True, resp
     text = json.loads(resp["result"]["content"][0]["text"])["error"]
     assert "arguments must be a JSON object" in text, text

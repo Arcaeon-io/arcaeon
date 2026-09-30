@@ -42,10 +42,12 @@ def test_initialize_and_tools_list(tmp_path):
     init = srv.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize",
                        "params": {"protocolVersion": PROTOCOL_VERSION, "capabilities": {},
                                   "clientInfo": {"name": "test", "version": "0"}}})
+    assert init is not None, "initialize (id 1) drew no reply"
     assert init["result"]["protocolVersion"] == PROTOCOL_VERSION
     assert init["result"]["serverInfo"]["name"] == "cite"
 
     listed = srv.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+    assert listed is not None, "tools/list (id 2) drew no reply"
     names = {t["name"] for t in listed["result"]["tools"]}
     assert names == TOOL_NAMES
     assert TOOLS[0]["inputSchema"]["required"] == ["text"]
@@ -68,6 +70,7 @@ def test_never_crashes_on_a_bad_call(tmp_path):
 
     # server is still alive afterward
     again = srv.handle({"jsonrpc": "2.0", "id": 4, "method": "tools/list"})
+    assert again is not None, "tools/list (id 4) after bad calls drew no reply"
     assert {t["name"] for t in again["result"]["tools"]} == TOOL_NAMES
 
 

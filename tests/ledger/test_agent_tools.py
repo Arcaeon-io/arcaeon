@@ -373,8 +373,10 @@ def test_the_three_agent_tools_are_advertised_with_usable_schemas():
     assert {"prove_my_conduct", "verify_peer_ledger", "declare_break"} <= names
     assert {"ledger_append", "ledger_verify"} <= names   # nothing was displaced
 
-    listed = handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-                    Ledger("unused.jsonl"))["result"]["tools"]
+    resp = handle({"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                  Ledger("unused.jsonl"))
+    assert resp is not None, "tools/list (id 1) drew no reply"
+    listed = resp["result"]["tools"]
     by_name = {t["name"]: t for t in listed}
 
     prove = by_name["prove_my_conduct"]["inputSchema"]
@@ -399,11 +401,13 @@ def test_handle_still_works_without_the_ns_dir_argument(tmp_path):
     log = Ledger(tmp_path / "agent.log.jsonl")
     resp = handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                    "params": {"name": "ledger_append", "arguments": {"record": {"a": 1}}}}, log)
+    assert resp is not None, "ledger_append (id 1) drew no reply"
     assert json.loads(resp["result"]["content"][0]["text"])["ok"] is True
 
     resp = handle({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
                    "params": {"name": "prove_my_conduct",
                               "arguments": {"namespace": "defaulted", "events": ["a"]}}}, log)
+    assert resp is not None, "prove_my_conduct (id 2) drew no reply"
     payload = json.loads(resp["result"]["content"][0]["text"])
     assert payload["rows"] == 1, payload
     # default namespace dir sits beside the server's own log
