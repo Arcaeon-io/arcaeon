@@ -166,10 +166,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"arcaeon open: COULD NOT LOOK: cannot start a server on 127.0.0.1:{a.port} "
               f"({e.strerror or type(e).__name__})", file=sys.stderr)
         return V.EXIT_COULD_NOT_LOOK
+    fence = srv.fence
+    if fence is None:  # a directory root always fences; never serve unfenced
+        srv.server_close()
+        print(f"arcaeon open: COULD NOT LOOK: no path fence for {root}", file=sys.stderr)
+        return V.EXIT_COULD_NOT_LOOK
     current = srv
     try:
         link = f"{srv.url}/?t={D.issue_code(srv)}"
-        print(f"arcaeon open: no server was running; started one for {srv.fence.root}",
+        print(f"arcaeon open: no server was running; started one for {fence.root}",
               file=sys.stderr, flush=True)
         _show(link, a.no_browser)
         S.run(srv, out=sys.stderr)

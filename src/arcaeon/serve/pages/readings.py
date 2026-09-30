@@ -146,8 +146,8 @@ def render(req) -> tuple[int, str]:
     if not a or not b:
         return _refusal(req, "Choose both readings ledgers first.", a, b)
     body, problem = C.fenced(req.fence, {"a": a, "b": b})
-    if problem:
-        return _refusal(req, problem)
+    if problem or body is None:  # fenced() pairs a None body with its refusal
+        return _refusal(req, problem or "That path could not be opened.")
     result = h_readings.compare(body)
     C.journal_as("POST", "/v1/second-read/compare", body, result)
     if not isinstance(result, dict):
@@ -156,8 +156,10 @@ def render(req) -> tuple[int, str]:
     word, rc = result.get("verdict"), result.get("exit")
     if rc == V.EXIT_USAGE:
         word = None
-    claims = result.get("claims") if isinstance(result.get("claims"), list) else []
-    summary = result.get("summary") if isinstance(result.get("summary"), dict) else {}
+    claims = result.get("claims")
+    claims = claims if isinstance(claims, list) else []
+    summary = result.get("summary")
+    summary = summary if isinstance(summary, dict) else {}
     indep = result.get("independence")
     indep_html = (f'<p class="independence">Readers, as the rows describe them: '
                   f"{C.esc(str(indep).replace('_', ' '))}.</p>" if indep else "")

@@ -218,8 +218,8 @@ def render(req) -> tuple[int, str]:
         return _refusal(req, "Choose a mandate file first.", mandate, ledger)
     fields = {"mandate": mandate, **({"ledger": ledger} if ledger else {})}
     body, problem = C.fenced(req.fence, fields)
-    if problem:
-        return _refusal(req, problem)
+    if problem or body is None:  # fenced() pairs a None body with its refusal
+        return _refusal(req, problem or "That path could not be opened.")
     root = req.fence.root if req.fence is not None else None
     explained, _explained = _explain(body["mandate"], root)
     html = (f'<h2>What <code>{C.esc(mandate)}</code> allows</h2>' + explained)

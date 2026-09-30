@@ -75,6 +75,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"arcaeon serve: cannot listen on 127.0.0.1:{a.port} "
               f"({e.strerror or type(e).__name__})", file=sys.stderr)
         return V.EXIT_COULD_NOT_LOOK
+    if srv.fence is None:  # a directory root always fences; never serve unfenced
+        srv.server_close()
+        print(f"arcaeon serve: COULD NOT LOOK: no path fence for {root}", file=sys.stderr)
+        return V.EXIT_COULD_NOT_LOOK
     print(f"arcaeon serve: serving paths under {srv.fence.root}", file=sys.stderr, flush=True)
     print(f"arcaeon serve: token in {auth.token_path()} "
           "(send it as `Authorization: Bearer <token>`; --print-token shows it)",
