@@ -72,6 +72,16 @@ reader can tell a call that was stopped from a call that went through.
 Beside them, `no_matching_mandate` counts calls no mandate rule matched at
 all: drift, kept apart from calls a rule matched and refused.
 
+## Bearer words
+
+Every sentence on an evidence pack's first page ends in one of these, in
+square brackets, naming what bears it. The full definitions are in
+[What it can and cannot prove](WHAT_IT_CAN_AND_CANNOT_PROVE.md).
+
+- `bytes`: a hash over frozen content proves it, the manifest hashes and the chain.
+- `order`: only a commitment made before the act proves it, the witness pin and the build time against the pin time.
+- `asserted`: no field carries it, the operator's own statement of the window and the system, the completeness of the could not look list, that any row is true.
+
 ## Many logs at once
 
 A summary over many logs keeps these words side by side: so many VERIFIED, so

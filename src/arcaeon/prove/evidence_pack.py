@@ -26,10 +26,21 @@ __all__ = ["build_pack", "select_window", "parse_when", "PackUsageError",
            "PACK_SCHEMA", "MANIFEST", "CNL_FILE", "README", "DOES_NOT_SHOW",
            "README_DOES_NOT_SHOW",
            "OPERATOR_AT_T", "OPERATOR_AT_T_NOTE", "PROSE_HASH_ONLY", "render_readme",
-           "newest_ts", "rederived_independence"]
+           "newest_ts", "rederived_independence", "BEARER_FILE", "BEARER_CLASSES",
+           "BEARER_ALLOWED", "BEARER_SCHEMA", "render_page_one", "render_bearer",
+           "BEARER_FALSIFIER", "falsifier_files", "BEARER_SINCE_SCHEMA",
+           "render_readme_pre_bearer",
+           "page_one_sentences", "sentence_sha256"]
 
-#: The evidence-pack manifest schema. 1 is the first (K053).
-PACK_SCHEMA = 1
+#: The evidence-pack manifest schema. 1 is the first (K053); 2 adds the
+#: bearer classes (README.md's brackets and its twin README.json).
+PACK_SCHEMA = 2
+#: The first pack schema whose page one carries bearer classes. A pack whose
+#: manifest names an older schema, with no README.json and no bracket on page
+#: one, was built before them: verify re-renders its page one untagged and
+#: says the classes are not present, the verdict unchanged. One with either
+#: is checked in full.
+BEARER_SINCE_SCHEMA = 2
 #: The manifest's file name. Every OTHER file in the pack is hashed in it.
 MANIFEST = "manifest.json"
 #: Every COULD NOT LOOK the build reached, one entry each; `[]` when none (K054).
@@ -108,6 +119,102 @@ OPERATOR_AT_T_NOTE = ("who operated the witness when each pin was taken is "
 PROSE_HASH_ONLY = "not re-derived, hash only"
 #: Prose files verify re-renders and compares word for word (K06xR3).
 REDERIVED_PROSE = ("README.md", "ARTICLE_12_SUMMARY.md")
+#: The bearer class of each sentence on page one: what carries it.
+#: `bytes`: a hash over frozen content proves it (the manifest hashes, the
+#: chain). `order`: only a commitment made before the act proves it (the
+#: witness pin, built_at against the pin time). `asserted`: no field carries
+#: it (the operator's statement of the window and the system, the
+#: completeness of the could-not-look list, that any row is true). Weakest
+#: last: a line holding two sentences carries the weaker one's class.
+BEARER_CLASSES = ("bytes", "order", "asserted")
+#: The machine-readable twin of README.md: each sentence id, the sha256 of
+#: its text (the line without its bracket), its line and its class.
+BEARER_FILE = "README.json"
+BEARER_SCHEMA = 2
+#: Every sentence id page one can print and the classes it may carry. Fixed
+#: here, never read from a pack: a pack whose twin says otherwise is BROKEN.
+#: No `bytes` sentence names a pin or an operator's statement.
+BEARER_ALLOWED: dict[str, tuple[str, ...]] = {
+    "intro.scope": ("asserted",),
+    "intro.chain": ("bytes",),
+    "intro.pin": ("order",),
+    "intro.no_pin": ("asserted",),
+    "legend": ("asserted",),
+    "agent.selected": ("asserted",),
+    "agent.names_seen": ("bytes",),
+    "agent.system_id": ("asserted",),
+    "agent.provider": ("asserted",),
+    "window.from": ("asserted",),
+    "window.to": ("asserted",),
+    "window.rows": ("bytes",),
+    "window.unplaced": ("bytes",),
+    "deal.tapes": ("asserted",),
+    "deal.dispute": ("bytes",),
+    "deal.files": ("bytes",),
+    "mandate.file": ("bytes",),
+    "mandate.counts": ("bytes",),
+    "mandate.rows": ("bytes",),
+    "readings.receipt": ("bytes",),
+    "readings.verify": ("bytes",),
+    "readings.caveat": ("asserted",),
+    "verdict": ("bytes",),
+    "dns.compliance": ("asserted",),
+    "dns.behaved": ("asserted",),
+    "dns.independence": ("asserted",),
+    "dns.operator": ("asserted",),
+    "dns.aat": ("asserted",),
+    "dns.retention": ("asserted",),
+    "check.rehash": ("bytes",),
+    "check.records": ("bytes",),
+}
+#: The falsifier of every [asserted] sentence: the check a stranger runs to
+#: catch it false. A coverage sentence on page one (what the window or the
+#: record covers, not what the bytes are) is [asserted] unless derived, and
+#: an [asserted] sentence with no falsifier may not be on page one. Where
+#: nothing in the pack can catch it, the falsifier says so ("none derivable")
+#: and names what to compare it with. Fixed here, never read from a pack; a
+#: file it names must be in every pack that prints the sentence.
+_WINDOW_FALSIFIER = ("could_not_look.json, and `arcaeon evidence-pack verify .` "
+                     "re-deriving the window from records.jsonl")
+_OPERATOR_FALSIFIER = "none derivable; compare with the operator's own records"
+BEARER_FALSIFIER: dict[str, str] = {
+    "intro.scope": _WINDOW_FALSIFIER,
+    "intro.no_pin": ("none derivable; with no pin in manifest.json, rewrite "
+                     "records.jsonl, rehash it and see `arcaeon evidence-pack "
+                     "verify .` still pass"),
+    "legend": ("README.json, and `arcaeon evidence-pack verify .` checking each "
+               "bracket against the fixed map"),
+    "agent.selected": _WINDOW_FALSIFIER,
+    "agent.system_id": _OPERATOR_FALSIFIER,
+    "agent.provider": _OPERATOR_FALSIFIER,
+    "window.from": _WINDOW_FALSIFIER,
+    "window.to": _WINDOW_FALSIFIER,
+    "deal.tapes": ("buyer.deal.jsonl and seller.deal.jsonl, and `arcaeon "
+                   "evidence-pack verify .` re-running the deal"),
+    "readings.caveat": "none derivable; check the claim against its own source",
+    "dns.compliance": "none derivable; compare with the regulator's own reading",
+    "dns.behaved": "none derivable; compare the rows with what the agent did",
+    "dns.independence": "manifest.json, its witness `independence` field",
+    "dns.operator": "manifest.json, its `operator_at_t` field",
+    "dns.aat": "none derivable here; a pack built with --format aat lists the gaps",
+    "dns.retention": "none derivable; compare with the holder's own records",
+}
+#: A file name inside a falsifier: verify checks each one is in the pack.
+_FALSIFIER_FILE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*\.(?:jsonl|json|md|sha256|zip)\b")
+
+
+def falsifier_files(text: str) -> list[str]:
+    """The pack files a falsifier names, in order, each once."""
+    out: list[str] = []
+    for m in _FALSIFIER_FILE.findall(text):
+        if m not in out:
+            out.append(m)
+    return out
+
+
+#: The does-not-show bullets' sentence ids, in the order of DOES_NOT_SHOW.
+_DNS_IDS = ("dns.compliance", "dns.behaved", "dns.independence", "dns.operator",
+            "dns.aat", "dns.retention")
 
 
 def rederived_independence(kind: Any) -> tuple[str, str]:
@@ -381,8 +488,9 @@ def build_pack(ledger: str | Path, out: str | Path, *,
         checks.append(r_check)
         _fold_check(res, r_check)
     _write_cnl(out, checks)
-    (out / README).write_bytes(render_readme(res, window, system_id=system_id,
-                                             provider=provider).encode("utf-8"))
+    page, twin = render_page_one(res, window, system_id=system_id, provider=provider)
+    (out / README).write_bytes(page.encode("utf-8"))
+    (out / BEARER_FILE).write_bytes(twin.encode("utf-8"))
     audit_manifest = json.loads((out / MANIFEST).read_text(encoding="utf-8"))
     _write_manifest(out, res, integrity, audit_manifest, window, unplaced, checks,
                     aat=aat, deal=deal_block, mandate=mandate_block,
@@ -785,13 +893,16 @@ _VERDICT_WORDS = {
 }
 
 
-def render_readme(res: dict, window: list[dict], *,
-                  system_id: str = "", provider: str = "") -> str:
-    """README.md's text, one page: the agent, the window, the verdict in
-    words, what the pack does not show, and the two commands to check it.
-    Written before the manifest, so it is hashed there, as bytes, so the page
-    is LF on every OS. One function for build and verify: verify re-renders
-    it from the records and compares it word for word (K06xR3)."""
+def sentence_sha256(text: str) -> str:
+    """The sha256 of one page-one sentence: its line without the bracket."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def page_one_sentences(res: dict, window: list[dict], *,
+                       system_id: str = "", provider: str = "") -> list:
+    """Page one as a list: a plain string for a heading, a blank or a code
+    line, an (id, text) pair for a sentence. The sentence's class is read off
+    BEARER_ALLOWED, never chosen here."""
     w = res["window"]
     seen: list[str] = []
     for r in window:
@@ -805,48 +916,56 @@ def render_readme(res: dict, window: list[dict], *,
                 seen.append(v)
     agent_line = (f"`{w['agent']}` (matched on a row's `agent` or `system_id`)"
                   if w["agent"] else "every agent in the ledger (no --agent given)")
-    lines = [
+    lines: list = [
         "# Evidence pack",
         "",
-        "This folder is evidence toward the logging duties in the EU AI Act for one "
-        "agent and one window of time. It shows what was written and that every "
-        "row hashes to the next. With a pin, it also shows the rows up to the "
-        "pinned head are the ones that existed at pin time. Without a pin, a full "
-        "rewrite by the holder still checks out.",
+        ("intro.scope", "This folder is evidence toward the logging duties in the EU AI "
+                        "Act for one agent and one window of time."),
+        ("intro.chain", "It shows what was written and that every row hashes to the "
+                        "next."),
+        ("intro.pin", "With a pin, it also shows the rows up to the pinned head are the "
+                      "ones that existed at pin time."),
+        ("intro.no_pin", "Without a pin, a full rewrite by the holder still checks out."),
+        "",
+        ("legend", "Each line ends in what bears it: [bytes] is a hash over frozen "
+                   "content, [order] is a commitment made before the act, [asserted] "
+                   "is the builder's word and no field in the pack carries it."),
         "",
         "## The agent",
         "",
-        f"- Agent: {agent_line}",
-        f"- Names seen in the window's rows: "
-        f"{', '.join('`' + n + '`' for n in seen) if seen else 'none'}",
+        ("agent.selected", f"- Agent: {agent_line}"),
+        ("agent.names_seen", f"- Names seen in the window's rows: "
+                             f"{', '.join('`' + n + '`' for n in seen) if seen else 'none'}"),
     ]
     if system_id:
-        lines.append(f"- System id given at build: `{system_id}`")
+        lines.append(("agent.system_id", f"- System id given at build: `{system_id}`"))
     if provider:
-        lines.append(f"- Provider given at build: {provider}")
+        lines.append(("agent.provider", f"- Provider given at build: {provider}"))
     rows = w["rows"]
     span = (f"ledger lines {w['first_line']} to {w['last_line']}" if rows else "no lines")
     lines += [
         "",
         "## The window",
         "",
-        f"- From: {w['from'] or 'the first row'}",
-        f"- To: {w['to'] or 'the last row'}",
-        f"- Rows: {rows} ({span}); each is in window.jsonl with its ledger line number",
+        ("window.from", f"- From: {w['from'] or 'the first row'}"),
+        ("window.to", f"- To: {w['to'] or 'the last row'}"),
+        ("window.rows", f"- Rows: {rows} ({span}); each is in window.jsonl with its "
+                        "ledger line number"),
     ]
     if w.get("unplaced_lines"):
-        lines.append(f"- Rows whose time could not be read, left out: lines "
-                     f"{w['unplaced_lines']}")
+        lines.append(("window.unplaced", f"- Rows whose time could not be read, left "
+                                         f"out: lines {w['unplaced_lines']}"))
     dl = res.get("deal")
     if dl:
         lines += [
             "",
             "## The deal",
             "",
-            f"- Deal `{dl['id']}`, buyer tape {dl['buyer_tape']}, seller tape "
-            f"{dl['seller_tape']}",
-            f"- Dispute: {dl['summary']}",
-            f"- Files: {', '.join(dl['files'])} (timeline.md is for a person)",
+            ("deal.tapes", f"- Deal `{dl['id']}`, buyer tape {dl['buyer_tape']}, seller "
+                           f"tape {dl['seller_tape']}"),
+            ("deal.dispute", f"- Dispute: {dl['summary']}"),
+            ("deal.files", f"- Files: {', '.join(dl['files'])} (timeline.md is for a "
+                           "person)"),
         ]
     mb = res.get("mandate")
     if mb:
@@ -855,11 +974,12 @@ def render_readme(res: dict, window: list[dict], *,
             "",
             "## The mandate",
             "",
-            f"- Mandate file: {mb['mandate_file']}, sha256 "
-            f"{mb['mandate_file_sha256'] or 'not read'}",
-            f"- Calls in the window: {c['inside']} inside, {c['outside']} outside, "
-            f"{c['could_not_look']} the gate could not judge",
-            f"- The outside rows, verbatim: {MANDATE_ROWS}",
+            ("mandate.file", f"- Mandate file: {mb['mandate_file']}, sha256 "
+                             f"{mb['mandate_file_sha256'] or 'not read'}"),
+            ("mandate.counts", f"- Calls in the window: {c['inside']} inside, "
+                               f"{c['outside']} outside, {c['could_not_look']} the gate "
+                               "could not judge"),
+            ("mandate.rows", f"- The outside rows, verbatim: {MANDATE_ROWS}"),
         ]
     rb = res.get("readings")
     if rb:
@@ -867,12 +987,13 @@ def render_readme(res: dict, window: list[dict], *,
             "",
             "## The second read",
             "",
-            f"- Comparison receipt: {READINGS_RECEIPT} (from {rb['source']}), kind "
-            f"{rb.get('kind') or 'not read'}",
-            f"- receipt verify: {'passes' if rb.get('ok') else 'does not pass'}; ledger "
-            f"{rb.get('ledger_status') or 'not read'}",
-            "- Two readers agreeing measures how a sentence reads, not whether a claim "
-            "is true.",
+            ("readings.receipt", f"- Comparison receipt: {READINGS_RECEIPT} (from "
+                                 f"{rb['source']}), kind {rb.get('kind') or 'not read'}"),
+            ("readings.verify", f"- receipt verify: "
+                                f"{'passes' if rb.get('ok') else 'does not pass'}; ledger "
+                                f"{rb.get('ledger_status') or 'not read'}"),
+            ("readings.caveat", "- Two readers agreeing measures how a sentence reads, "
+                                "not whether a claim is true."),
         ]
     verdict_text = _VERDICT_WORDS.get(res["verdict"], _VERDICT_WORDS[V.COULD_NOT_LOOK])
     if dl and res["verdict"] == V.BROKEN and str(res.get("finding", "")).startswith("deal "):
@@ -882,30 +1003,106 @@ def render_readme(res: dict, window: list[dict], *,
         "",
         "## The verdict",
         "",
-        verdict_text,
+        ("verdict", verdict_text),
         "",
         "## What this pack does not show",
         "",
     ]
-    lines += [f"- {b}" for b in README_DOES_NOT_SHOW]
+    lines += [(i, f"- {b}") for i, b in zip(_DNS_IDS, README_DOES_NOT_SHOW)]
     lines += [
         "",
         "## How to check it yourself",
         "",
-        "Rehash every file against manifest.json and rerun the chain:",
+        ("check.rehash", "Rehash every file against manifest.json and rerun the chain:"),
         "",
         "```text",
         "arcaeon evidence-pack verify .",
         "```",
         "",
-        "Check the records chain on its own, with nothing from this pack but the file:",
+        ("check.records", "Check the records chain on its own, with nothing from this "
+                          "pack but the file:"),
         "",
         "```text",
         "arcaeon verify records.jsonl",
         "```",
         "",
     ]
-    return "\n".join(lines)
+    return lines
+
+
+def render_page_one(res: dict, window: list[dict], *,
+                    system_id: str = "", provider: str = "") -> tuple[str, str]:
+    """(README.md, README.json): page one with each sentence's bracket at the
+    end of its line, and its twin listing each sentence id, the sha256 of its
+    text, its line and its class, and for an [asserted] sentence its
+    falsifier, printed after the class: "[asserted; falsifier: ...]". One
+    function for build and verify."""
+    out: list[str] = []
+    sentences: list[dict] = []
+    for item in page_one_sentences(res, window, system_id=system_id, provider=provider):
+        if isinstance(item, str):
+            out.append(item)
+            continue
+        sid, text = item
+        cls = BEARER_ALLOWED[sid][0]
+        entry = {"id": sid, "line": 0, "sha256": sentence_sha256(text), "class": cls}
+        if cls == "asserted":
+            entry["falsifier"] = BEARER_FALSIFIER[sid]
+            out.append(f"{text} [{cls}; falsifier: {entry['falsifier']}]")
+        else:
+            out.append(f"{text} [{cls}]")
+        entry["line"] = len(out)
+        sentences.append(entry)
+    counts = {c: sum(x["class"] == c for x in sentences) for c in BEARER_CLASSES}
+    twin = {"bearer_schema": BEARER_SCHEMA, "page": README,
+            "classes": list(BEARER_CLASSES), "counts": counts, "sentences": sentences}
+    return "\n".join(out), json.dumps(twin, indent=2) + "\n"
+
+
+def render_readme(res: dict, window: list[dict], *,
+                  system_id: str = "", provider: str = "") -> str:
+    """README.md's text, one page: the agent, the window, the verdict in
+    words, what the pack does not show, and the two commands to check it.
+    Every sentence ends in its bearer class, [bytes], [order] or [asserted].
+    Written before the manifest, so it is hashed there, as bytes, so the page
+    is LF on every OS. One function for build and verify: verify re-renders
+    it from the records and compares it word for word (K06xR3)."""
+    return render_page_one(res, window, system_id=system_id, provider=provider)[0]
+
+
+def render_readme_pre_bearer(res: dict, window: list[dict], *,
+                             system_id: str = "", provider: str = "") -> str:
+    """README.md as a pack built before the bearer classes (pack schema 1)
+    printed it: the same sentences, no brackets, no legend, the four intro
+    sentences as one paragraph. Verify re-renders an older pack's page one
+    with it, word for word, so the page is still re-derived."""
+    out: list[str] = []
+    intro: list[str] = []
+    skip_blank = False
+    for item in page_one_sentences(res, window, system_id=system_id, provider=provider):
+        if isinstance(item, str):
+            if skip_blank and item == "":
+                skip_blank = False
+                continue
+            if intro:
+                out.append(" ".join(intro))
+                intro = []
+            out.append(item)
+            continue
+        sid, text = item
+        if sid.startswith("intro."):
+            intro.append(text)
+        elif sid == "legend":
+            skip_blank = True
+        else:
+            out.append(text)
+    return "\n".join(out)
+
+
+def render_bearer(res: dict, window: list[dict], *,
+                  system_id: str = "", provider: str = "") -> str:
+    """README.json's text: the bearer twin of page one."""
+    return render_page_one(res, window, system_id=system_id, provider=provider)[1]
 
 
 def _write_manifest(out: Path, res: dict, integrity: dict, audit_manifest: dict,
