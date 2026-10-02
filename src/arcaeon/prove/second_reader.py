@@ -411,7 +411,21 @@ def _rows_for(pack: Path, manifest: dict, verify_res: dict, witness) -> list[Row
     twin = _load(pack / "README.json")
     readme = pack / "README.md"
     if isinstance(twin, dict) and isinstance(twin.get("sentences"), list):
-        page = readme.read_text(encoding="utf-8").split("\n") if readme.is_file() else None
+        page = None
+        if readme.is_file():
+            try:
+                page = readme.read_bytes().decode("utf-8").split("\n")
+            except UnicodeDecodeError as e:
+                # a damaged page fails closed: one row, and no sentence row is read off it
+                t.add("sentence", "README.md is UTF-8 text the twin's sentences can be read off",
+                      "README.md", "utf-8", f"not utf-8 at byte {e.start}", "utf-8 decode",
+                      "README.md's bytes decoded as UTF-8", word=MISMATCH)
+                return t.rows
+            except OSError as e:
+                t.add("sentence", "README.md is UTF-8 text the twin's sentences can be read off",
+                      "README.md", "utf-8", None, "utf-8 decode",
+                      f"README.md could not be read: {type(e).__name__}")
+                return t.rows
         for s in twin["sentences"]:
             if not isinstance(s, dict):
                 continue

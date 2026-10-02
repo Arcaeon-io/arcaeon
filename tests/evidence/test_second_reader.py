@@ -28,10 +28,11 @@ from arcaeon.record.ledger import Ledger
 from arcaeon.record.ledger.witness import WitnessStore, publish_head
 
 NS = "acme"
-DEMO_README_SHA = "a890bf5290db02c5102e3283e30e6f685976d2e407f5f1113e2cc6cd01788f9b"
+# README pins re-taken after merging main's bearer classes (pack schema 2: every sentence bracketed, plus a legend line); was a890bf52...
+DEMO_README_SHA = "b2cd4299f856f99b6a3d5299d100471d4ede24fdfe718da68df4e674ce285f7f"
 DEMO_RECORDS_SHA = "fb3bb4cb9fee51fb94909c3cd39cfde310ebd4b4b834e39fb0e89dad4759280d"
 DEMO_HEAD = "bac3de455350a046f6e21ade25d45e0e"
-TAMPERED_README_SHA = "98cd18567db1cc8a0fb04004ee8b8724c2d7939b3776b3c2d70da8ec7eef8c2a"
+TAMPERED_README_SHA = "122378564cc84949e06bea89dbf5fd0380278a765090b6bd352e9769c8ae0d6a"
 TAMPERED_RECORDS_SHA = "923bc4cc9bf614325fa1f85ee5db34d95daacaded2aee8969e7253b29895ac9f"
 
 
@@ -413,7 +414,7 @@ def test_cli_unwritable_json_path_is_bad_usage(pack, tmp_path, capsys):
 def test_bearer_twin_sentences_are_recomputed(pack):
     """A schema 2 pack's README.json lists each sentence's sha256 and class;
     the reader rehashes the line without its bracket and reads the bracket.
-    Written by hand here: main builds schema 1 packs, which have no twin."""
+    Written by hand here, independent of the twin the builder writes."""
     import hashlib
     line_text = "The records are the rows below."
     readme = pack / "README.md"
@@ -433,60 +434,55 @@ def test_bearer_twin_sentences_are_recomputed(pack):
         ("README.json sentences[s.bad].class", MISMATCH)]
 
 
+def test_a_readme_that_is_not_utf8_fails_closed(pack, capsys):
+    """A byte that is not UTF-8 on page one: one MISMATCH row naming the byte,
+    no sentence row read off the page, overall BROKEN and exit 1, no traceback."""
+    readme = pack / "README.md"
+    readme.write_bytes(b"\xff\xfe" + readme.read_bytes())
+    rep = second_reader(pack)
+    bad = [r for r in rep.rows if r.where == "README.md"]
+    assert len(bad) == 1 and bad[0].verdict == MISMATCH
+    assert bad[0].recomputed == "not utf-8 at byte 0"
+    assert not any(r.where.startswith("README.json sentences[") for r in rep.rows)
+    assert rep.verdict == V.BROKEN and rep.exit == 1
+    assert evidence_pack_verify.main([str(pack), "--second-reader"]) == 1
+    out = capsys.readouterr().out
+    assert "not utf-8 at byte 0" in out and "BROKEN: second reader" in out
+
+
 REAL_TWIN = Path(__file__).parent / "fixtures" / "bearer_readme_real.json"
-# page one's legend: schema 1 (this branch) prints no legend, so its text is
-# written here; the test checks it against the real twin's sha256 first.
-LEGEND = ("Each line ends in what bears it: [bytes] is a hash over frozen content, [order] "
-          "is a commitment made before the act, [asserted] is the builder's word and no "
-          "field in the pack carries it.")
 
 
 def test_real_bearer_twin_from_the_bearer_branch(pack):
     """The README.json the bearer branch built from this same demo ledger (see
-    fixtures/bearer_readme_real.SOURCE.txt). Only the twin was copied, so page
-    one is rebuilt from this branch's own schema 1 page: every twin sentence is
-    found there by its sha256 (the legend excepted, which schema 1 omits), then
-    set at the twin's line with the twin's bracket. Each sentence then gives the
-    two rows the hand-written twin's s.ok gives, both VERIFIED, including the
-    [asserted; falsifier: ...] brackets the hand-written twin never has."""
-    import hashlib
-    import re
+    fixtures/bearer_readme_real.SOURCE.txt). With main's bearer classes merged,
+    this branch builds the same twin byte for byte, and each of its sentences
+    gives two rows, both VERIFIED, including the [asserted; falsifier: ...]
+    brackets the hand-written twin never has."""
     twin = json.loads(REAL_TWIN.read_text(encoding="utf-8"))
     sents = twin["sentences"]
     assert twin["bearer_schema"] == 2 and twin["page"] == "README.md"
     assert len(sents) == sum(twin["counts"].values()) == 21
-
-    def sha(t):
-        return hashlib.sha256(t.encode("utf-8")).hexdigest()
-
-    readme = pack / "README.md"
-    known = {sha(LEGEND): LEGEND}
-    for line in readme.read_text(encoding="utf-8").split("\n"):
-        for t in [line, *re.split(r"(?<=\.) ", line)]:
-            known[sha(t)] = t
-    missing = [s["id"] for s in sents if s["sha256"] not in known]
-    assert missing == [], missing
-
-    page = [""] * max(s["line"] for s in sents)
-    for s in sents:
-        bracket = s["class"] + (f"; falsifier: {s['falsifier']}" if "falsifier" in s else "")
-        page[s["line"] - 1] = f"{known[s['sha256']]} [{bracket}]"
-    readme.write_text("\n".join(page), encoding="utf-8", newline="\n")
-    shutil.copyfile(REAL_TWIN, pack / "README.json")
+    assert (pack / "README.json").read_bytes() == REAL_TWIN.read_bytes()
 
     rows = [r for r in second_reader(pack).rows if r.kind == "sentence"]
     expect = []
     for s in sents:
         expect += [(f"README.json sentences[{s['id']}]", VERIFIED),
                    (f"README.json sentences[{s['id']}].class", VERIFIED)]
-    assert [(r.where, r.verdict) for r in rows] == expect, \
-        [(r.where, r.claimed, r.recomputed) for r in rows if r.verdict != VERIFIED]
+    assert [(r.where, r.verdict) for r in rows] == expect,         [(r.where, r.claimed, r.recomputed) for r in rows if r.verdict != VERIFIED]
     assert [r.recomputed for r in rows[1::2]] == [s["class"] for s in sents]
 
 
-def test_real_bearer_twin_beside_a_schema_1_page_is_mismatch(pack):
-    """The twin copied into this branch's pack as it is, page one untouched:
-    a schema 1 page bears no brackets, so no class row can verify."""
+def test_real_bearer_twin_beside_a_bracketless_page_is_mismatch(pack):
+    """The real twin beside page one with every closing bracket cut off (what a
+    schema 1 page looks like): no class row can verify."""
+    import re
+    readme = pack / "README.md"
+    page = readme.read_text(encoding="utf-8")
+    bare = re.sub(r" \[(?:bytes|order|asserted[^\]]*)\]$", "", page, flags=re.M)
+    assert bare != page
+    readme.write_text(bare, encoding="utf-8", newline="\n")
     shutil.copyfile(REAL_TWIN, pack / "README.json")
     rows = [r for r in second_reader(pack).rows if r.kind == "sentence"]
     assert len(rows) == 42

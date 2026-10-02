@@ -44,6 +44,11 @@ readers answered differently are filed as DISAGREED beside it, with both
 readings and both reader ids; two readers agreeing measures how ambiguous the
 sentence was for them, not whether a claim holds.
 
+**MISMATCH.** A row word of the second reader (`evidence-pack verify
+--second-reader`): the value the pack claims and the value recomputed from its
+bytes differ, and the row shows both. One MISMATCH row makes the whole report
+BROKEN; the claim it sits on cannot be relied on until you know why.
+
 ## Reason words
 
 A COULD NOT LOOK answer carries one of these in `reason_word`, next to

@@ -37,3 +37,7 @@ That is `arcaeon evidence-pack --ledger L --out DIR --witness W --namespace acme
 --system-id sys-a --provider "Demo Provider" --zip` on the bearer branch; it
 printed "VERIFIED: evidence pack at ..." and exited 0. Only README.json was
 copied here; the bearer branch is not merged into this one.
+
+Update after merging main (bearer classes) into this branch: this branch now
+builds this same README.json byte for byte from the demo ledger, and
+test_real_bearer_twin_from_the_bearer_branch checks exactly that.
