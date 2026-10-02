@@ -540,9 +540,12 @@ def build_receipt(kind: str, subject: dict, checks: list, scope: dict, *,
 
 
 #: The fields every receipt this format issues carries (build_receipt writes
-#: all of them). A JSON object that is not ours is told by receipt_version.
+#: all of them). A JSON object is ours when its receipt_version OR its
+#: body_digest carries our marker (the same two markers the web verifier's
+#: detect.js checks), so editing one of them away does not make it foreign.
 REQUIRED_FIELDS = BODY_FIELDS + ("body_digest",)
 RECEIPT_VERSION_PREFIX = "arcaeon-receipt/"
+BODY_DIGEST_PREFIX = "sha256:json-c14n:v1:"
 
 #: The one line `receipt verify` gives for a JSONL input (one receipt per line).
 JSONL_REASON = "JSONL is not supported; pass one receipt per file"
@@ -550,16 +553,20 @@ JSONL_REASON = "JSONL is not supported; pass one receipt per file"
 
 def not_our_format(receipt: Any) -> Optional[str]:
     """None when `receipt` is an Arcaeon receipt (a JSON object whose
-    receipt_version is arcaeon-receipt/*), else the one-line reason it is not.
+    receipt_version is arcaeon-receipt/* or whose body_digest is a string
+    starting sha256:json-c14n:v1:), else the one-line reason it is not.
 
     Another vendor's file is not a broken Arcaeon receipt: calling it BROKEN
     or "body digest mismatch" accuses a file of failing a check it was never
-    under. A file that IS ours (its receipt_version says so) and then lacks a
-    field is a tampered receipt, and stays BROKEN."""
+    under. A file that IS ours (either marker says so) and then lacks a field,
+    receipt_version included, is a tampered receipt, and stays BROKEN."""
     if not isinstance(receipt, dict):
         return "not an Arcaeon receipt: a receipt is a JSON object at the top level"
     ver = receipt.get("receipt_version")
     if isinstance(ver, str) and ver.startswith(RECEIPT_VERSION_PREFIX):
+        return None
+    bd = receipt.get("body_digest")
+    if isinstance(bd, str) and bd.startswith(BODY_DIGEST_PREFIX):
         return None
     if "receipt_version" in receipt:
         return (f"not an Arcaeon receipt: receipt_version {str(ver)[:60]!r} is not "
