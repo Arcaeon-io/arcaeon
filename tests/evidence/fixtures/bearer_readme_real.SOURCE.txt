@@ -1,7 +1,7 @@
 bearer_readme_real.json: the README.json of a real pack built by the bearer branch.
 
 Bearer commit: a69b4c6cf36f37ce559c4065dcaec1f2e9157e1b
-Branch:        bearer-class-2026-09-27 (worktree C:/Users/USER/arcaeon-bearer, PACK_SCHEMA 2)
+Branch:        bearer-class-2026-09-27 (a separate worktree, <bearer>, PACK_SCHEMA 2)
 Built:         2026-09-30, into a scratch folder outside both repos; nothing installed,
                the bearer worktree's src/ put first on sys.path
 File sha256:   4e9ae0aa1391b94efea001fffec99235f8145932271c0d00fe21137a408a6aff (copied byte for byte)
@@ -18,8 +18,8 @@ build_bearer_pack.py:
 
     import sys
     from pathlib import Path
-    sys.path.insert(0, "C:/Users/USER/arcaeon-bearer/src")
-    sys.path.insert(0, "C:/Users/USER/arcaeon-bearer/tests/evidence")
+    sys.path.insert(0, "<bearer>/src")
+    sys.path.insert(0, "<bearer>/tests/evidence")
     from conftest import ROWS
     from arcaeon.record.ledger import Ledger
     from arcaeon.record.ledger.witness import WitnessStore, publish_head
