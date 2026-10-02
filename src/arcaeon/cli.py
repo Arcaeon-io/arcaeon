@@ -40,6 +40,7 @@ VERBS = {
     "proxy":     ("record", "wrap an MCP server and record every call at the seam"),
     "pin":       ("record", "record a ledger head with a witness (local file, or --remote)"),
     "deal":      ("record", "a witnessed transaction: mandate, commit, pay, ship, deliver, cancel, dispute, pack"),
+    "escrow":    ("record", "a release rule over deal rows, mock rail only: hold, settle, state"),
     "mandate":   ("record", "check a call against a mandate, record-only (lint, explain, check)"),
     "reconcile": ("prove",  "two tapes and a counter: MATCHED / MISSING / ALTERED / COULD NOT LOOK"),
     "audit":     ("prove",  "verify a log or export a regulator-ready bundle"),
@@ -174,8 +175,8 @@ def main(argv: list[str] | None = None) -> int:
 #: servers (serve journals each HTTP call itself, as serve:<route>).
 _UNJOURNALED = {"status", "mcp", "serve"}
 #: Verbs whose first positional word is a subcommand, not the target.
-_SUBCOMMAND_VERBS = {"receipt", "once", "audit", "vet", "baseline", "meter", "deal", "distill",
-                     "second-read", "evidence-pack", "mandate"}
+_SUBCOMMAND_VERBS = {"receipt", "once", "audit", "vet", "baseline", "meter", "deal", "escrow",
+                     "distill", "second-read", "evidence-pack", "mandate"}
 
 
 def _journal_target(verb: str, rest: list[str]) -> str | None:
@@ -708,6 +709,11 @@ def _deal(argv) -> int:
     return _run(deal.main, argv)
 
 
+def _escrow(argv) -> int:
+    from arcaeon.record import escrow
+    return _run(escrow.main, argv)
+
+
 # --- prove ---------------------------------------------------------------------
 
 def _reconcile(argv) -> int:
@@ -1158,7 +1164,8 @@ def _lazy(verb: str, argv) -> int:
 
 HANDLERS = {
     "log": _log, "verify": _verify, "receipt": _receipt, "once": _once, "proxy": _proxy,
-    "pin": _pin, "deal": _deal, "reconcile": _reconcile, "audit": _audit, "vet": _vet, "badge": _badge,
+    "pin": _pin, "deal": _deal, "escrow": _escrow,
+    "reconcile": _reconcile, "audit": _audit, "vet": _vet, "badge": _badge,
     "seal": _seal, "baseline": _baseline, "compact": _compact, "distill": _distill,
     "dedup": _dedup, "meter": _meter, "stamp": _stamp, "credits": _credits, "buy": _buy,
     "mcp": _mcp, "status": _status, "selftest": _selftest, "version": _version,

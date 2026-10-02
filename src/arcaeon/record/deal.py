@@ -39,6 +39,18 @@ in it, and are never compared.
   cancel   buyer; the seller may mirror. shared = {reason}.
   dispute  either. shared = {claim, text}. Never compared: a claim is one side's.
 
+RECOURSE (N05). `mandate(recourse=...)` records the recourse tier, one of
+RECOURSE, before any work: it goes in the mandate body (so the digest binds
+it) and beside it in the row as `recourse` (so a sealed mandate still shows
+it). Absent writes no key, so a mandate without one digests as it always did.
+A tier records what the buyer asked for; it is never a promise that anything
+will be paid back. `dispute()` checks it once a hold row is on either tape.
+
+ESCROW ROWS (arcaeon.record.escrow writes them): `hold`, `release`, `refund`
+compared once both sides record them, like the mirrored steps; `look` never
+compared (one side's look at a receipt). They are deal rows like any other,
+so `pack()` carries them.
+
 Two-sided steps (commit, pay) must be on both tapes. A mirrored step (ship,
 deliver, cancel) held by one side only is not a finding; `position` says which
 tape lacks it. Once both sides record a mirrored step, they are compared.
@@ -79,8 +91,8 @@ from arcaeon.prove.reconcile import LIMITS as _RECONCILE_LIMITS
 from arcaeon.prove.reconcile import Finding, load_pins
 from arcaeon.prove.reconcile import _cannot_read, _check_pin, _Cnl, _detail, _Tape
 
-__all__ = ["STEPS", "PARTIES", "CLAIMS", "Deal", "DealReport", "Finding", "dispute",
-           "pack", "check_mandate", "deal_rows", "LIMITS"]
+__all__ = ["STEPS", "PARTIES", "CLAIMS", "RECOURSE", "ESCROW_STEPS", "Deal", "DealReport",
+           "Finding", "dispute", "pack", "check_mandate", "deal_rows", "LIMITS"]
 
 STEPS = ("mandate", "commit", "pay", "ship", "deliver", "cancel", "dispute")
 PARTIES = ("buyer", "seller")
@@ -88,7 +100,19 @@ CLAIMS = ("not_authorized", "terms_altered", "not_shipped", "not_delivered",
           "cancelled_before_ship", "other")
 BOTH_SIDES = ("commit", "pay")                 # must be on both tapes
 MIRRORED = ("ship", "deliver", "cancel")       # compared once both sides record it
-_ORDER = {s: i for i, s in enumerate(STEPS)}
+#: Recourse tiers (N05), recorded on the mandate before any work. A tier names
+#: what the buyer asked for, never a promise: `no_recourse` (pay outright, no
+#: hold), `escrow_challenge_window` (a hold under frozen criteria, settled by
+#: arcaeon.record.escrow), `high` (the buyer asked for more than a hold; what
+#: more is the parties' own agreement, recorded, not interpreted).
+RECOURSE = ("no_recourse", "escrow_challenge_window", "high")
+#: Rows arcaeon.record.escrow writes. hold / release / refund are compared once
+#: both sides record them; look is one side's and never compared.
+ESCROW_STEPS = ("hold", "look", "release", "refund")
+ESCROW_COMPARED = ("hold", "release", "refund")
+_ALL_STEPS = STEPS + ESCROW_STEPS
+_ORDER = {s: i for i, s in enumerate(("mandate", "commit", "hold", "pay", "ship", "deliver",
+                                      "look", "release", "refund", "cancel", "dispute"))}
 
 #: What a deal verdict does not prove. The first three are reconcile's LIMITS in
 #: deal words; the fourth is reconcile's no-pin sentence, verbatim.
@@ -216,19 +240,25 @@ class Deal:
     def mandate(self, *, merchant: str, cap: str, currency: str, not_before: str | None = None,
                 not_after: str | None = None, may: list | None = None,
                 may_not: list | None = None, sealed: str | Path | None = None,
-                ts: str | None = None) -> dict:
+                recourse: str | None = None, ts: str | None = None) -> dict:
         """Buyer only. `cap` is a string amount in `currency`. With `sealed`,
-        the body goes to that sidecar file and the row keeps only its digest."""
+        the body goes to that sidecar file and the row keeps only its digest.
+        `recourse` (one of RECOURSE) is the tier recorded before any work; it
+        sits in the body and, readable even when sealed, in the row."""
         if self.party != "buyer":
             raise ValueError("only the buyer writes a mandate; the seller never holds one")
+        if recourse is not None and recourse not in RECOURSE:
+            raise ValueError(f"recourse must be one of {RECOURSE}, got {recourse!r}")
         body = {"merchant": merchant, "cap": str(cap), "currency": currency,
                 "not_before": not_before, "not_after": not_after,
                 "may": list(may or []), "may_not": list(may_not or [])}
+        if recourse is not None:               # absent writes no key: old digests hold
+            body["recourse"] = recourse
         md = digest_json(body)
         scope = (f"{merchant}, up to {cap} {currency}"
                  + (f", from {not_before}" if not_before else "")
                  + (f", until {not_after}" if not_after else ""))
-        private: dict = {"mandate_digest": md, "scope": scope}
+        private: dict = {"mandate_digest": md, "scope": scope, "recourse": recourse}
         if sealed is not None:
             Path(sealed).write_text(json.dumps({"deal": self.id, "mandate_digest": md,
                                                 "mandate": body}, indent=1), encoding="utf-8")
@@ -441,7 +471,7 @@ def _load_side(party: str, path: str | Path, deal_id: str, cnl: list,
         n = len(t.rows)
         step = row["kind"][5:]
         at = f"{t.path} row {n}"
-        if step not in STEPS:
+        if step not in _ALL_STEPS:
             return refuse(f"{label} row {n} is a deal row of unknown step {step!r}",
                           f"a deal step named {step!r}", "name_not_found", at)
         if row.get("party") != party:
@@ -583,14 +613,19 @@ def _position(by: dict, timeline: list, checked: list) -> list[str]:
     """Plain sentences from the rows alone. Never a verdict word."""
     out = []
     B, S = by["buyer"], by["seller"]
-    for step in STEPS:
+    for step in _ALL_STEPS:
         nb, ns_ = len(B[step]), len(S[step])
+        if step in ESCROW_STEPS and not nb and not ns_:
+            continue                           # a deal with no hold says nothing about one
         if step == "mandate":
             if nb:
                 out.append(f"mandate: the buyer tape holds {nb} mandate row(s); the seller "
                            f"never holds one.")
             else:
                 out.append("mandate: no mandate row on the buyer tape.")
+            for _, r in B[step]:
+                if r.get("recourse") is not None:
+                    out.append(f"the buyer's mandate row records recourse {r.get('recourse')}.")
             continue
         if step == "dispute":
             claims = [f"the {p}'s dispute row claims {r['shared'].get('claim')}"
@@ -642,6 +677,61 @@ def _position(by: dict, timeline: list, checked: list) -> list[str]:
     return out
 
 
+def _first_work_row(B: dict) -> float:
+    """Row number of the buyer tape's first commit or hold: where work begins."""
+    work = [n for n, _ in B["commit"] + B["hold"]]
+    return min(work) if work else float("inf")
+
+
+def recourse_before_work(B: dict) -> tuple[str | None, int | None]:
+    """The recourse tier on the latest buyer mandate row written before the
+    first commit or hold row, and that row's number; (None, None) if none.
+    `B` is the buyer's rows by step, as (row number, row) pairs."""
+    first = _first_work_row(B)
+    before = [(n, r) for n, r in B["mandate"] if r.get("recourse") is not None and n < first]
+    if not before:
+        return None, None
+    n, r = before[-1]
+    return r.get("recourse"), n
+
+
+def _recourse_check(by: dict, findings: list, cnl: list, tapes: dict) -> None:
+    """N05: the recourse tier. A mandate row's tier must be one of RECOURSE and,
+    when the body is in the row, the same as the body's. Once a hold row is on
+    either tape, the buyer must have recorded a tier before work began (else
+    MISSING), and every hold must carry that tier (else ALTERED)."""
+    B = by["buyer"]
+    where = str(tapes["buyer"].path)
+    for k, (n, r) in enumerate(B["mandate"], start=1):
+        tier = r.get("recourse")
+        if tier is not None and tier not in RECOURSE:
+            cnl.append(_Cnl(f"buyer tape row {n} records recourse {tier!r}, which is not one of "
+                            f"{', '.join(RECOURSE)}", "a recourse tier", where, "unreadable"))
+        body = r.get("mandate")
+        if isinstance(body, dict) and body.get("recourse") != tier:
+            findings.append(Finding(_v.ALTERED, f"mandate#{k}", "buyer",
+                                    f"buyer tape row {n}: the row's recourse "
+                                    f"({tier!r}) differs from the mandate body's "
+                                    f"({body.get('recourse')!r})", index_side="buyer"))
+    holds = [(p, k, n, r) for p in PARTIES for k, (n, r) in enumerate(by[p]["hold"], start=1)]
+    if not holds:
+        return
+    tier, _ = recourse_before_work(B)
+    if tier is None:
+        findings.append(Finding(_v.MISSING, "hold#1", "buyer",
+                                "a hold row is on the tapes, and no mandate row on the buyer "
+                                "tape recorded a recourse tier before work began",
+                                index_side=holds[0][0]))
+        return
+    for p, k, n, r in holds:
+        held = r["shared"].get("recourse") if isinstance(r.get("shared"), dict) else None
+        if held != tier:
+            findings.append(Finding(_v.ALTERED, f"hold#{k}", p,
+                                    f"{p} tape row {n}: the hold carries recourse {held!r}; the "
+                                    f"buyer's mandate recorded {tier!r} before work began",
+                                    index_side=p))
+
+
 def dispute(deal_id: str, buyer: str | Path, seller: str | Path, *,
             pins: list[dict] | None = None, pin_path: str | Path | None = None,
             buyer_ns: str | None = None, seller_ns: str | None = None) -> DealReport:
@@ -678,7 +768,7 @@ def _dispute(deal_id, buyer, seller, *, pins, pin_path, buyer_ns, seller_ns) -> 
     for party, path in (("buyer", buyer), ("seller", seller)):
         tapes[party], mine[party] = _load_side(party, path, deal_id, cnl, findings)
 
-    by = {p: {s: [] for s in STEPS} for p in PARTIES}
+    by = {p: {s: [] for s in _ALL_STEPS} for p in PARTIES}
     for p in PARTIES:
         for n, row in mine[p]:
             step = row["kind"][5:]
@@ -692,10 +782,14 @@ def _dispute(deal_id, buyer, seller, *, pins, pin_path, buyer_ns, seller_ns) -> 
         for step in BOTH_SIDES:
             compared += max(len(by["buyer"][step]), len(by["seller"][step]))
             matched += _compare(step, by["buyer"][step], by["seller"][step], findings)
-        for step in MIRRORED:
+        for step in MIRRORED + ESCROW_COMPARED:
             if by["buyer"][step] and by["seller"][step]:
                 compared += max(len(by["buyer"][step]), len(by["seller"][step]))
                 matched += _compare(step, by["buyer"][step], by["seller"][step], findings)
+        _recourse_check(by, findings, cnl, tapes)
+        if any(by[p][s] for p in PARTIES for s in ESCROW_STEPS):
+            from arcaeon.record import escrow as _escrow     # lazy: deal stays light
+            _escrow.check_rows(by, findings)
         mandates = {r.get("mandate_digest") for _, r in by["buyer"]["mandate"]}
         for k, (n, r) in enumerate(by["seller"]["commit"], start=1):
             md = r["shared"].get("mandate_digest")
@@ -728,7 +822,7 @@ def _dispute(deal_id, buyer, seller, *, pins, pin_path, buyer_ns, seller_ns) -> 
 
     timeline = []
     for p in PARTIES:
-        for step in STEPS:
+        for step in _ALL_STEPS:
             for k, (n, r) in enumerate(by[p][step], start=1):
                 e = {"ts": r.get("ts"), "party": p, "step": step, "ordinal": k, "row": n,
                      "step_digest": r.get("step_digest"), "pinned": _pin_bound(p, n, checked)}
@@ -740,7 +834,7 @@ def _dispute(deal_id, buyer, seller, *, pins, pin_path, buyer_ns, seller_ns) -> 
     def _key(f):
         at = str(f.at)
         step, _, k = at.partition("#")
-        return (_ORDER.get(step, len(STEPS)), int(k) if k.isdigit() else 0,
+        return (_ORDER.get(step, len(_ORDER)), int(k) if k.isdigit() else 0,
                 0 if f.verdict == _v.ALTERED else 1)
 
     findings.sort(key=_key)
@@ -820,7 +914,8 @@ USAGE = """usage: arcaeon deal <step> ...
 A witnessed transaction: each side records the same steps on its own ledger;
 `dispute` lines the two tapes up. Steps:
   mandate   <ledger> --merchant M --cap AMOUNT --currency C [--deal ID] [--not-before T]
-            [--not-after T] [--may X]... [--may-not X]... [--sealed SIDECAR]   (buyer only)
+            [--not-after T] [--may X]... [--may-not X]... [--sealed SIDECAR]
+            [--recourse no_recourse|escrow_challenge_window|high]   (buyer only)
   commit    <ledger> --deal ID --party buyer|seller --seller M --item SKU:QTY:PRICE...
             --total AMOUNT --currency C [--ship-to TEXT] [--buyer-ref R]
             [--mandate-digest D] [--mandate-sidecar FILE] [--note N]
@@ -832,6 +927,7 @@ A witnessed transaction: each side records the same steps on its own ledger;
             [--json] [--remote] [--claim CLAIM --by buyer|seller [--text T]]
   pack      <deal_id> --buyer B --seller S [--pins FILE] [-o DIR]
   show      <ledger> --deal ID
+  (holds and their release or refund: `arcaeon escrow`, mock rail only)
   handshake propose|accept|verify ...   two agents countersign any agreement
             (`arcaeon deal handshake --help`)
 
@@ -861,6 +957,8 @@ def _parser(cmd: str):
         ap.add_argument("--may", action="append", default=[])
         ap.add_argument("--may-not", action="append", default=[])
         ap.add_argument("--sealed", help="write the mandate body here; the row keeps its digest")
+        ap.add_argument("--recourse", choices=RECOURSE,
+                        help="the recourse tier, recorded before any work (never a promise)")
     elif cmd == "commit":
         ap.add_argument("--seller", required=True)
         ap.add_argument("--item", action="append", required=True, help="SKU:QTY:UNIT_PRICE")
@@ -993,7 +1091,7 @@ def _step(cmd: str, a) -> int:
     if cmd == "mandate":
         row = d.mandate(merchant=a.merchant, cap=a.cap, currency=a.currency,
                         not_before=a.not_before, not_after=a.not_after, may=a.may,
-                        may_not=a.may_not, sealed=a.sealed)
+                        may_not=a.may_not, sealed=a.sealed, recourse=a.recourse)
     elif cmd == "commit":
         disclosed = None
         if a.mandate_sidecar:

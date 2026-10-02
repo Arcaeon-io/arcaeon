@@ -114,6 +114,7 @@ Three families. The full reference, with usage lines and examples, is
 - `proxy`: sit in front of an MCP server and record every tool call.
 - `pin`: hand a ledger's current head to a witness, a local file or the hosted one.
 - `deal`: a purchase recorded on both sides, step by step.
+- `escrow`: release a hold only on a verified call receipt. Mock rail: no money moves.
 
 ### Prove: check what was written
 

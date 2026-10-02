@@ -6,6 +6,7 @@ that adds a JSON field or a verb.
 
 ## Unreleased
 
+- **Escrow release rule and recourse tier (branch escrow-release-rule-2026-10-02).** New `arcaeon escrow` verb and `arcaeon.record.escrow`, mock rail only: `hold` writes a HELD row, `settle` releases only on a counterpart call receipt that verifies MATCHED against criteria that recompute to the held digest, refunds on ALTERED or MISSING, and keeps a COULD NOT LOOK held until the timeout declared at hold time; `deal mandate --recourse` records the tier before any work and `deal dispute` checks it and the escrow rows.
 - **Bearer classes (branch bearer-class-2026-09-27).** Every sentence on an evidence pack's README.md ends in `[bytes]`, `[order]` or `[asserted]` (an `[asserted]` one names its falsifier), and a new `README.json` twin lists each sentence id, its sha256, line and class. `evidence-pack verify` breaks an untagged, misclassed or falsifier-less sentence naming its id and reports the counts under `bearer`. `pack_schema` is now 2; a schema 1 pack with no README.json and no brackets still verifies and prints "bearer classes: not present (pack schema 1)".
 
 ## 0.10.0 (2026-09-27)

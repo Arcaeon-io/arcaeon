@@ -68,6 +68,35 @@ square brackets, naming what bears it. The full definitions are in
 - `order`: only a commitment made before the act proves it, the witness pin and the build time against the pin time.
 - `asserted`: no field carries it, the operator's own statement of the window and the system, the completeness of the could not look list, that any row is true.
 
+## Escrow words
+
+`arcaeon escrow` writes deal rows, and names where a hold stands. These are
+states, not verdicts: the verdict that moved a hold is always one of the four
+deal words above, and it is in the row. Mock rail only: no money is held,
+released or refunded by any of them.
+
+**HELD.** A hold row is on the ledger and nothing has settled it. Either
+nobody has looked at the counterpart's receipt yet, or every look so far was a
+COULD NOT LOOK and the timeout recorded at hold time has not passed.
+
+**RELEASED.** The counterpart's call receipt was looked at and was MATCHED:
+it recomputes, its row is on the counterpart's verified ledger, and it is the
+call the frozen criteria named. It shows the call happened as recorded, not
+that its answer was right.
+
+**REFUNDED.** The look found the receipt ALTERED or MISSING, or nothing could
+be looked at until the declared timeout passed. The row's `cause` says which.
+
+The rows: `hold`, `look` (a COULD NOT LOOK that left the hold where it was),
+`release` and `refund`.
+
+Recourse tiers, recorded on the mandate before any work. Each records what the
+buyer asked for, never a promise that anything will be paid back:
+
+- `no_recourse`: pay outright; there is no hold.
+- `escrow_challenge_window`: a hold under frozen criteria, settled by the rule above.
+- `high`: the buyer asked for more than a hold; what more is the parties' own agreement, recorded and not interpreted.
+
 ## Many logs at once
 
 A summary over many logs keeps these words side by side: so many VERIFIED, so
