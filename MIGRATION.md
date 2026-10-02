@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Bearer classes.** A pack's manifest now reads `pack_schema` 2 and the pack holds `README.json` (`bearer_schema`, `page`, `classes`, `counts`, and `sentences`: `id`, `line`, `sha256`, `class`, and `falsifier` on an `asserted` one), hashed in `files`. Each sentence line of README.md ends in `[bytes]`, `[order]` or `[asserted; falsifier: ...]`, and page one gains a legend line. `evidence-pack verify --json` adds `bearer` (the class counts, `null` for a schema 1 pack). A schema 1 pack with no README.json and no brackets verifies as before and prints `bearer classes: not present (pack schema 1)`.
 - **`evidence-pack verify --second-reader` (branch second-reader-2026-09-29).** New module `arcaeon.prove.second_reader`. Additive: without the flag `verify` prints as before and its `--json` still prints to stdout; with it, `--json PATH` and `--markdown PATH` write files. The report's JSON: `second_reader` (1), `pack`, `verdict`, `exit`, `witness`, `counts` (per row word), `pack_verify` (plain verify's `verdict` and `exit`), `note`, and `rows`, each with `n`, `kind`, `claim`, `where`, `claimed`, `recomputed`, `verdict` (`VERIFIED`, `MISMATCH` or `COULD NOT LOOK`), `algorithm` and `how`. New MCP tool `evidence_pack_second_reader`; the connector lists 20 tools.
 
 ## 0.10.0 (2026-09-27)

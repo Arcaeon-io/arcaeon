@@ -6,6 +6,7 @@ that adds a JSON field or a verb.
 
 ## Unreleased
 
+- **Bearer classes (branch bearer-class-2026-09-27).** Every sentence on an evidence pack's README.md ends in `[bytes]`, `[order]` or `[asserted]` (an `[asserted]` one names its falsifier), and a new `README.json` twin lists each sentence id, its sha256, line and class. `evidence-pack verify` breaks an untagged, misclassed or falsifier-less sentence naming its id and reports the counts under `bearer`. `pack_schema` is now 2; a schema 1 pack with no README.json and no brackets still verifies and prints "bearer classes: not present (pack schema 1)".
 - **Second reader (branch second-reader-2026-09-29).** `arcaeon evidence-pack verify PACK --second-reader [--witness PINS] [--json OUT] [--markdown OUT]` and `arcaeon.prove.second_reader.second_reader(pack_path, witness=None)` recompute every claim a pack makes from its bytes, one row each with the claimed value, the recomputed value, the algorithm and VERIFIED, MISMATCH (overall BROKEN) or COULD NOT LOOK; the chain head is recomputed from the rows' content, never read off the stored field; also the MCP tool `evidence_pack_second_reader` (the connector lists 20 tools); docs/SECOND_READER.md.
 
 ## 0.10.0 (2026-09-27)

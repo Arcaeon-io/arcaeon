@@ -69,6 +69,51 @@ These are the README's limits, word for word.
 - Keeping the pack for any length of time is the holder's job, not the job of
   whoever runs the hosted witness.
 
+### Three kinds of sentence on page one
+
+Every sentence on an evidence pack's README.md ends in one bracket that says
+what bears it. README.json, beside it, lists each sentence id, the sha256 of
+its text and its class, and `arcaeon evidence-pack verify --json` prints how
+many of each the page holds.
+
+- **[bytes]**: a hash over frozen content proves it. The manifest hashes and
+  the records chain are this kind. Anyone can recompute them from the files.
+- **[order]**: only a commitment made before the act proves it. The witness
+  pin, and the build time read against the pin time, are this kind. Without a
+  pin nothing in the pack bears it.
+- **[asserted]**: no field in the pack carries it. The operator's statement of
+  the window and the system, the completeness of the could not look list, and
+  that any row is true are this kind. It is the builder's word.
+
+The sentence "Without a pin, a full rewrite by the holder still checks out" is
+[asserted]: it says what nothing in the pack carries, so no field bears it.
+
+A pack built before the classes (its manifest's `pack_schema` is 1, it holds
+no README.json and no bracket on page one) still verifies: its page one is
+re-rendered untagged and compared word for word, and verify prints
+"bearer classes: not present (pack schema 1)" with the verdict unchanged. A
+pack that holds README.json or any bracket is checked in full, whatever
+schema its manifest names.
+
+A line holding two sentences carries the weaker class. The class each
+sentence may carry is fixed in the code, not in the pack, so a pack that
+moves a sentence to a stronger class, or leaves one untagged, is BROKEN and
+names the sentence.
+
+A coverage sentence, one that says what the window or the record covers
+rather than what the bytes are, is [asserted] unless it is derived, and an
+[asserted] sentence must name the falsifier a stranger can run, or it is not
+allowed on page one. The falsifier is printed after the class, as in
+"[asserted; falsifier: could_not_look.json, ...]", and README.json carries it
+as `falsifier` beside the sentence. The operator's window statement is
+falsified by the could_not_look.json list and by `arcaeon evidence-pack
+verify`, which re-derives the window from records.jsonl. The system id and
+the provider have no falsifier in the pack, so theirs says so: none
+derivable, compare with the operator's own records. The falsifier of each
+sentence is fixed in the code beside its class, so an [asserted] sentence
+with no falsifier in README.json, or a falsifier naming a file the pack does
+not hold, is BROKEN and names the sentence.
+
 ### The second reader (`second-read`)
 
 - It does not show whether a claim holds. Two readers reading one sentence
