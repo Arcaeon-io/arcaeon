@@ -245,16 +245,19 @@ def _extract(response: Any) -> tuple[dict | None, Any, str, str]:
 def check(response: Any, file_bytes: bytes, audience: str | None, action: str, *,
           signers=(), deal: str | None = None, purpose: str | None = None,
           record_dir: str | Path | None = None, file_name: str | None = None,
-          now=None) -> X402Check:
+          ledger: str | Path | None = None, now=None) -> X402Check:
     """Run the gate on a paid response before an escrow rule releases.
 
     `response` is the SettlementResponse (a dict, the base64 header value, or
     raw JSON); `file_bytes` the paid body; `audience` the buyer's own id;
     `action` "pay" or "act". `signers`, `deal`, `purpose` and `record_dir` go
-    to gate.decide unchanged. ValueError on another action; otherwise never
-    raises."""
+    to gate.decide unchanged, with `ledger`, the party's own chain, which
+    gate.decide requires with a `deal` (D066). ValueError on another action
+    or a `deal` without a `ledger`; otherwise never raises."""
     if action not in RELEASE_ACTIONS:
         raise ValueError(f"action must be one of {RELEASE_ACTIONS}, got {action!r}")
+    if deal is not None and ledger is None:
+        raise ValueError(G._NEEDS_LEDGER)
     try:
         obj, env, state, why = _extract(response)
     except Exception as e:  # noqa: BLE001  hostile input: an answer, never a traceback
@@ -275,18 +278,28 @@ def check(response: Any, file_bytes: bytes, audience: str | None, action: str, *
             except Exception as e:  # noqa: BLE001  not JSON-writable: the sidecar stays missing
                 state = "malformed"
                 why = f"info.{INFO_FIELD} is not JSON ({type(e).__name__})"
+        made: dict = {}
+
+        def on_pack(out: Path) -> None:
+            # into the pack before its gate.evidence row, so the row's digest covers them
+            if obj is not None:
+                try:
+                    (out / "x402-settlement-response.json").write_text(
+                        json.dumps(obj, indent=1, ensure_ascii=False, allow_nan=False) + "\n",
+                        encoding="utf-8", newline="\n")
+                except Exception:  # noqa: BLE001  the refusal stands either way
+                    pass
+            ev = json.loads((out / "evidence.json").read_text(encoding="utf-8"))
+            if ev.get("verdict") == V.BROKEN:
+                made["packet"] = _dispute_pack(out)
+
         d = G.decide(body, envelope=side, action=action, audience=audience, signers=signers,
-                     deal=deal, purpose=purpose, record_dir=record_dir, now=now)
-        if d.evidence and obj is not None:
-            try:
-                (Path(d.evidence) / "x402-settlement-response.json").write_text(
-                    json.dumps(obj, indent=1, ensure_ascii=False, allow_nan=False) + "\n",
-                    encoding="utf-8", newline="\n")
-            except Exception:  # noqa: BLE001  the refusal stands either way
-                pass
+                     deal=deal, purpose=purpose, record_dir=record_dir, ledger=ledger,
+                     now=now, on_pack=on_pack)
         # BROKEN is a HOLD with a dispute packet; made while the body still exists
-        packet, packet_error = (_dispute(d) if d.verdict == V.BROKEN and not d.allowed
-                                else (None, None))
+        packet, packet_error = None, None
+        if d.verdict == V.BROKEN and not d.allowed:
+            packet, packet_error = made.get("packet") or _dispute(d)
     settled = isinstance(obj, dict) and obj.get("success") is True
     release = bool(d.allowed and d.verdict == V.VERIFIED and settled and state == "present")
     if release:
@@ -304,16 +317,26 @@ def check(response: Any, file_bytes: bytes, audience: str | None, action: str, *
                      dispute_error=packet_error)
 
 
+def _dispute_pack(ev: Path) -> tuple[dict | None, str | None]:
+    """The dispute packet written into an evidence pack, before its chain row."""
+    try:
+        p = P.from_evidence(ev)
+        (ev / PACKET_JSON).write_text(P.render_json(p), encoding="utf-8", newline="\n")
+        (ev / PACKET_MD).write_text(P.render_markdown(p), encoding="utf-8", newline="\n")
+        return p, None
+    except Exception as e:  # noqa: BLE001  a packet that cannot be made is named, not raised
+        return None, f"dispute packet not made ({type(e).__name__}: {e})"
+
+
 def _dispute(d: G.GateDecision) -> tuple[dict | None, str | None]:
     """The dispute packet for a BROKEN refusal (D052's generator, not a new
-    one): from the evidence pack when there is one, written beside it, else
-    from the decision. Never raises; the hold stands either way."""
+    one): from the evidence pack when there is one (decide's on_pack has
+    already written it into the pack; the pack is sealed by its chain row, so
+    nothing is written here), else from the decision. Never raises; the hold
+    stands either way."""
     try:
         if d.evidence:
             p = P.from_evidence(d.evidence)
-            ev = Path(d.evidence)
-            (ev / PACKET_JSON).write_text(P.render_json(p), encoding="utf-8", newline="\n")
-            (ev / PACKET_MD).write_text(P.render_markdown(p), encoding="utf-8", newline="\n")
         else:
             p = P.from_decision(d)
         return p, None

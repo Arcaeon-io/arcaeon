@@ -53,7 +53,8 @@ def _paid(tmp_path, **kw):
 
 def _check(resp, body, did, tmp_path, audience="buyer-agent-7", action="pay", deal="d-x402-1"):
     return X.check(resp, body, audience, action, signers=[did], deal=deal,
-                   record_dir=tmp_path / "records")
+                   record_dir=tmp_path / "records",
+                   ledger=tmp_path / "ledger.jsonl" if deal is not None else None)
 
 
 # --- placement --------------------------------------------------------------------
@@ -120,7 +121,9 @@ def test_stripped_extension_is_could_not_look_and_holds(tmp_path):
         c = _check(resp, BODY, did, tmp_path)
         assert c.release is False and c.verdict == V.COULD_NOT_LOOK
         assert c.extension == "missing" and c.reason.startswith("hold")
-        assert c.evidence is None
+        # D066 on the stack: a COULD NOT LOOK refusal with a deal id writes a pack too
+        # (no dispute packet: that is BROKEN only)
+        assert c.evidence is not None and c.dispute is None
     rail = X.MockEscrowRail()
     rail.hold("d-x402-1", "0.01", "USDC")
     assert rail.settle("d-x402-1", c)["released"] is False
@@ -196,7 +199,7 @@ HOSTILE = [
 @pytest.mark.parametrize("resp", HOSTILE, ids=range(len(HOSTILE)))
 def test_hostile_response_holds_without_a_traceback(tmp_path, resp):
     c = X.check(resp, BODY, "buyer-agent-7", "pay", signers=["did:key:zX"], deal="d-x402-1",
-                record_dir=tmp_path / "records")
+                record_dir=tmp_path / "records", ledger=tmp_path / "ledger.jsonl")
     assert c.release is False
     assert c.verdict in (V.COULD_NOT_LOOK, V.BROKEN)
     json.dumps(c.to_dict(), default=str)
@@ -220,7 +223,7 @@ def test_hostile_body_and_deep_response_dict(tmp_path):
 def test_hostile_sidecar_name_stays_in_the_temp_dir(tmp_path):
     paid, did = _paid(tmp_path)
     c = X.check(paid, BODY, "buyer-agent-7", "pay", signers=[did], deal="d-x402-1",
-                file_name="../../escape.json")
+                file_name="../../escape.json", ledger=tmp_path / "ledger.jsonl")
     assert c.release is True and not (tmp_path / "escape.json").exists()
 
 
@@ -273,6 +276,18 @@ def test_broken_holds_makes_a_packet_and_never_refunds(tmp_path):
     assert rail.holds["d-x402-1"]["dispute"]["kind"] == P.KIND
     assert any(e["event"] == "dispute" for e in rail.log)
     assert c.to_dict()["escrow"] == "HOLD" and c.to_dict()["dispute"]["kind"] == P.KIND
+    # D066 on the stack: the settlement response and the packet are in the pack before
+    # its gate.evidence row, so the row's pack digest still matches
+    from arcaeon.prove import gate as G
+    row = c.decision.chain_row
+    assert row and c.decision.chain_error is None
+    assert (ev / "x402-settlement-response.json").is_file()
+    assert G.verify_evidence_pack(ev, row)["verdict"] == V.VERIFIED
+
+
+def test_deal_without_ledger_raises_before_anything(tmp_path):
+    with pytest.raises(ValueError):
+        X.check({}, BODY, "buyer-agent-7", "pay", deal="d-x402-1")
 
 
 def test_broken_without_a_deal_id_still_has_a_packet(tmp_path):
