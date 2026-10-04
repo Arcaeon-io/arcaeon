@@ -156,7 +156,18 @@ def _text_ok(v: Any, limit: int = 512) -> bool:
 _B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 
 
+#: An Ed25519 did:key is always this long: "did:key:z" + 47 base58 digits of
+#: 0xed01 + the 32-byte key (checked against every key receipts.did_key makes).
+DID_KEY_ED25519_LEN = 56
+
+#: The longest base58 string _b58decode will read. Decoding is quadratic in the
+#: length (one bigint digit per character), so an unbounded hostile string hangs.
+_B58_MAX_CHARS = 128
+
+
 def _b58decode(s: str) -> bytes:
+    if len(s) > _B58_MAX_CHARS:
+        raise ValueError(f"base58 text too long ({len(s)} chars, at most {_B58_MAX_CHARS})")
     n = 0
     for ch in s:
         i = _B58.find(ch)
@@ -171,6 +182,9 @@ def _pubkey_from_did(did: str) -> bytes:
     """The raw Ed25519 key inside a did:key, or ValueError."""
     if not isinstance(did, str) or not did.startswith("did:key:z"):
         raise ValueError("keyid is not a did:key")
+    if len(did) != DID_KEY_ED25519_LEN:   # before decoding: a hostile length must not hang
+        raise ValueError(f"did:key is not an Ed25519 key ({len(did)} chars, "
+                         f"an Ed25519 did:key is {DID_KEY_ED25519_LEN})")
     raw = _b58decode(did[len("did:key:z"):])
     if len(raw) != 34 or raw[:2] != b"\xed\x01":
         raise ValueError("did:key is not an Ed25519 key")
