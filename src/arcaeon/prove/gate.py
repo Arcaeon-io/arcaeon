@@ -752,8 +752,7 @@ def _judge_check(path: Path, *, sha: str, parties: set, checkers: list, audience
             return out
         mine = [x for x in rows if x.get("kind") == CHECK_KIND
                 and isinstance(x.get("subject"), dict)
-                and isinstance(x["subject"].get("sha256"), str)
-                and x["subject"]["sha256"].lower() == sha]
+                and _norm_sha(x["subject"].get("sha256")) == sha]
         if not mine:
             out["why"] = f"signed by a non-party, but no {CHECK_KIND} row names sha256 {sha}"
             return out

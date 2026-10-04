@@ -142,6 +142,16 @@ def test_wrong_file_hash_refuses(tmp_path):
     assert f"names sha256 {SHA}" in d.reason
 
 
+@pytest.mark.parametrize("written", ["sha256:" + SHA, "SHA256:" + SHA.upper(), SHA.upper()])
+def test_check_sha256_is_normalised_like_the_checks_veto(tmp_path, written):
+    """F8: a `sha256:` prefix or upper case names the same digest, as `--checks` reads it."""
+    f, did, _ = _handed(tmp_path)
+    c, _ = _check(tmp_path, "prefixed", _key(tmp_path, "checker"), _row(sha=written))
+    d = _decide(f, did, require_nonparty_check_above="10", amount="11", checks=[c])
+    assert d.decision == "allow" and d.exit_code == 0, d.reason
+    assert d.nonparty_check["checks"][0]["counts"] is True
+
+
 def test_check_that_says_broken_or_could_not_look_does_not_count(tmp_path):
     f, did, _ = _handed(tmp_path)
     k = _key(tmp_path, "checker")
