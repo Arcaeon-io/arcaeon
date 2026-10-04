@@ -15,7 +15,7 @@ response"]`; A2A: an entry of `x402.payment.receipts`). Its optional
 `extensions` object maps an extension id to `{"info": ..., "schema": ...}`.
 This module puts the envelope at
 
-    extensions["labeled-exchange"].info.envelope
+    extensions["arcaeon-labeled-exchange"].info.envelope
 
 and the sidecar object goes there unchanged. docs/X402.md has the sources.
 
@@ -27,13 +27,19 @@ sidecar, so it reads COULD NOT LOOK there, never VERIFIED.
 
 `release` is True only when the action is `pay` or `act`, the gate allowed
 it (so the verdict was VERIFIED), and the settlement response says
-`"success": true`. BROKEN: no release, and with a deal id the gate's
-evidence pack is written (plus the settlement response as received).
-COULD NOT LOOK: no release; the hold stays.
+`"success": true`. `escrow` is then RELEASE; on anything else it is HOLD.
+There is no third word: this path never refunds (D068, docs/X402.md "BROKEN
+is a hold, not a refund").
+
+BROKEN: HOLD, and a dispute packet (arcaeon.prove.dispute_packet) is made
+and kept on the check. With a deal id the gate's evidence pack is written,
+plus the settlement response as received and the packet (dispute-packet.json
+and .md). COULD NOT LOOK: HOLD, no packet (the gate writes no pack for it).
 
 THE MOCK RAIL. `MockEscrowRail` is in memory and test-only: nothing is held
-or moved, there is no network and no key. A refusal never refunds by itself:
-whether money goes back is the human's decision.
+or moved, there is no network and no key. It has no refund method. A refund
+comes only from the escrow rule's own timer or dispute outcome, never from
+here.
 
 Stdlib only. `attach` raises ValueError on a bad argument; `check` raises
 only on an action other than `pay` or `act` and otherwise always answers.
@@ -51,20 +57,30 @@ from pathlib import Path
 from typing import Any
 
 from arcaeon import verdict as V
+from arcaeon.prove import dispute_packet as P
 from arcaeon.prove import envelope as E
 from arcaeon.prove import gate as G
 from arcaeon.record.row import loads_strict
 
 __all__ = ["EXTENSION_KEY", "INFO_FIELD", "SCHEMA", "RELEASE_ACTIONS", "X402Check",
            "MockEscrowRail", "attach", "check", "encode_header", "decode_header",
-           "HELD", "RELEASED"]
+           "HELD", "RELEASED", "RELEASE", "HOLD", "ESCROW_ACTIONS", "PACKET_JSON",
+           "PACKET_MD"]
 
 #: the extension id, kebab-case like the spec's own (`offer-receipt`,
-#: `payment-identifier`); the name of the envelope's predicate.
-EXTENSION_KEY = "labeled-exchange"
+#: `payment-identifier`), prefixed with the project name so it cannot collide
+#: with a future x402 Foundation id. Fixed (D068); the bare `labeled-exchange`
+#: is not read.
+EXTENSION_KEY = "arcaeon-labeled-exchange"
 #: the field under `info` that holds the sidecar object. Never `bundle`.
 INFO_FIELD = "envelope"
 RELEASE_ACTIONS = ("pay", "act")
+#: everything a check may tell the escrow side to do. There is no REFUND:
+#: a refund comes only from the escrow rule's own timer or dispute outcome.
+RELEASE, HOLD = "RELEASE", "HOLD"
+ESCROW_ACTIONS = (RELEASE, HOLD)
+#: the dispute packet files a BROKEN check writes into the gate's evidence pack
+PACKET_JSON, PACKET_MD = "dispute-packet.json", "dispute-packet.md"
 #: the most a header value or raw JSON response is read (bytes).
 MAX_RESPONSE_BYTES = 2 * E.MAX_ENVELOPE_BYTES
 BODY_NAME = "paid-response.body"
@@ -106,7 +122,7 @@ LIMITS = [
     "for you, for this deal when you gave one, and in date; not that they are true or safe",
     "the x402 settlement fields (success, transaction, payer) are read as the seller sent "
     "them; nothing here checks a chain or a facilitator",
-    "the mock rail holds and moves nothing; a refusal never refunds by itself",
+    "the mock rail holds and moves nothing; a refusal holds and never refunds from this path",
 ]
 
 _FILE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
@@ -145,7 +161,7 @@ def decode_header(value: str | bytes) -> dict:
 
 def attach(response: dict, envelope: dict | str | Path, *, replace: bool = False) -> dict:
     """A copy of `response` (a SettlementResponse) with the envelope under
-    extensions["labeled-exchange"].info.envelope. `envelope` is the sidecar
+    extensions["arcaeon-labeled-exchange"].info.envelope. `envelope` is the sidecar
     object or its path. ValueError on a bad argument or an extension already
     there (unless `replace`)."""
     if not isinstance(response, dict):
@@ -183,16 +199,24 @@ class X402Check:
     deal: str | None = None
     evidence: str | None = None
     limits: list = field(default_factory=lambda: list(LIMITS))
+    dispute: dict | None = None
+    dispute_error: str | None = None
 
     @property
     def verdict(self) -> str:
         return self.decision.verdict
 
+    @property
+    def escrow(self) -> str:
+        """What the escrow side may do: RELEASE or HOLD. Never a refund."""
+        return RELEASE if self.release else HOLD
+
     def to_dict(self) -> dict:
-        return {"release": self.release, "verdict": self.verdict,
+        return {"release": self.release, "escrow": self.escrow, "verdict": self.verdict,
                 "decision": self.decision.to_dict(), "extension": self.extension,
                 "reason": self.reason, "settled": self.settled, "deal": self.deal,
-                "evidence": self.evidence, "limits": list(self.limits)}
+                "evidence": self.evidence, "dispute": self.dispute,
+                "dispute_error": self.dispute_error, "limits": list(self.limits)}
 
 
 def _extract(response: Any) -> tuple[dict | None, Any, str, str]:
@@ -253,26 +277,48 @@ def check(response: Any, file_bytes: bytes, audience: str | None, action: str, *
                 why = f"info.{INFO_FIELD} is not JSON ({type(e).__name__})"
         d = G.decide(body, envelope=side, action=action, audience=audience, signers=signers,
                      deal=deal, purpose=purpose, record_dir=record_dir, now=now)
+        if d.evidence and obj is not None:
+            try:
+                (Path(d.evidence) / "x402-settlement-response.json").write_text(
+                    json.dumps(obj, indent=1, ensure_ascii=False, allow_nan=False) + "\n",
+                    encoding="utf-8", newline="\n")
+            except Exception:  # noqa: BLE001  the refusal stands either way
+                pass
+        # BROKEN is a HOLD with a dispute packet; made while the body still exists
+        packet, packet_error = (_dispute(d) if d.verdict == V.BROKEN and not d.allowed
+                                else (None, None))
     settled = isinstance(obj, dict) and obj.get("success") is True
     release = bool(d.allowed and d.verdict == V.VERIFIED and settled and state == "present")
-    if d.evidence and obj is not None:
-        try:
-            (Path(d.evidence) / "x402-settlement-response.json").write_text(
-                json.dumps(obj, indent=1, ensure_ascii=False, allow_nan=False) + "\n",
-                encoding="utf-8", newline="\n")
-        except Exception:  # noqa: BLE001  the refusal stands either way
-            pass
     if release:
         reason = f"release: {d.reason}"
     elif d.allowed and not settled:
         reason = ("hold: the settlement response does not say success: true, so there is "
                   f"nothing to release. {d.reason}")
     elif d.verdict == V.BROKEN:
-        reason = f"do not release: {d.reason}"
+        reason = (f"do not release: hold, funds stay in escrow, dispute packet "
+                  f"{'made' if packet else 'not made'}; no refund from this path. {d.reason}")
     else:
         reason = f"hold: {why + '. ' if why else ''}{d.reason}"
     return X402Check(release=release, decision=d, extension=state, reason=reason,
-                     settled=settled, deal=deal, evidence=d.evidence)
+                     settled=settled, deal=deal, evidence=d.evidence, dispute=packet,
+                     dispute_error=packet_error)
+
+
+def _dispute(d: G.GateDecision) -> tuple[dict | None, str | None]:
+    """The dispute packet for a BROKEN refusal (D052's generator, not a new
+    one): from the evidence pack when there is one, written beside it, else
+    from the decision. Never raises; the hold stands either way."""
+    try:
+        if d.evidence:
+            p = P.from_evidence(d.evidence)
+            ev = Path(d.evidence)
+            (ev / PACKET_JSON).write_text(P.render_json(p), encoding="utf-8", newline="\n")
+            (ev / PACKET_MD).write_text(P.render_markdown(p), encoding="utf-8", newline="\n")
+        else:
+            p = P.from_decision(d)
+        return p, None
+    except Exception as e:  # noqa: BLE001  a packet that cannot be made is named, not raised
+        return None, f"dispute packet not made ({type(e).__name__}: {e})"
 
 
 # --- the mock rail ---------------------------------------------------------------
@@ -284,8 +330,9 @@ class MockEscrowRail:
     """In-memory, test-only escrow. MOCK RAIL: nothing is held or moved, no
     network, no keys. A hold is RELEASED only on a check whose `release` is
     True and that was run with this hold's deal id; anything else leaves it
-    HELD and logs why. It never refunds: that
-    is the human's call, made outside this object."""
+    HELD and logs why. A BROKEN check keeps the hold and records its dispute
+    packet. There is no refund method: a refund comes only from the escrow
+    rule's own timer or dispute outcome (docs/X402.md), never from here."""
 
     def __init__(self) -> None:
         self.holds: dict[str, dict] = {}
@@ -295,7 +342,7 @@ class MockEscrowRail:
         if deal in self.holds:
             raise ValueError(f"deal {deal!r} already has a hold")
         h = {"deal": deal, "amount": str(amount), "currency": str(currency), "state": HELD,
-             "evidence": None}
+             "evidence": None, "dispute": None}
         self.holds[deal] = h
         self.log.append({"deal": deal, "event": "hold", "state": HELD})
         return dict(h)
@@ -319,10 +366,16 @@ class MockEscrowRail:
         ok = isinstance(result, X402Check) and result.release is True and result.deal == deal
         if ok:
             h["state"] = RELEASED
-        elif isinstance(result, X402Check) and result.evidence:
-            h["evidence"] = result.evidence
+        elif isinstance(result, X402Check):
+            if result.evidence:
+                h["evidence"] = result.evidence
+            if result.dispute:                  # BROKEN: hold, keep the packet, no refund
+                h["dispute"] = result.dispute
+                self.log.append({"deal": deal, "event": "dispute", "state": HELD,
+                                 "verdict": result.verdict, "evidence": result.evidence})
         verdict = result.verdict if isinstance(result, X402Check) else None
         self.log.append({"deal": deal, "event": "settle", "state": h["state"],
                          "verdict": verdict,
                          "why": result.reason if isinstance(result, X402Check) else "no check"})
-        return {"deal": deal, "state": h["state"], "released": ok, "verdict": verdict}
+        return {"deal": deal, "state": h["state"], "released": ok, "verdict": verdict,
+                "escrow": RELEASE if ok else HOLD}

@@ -29,6 +29,10 @@ SETTLED = {"success": True,
 @pytest.fixture(autouse=True)
 def _cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    home = tmp_path / "home"                                 # never the real home folder
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
 
 
 def _sealed(tmp_path: Path, signed: bool = True):
@@ -57,7 +61,7 @@ def _check(resp, body, did, tmp_path, audience="buyer-agent-7", action="pay", de
 def test_attach_places_the_envelope_under_the_extension_key(tmp_path):
     env, _ = _sealed(tmp_path)
     paid = X.attach(SETTLED, env)
-    entry = paid["extensions"]["labeled-exchange"]
+    entry = paid["extensions"]["arcaeon-labeled-exchange"]
     assert set(entry) == {"info", "schema"}                 # the V2 extension shape
     assert entry["info"] == {"envelope": env}
     assert "bundle" not in json.dumps(entry)
@@ -111,7 +115,7 @@ def test_tampered_body_is_broken_no_release_and_evidence(tmp_path):
 def test_stripped_extension_is_could_not_look_and_holds(tmp_path):
     paid, did = _paid(tmp_path)
     stripped = copy.deepcopy(paid)
-    del stripped["extensions"]["labeled-exchange"]
+    del stripped["extensions"]["arcaeon-labeled-exchange"]
     for resp in (stripped, SETTLED):
         c = _check(resp, BODY, did, tmp_path)
         assert c.release is False and c.verdict == V.COULD_NOT_LOOK
@@ -168,7 +172,7 @@ def test_only_pay_or_act(tmp_path):
 
 def _deep(n):
     s = "[" * n + "]" * n
-    return '{"success":true,"extensions":{"labeled-exchange":{"info":{"envelope":' + s + "}}}}"
+    return '{"success":true,"extensions":{"arcaeon-labeled-exchange":{"info":{"envelope":' + s + "}}}}"
 
 
 HOSTILE = [
@@ -176,14 +180,14 @@ HOSTILE = [
     '{"success":true,"success":false}',                                   # duplicate key
     base64.b64encode(b'{"a":1,"a":2}').decode(),
     _deep(5000), "x" * (X.MAX_RESPONSE_BYTES + 1),
-    {"success": True, "extensions": "labeled-exchange"},
-    {"success": True, "extensions": {"labeled-exchange": None}},
-    {"success": True, "extensions": {"labeled-exchange": {"info": []}}},
-    {"success": True, "extensions": {"labeled-exchange": {"info": {"bundle": {}}}}},
-    {"success": True, "extensions": {"labeled-exchange": {"info": {"envelope": "x"}}}},
-    {"success": True, "extensions": {"labeled-exchange": {"info": {"envelope": float("nan")}}}},
-    {"success": True, "extensions": {"labeled-exchange": {"info": {"envelope": {1, 2}}}}},
-    {"success": True, "extensions": {"labeled-exchange": {"info": {"envelope": {
+    {"success": True, "extensions": "arcaeon-labeled-exchange"},
+    {"success": True, "extensions": {"arcaeon-labeled-exchange": None}},
+    {"success": True, "extensions": {"arcaeon-labeled-exchange": {"info": []}}},
+    {"success": True, "extensions": {"arcaeon-labeled-exchange": {"info": {"bundle": {}}}}},
+    {"success": True, "extensions": {"arcaeon-labeled-exchange": {"info": {"envelope": "x"}}}},
+    {"success": True, "extensions": {"arcaeon-labeled-exchange": {"info": {"envelope": float("nan")}}}},
+    {"success": True, "extensions": {"arcaeon-labeled-exchange": {"info": {"envelope": {1, 2}}}}},
+    {"success": True, "extensions": {"arcaeon-labeled-exchange": {"info": {"envelope": {
         "mediaType": E.MEDIA_TYPE, "dsseEnvelope": {"payloadType": E.PAYLOAD_TYPE,
                                                     "payload": "!!", "signatures": []}}}}}},
 ]
@@ -208,7 +212,7 @@ def test_hostile_body_and_deep_response_dict(tmp_path):
     for _ in range(5000):
         cur["a"] = {}
         cur = cur["a"]
-    paid["extensions"]["labeled-exchange"]["info"]["envelope"] = deep
+    paid["extensions"]["arcaeon-labeled-exchange"]["info"]["envelope"] = deep
     c = _check(paid, BODY, did, tmp_path)
     assert c.release is False
 
@@ -218,3 +222,85 @@ def test_hostile_sidecar_name_stays_in_the_temp_dir(tmp_path):
     c = X.check(paid, BODY, "buyer-agent-7", "pay", signers=[did], deal="d-x402-1",
                 file_name="../../escape.json")
     assert c.release is True and not (tmp_path / "escape.json").exists()
+
+
+# --- D068: BROKEN is a HOLD with a dispute packet, never a refund ------------------
+
+class RefundTrapRail(X.MockEscrowRail):
+    """A mock rail with a refund() that records and raises: the x402 path
+    must never reach it."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.refunds: list = []
+
+    def refund(self, *a, **kw):
+        self.refunds.append((a, kw))
+        raise AssertionError("the x402 path called refund()")
+
+
+def test_extension_id_is_fixed():
+    assert X.EXTENSION_KEY == "arcaeon-labeled-exchange"
+    assert X.ESCROW_ACTIONS == ("RELEASE", "HOLD")          # no REFUND word at all
+    assert not hasattr(X.MockEscrowRail, "refund")
+
+
+def test_the_bare_old_id_is_not_read(tmp_path):
+    paid, did = _paid(tmp_path)
+    old = copy.deepcopy(paid)
+    old["extensions"] = {"labeled-exchange": old["extensions"].pop("arcaeon-labeled-exchange")}
+    c = _check(old, BODY, did, tmp_path)
+    assert c.verdict == V.COULD_NOT_LOOK and c.extension == "missing"
+    assert c.escrow == "HOLD" and c.release is False
+
+
+def test_broken_holds_makes_a_packet_and_never_refunds(tmp_path):
+    from arcaeon.prove import dispute_packet as P
+    paid, did = _paid(tmp_path)
+    rail = RefundTrapRail()
+    rail.hold("d-x402-1", "0.01", "USDC")
+    c = _check(paid, BODY.replace(b"101.20", b"999.99"), did, tmp_path)
+    assert c.verdict == V.BROKEN and c.escrow == "HOLD" and c.release is False
+    assert c.dispute and c.dispute["kind"] == P.KIND and c.dispute["verdict"] == V.BROKEN
+    assert c.dispute_error is None
+    ev = Path(c.evidence)
+    assert json.loads((ev / X.PACKET_JSON).read_text(encoding="utf-8"))["kind"] == P.KIND
+    assert (ev / X.PACKET_MD).read_text(encoding="utf-8").strip()
+    out = rail.settle("d-x402-1", c)
+    assert out["released"] is False and out["state"] == X.HELD and out["escrow"] == "HOLD"
+    assert rail.refunds == []                                  # refund() never called
+    assert rail.state("d-x402-1") == X.HELD
+    assert rail.holds["d-x402-1"]["dispute"]["kind"] == P.KIND
+    assert any(e["event"] == "dispute" for e in rail.log)
+    assert c.to_dict()["escrow"] == "HOLD" and c.to_dict()["dispute"]["kind"] == P.KIND
+
+
+def test_broken_without_a_deal_id_still_has_a_packet(tmp_path):
+    paid, did = _paid(tmp_path)
+    c = _check(paid, BODY, did, tmp_path, audience="buyer-agent-8", deal=None)
+    assert c.verdict == V.BROKEN and c.escrow == "HOLD" and c.evidence is None
+    assert c.dispute and c.dispute["verdict"] == V.BROKEN
+    assert c.dispute["handed"]["sha256"]                        # hashed while the body existed
+
+
+def test_could_not_look_holds_no_packet_no_refund(tmp_path):
+    paid, did = _paid(tmp_path)
+    del paid["extensions"]["arcaeon-labeled-exchange"]
+    rail = RefundTrapRail()
+    rail.hold("d-x402-1", "0.01", "USDC")
+    c = _check(paid, BODY, did, tmp_path)
+    assert c.verdict == V.COULD_NOT_LOOK and c.escrow == "HOLD" and c.dispute is None
+    for _ in range(3):                                          # held, however often settled
+        assert rail.settle("d-x402-1", c)["state"] == X.HELD
+    assert rail.refunds == [] and rail.holds["d-x402-1"]["dispute"] is None
+
+
+def test_verified_path_unchanged(tmp_path):
+    paid, did = _paid(tmp_path)
+    rail = RefundTrapRail()
+    rail.hold("d-x402-1", "0.01", "USDC")
+    c = _check(paid, BODY, did, tmp_path)
+    assert c.release is True and c.escrow == "RELEASE" and c.dispute is None
+    out = rail.settle("d-x402-1", c)
+    assert out["released"] is True and out["escrow"] == "RELEASE"
+    assert rail.state("d-x402-1") == X.RELEASED and rail.refunds == []
