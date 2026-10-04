@@ -95,7 +95,7 @@ def test_broken_with_deal_writes_evidence_pack(tmp_path):
     f, did = _make(tmp_path, V.BROKEN)
     rec = tmp_path / "rec"
     d = G.decide(f, action="pay", audience="instructor-1", signers=[did], deal="d-7f3a",
-                 record_dir=rec)
+                 record_dir=rec, ledger=tmp_path / "tape.jsonl")
     assert d.decision == "refuse" and d.verdict == V.BROKEN and d.exit_code == 1
     out = Path(d.evidence)
     assert out.parent == rec / "DEAL-d-7f3a" / "gate"
@@ -123,7 +123,7 @@ def test_broken_with_deal_writes_evidence_pack(tmp_path):
 def test_two_packs_for_one_deal_do_not_overwrite(tmp_path):
     f, did = _make(tmp_path, V.BROKEN)
     kw = dict(action="act", audience="instructor-1", signers=[did], deal="d-7f3a",
-              record_dir=tmp_path / "rec")
+              record_dir=tmp_path / "rec", ledger=tmp_path / "tape.jsonl")
     a, b = G.decide(f, **kw), G.decide(f, **kw)
     assert a.evidence != b.evidence
     assert (Path(a.evidence) / "evidence.json").is_file()
@@ -140,21 +140,64 @@ def test_broken_without_deal_writes_no_pack(tmp_path):
     assert not list(tmp_path.glob("DEAL-*"))
 
 
-def test_no_pack_on_verified_or_could_not_look_with_deal(tmp_path):
-    for verdict in (V.VERIFIED, V.COULD_NOT_LOOK):
+def test_no_pack_on_allow_with_deal(tmp_path):
+    """VERIFIED (any action) and COULD NOT LOOK `read` are allows: nothing written."""
+    for verdict, action in ((V.VERIFIED, "pay"), (V.COULD_NOT_LOOK, "read")):
         sub = tmp_path / verdict.replace(" ", "_")
         sub.mkdir()
         f, did = _make(sub, verdict)
-        d = G.decide(f, action="pay", audience="instructor-1", signers=[did], deal="d-7f3a",
-                     record_dir=sub / "rec")
+        d = G.decide(f, action=action, audience="instructor-1", signers=[did], deal="d-7f3a",
+                     record_dir=sub / "rec", ledger=sub / "tape.jsonl")
+        assert d.decision == "allow"
         assert d.evidence is None and not (sub / "rec").exists()
+        assert not (sub / "tape.jsonl").exists()
+
+
+def test_could_not_look_refusal_with_deal_writes_evidence_pack(tmp_path):
+    """D066: a COULD NOT LOOK refusal is evidence too; the pack says which verdict."""
+    f, did = _make(tmp_path, V.COULD_NOT_LOOK)
+    rec = tmp_path / "rec"
+    d = G.decide(f, action="pay", audience="instructor-1", signers=[did], deal="d-7f3a",
+                 record_dir=rec, ledger=tmp_path / "tape.jsonl")
+    assert d.decision == "refuse" and d.verdict == V.COULD_NOT_LOOK and d.exit_code == 3
+    out = Path(d.evidence)
+    assert out.parent == rec / "DEAL-d-7f3a" / "gate"
+    ev = json.loads((out / "evidence.json").read_text(encoding="utf-8"))
+    assert ev["verdict"] == V.COULD_NOT_LOOK and ev["decision"] == "refuse"
+    assert ev["could_not_check"]["looked_for"] == "a signature on the envelope"
+    assert (out / ev["file"]["copy"]).read_bytes() == f.read_bytes()
+    assert f"Evidence pack written to {out}" in d.reason
+
+
+# --- --deal needs --ledger (D066) -------------------------------------------------------
+
+def test_deal_without_ledger_raises_and_writes_nothing(tmp_path):
+    for verdict in (V.BROKEN, V.COULD_NOT_LOOK, V.VERIFIED):
+        sub = tmp_path / verdict.replace(" ", "_")
+        sub.mkdir()
+        f, did = _make(sub, verdict)
+        before = sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*"))
+        with pytest.raises(ValueError, match="--ledger"):
+            G.decide(f, action="pay", audience="instructor-1", signers=[did], deal="d-7f3a",
+                     record_dir=sub / "rec")
+        assert sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*")) == before
+
+
+def test_cli_deal_without_ledger_is_usage_and_writes_nothing(tmp_path, capsys):
+    f, did = _make(tmp_path, V.BROKEN)
+    before = sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*"))
+    assert _cli(f, did, "--action", "pay", "--deal", "d-7f3a",
+                "--record-dir", str(tmp_path / "rec")) == 2
+    err = capsys.readouterr().err
+    assert "--deal needs --ledger" in err
+    assert sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*")) == before
 
 
 def test_unsafe_deal_id_stays_inside_record_dir(tmp_path):
     f, did = _make(tmp_path, V.BROKEN)
     rec = tmp_path / "rec"
     d = G.decide(f, action="read", audience="instructor-1", signers=[did],
-                 deal="../../escape", record_dir=rec)
+                 deal="../../escape", record_dir=rec, ledger=tmp_path / "tape.jsonl")
     out = Path(d.evidence).resolve()
     assert rec.resolve() in out.parents
     assert out.parent.parent.name.startswith("DEAL-sha256-")
@@ -201,7 +244,7 @@ def test_wrong_audience_is_broken_and_refused(tmp_path):
 def test_wrong_deal_is_broken_and_packed_in_the_receivers_deal(tmp_path):
     f, did = _make(tmp_path, V.VERIFIED)
     d = G.decide(f, action="pay", audience="instructor-1", signers=[did], deal="d-other",
-                 record_dir=tmp_path / "rec")
+                 record_dir=tmp_path / "rec", ledger=tmp_path / "tape.jsonl")
     assert d.verdict == V.BROKEN and d.decision == "refuse"
     assert "deal: sealed for 'd-7f3a'" in d.reason
     assert Path(d.evidence).parent.parent.name == "DEAL-d-other"
@@ -218,7 +261,7 @@ def test_gate_uses_envelope_verify_and_nothing_else(tmp_path, monkeypatch):
 
     monkeypatch.setattr(E, "verify", fake)
     d = G.decide(tmp_path / "nothing-here", action="pay", audience="me", signers=["did:key:zA"],
-                 deal="d-1", purpose="p")
+                 deal="d-1", purpose="p", ledger=tmp_path / "tape.jsonl")
     assert d.decision == "allow" and len(calls) == 1
     kw = calls[0][2]
     assert kw["audience"] == "me" and kw["signers"] == ["did:key:zA"]
@@ -255,7 +298,8 @@ def test_cli_exit_codes_and_output(tmp_path, capsys):
     capsys.readouterr()
     f.write_bytes(b"changed")
     assert _cli(f, did, "--action", "read", "--deal", "d-7f3a",
-                "--record-dir", str(tmp_path / "rec")) == 1
+                "--record-dir", str(tmp_path / "rec"),
+                "--ledger", str(tmp_path / "tape.jsonl")) == 1
     assert capsys.readouterr().out.startswith("refuse read: BROKEN")
     assert list((tmp_path / "rec" / "DEAL-d-7f3a" / "gate").iterdir())
 
@@ -264,6 +308,10 @@ def test_cli_could_not_look_refuse_is_3_and_read_is_0(tmp_path, capsys):
     f, did = _make(tmp_path, V.COULD_NOT_LOOK)
     assert _cli(f, did, "--action", "irreversible") == 3
     assert _cli(f, did, "--action", "read") == 0
+    led = tmp_path / "tape.jsonl"
+    assert _cli(f, did, "--action", "pay", "--deal", "d-7f3a", "--ledger", str(led),
+                "--record-dir", str(tmp_path / "rec")) == 3
+    assert list((tmp_path / "rec" / "DEAL-d-7f3a" / "gate").iterdir()) and led.is_file()
 
 
 def test_cli_usage_errors_are_2(tmp_path, capsys):

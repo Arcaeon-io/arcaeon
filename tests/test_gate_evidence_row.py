@@ -62,6 +62,7 @@ def _cwd(tmp_path, monkeypatch):
 def _refuse(tmp_path, **kw):
     f, did = _make(tmp_path, V.BROKEN)
     kw.setdefault("record_dir", tmp_path / "rec")
+    kw.setdefault("ledger", tmp_path / "tape.jsonl")
     d = G.decide(f, action="pay", audience="instructor-1", signers=[did], deal="d-7f3a", **kw)
     return f, d
 
@@ -72,7 +73,8 @@ def test_refusal_with_deal_appends_exactly_one_gate_evidence_row(tmp_path):
     f, d = _refuse(tmp_path)
     assert d.decision == "refuse" and d.verdict == V.BROKEN and d.chain_error is None
     pack = Path(d.evidence)
-    ledger = pack.parent / G.LEDGER_NAME
+    ledger = tmp_path / "tape.jsonl"                   # the party's own chain, not the pack's
+    assert not (pack.parent / G.LEDGER_NAME).exists()
     rows = _rows(ledger)
     assert len(rows) == 1 and rows == _gate_rows(ledger)
     row = rows[0]
@@ -91,7 +93,8 @@ def test_refusal_with_deal_appends_exactly_one_gate_evidence_row(tmp_path):
 def test_pack_digest_is_the_documented_rule(tmp_path):
     _, d = _refuse(tmp_path)
     pack = Path(d.evidence)
-    lines = sorted((p.relative_to(pack).as_posix(), hashlib.sha256(p.read_bytes()).hexdigest())
+    lines = sorted((p.relative_to(pack).as_posix(),
+                    hashlib.sha256(p.read_bytes().replace(b"\r\n", b"\n")).hexdigest())
                    for p in pack.rglob("*") if p.is_file())
     assert [r for r, _ in lines] == ["bundle/grades.csv", "bundle/grades.csv.envelope.json",
                                      "evidence.json"]
@@ -103,8 +106,8 @@ def test_second_refusal_chains_a_second_row(tmp_path):
     f, a = _refuse(tmp_path)
     did = a.signers[0]
     b = G.decide(f, action="act", audience="instructor-1", signers=[did], deal="d-7f3a",
-                 record_dir=tmp_path / "rec")
-    ledger = Path(a.evidence).parent / G.LEDGER_NAME
+                 record_dir=tmp_path / "rec", ledger=tmp_path / "tape.jsonl")
+    ledger = tmp_path / "tape.jsonl"
     rows = _gate_rows(ledger)
     assert [r["pack"] for r in rows] == [Path(a.evidence).name, Path(b.evidence).name]
     assert verify_file(ledger).ok is True
@@ -119,13 +122,31 @@ def test_allow_writes_no_row(tmp_path):
     assert not led.exists() and not (tmp_path / "rec").exists()
 
 
-def test_could_not_look_refusal_writes_no_pack_and_no_row(tmp_path):
+def test_could_not_look_refusal_writes_a_row_naming_the_verdict(tmp_path):
+    """D066: a refusal is evidence. COULD NOT LOOK on act/pay/irreversible writes a
+    pack and one gate.evidence row whose verdict says COULD NOT LOOK."""
     f, did = _make(tmp_path, V.COULD_NOT_LOOK)
     led = tmp_path / "tape.jsonl"
     d = G.decide(f, action="pay", audience="instructor-1", signers=[did], deal="d-7f3a",
                  record_dir=tmp_path / "rec", ledger=led)
-    assert d.decision == "refuse" and d.evidence is None and d.chain_row is None
-    assert not led.exists()
+    assert d.decision == "refuse" and d.exit_code == 3 and d.evidence and d.chain_error is None
+    rows = _gate_rows(led)
+    assert rows == [d.chain_row] and len(_rows(led)) == 1
+    row = rows[0]
+    assert row["verdict"] == V.COULD_NOT_LOOK and row["deal"] == "d-7f3a"
+    assert row["file_sha256"] == hashlib.sha256(f.read_bytes()).hexdigest()
+    assert row["pack"] == Path(d.evidence).name
+    assert G.verify_evidence_pack(d.evidence, row)["verdict"] == V.VERIFIED
+    assert verify_file(led).ok is True
+
+
+def test_could_not_look_read_is_allowed_and_writes_nothing(tmp_path):
+    f, did = _make(tmp_path, V.COULD_NOT_LOOK)
+    led = tmp_path / "tape.jsonl"
+    d = G.decide(f, action="read", audience="instructor-1", signers=[did], deal="d-7f3a",
+                 record_dir=tmp_path / "rec", ledger=led)
+    assert d.decision == "allow" and d.evidence is None and d.chain_row is None
+    assert not led.exists() and not (tmp_path / "rec").exists()
 
 
 def test_no_deal_id_no_row_no_crash(tmp_path):
@@ -186,6 +207,89 @@ def test_verify_could_not_look(tmp_path):
     assert G.verify_evidence_pack(d.evidence, None)["verdict"] == V.COULD_NOT_LOOK
 
 
+# --- LF-canonical pack digest (D066, the W18 rule) --------------------------------------
+
+def _crlf(raw: bytes) -> bytes:
+    return raw.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+
+
+def _lf(raw: bytes) -> bytes:
+    return raw.replace(b"\r\n", b"\n")
+
+
+def test_row_names_the_lf_canonical_rule(tmp_path):
+    _, d = _refuse(tmp_path)
+    assert d.chain_row["pack_digest_of"] == G.PACK_DIGEST_OF
+    assert "CRLF" in G.PACK_DIGEST_OF and G.PACK_DIGEST_OF != G.PACK_DIGEST_OF_V1
+    # the gate writes evidence.json as LF bytes whatever the OS
+    assert b"\r" not in (Path(d.evidence) / "evidence.json").read_bytes()
+
+
+@pytest.mark.parametrize("rewrite", [_crlf, _lf])
+@pytest.mark.parametrize("name", ["evidence.json", "bundle/grades.csv",
+                                  "bundle/grades.csv.envelope.json", "all"])
+def test_line_ending_copy_of_a_pack_file_still_verifies(tmp_path, rewrite, name):
+    _, d = _refuse(tmp_path)
+    pack, row = Path(d.evidence), d.chain_row
+    targets = ([p for p in pack.rglob("*") if p.is_file()] if name == "all"
+               else [pack / name])
+    for p in targets:
+        p.write_bytes(rewrite(p.read_bytes()))
+    if rewrite is _crlf and name in ("bundle/grades.csv", "evidence.json"):
+        assert b"\r\n" in (pack / name).read_bytes()
+    r = G.verify_evidence_pack(pack, row)
+    assert r["verdict"] == V.VERIFIED, r["reason"]
+    assert r["now"] == r["recorded"] == G.pack_digest(pack)
+
+
+def test_crlf_and_a_content_edit_is_still_broken(tmp_path):
+    _, d = _refuse(tmp_path)
+    pack, row = Path(d.evidence), d.chain_row
+    copy = pack / "bundle" / "grades.csv"
+    copy.write_bytes(_crlf(copy.read_bytes()).replace(b"unit-b", b"unit-c"))
+    r = G.verify_evidence_pack(pack, row)
+    assert r["verdict"] == V.BROKEN and "changed after the row was written" in r["reason"]
+    ev = pack / "evidence.json"
+    copy.write_bytes(_lf(copy.read_bytes()).replace(b"unit-c", b"unit-b"))
+    assert G.verify_evidence_pack(pack, row)["verdict"] == V.VERIFIED       # put back
+    ev.write_bytes(_crlf(ev.read_bytes()).replace(b'"pay"', b'"read"'))
+    assert G.verify_evidence_pack(pack, row)["verdict"] == V.BROKEN
+
+
+def test_a_bare_cr_is_content_not_a_line_ending(tmp_path):
+    _, d = _refuse(tmp_path)
+    copy = Path(d.evidence) / "bundle" / "grades.csv"
+    copy.write_bytes(copy.read_bytes().replace(b"\n", b"\r"))
+    assert G.verify_evidence_pack(d.evidence, d.chain_row)["verdict"] == V.BROKEN
+
+
+def test_lf_digest_streams_across_chunk_boundaries(tmp_path):
+    """A CRLF split across the reader's chunk edge still counts as one LF."""
+    p = tmp_path / "big"
+    body = b"x" * ((1 << 20) - 1) + b"\r\n" + b"y\r\n" * 3 + b"\r"
+    p.write_bytes(body)
+    assert G._file_sha256_lf(p) == hashlib.sha256(_lf(body)).hexdigest()
+
+
+def test_legacy_v1_row_still_reads_by_its_own_rule(tmp_path):
+    """A row written before D066 names the raw-byte rule (v1, or no rule at all):
+    it reads by that rule, unchanged."""
+    _, d = _refuse(tmp_path)
+    pack = Path(d.evidence)
+    lines = sorted((p.relative_to(pack).as_posix(), hashlib.sha256(p.read_bytes()).hexdigest())
+                   for p in pack.rglob("*") if p.is_file())
+    raw = hashlib.sha256("".join(f"{h}  {r}\n" for r, h in lines).encode()).hexdigest()
+    assert G.pack_digest(pack, of=G.PACK_DIGEST_OF_V1) == raw
+    for rule in (G.PACK_DIGEST_OF_V1, None):
+        legacy = dict(d.chain_row, pack_digest=raw, pack_digest_of=rule)
+        assert G.verify_evidence_pack(pack, legacy)["verdict"] == V.VERIFIED
+    (pack / "note.txt").write_text("added", encoding="utf-8")
+    legacy = dict(d.chain_row, pack_digest=raw, pack_digest_of=G.PACK_DIGEST_OF_V1)
+    assert G.verify_evidence_pack(pack, legacy)["verdict"] == V.BROKEN
+    unknown = dict(d.chain_row, pack_digest_of="sha512, v9")
+    assert G.verify_evidence_pack(pack, unknown)["verdict"] == V.COULD_NOT_LOOK
+
+
 # --- deal dispute ignores the new kind ----------------------------------------------
 
 def _honest(tmp: Path, deal="d-7f3a"):
@@ -230,3 +334,15 @@ def test_cli_ledger_flag(tmp_path, capsys):
     assert rc == 1
     j = json.loads(capsys.readouterr().out)
     assert j["chain_row"]["kind"] == "gate.evidence" and _gate_rows(led) == [j["chain_row"]]
+
+
+def test_cli_deal_without_ledger_writes_no_pack_and_no_row(tmp_path, capsys):
+    """D066: a row written next to the pack could be rewritten with it, so --deal
+    without --ledger is refused before anything is written."""
+    f, did = _make(tmp_path, V.BROKEN)
+    rc = cli.main(["gate", "decide", "--envelope", str(E.envelope_path(f)), "--audience",
+                   "instructor-1", "--signer", did, "--action", "pay", "--deal", "d-7f3a",
+                   "--record-dir", str(tmp_path / "rec")])
+    assert rc == 2
+    assert "--deal needs --ledger" in capsys.readouterr().err
+    assert not (tmp_path / "rec").exists() and not list(tmp_path.rglob(G.LEDGER_NAME))

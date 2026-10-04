@@ -1,6 +1,6 @@
 """The dispute packet (TE-26 / D052): `arcaeon gate packet` renders a refused
 handoff as one page, markdown and JSON, from a gate evidence pack (BROKEN) or
-a gate decision (COULD NOT LOOK writes no pack). Throwaway keys in tmp_path;
+a gate decision (no deal id, no pack). Throwaway keys in tmp_path;
 nothing reaches the network."""
 from __future__ import annotations
 
@@ -42,14 +42,14 @@ def _doc_does_not_prove() -> list[str]:
 def _broken_pack(tmp_path):
     f, did = TG._make(tmp_path, V.BROKEN)              # bytes changed after sealing
     d = G.decide(f, action="pay", audience=AUD, signers=[did], deal="d-7f3a",
-                 record_dir=tmp_path / "rec")
+                 record_dir=tmp_path / "rec", ledger=tmp_path / "tape.jsonl")
     assert d.verdict == V.BROKEN and d.evidence
     return f, did, d
 
 
 def _cnl_decision(tmp_path):
     f, did = TG._make(tmp_path, V.COULD_NOT_LOOK)      # unsigned envelope
-    d = G.decide(f, action="pay", audience=AUD, signers=[did], deal="d-7f3a",
+    d = G.decide(f, action="pay", audience=AUD, signers=[did],      # no deal id: no pack
                  record_dir=tmp_path / "rec")
     assert d.verdict == V.COULD_NOT_LOOK and d.decision == "refuse" and d.evidence is None
     return f, did, d
@@ -166,6 +166,20 @@ def test_could_not_look_decision_renders(tmp_path):
     assert p["evidence"]["pack"] is None and "none written" in md
     assert json.loads(P.render_json(p)) == p
     _no_local_paths(md + P.render_json(p), tmp_path)
+
+
+def test_could_not_look_refusal_with_deal_packs_and_renders(tmp_path):
+    """D066: a COULD NOT LOOK refusal with a deal id writes a pack too."""
+    f, did = TG._make(tmp_path, V.COULD_NOT_LOOK)
+    d = G.decide(f, action="pay", audience=AUD, signers=[did], deal="d-7f3a",
+                 record_dir=tmp_path / "rec", ledger=tmp_path / "tape.jsonl")
+    assert d.verdict == V.COULD_NOT_LOOK and d.evidence and d.chain_row
+    p = P.from_evidence(d.evidence)
+    assert p["verdict"] == V.COULD_NOT_LOOK and p["decision"] == "refuse"
+    assert p["evidence"]["pack"] == Path(d.evidence).name
+    assert p["evidence"]["file_copy_check"].endswith("matches")
+    assert p["not_checked"] and p["failed"] == []
+    _no_local_paths(P.render_markdown(p) + P.render_json(p), tmp_path)
 
 
 def test_unhashed_decision_says_not_recorded(tmp_path):

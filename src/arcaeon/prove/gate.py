@@ -3,10 +3,11 @@
 
     from arcaeon.prove import gate
     d = gate.decide("grades.csv", action="pay", audience="instructor-1",
-                    signers=["did:key:z6Mk..."], deal="d-7f3a", record_dir="deals")
+                    signers=["did:key:z6Mk..."], deal="d-7f3a", record_dir="deals",
+                    ledger="my-deal-tape.jsonl")
     d.decision        # "allow" or "refuse"
     d.reason          # one plain sentence or three
-    d.evidence        # the evidence pack's directory, on BROKEN with a deal id
+    d.evidence        # the evidence pack's directory, on a refusal with a deal id
 
 THE RULE. The envelope's verify (arcaeon.prove.envelope.verify, the one and
 only verifier; this module never checks a byte itself) answers one of three
@@ -24,14 +25,17 @@ It never means the content is true or safe (docs/ENVELOPE.md, "What VERIFIED
 does not prove"). COULD NOT LOOK allows `read` because reading changes
 nothing; every refusal on it names what could not be checked.
 
-THE EVIDENCE PACK. On BROKEN with a deal id, the gate copies the handed file
-and its envelope into the deal's record and writes evidence.json beside them:
+THE EVIDENCE PACK. On a refusal with a deal id (BROKEN, or COULD NOT LOOK on
+act, pay or irreversible: a refusal is evidence, D066), the gate copies the
+handed file and its envelope into the deal's record and writes evidence.json
+(LF line endings) beside them:
 
     <record_dir>/DEAL-<deal>/gate/<UTC stamp>-<sha256[:12]>/
         bundle/<file name>              the handed file's bytes
         bundle/<file name>.envelope.json the sidecar's bytes (when there is one)
         evidence.json                   kind, deal, action, decision, verdict,
-                                        reason, reasons, at (UTC), file and
+                                        reason, reasons, could_not_check,
+                                        at (UTC), file and
                                         envelope {path, copy, sha256, bytes},
                                         audience, signers, the verify report
 
@@ -46,14 +50,19 @@ writer the deal lane's rows go through (no second chain format):
     {"kind": "gate.evidence", "deal", "file_sha256", "verdict", "reason",
      "pack", "pack_digest", "pack_digest_of", "at"}   (+ "ts", "chain")
 
-The ledger is `ledger=` (`--ledger`, e.g. the receiver's own deal tape) or by
-default <record_dir>/DEAL-<deal>/gate/ledger.jsonl. `deal dispute` reads only
-`deal.*` rows, so this row never enters a deal verdict. The pack digest
-(PACK_DIGEST_OF) is sha256 over the UTF-8 text made of one line per regular
-file in the pack, `<sha256 hex of its bytes><two spaces><path relative to the
+`verdict` is the word refused on: BROKEN or COULD NOT LOOK. The ledger is
+`ledger=` (`--ledger`), the receiver's own deal chain, and it is required
+whenever a deal id is given (D066): a row written next to the pack could be
+rewritten along with it. `deal dispute` reads only `deal.*` rows, so this row
+never enters a deal verdict. The pack digest (PACK_DIGEST_OF, v2) is sha256
+over the UTF-8 text made of one line per regular file in the pack,
+`<sha256 hex of its LF-canonical bytes><two spaces><path relative to the
 pack, / separated>\n`, sorted by the path's UTF-8 bytes (sha256sum's format;
-empty directories add nothing; a symlink or other non-regular entry is
-refused). `verify_evidence_pack(pack_dir, row)` recomputes it: VERIFIED when
+LF-canonical: every CRLF read as LF, a bare CR kept, the W18 rule, so a
+checkout that rewrites line endings still matches; empty directories add
+nothing; a symlink or other non-regular entry is refused). A row naming
+PACK_DIGEST_OF_V1 (D056, raw bytes) or no rule reads by the raw-byte rule.
+`verify_evidence_pack(pack_dir, row)` recomputes it: VERIFIED when
 it matches, BROKEN when the pack changed, COULD NOT LOOK when the pack or the
 row cannot be read. It says the pack still matches the row; that the row
 itself was not rewritten is the chain's and a witness pin's job.
@@ -81,7 +90,8 @@ from arcaeon import verdict as V
 from arcaeon.prove import envelope as E
 
 __all__ = ["ACTIONS", "ALLOW", "REFUSE", "RULES", "GateDecision", "decide", "resolve",
-           "EVIDENCE_KIND", "CHAIN_KIND", "PACK_DIGEST_OF", "pack_digest",
+           "EVIDENCE_KIND", "CHAIN_KIND", "PACK_DIGEST_OF", "PACK_DIGEST_OF_V1",
+           "pack_digest",
            "verify_evidence_pack", "main"]
 
 ACTIONS = ("read", "act", "pay", "irreversible")
@@ -92,9 +102,20 @@ RULES = {V.VERIFIED: frozenset(ACTIONS), V.BROKEN: frozenset(),
 EVIDENCE_KIND = "arcaeon.gate.evidence/v1"
 #: The ledger row kind a refusal's evidence pack is chained under (D056).
 CHAIN_KIND = "gate.evidence"
-#: Names the pack digest rule (module docstring, docs/VERBS.md `gate`).
-PACK_DIGEST_OF = "sha256 over sorted '<sha256>  <relpath>' lines (sha256sum format), v1"
+#: Names the pack digest rule (module docstring, docs/VERBS.md `gate`). v2
+#: (D066): each file's sha256 is over its bytes with every CRLF turned into LF
+#: (W18's rule), so a checkout that rewrites line endings still matches.
+PACK_DIGEST_OF = ("sha256 over sorted '<sha256>  <relpath>' lines (sha256sum format), "
+                  "file sha256 over LF-canonical bytes (CRLF to LF), v2")
+#: The D056 rule (raw bytes). A row naming it, or no rule, reads by it.
+PACK_DIGEST_OF_V1 = "sha256 over sorted '<sha256>  <relpath>' lines (sha256sum format), v1"
+_RULES_READ = (PACK_DIGEST_OF, PACK_DIGEST_OF_V1)
+#: The D056 default ledger name beside the packs. No longer written (D066: the
+#: row belongs in the party's own chain, `ledger=` / `--ledger`, required with
+#: a deal); kept so a reader can find rows written before it.
 LEDGER_NAME = "ledger.jsonl"
+_NEEDS_LEDGER = ("--deal needs --ledger: the gate.evidence row goes in your own deal "
+                 "chain (a row written beside the pack could be rewritten along with it)")
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 
 ALLOW_MEANS = ("allow means the bytes are unchanged since the key you named sealed them "
@@ -237,19 +258,49 @@ def _write_evidence(d: GateDecision, file: Path, env_path: Path, signers: list,
         parts[key] = entry
     ev = {"kind": EVIDENCE_KIND, "deal": d.deal, "action": d.action, "decision": d.decision,
           "verdict": d.verdict, "reason": d.reason, "reasons": list(d.reasons),
+          "could_not_check": dict(d.could_not_check) if d.could_not_check else None,
           "at": _utc(now), "file": parts["file"], "envelope": parts["envelope"],
           "audience": d.audience, "purpose": d.purpose, "signers": list(signers), "limits": list(d.limits),
           "report": d.report}
     (out / "evidence.json").write_text(json.dumps(ev, indent=1, ensure_ascii=False) + "\n",
-                                       encoding="utf-8")
+                                       encoding="utf-8", newline="\n")
     return out
 
 
-def pack_digest(pack_dir: str | Path) -> str:
+def _file_sha256_lf(path: Path) -> str:
+    """sha256 of the file's LF-canonical bytes: every CRLF becomes LF (a bare
+    CR is content and stays), streamed; a CR at a chunk's end waits for the
+    next chunk so a CRLF split across the edge still counts as one LF."""
+    h, held = hashlib.sha256(), b""
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            chunk = held + chunk
+            held = b""
+            if chunk.endswith(b"\r"):
+                chunk, held = chunk[:-1], b"\r"
+            h.update(chunk.replace(b"\r\n", b"\n"))
+    h.update(held)
+    return h.hexdigest()
+
+
+def _file_sha256_raw(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def pack_digest(pack_dir: str | Path, *, of: str = PACK_DIGEST_OF) -> str:
     """The pack digest (PACK_DIGEST_OF): sha256 over one `<sha256>  <relpath>\\n`
-    line per regular file under `pack_dir`, sorted by the relpath's UTF-8 bytes.
+    line per regular file under `pack_dir`, sorted by the relpath's UTF-8 bytes,
+    each file's sha256 over its LF-canonical bytes (CRLF to LF). `of` =
+    PACK_DIGEST_OF_V1 hashes raw bytes instead (rows written before D066).
     Raises ValueError on a symlink or other non-regular entry (the gate never
-    writes one), OSError when the pack cannot be read."""
+    writes one) or an unknown rule, OSError when the pack cannot be read."""
+    if of not in _RULES_READ:
+        raise ValueError(f"unknown pack digest rule {of!r}")
+    file_sha = _file_sha256_lf if of == PACK_DIGEST_OF else _file_sha256_raw
     root = Path(pack_dir)
     if not root.is_dir() or root.is_symlink():
         raise FileNotFoundError(f"no evidence pack directory at {root}")
@@ -265,11 +316,7 @@ def pack_digest(pack_dir: str | Path) -> str:
                 continue
             if not p.is_file():
                 raise ValueError(f"the pack holds {rel!r}, which is not a regular file")
-            h = hashlib.sha256()
-            with open(p, "rb") as f:
-                for chunk in iter(lambda: f.read(1 << 20), b""):
-                    h.update(chunk)
-            lines.append((rel.encode("utf-8"), f"{h.hexdigest()}  {rel}\n"))
+            lines.append((rel.encode("utf-8"), f"{file_sha(p)}  {rel}\n"))
     lines.sort(key=lambda t: t[0])
     return hashlib.sha256("".join(t[1] for t in lines).encode("utf-8")).hexdigest()
 
@@ -290,11 +337,14 @@ def verify_evidence_pack(pack_dir: str | Path, row: dict) -> dict:
     if not isinstance(rec, str) or not _HEX64.fullmatch(rec):
         out["reason"] = "the row carries no readable pack_digest"
         return out
-    if row.get("pack_digest_of") not in (None, PACK_DIGEST_OF):
-        out["reason"] = f"the row's digest rule {row.get('pack_digest_of')!r} is not one this reads"
+    rule = row.get("pack_digest_of")
+    if rule is None:                          # D056 rows always named v1; absent reads as v1
+        rule = PACK_DIGEST_OF_V1
+    if rule not in _RULES_READ:
+        out["reason"] = f"the row's digest rule {rule!r} is not one this reads"
         return out
     try:
-        now = pack_digest(pack_dir)
+        now = pack_digest(pack_dir, of=rule)
     except ValueError as e:
         out.update(verdict=V.BROKEN, reason=str(e))
         return out
@@ -351,13 +401,17 @@ def decide(file: str | Path, *, action: str, audience: str | None,
 
     `file` is the handed file; `envelope` its sidecar (default: beside it).
     `audience`, `signers`, `deal` and `purpose` go to verify unchanged (a
-    wrong one is BROKEN there). On BROKEN with a `deal`, an evidence pack is
-    written under `record_dir` (default: the current directory) and one
-    gate.evidence row is appended to `ledger` (default: the pack's
-    DEAL-<deal>/gate/ledger.jsonl). Raises ValueError on an unknown action;
-    otherwise never raises."""
+    wrong one is BROKEN there). On a refusal (BROKEN, or COULD NOT LOOK on
+    anything but read) with a `deal`, an evidence pack is written under
+    `record_dir` (default: the current directory) and one gate.evidence row
+    is appended to `ledger`, the party's own chain. `ledger` is required with
+    `deal` (D066): a row written beside the pack could be rewritten with it.
+    Raises ValueError on an unknown action or a `deal` without a `ledger`,
+    before anything is read or written; otherwise never raises."""
     if action not in ACTIONS:
         raise ValueError(f"action must be one of {ACTIONS}, got {action!r}")
+    if deal is not None and ledger is None:
+        raise ValueError(_NEEDS_LEDGER)
     now = now or datetime.now(timezone.utc)
     file = Path(file)
     env_path = Path(envelope) if envelope is not None else E.envelope_path(file)
@@ -381,7 +435,7 @@ def decide(file: str | Path, *, action: str, audience: str | None,
                      could_not_check=cnc, file=str(file), envelope=str(env_path),
                      audience=audience, deal=deal, purpose=purpose, signers=list(signers),
                      at=_utc(now), report=r)
-    if verdict == V.BROKEN and deal is not None:
+    if not allowed and deal is not None:
         try:
             out = _write_evidence(d, file, env_path, signers,
                                   Path(record_dir) if record_dir is not None else Path.cwd(), now)
@@ -393,14 +447,12 @@ def decide(file: str | Path, *, action: str, audience: str | None,
         if d.evidence is not None:
             out = Path(d.evidence)
             try:
-                d.chain_row = _append_chain_row(
-                    d, out, Path(ledger) if ledger is not None else out.parent / LEDGER_NAME,
-                    now)
+                d.chain_row = _append_chain_row(d, out, Path(ledger), now)
             except Exception as e:  # noqa: BLE001  the refusal stands either way
                 d.chain_error = f"gate.evidence row not appended ({type(e).__name__}: {e})"
                 d.reason += (f" The {CHAIN_KIND} row could not be appended "
                              f"({type(e).__name__}).")
-    elif verdict == V.BROKEN:
+    elif not allowed:
         d.reason += " No deal id was given, so no evidence pack was written."
     return d
 
@@ -408,9 +460,9 @@ def decide(file: str | Path, *, action: str, audience: str | None,
 # --- CLI ------------------------------------------------------------------------
 
 USAGE = """usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
-                           --action {read,act,pay,irreversible} [--deal ID]
-                           [--purpose TEXT] [--file PATH] [--record-dir DIR]
-                           [--ledger PATH] [--json]
+                           --action {read,act,pay,irreversible}
+                           [--deal ID --ledger PATH] [--purpose TEXT]
+                           [--file PATH] [--record-dir DIR] [--json]
        arcaeon gate packet (--evidence DIR | --decision FILE.json)
                            [--out DIR] [--json]"""
 
@@ -420,11 +472,13 @@ decide runs `envelope verify` and turns its word into allow or refuse for the
 action you are about to take:
 
   VERIFIED        allows read, act, pay and irreversible
-  BROKEN          refuses all four; with --deal, writes an evidence pack (the
-                  file and envelope bytes, their sha256, the verdict, the
-                  reasons, the UTC time) to DIR/DEAL-<deal>/gate/<stamp>/
+  BROKEN          refuses all four
   COULD NOT LOOK  allows read only; refuses act, pay and irreversible,
                   naming what could not be checked
+
+Every refusal with --deal writes an evidence pack (the file and envelope
+bytes, their sha256, the verdict, the reasons, the UTC time) to
+DIR/DEAL-<deal>/gate/<stamp>/.
 
 --envelope names the sidecar (FILE.envelope.json; the handed file is FILE)
 or the handed file itself (its sidecar beside it); with --file, --envelope is
@@ -432,10 +486,13 @@ the sidecar under any name and --file the handed file. --signer may be
 repeated. --deal and --purpose are held against the envelope's binding.
 --record-dir defaults to the current directory.
 
-With an evidence pack written, one `gate.evidence` row (deal, file sha256,
-verdict, reason, the pack's digest, UTC time) is appended to the hash-chained
-ledger --ledger names (default DIR/DEAL-<deal>/gate/ledger.jsonl), so a later
-edit of the pack no longer matches the chain. `deal dispute` ignores the row.
+--deal needs --ledger: with an evidence pack written, one `gate.evidence`
+row (deal, file sha256, verdict BROKEN or COULD NOT LOOK, reason, the pack's
+digest, UTC time) is appended to the hash-chained ledger --ledger names, your
+own deal chain, so a later edit of the pack no longer matches the chain. A
+row beside the pack could be rewritten along with it, so there is no default.
+The pack digest hashes each file with CRLF read as LF, so a line-ending
+rewrite of the pack still matches. `deal dispute` ignores the row.
 
 Allow means the bytes are unchanged since the key you named sealed them and
 are labeled for you and in date. It does not say the content is true or safe.
@@ -448,9 +505,9 @@ usage. Spec and limits: docs/ENVELOPE.md.
 packet renders a refusal as one page a dispute process can take: what was
 handed (name, sha256, size), by whom, for whom, when, what failed, what was
 not checked, the verdict and decision, and the envelope spec's "does not
-prove" list word for word. --evidence is an evidence pack directory (BROKEN
-with a deal id); --decision is the `decide --json` output (so a COULD NOT
-LOOK refusal, which writes no pack, can be rendered too). File names only,
+prove" list word for word. --evidence is an evidence pack directory (a
+refusal with a deal id); --decision is the `decide --json` output (so a
+refusal without a deal id, which writes no pack, can be rendered too). File names only,
 never the directories. Prints markdown (--json: the JSON form, kind
 arcaeon.dispute.packet/v1); --out DIR writes dispute-packet.md and
 dispute-packet.json there instead.
@@ -471,6 +528,8 @@ def _decide_cli(argv: list[str]) -> int:
             raise E._Usage(f"decide needs {need}")
     if o["--action"] not in ACTIONS:
         raise E._Usage(f"--action must be one of {', '.join(ACTIONS)}")
+    if o.get("--deal") is not None and not o.get("--ledger"):
+        raise E._Usage(_NEEDS_LEDGER)
     file, env_path = resolve(o["--envelope"], o.get("--file"))
     d = decide(file, envelope=env_path, action=o["--action"], audience=o["--audience"],
                signers=o["--signer"], deal=o.get("--deal"), purpose=o.get("--purpose"),

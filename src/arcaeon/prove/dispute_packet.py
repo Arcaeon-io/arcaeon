@@ -3,14 +3,14 @@
 
     from arcaeon.prove import dispute_packet as P
     p = P.from_evidence("deals/DEAL-d-7f3a/gate/20261004T152828Z-0123456789ab")
-    p = P.from_decision(gate.decide(...).to_dict())     # a COULD NOT LOOK refusal
+    p = P.from_decision(gate.decide(...).to_dict())     # a refusal with no deal id
     P.render_markdown(p)     # the page a marketplace's dispute process can take
     P.render_json(p)         # the same facts, kind arcaeon.dispute.packet/v1
 
-The gate (arcaeon.prove.gate) refuses an action and, on BROKEN with a deal
-id, keeps an evidence pack. This module renders that refusal, from the pack's
-evidence.json or from the gate's decision dict (a COULD NOT LOOK refusal
-writes no pack), as one page in plain words: what was handed, by whom, for
+The gate (arcaeon.prove.gate) refuses an action and, on a refusal with a
+deal id (BROKEN or COULD NOT LOOK), keeps an evidence pack. This module
+renders that refusal, from the pack's evidence.json or from the gate's
+decision dict (a refusal without a deal id writes no pack), as one page in plain words: what was handed, by whom, for
 whom, when, what failed, what was not checked, the verdict and the decision,
 and the envelope spec's "does not prove" list quoted word for word.
 
@@ -416,7 +416,7 @@ def render_markdown(packet: dict) -> str:
         ])
     else:
         evidence_block = _rows([
-            ("Evidence pack", "none written (the gate writes one only on BROKEN with a deal id)"
+            ("Evidence pack", "none written (the gate writes one only on a refusal with a deal id)"
              + (f"; {_text(ev['error'])}" if ev.get("error") else "")),
             ("Envelope", _code(ev.get("envelope_file"))),
         ])

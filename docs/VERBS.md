@@ -677,8 +677,9 @@ Answers: may I take this action on the file I was handed? `gate decide` runs
 `envelope verify` (the same verifier, not a second one) and turns its word
 into allow or refuse for one of four actions: VERIFIED allows `read`, `act`,
 `pay` and `irreversible`; BROKEN refuses all four; COULD NOT LOOK allows
-`read` only and refuses the rest, naming what could not be checked. On
-BROKEN with `--deal`, it writes an evidence pack into the deal's record:
+`read` only and refuses the rest, naming what could not be checked. On any
+refusal with `--deal` (BROKEN, or COULD NOT LOOK on `act`, `pay` or
+`irreversible`), it writes an evidence pack into the deal's record:
 `DIR/DEAL-<deal>/gate/<UTC stamp>-<sha256 prefix>/` holding `bundle/` (copies
 of the file and its envelope) and `evidence.json` (the sha256 of each copy,
 the verdict, the reasons, the action, the UTC time and the verify report).
@@ -688,16 +689,20 @@ The library function is `arcaeon.prove.gate.decide`.
 
 Once the pack is written, the gate appends one row of kind `gate.evidence` to
 a hash-chained ledger through the same writer the deal rows use: the deal id,
-the file's sha256, the verdict, the reason, the pack's name, its
-`pack_digest` and the UTC time. The ledger is `--ledger PATH` (your own deal
-tape, say) or `DIR/DEAL-<deal>/gate/ledger.jsonl`. The pack digest is the
-sha256 of the text `<sha256>  <path>\n`, one line per regular file in the
-pack (sha256sum's format, the path relative to the pack with `/`), sorted by
-the path's UTF-8 bytes. A later edit, addition, removal or rename in the pack
-no longer matches the row; `arcaeon.prove.gate.verify_evidence_pack(pack,
-row)` answers VERIFIED, BROKEN or COULD NOT LOOK. `deal dispute` reads only
-`deal.*` rows and ignores this one. No row is written without a pack (allow,
-COULD NOT LOOK, or no deal id).
+the file's sha256, the verdict (BROKEN or COULD NOT LOOK), the reason, the
+pack's name, its `pack_digest` and the UTC time. The ledger is `--ledger
+PATH`, your own deal chain, and `--deal` without `--ledger` is bad usage
+(exit 2, nothing written): a row beside the pack could be rewritten along
+with it. The pack digest is the sha256 of the text `<sha256>  <path>\n`, one
+line per regular file in the pack (sha256sum's format, the path relative to
+the pack with `/`), sorted by the path's UTF-8 bytes; each file's sha256 is
+over its bytes with every CRLF read as LF, so a checkout that rewrites line
+endings still matches (a row naming the older raw-byte rule reads by that
+rule). A later edit, addition, removal or rename in the pack no longer
+matches the row; `arcaeon.prove.gate.verify_evidence_pack(pack, row)`
+answers VERIFIED, BROKEN or COULD NOT LOOK. `deal dispute` reads only
+`deal.*` rows and ignores this one. No row is written without a pack (an
+allow, or no deal id).
 
 `gate packet` renders a refusal as one page a marketplace's dispute process
 can take, in markdown and JSON (kind `arcaeon.dispute.packet/v1`): what was
@@ -705,9 +710,9 @@ handed (file name, sha256, size), by whom (the signer the envelope names and
 whether the signature checked), for whom, when (sealed at, checked at), what
 failed, what was not checked, the verdict and the decision, and ENVELOPE.md's
 "What VERIFIED does not prove" list word for word. `--evidence DIR` reads an
-evidence pack (BROKEN with a deal id); `--decision FILE.json` reads the
-`decide --json` output, so a COULD NOT LOOK refusal, which writes no pack,
-can be rendered too. Only file names reach the packet, never the directories.
+evidence pack (a refusal with a deal id); `--decision FILE.json` reads the
+`decide --json` output, so a refusal without a deal id, which writes no
+pack, can be rendered too. Only file names reach the packet, never the directories.
 A decision that allowed the action has nothing to dispute (exit 2). The
 library is `arcaeon.prove.dispute_packet`.
 
@@ -715,21 +720,21 @@ library is `arcaeon.prove.dispute_packet`.
 
 ```text
 usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
-                           --action {read,act,pay,irreversible} [--deal ID]
-                           [--purpose TEXT] [--file PATH] [--record-dir DIR]
-                           [--ledger PATH] [--json]
+                           --action {read,act,pay,irreversible}
+                           [--deal ID --ledger PATH] [--purpose TEXT]
+                           [--file PATH] [--record-dir DIR] [--json]
        arcaeon gate packet (--evidence DIR | --decision FILE.json)
                            [--out DIR] [--json]
 ```
 
 **Exit codes:** 0 allow, 1 refuse (BROKEN), 3 refuse (COULD NOT LOOK), 2 bad
-usage (a missing `--envelope`, `--audience`, `--signer` or `--action`, or an
-action that is not one of the four). `packet`: 0 written, 2 bad usage or
+usage (a missing `--envelope`, `--audience`, `--signer` or `--action`, an
+action that is not one of the four, or `--deal` without `--ledger`). `packet`: 0 written, 2 bad usage or
 nothing to dispute, 3 the input is not a readable gate record. New in 0.10.x,
 so `--legacy-exit` changes nothing here.
 
 ```console
-$ arcaeon gate decide --envelope grades.csv.envelope.json --audience instructor-1 --signer did:key:z6Mk... --action pay --deal d-7f3a
+$ arcaeon gate decide --envelope grades.csv.envelope.json --audience instructor-1 --signer did:key:z6Mk... --action pay --deal d-7f3a --ledger my-deal-tape.jsonl
 allow pay: VERIFIED. The bytes are unchanged since the key you named sealed them, ...
 ```
 
