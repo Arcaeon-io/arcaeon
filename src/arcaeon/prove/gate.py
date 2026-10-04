@@ -43,6 +43,10 @@ THE DISPUTE PACKET. `arcaeon gate packet` (arcaeon.prove.dispute_packet)
 renders a refusal, from an evidence pack or from a decision's to_dict(), as
 one page in markdown and JSON for a marketplace's dispute process.
 
+A2A. `arcaeon gate a2a` (arcaeon.prove.a2a_receiver) takes the envelope from
+an A2A Artifact's metadata under https://arcaeon.io/a2a/witness/v1 and runs
+`decide` on it (docs/A2A.md).
+
 Stdlib only (verify loads the [sign] backend itself). `decide` raises only on
 an unknown action; anything else is an answer.
 """
@@ -289,7 +293,11 @@ USAGE = """usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
                            [--purpose TEXT] [--file PATH] [--record-dir DIR]
                            [--json]
        arcaeon gate packet (--evidence DIR | --decision FILE.json)
-                           [--out DIR] [--json]"""
+                           [--out DIR] [--json]
+       arcaeon gate a2a --message FILE.json --audience ID --signer DID
+                        --action {read,act,pay,irreversible} [--file PATH]
+                        [--artifact ID] [--deal ID] [--purpose TEXT]
+                        [--activated URIS] [--record-dir DIR] [--json]"""
 
 HELP = USAGE + """
 
@@ -327,7 +335,17 @@ never the directories. Prints markdown (--json: the JSON form, kind
 arcaeon.dispute.packet/v1); --out DIR writes dispute-packet.md and
 dispute-packet.json there instead.
 Exit codes: 0 written, 2 bad usage or nothing to dispute (the gate allowed
-the action), 3 the input could not be read as a gate record."""
+the action), 3 the input could not be read as a gate record.
+
+a2a is decide for a file handed over A2A (Agent2Agent): the envelope rides
+in the Artifact's (or Message's) metadata under the witness extension URI
+https://arcaeon.io/a2a/witness/v1 (docs/A2A.md). --message is the A2A JSON (an
+Artifact, Message, Task, artifact update event, or a JSON-RPC body around
+one); --file is the artifact's file (default: its one inline raw part; a url
+part is never fetched). --artifact picks the artifact when several carry an
+envelope. --activated is the A2A-Extensions value the request carried; it is
+recorded and changes no verdict. No envelope there, or no file bytes, is
+COULD NOT LOOK (read only). Same exit codes as decide."""
 
 _SPEC = {"--envelope": "value", "--audience": "value", "--signer": "list",
          "--action": "value", "--deal": "value", "--purpose": "value", "--file": "value",
@@ -396,7 +414,10 @@ def main(argv: list[str] | None = None) -> int:
             return _decide_cli(rest)
         if sub == "packet":
             return _packet_cli(rest)
-        raise E._Usage(f"unknown subcommand {sub!r} (decide, packet)")
+        if sub == "a2a":
+            from arcaeon.prove import a2a_receiver
+            return a2a_receiver.cli(rest)
+        raise E._Usage(f"unknown subcommand {sub!r} (decide, packet, a2a)")
     except E._Usage as e:
         print(f"arcaeon gate: {e}\n{USAGE}", file=sys.stderr)
         return V.EXIT_USAGE
