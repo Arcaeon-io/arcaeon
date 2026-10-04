@@ -798,7 +798,7 @@ def _react_cli(argv: list[str]) -> int:
     except ExchangeError as e:
         print(f"arcaeon exchange react: {e}; nothing was written", file=sys.stderr)
         return V.EXIT_USAGE
-    print(json.dumps({"ok": True, **out}, indent=1, ensure_ascii=False))
+    print(json.dumps({"ok": True, **out}, indent=1, ensure_ascii=True))
     return V.EXIT_GOOD
 
 
@@ -852,9 +852,9 @@ def _pair_cli(argv: list[str]) -> int:
             raise _Usage(f"{flag} must be an Ed25519 did:key")
     r = pair(pos[0], pos[1], owner_a=o.get("--owner-a"), owner_b=o.get("--owner-b"))
     if o.get("--json"):
-        print(json.dumps(r, indent=1, ensure_ascii=False))
+        print(json.dumps(r, indent=1, ensure_ascii=True))     # F11: a lone surrogate prints
     else:
-        print(_render(r))
+        print(_render(r).encode("utf-8", "backslashreplace").decode("utf-8"))
     code = V.exit_for(r["verdict"])
     marks = r["counts"]["mismatch"] + r["counts"]["missing"]
     if o.get("--strict") and code == V.EXIT_GOOD and marks:

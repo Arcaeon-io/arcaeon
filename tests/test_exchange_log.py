@@ -572,3 +572,30 @@ def test_cli_bind(parties, capsys):
                      "--log", str(p["lb"])]) == V.EXIT_USAGE
     assert cli.main(["exchange", "bind", "--key", str(p["kb"])]) == V.EXIT_USAGE
     assert "Traceback" not in capsys.readouterr().err
+
+
+# --- F11: a lone surrogate in an exchange id never crashes the CLI print -----------------
+
+LONE = "ex-\ud800-1"
+
+
+def _pair_result():
+    return {"verdict": V.VERIFIED, "reason": "both logs check", "logs": {},
+            "exchanges": [{"exchange_id": LONE, "status": "missing", "findings": [LONE]}],
+            "claims": [{"side": "a", "exchange_id": LONE, "at": "t", "current": True,
+                        "reason": LONE}],
+            "counts": {"clean": 0, "mismatch": 0, "missing": 1, "not_verified": 0,
+                       "broken": 0}}
+
+
+@pytest.mark.parametrize("json_flag", [True, False])
+def test_pair_cli_prints_a_lone_surrogate_without_unicode_error(monkeypatch, capsys, json_flag):
+    monkeypatch.setattr(X, "pair", lambda *a, **k: _pair_result())
+    argv = ["pair", "a.jsonl", "b.jsonl"] + (["--json"] if json_flag else [])
+    assert X.main(argv) == V.EXIT_GOOD
+    out = capsys.readouterr().out
+    out.encode("utf-8")                                   # strict: no surrogate got through
+    if json_flag:
+        assert r"\ud800" in out and json.loads(out)["exchanges"][0]["exchange_id"] == LONE
+    else:
+        assert r"\ud800" in out
