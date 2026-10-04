@@ -686,6 +686,19 @@ Allow means the bytes are unchanged since the key you named sealed them and
 are labeled for you and in date; it does not say the content is true or safe.
 The library function is `arcaeon.prove.gate.decide`.
 
+Once the pack is written, the gate appends one row of kind `gate.evidence` to
+a hash-chained ledger through the same writer the deal rows use: the deal id,
+the file's sha256, the verdict, the reason, the pack's name, its
+`pack_digest` and the UTC time. The ledger is `--ledger PATH` (your own deal
+tape, say) or `DIR/DEAL-<deal>/gate/ledger.jsonl`. The pack digest is the
+sha256 of the text `<sha256>  <path>\n`, one line per regular file in the
+pack (sha256sum's format, the path relative to the pack with `/`), sorted by
+the path's UTF-8 bytes. A later edit, addition, removal or rename in the pack
+no longer matches the row; `arcaeon.prove.gate.verify_evidence_pack(pack,
+row)` answers VERIFIED, BROKEN or COULD NOT LOOK. `deal dispute` reads only
+`deal.*` rows and ignores this one. No row is written without a pack (allow,
+COULD NOT LOOK, or no deal id).
+
 `gate packet` renders a refusal as one page a marketplace's dispute process
 can take, in markdown and JSON (kind `arcaeon.dispute.packet/v1`): what was
 handed (file name, sha256, size), by whom (the signer the envelope names and
@@ -704,7 +717,7 @@ library is `arcaeon.prove.dispute_packet`.
 usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
                            --action {read,act,pay,irreversible} [--deal ID]
                            [--purpose TEXT] [--file PATH] [--record-dir DIR]
-                           [--json]
+                           [--ledger PATH] [--json]
        arcaeon gate packet (--evidence DIR | --decision FILE.json)
                            [--out DIR] [--json]
 ```
