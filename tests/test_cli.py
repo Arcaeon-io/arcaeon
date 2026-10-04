@@ -28,7 +28,8 @@ COUNCIL_VERBS = ["log", "verify", "reconcile", "pin", "seal", "stamp", "vet", "b
 #: envelope: the labeled-exchange envelope, truth-economy connector phase 1 (D010).
 #: gate: the rule as code over the envelope verdict, truth-economy phase 2 (D050 / TE-21).
 #: exchange: signed reactions and the pair reader, truth-economy TE-42 (D057).
-ADDED_VERBS = ["deal", "status", "envelope", "gate", "exchange"]
+#: tally: the tally as facts, no score, truth-economy TE-43 + TE-44 (D058).
+ADDED_VERBS = ["deal", "status", "envelope", "gate", "exchange", "tally"]
 #: Registered up front by the 9/27 plug-in batch (BATCH_OPUS_2026-09-27_PLUGIN.md,
 #: K001), each dispatched lazily to a module a later item builds.
 PLUGIN_VERBS = ["serve", "connect", "schema", "second-read", "evidence-pack", "export",

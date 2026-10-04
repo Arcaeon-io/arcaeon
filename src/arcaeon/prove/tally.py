@@ -1,0 +1,730 @@
+# SPDX-License-Identifier: MIT
+"""arcaeon.prove.tally: the tally as facts, no score (TE-43 + TE-44).
+
+    arcaeon tally build CHAIN.jsonl... [--json] [--settled-only] [--checked-only]
+                        [--window 30d] [--groups FILE] [--aliases FILE] [--now T]
+    arcaeon tally alias --old-key SEEDFILE --new-key SEEDFILE [--at T]
+
+Reads exchange reaction chains (docs/EXCHANGE.md, one per account key) and
+prints, per ID, facts in columns for a recent window and for all time, side
+by side. There is no score, no weight and no ranking: anything that counts
+more can be bought. The library is `build(paths, ...)`; it returns a dict of
+kind arcaeon.tally/v1 and does not raise on hostile input (COULD NOT LOOK or
+BROKEN instead). Bad options (a window or time that does not parse) raise
+TallyError before anything is read.
+
+Every output carries SENTENCE. The spec and its limits: docs/TALLY.md.
+"""
+from __future__ import annotations
+
+import base64
+import binascii
+import json
+import re
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+from arcaeon import verdict as V
+from arcaeon.prove import exchange_log as X
+from arcaeon.record.row import canon_json, loads_strict
+
+__all__ = ["KIND", "SENTENCE", "ALIAS_KIND", "ALIAS_PAYLOAD_TYPE", "UNRATED_UNDER_EXCHANGES",
+           "UNRATED_UNDER_DAYS", "DEFAULT_WINDOW", "TallyError", "parse_window", "parse_now",
+           "sign_alias", "check_alias", "build", "render", "main"]
+
+KIND = "arcaeon.tally/v1"
+SENTENCE = "clean means unchanged and labeled, never true"
+ALIAS_KIND = "arcaeon.tally.alias/v1"
+ALIAS_PAYLOAD_TYPE = "application/vnd.arcaeon.tally.alias.v1+json"
+ALIAS_SIGNED = ("kind", "old", "new", "at")
+UNRATED_UNDER_EXCHANGES = 10
+UNRATED_UNDER_DAYS = 14
+DEFAULT_WINDOW = "30d"
+WORDS = (V.VERIFIED, V.COULD_NOT_LOOK, V.BROKEN)
+MAX_SIDE_FILE = 4 << 20
+_TS_FMT = "%Y-%m-%dT%H:%M:%SZ"
+_WINDOW = re.compile(r"([1-9][0-9]{0,4})([dh])")
+
+DEFINITIONS = {
+    "said": "the words this ID wrote in its own chain: its latest non-superseded reaction "
+            "per exchange (what it said about the bytes it got)",
+    "received": "the words counterparties wrote about exchanges with this ID: their latest "
+                "reaction per exchange, read only from chains among the inputs",
+    "paired": "exchanges where both parties' chains are among the inputs, lined up by "
+              "exchange_id as `arcaeon exchange pair` does: clean, mismatch, missing, "
+              "not_verified, broken",
+    "exchanges": "distinct paired exchanges (counterparty has its own chain among the inputs), "
+                 "self-trades excluded; the unrated threshold counts these",
+    "counterparties_with_records": "distinct other IDs in paired exchanges: a counterparty "
+                                   "counts only if a chain it owns is among the inputs",
+    "disagreements": "paired exchanges whose status is mismatch or missing",
+    "broken": "findings that make the BROKEN flag: this ID's chain does not verify or holds "
+              "a BROKEN row (dated in every window), a counterparty said BROKEN about an "
+              "exchange with it, or a paired exchange is broken",
+    "checked": "a reaction that is VERIFIED or BROKEN (someone looked); COULD NOT LOOK is not "
+               "checked. --checked-only drops unchecked rows and any pair holding one",
+    "settled": "an exchange with a current row from both parties (both chains among the "
+               "inputs) and neither row DISPUTED. --settled-only drops every other row",
+    "age": "from this ID's earliest signed `at` (any of its keys) to now; the writer's clock",
+}
+
+PROVES = ("each counted row was written by the key that owns its chain, and the counts are "
+          "what those rows say, read the same way by anyone holding the same chains")
+DOES_NOT_PROVE = ("that any file was true, that an ID is honest or a person, that two IDs "
+                  "are not one owner (only declared groups and shared keys are caught), that "
+                  "a chain was not truncated or re-minted, or that `at` times are real (they "
+                  "are the writer's clock)")
+LIMITS = (
+    "no score, no weight, no ranking: anything that counts more can be bought",
+    "self-trades are caught only when the two sides share a key, are one ID by a signed "
+    "alias, or are in one declared group; two strangers' keys run by one owner look like "
+    "two parties",
+    "a fresh key with no alias cannot be stopped; it is shown as a new, unrated ID",
+    "an alias needs both keys' signatures, so an ID with a bad record will not sign one: "
+    "the alias carries history forward only when the holder chooses to",
+    "`at` is signed but not witnessed: an owner can backdate rows to look older; pin chain "
+    "heads outside your control",
+)
+
+
+class TallyError(ValueError):
+    """A bad option (window, time, key file). Nothing was read."""
+
+
+# --- options -----------------------------------------------------------------------------
+
+def parse_window(text: str) -> timedelta:
+    """'30d' or '12h' (1 to 99999), else TallyError."""
+    m = _WINDOW.fullmatch(str(text).strip())
+    if not m:
+        raise TallyError(f"--window {text!r} is not a span like 30d or 12h")
+    n = int(m.group(1))
+    return timedelta(days=n) if m.group(2) == "d" else timedelta(hours=n)
+
+
+def parse_now(text: Any) -> datetime:
+    """A datetime with a zone, or 'YYYY-MM-DDTHH:MM:SSZ', as UTC."""
+    if isinstance(text, datetime):
+        if text.tzinfo is None:
+            raise TallyError("--now needs a zone")
+        return text.astimezone(timezone.utc).replace(microsecond=0)
+    try:
+        return datetime.strptime(str(text), _TS_FMT).replace(tzinfo=timezone.utc)
+    except ValueError:
+        raise TallyError(f"--now {text!r} is not a UTC time YYYY-MM-DDTHH:MM:SSZ") from None
+
+
+def _at(text: Any) -> datetime | None:
+    try:
+        return datetime.strptime(text, _TS_FMT).replace(tzinfo=timezone.utc)
+    except (TypeError, ValueError):
+        return None
+
+
+def _ts(dt: datetime | None) -> str | None:
+    return dt.strftime(_TS_FMT) if dt else None
+
+
+# --- aliases: a new key inherits an old ID, signed by both keys --------------------------
+
+def _alias_bytes(entry: dict) -> bytes:
+    from arcaeon.prove.envelope import pae
+    return pae(ALIAS_PAYLOAD_TYPE, canon_json({k: entry[k] for k in ALIAS_SIGNED}))
+
+
+def sign_alias(old_seed: bytes, new_seed: bytes, at: datetime | None = None) -> dict:
+    """An alias entry: `new` inherits the record of `old`. Both keys sign the
+    same bytes (sig_old, sig_new), so neither a key's history nor a key can be
+    claimed without its holder."""
+    from arcaeon.prove.vet import receipts as R
+    old = R.did_key(R.public_key_from_seed(old_seed))
+    new = R.did_key(R.public_key_from_seed(new_seed))
+    if old == new:
+        raise TallyError("the old key and the new key are the same key")
+    e = {"kind": ALIAS_KIND, "old": old, "new": new,
+         "at": _ts((at or datetime.now(timezone.utc)).astimezone(timezone.utc))}
+    msg = _alias_bytes(e)
+    e["sig_old"] = base64.b64encode(R._sign_bytes(old_seed, msg)).decode("ascii")
+    e["sig_new"] = base64.b64encode(R._sign_bytes(new_seed, msg)).decode("ascii")
+    return e
+
+
+def check_alias(entry: Any) -> tuple[str | None, str | None]:
+    """(None, None) when both signatures verify; else (word, why): word is
+    COULD NOT LOOK for a malformed entry, BROKEN for a signature that fails."""
+    from arcaeon.prove.envelope import _pubkey_from_did
+    from arcaeon.prove.vet import receipts as R
+    if not isinstance(entry, dict):
+        return V.COULD_NOT_LOOK, "not a JSON object"
+    want = set(ALIAS_SIGNED) | {"sig_old", "sig_new"}
+    if set(entry) != want:
+        return V.COULD_NOT_LOOK, f"fields must be exactly {', '.join(sorted(want))}"
+    if entry["kind"] != ALIAS_KIND:
+        return V.COULD_NOT_LOOK, f"kind is not {ALIAS_KIND}"
+    if not (X._is_did(entry["old"]) and X._is_did(entry["new"])):
+        return V.COULD_NOT_LOOK, "old and new must be Ed25519 did:key"
+    if entry["old"] == entry["new"]:
+        return V.COULD_NOT_LOOK, "old and new are the same key"
+    if _at(entry["at"]) is None:
+        return V.COULD_NOT_LOOK, "at is not a UTC time"
+    msg = _alias_bytes(entry)
+    for side in ("old", "new"):
+        try:
+            sig = base64.b64decode(str(entry[f"sig_{side}"]), validate=True)
+        except (binascii.Error, ValueError):
+            return V.BROKEN, f"sig_{side} is not base64"
+        if not R._verify_bytes(_pubkey_from_did(entry[side]), msg, sig):
+            return V.BROKEN, f"sig_{side} does not verify under the {side} key"
+    return None, None
+
+
+# --- side files (groups, aliases) ----------------------------------------------------------
+
+def _load_side(src: Any, what: str) -> tuple[Any, str | None]:
+    """(parsed JSON, None) or (None, why). `src` is a path or already-parsed JSON."""
+    if src is None:
+        return None, None
+    if isinstance(src, (dict, list)):
+        return src, None
+    p = Path(src)
+    try:
+        if not p.is_file():
+            return None, f"{what} file {p.name} is not there"
+        if p.stat().st_size > MAX_SIDE_FILE:
+            return None, f"{what} file {p.name} is over {MAX_SIDE_FILE} bytes; not read"
+        return loads_strict(p.read_bytes().decode("utf-8")), None
+    except (OSError, UnicodeDecodeError, ValueError) as e:
+        return None, f"{what} file {p.name} is not JSON ({type(e).__name__})"
+
+
+def _groups(obj: Any) -> tuple[list[dict], str | None]:
+    """[{name, members}] or (_, why). Shape: {"groups": [...]} or a list; each
+    group a list of did:key or {"name": TEXT, "members": [did:key, ...]}."""
+    if obj is None:
+        return [], None
+    items = obj.get("groups") if isinstance(obj, dict) else obj
+    if not isinstance(items, list):
+        return [], "groups file holds no list of groups"
+    out = []
+    for n, g in enumerate(items, 1):
+        name, members = f"group {n}", g
+        if isinstance(g, dict):
+            name, members = g.get("name", name), g.get("members")
+        if not X._text_ok(name) or not isinstance(members, list) or len(members) < 2 \
+                or not all(X._is_did(m) for m in members):
+            return [], f"group {n} is not a name and two or more Ed25519 did:key members"
+        out.append({"name": name, "members": sorted(set(members))})
+    return out, None
+
+
+# --- build ---------------------------------------------------------------------------------
+
+def _skeleton(now: datetime, span: timedelta, window: str, settled: bool, checked: bool) -> dict:
+    return {"kind": KIND, "sentence": SENTENCE, "verdict": None, "reason": None,
+            "now": _ts(now),
+            "windows": [{"name": window, "from": _ts(now - span), "to": _ts(now)},
+                        {"name": "all", "from": None, "to": _ts(now)}],
+            "order": "IDs with a BROKEN flag first, then by key text; this is not a ranking",
+            "thresholds": {"unrated_under_exchanges": UNRATED_UNDER_EXCHANGES,
+                           "unrated_under_days": UNRATED_UNDER_DAYS},
+            "filters": {"settled_only": settled, "checked_only": checked},
+            "definitions": DEFINITIONS, "chains": [], "aliases": [], "groups": [],
+            "ids": [], "findings": [], "proves": PROVES, "does_not_prove": DOES_NOT_PROVE,
+            "limits": list(LIMITS)}
+
+
+def build(paths, *, window: str = DEFAULT_WINDOW, settled_only: bool = False,
+          checked_only: bool = False, groups: Any = None, aliases: Any = None,
+          now: Any = None) -> dict:
+    """The tally of exchange reaction chains as facts per ID (kind arcaeon.tally/v1).
+
+    verdict: BROKEN if a chain does not verify or holds a BROKEN row, or an
+    alias entry's signature fails; else COULD NOT LOOK if a chain, the groups
+    file or the aliases file could not be read, or no chain was given; else
+    VERIFIED. The verdict is about the record, never about an ID. Raises
+    TallyError only for a bad window or now."""
+    span = parse_window(window)
+    when = parse_now(now) if now is not None else \
+        datetime.now(timezone.utc).replace(microsecond=0)
+    r = _skeleton(when, span, str(window).strip(), bool(settled_only), bool(checked_only))
+    try:
+        return _build(r, [Path(p) for p in paths], when, span, groups, aliases,
+                      bool(settled_only), bool(checked_only))
+    except Exception as e:  # noqa: BLE001  never a traceback, never a green
+        why = f"the tally could not finish ({type(e).__name__})"
+        r.update({"verdict": V.COULD_NOT_LOOK, "ids": [], "reason": why,
+                  **V.could_not_look("a finished tally", "the chains given", "unreadable", why)})
+        return r
+
+
+def _cnl(r: dict, looked_for: str, where: str, word: str, why: str) -> dict:
+    r.update({"verdict": V.COULD_NOT_LOOK, "ids": [], "reason": why,
+              **V.could_not_look(looked_for, where, word, why)})
+    return r
+
+
+def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_src,
+           aliases_src, settled_only: bool, checked_only: bool) -> dict:
+    try:
+        from arcaeon.prove.vet import receipts as R
+        R._require_backend()
+    except Exception:  # noqa: BLE001
+        return _cnl(r, "an Ed25519 backend", "this install", "missing",
+                    "this install cannot check Ed25519 signatures: pip install 'arcaeon[sign]'")
+    if not paths:
+        return _cnl(r, "an exchange reactions chain", "the arguments", "empty",
+                    "no chain was given")
+    gobj, why = _load_side(groups_src, "groups")
+    if why:
+        return _cnl(r, "the groups file", str(groups_src), "unreadable", why)
+    glist, why = _groups(gobj)
+    if why:
+        return _cnl(r, "the groups file", str(groups_src), "unreadable", why)
+    r["groups"] = glist
+    aobj, why = _load_side(aliases_src, "aliases")
+    if why:
+        return _cnl(r, "the aliases file", str(aliases_src), "unreadable", why)
+    entries = []
+    if aobj is not None:
+        entries = aobj.get("aliases") if isinstance(aobj, dict) else aobj
+        if not isinstance(entries, list):
+            return _cnl(r, "the aliases file", str(aliases_src), "unreadable",
+                        "aliases file holds no list of aliases")
+    broken_top: list[str] = []
+    alias: dict[str, str] = {}
+    for n, e in enumerate(entries, 1):
+        word, why = check_alias(e)
+        old = e.get("old") if isinstance(e, dict) else None
+        new = e.get("new") if isinstance(e, dict) else None
+        rec = {"old": old, "new": new, "applied": False, "how": "signed by the old and new keys",
+               "finding": None}
+        if word is None and new in alias:
+            word, why = V.COULD_NOT_LOOK, f"{new} already aliased to {alias[new]}; not applied"
+        if word is None:
+            k = old                     # the applied map has no loop, so this ends
+            while k != new and k in alias:
+                k = alias[k]
+            if k == new:
+                word, why = V.COULD_NOT_LOOK, "this alias closes a loop; not applied"
+        if word is None:
+            alias[new] = old
+            rec["applied"] = True
+        else:
+            rec["finding"] = f"{word}: {why}"
+            if word == V.BROKEN:
+                broken_top.append(f"alias {n}: {why}")
+        r["aliases"].append(rec)
+
+    def canon(k: str) -> str:
+        while k in alias:
+            k = alias[k]
+        return k
+
+    # read every chain
+    rows_by_key: dict[str, list[dict]] = {}
+    broken_rows_by_key: dict[str, list[dict]] = {}
+    record_broken: dict[str, list[str]] = {}
+    cnl_chains: list[str] = []
+    seen_paths: set[str] = set()
+    for i, p in enumerate(paths, 1):
+        try:
+            where = str(p.resolve())
+        except (OSError, RuntimeError, ValueError):
+            where = str(p)
+        if where in seen_paths:
+            r["chains"].append({"log": str(p), "verdict": None,
+                                "reason": "the same file was given twice; read once"})
+            continue
+        seen_paths.add(where)
+        side = X._read_side(p, None, f"#{i}")
+        rows = side.pop("_rows", [])
+        own = side.get("owner")
+        entry = {k: side.get(k) for k in ("log", "verdict", "reason", "owner", "owner_from",
+                                          "reaction_rows", "broken_rows", "chain")}
+        entry["id"] = canon(own) if own else None
+        for k in ("looked_for", "where", "reason_word"):
+            if k in side:
+                entry[k] = side[k]
+        r["chains"].append(entry)
+        if side["verdict"] == V.COULD_NOT_LOOK:
+            cnl_chains.append(f"{p.name}: {side['reason']}")
+            continue
+        if side["verdict"] == V.BROKEN:
+            broken_top.append(f"{p.name}: {side['reason']}")
+            if own is None:
+                continue
+            record_broken.setdefault(own, []).append(f"chain {p.name}: {side['reason']}")
+        if own is None:
+            continue
+        rows_by_key.setdefault(own, []).extend(rows)
+        broken_rows_by_key.setdefault(own, []).extend(side["broken_rows"])
+
+    owners = set(rows_by_key)
+    heads = {k: X._heads({"_rows": v}) for k, v in rows_by_key.items()}
+    group_of: dict[str, set[str]] = {}
+    for g in glist:
+        for m in g["members"]:
+            group_of.setdefault(canon(m), set()).add(g["name"])
+
+    def exclusion(a: str, b: str) -> str | None:
+        if a == b:
+            return "self-trade: the row names its own key as the counterparty"
+        ca, cb = canon(a), canon(b)
+        if ca == cb:
+            return "self-trade: both keys are one ID (a signed alias)"
+        shared = sorted(group_of.get(ca, set()) & group_of.get(cb, set()))
+        if shared:
+            return f"self-trade: both IDs are in the declared group {shared[0]!r}"
+        return None
+
+    ids: dict[str, dict] = {}
+
+    def acc(i: str) -> dict:
+        return ids.setdefault(i, {"keys": set(), "chains": [], "events": [], "excluded": [],
+                                  "claims": [], "record_broken": [], "filtered_out":
+                                  {"said": 0, "received": 0, "paired": 0}, "first": None,
+                                  "future": 0})
+
+    for c in r["chains"]:
+        if c.get("id") and c.get("owner") in owners | set(record_broken):
+            a = acc(c["id"])
+            a["chains"].append(c["log"])
+            a["keys"].add(c["owner"])
+    for k, fs in record_broken.items():
+        acc(canon(k))["record_broken"].extend(fs)
+    for k, bl in broken_rows_by_key.items():
+        for br in bl:
+            acc(canon(k))["record_broken"].append(f"row line {br['line']}: {br['finding']}")
+
+    def pair_key(a: str, b: str, eid: str) -> tuple[str, str, str]:
+        return (a, b, eid) if a < b else (b, a, eid)
+
+    def settled(a: str, b: str, eid: str) -> bool:
+        if a not in owners or b not in owners:
+            return False
+        ha, hb = heads[a].get(eid), heads[b].get(eid)
+        return bool(ha and hb and not ha["disputed"] and not hb["disputed"])
+
+    # said and received, from heads
+    pairs: set[tuple[str, str, str]] = set()
+    for k in sorted(owners):
+        me = acc(canon(k))
+        for row in rows_by_key[k]:
+            t = _at(row["at"])
+            if t and t > now:
+                me["future"] += 1
+            elif t and (me["first"] is None or t < me["first"]):
+                me["first"] = t
+        for eid, h in sorted(heads[k].items()):
+            cp, t = h["counterparty"], _at(h["at"])
+            why = exclusion(k, cp)
+            if why:
+                me["excluded"].append({"exchange_id": eid, "counterparty": cp, "side": "said",
+                                       "at": h["at"], "reason": why})
+                if cp in owners and cp != k:
+                    acc(canon(cp))["excluded"].append(
+                        {"exchange_id": eid, "counterparty": k, "side": "received",
+                         "at": h["at"], "reason": why})
+                continue
+            if cp in owners:
+                pairs.add(pair_key(k, cp, eid))
+            drop = (checked_only and h["reaction"] == V.COULD_NOT_LOOK) or \
+                (settled_only and not settled(k, cp, eid))
+            if drop:
+                me["filtered_out"]["said"] += 1
+                if cp in owners:
+                    acc(canon(cp))["filtered_out"]["received"] += 1
+                continue
+            me["events"].append({"t": t, "type": "said", "word": h["reaction"]})
+            if cp in owners:
+                acc(canon(cp))["events"].append({"t": t, "type": "received",
+                                                 "word": h["reaction"]})
+
+    # paired outcomes
+    for a, b, eid in sorted(pairs):
+        ha, hb = heads[a].get(eid), heads[b].get(eid)
+        ba = [x for x in broken_rows_by_key.get(a, []) if x["exchange_id"] == eid]
+        bb = [x for x in broken_rows_by_key.get(b, []) if x["exchange_id"] == eid]
+        ex = X._pair_exchange(eid, ha, hb, a, b, ba, bb)
+        times = [t for t in (_at(h["at"]) if h else None for h in (ha, hb)) if t]
+        t = max(times) if times else None
+        present = [h for h in (ha, hb) if h]
+        drop = (checked_only and any(h["reaction"] == V.COULD_NOT_LOOK for h in present)) or \
+            (settled_only and not settled(a, b, eid))
+        for me_k, other in ((a, b), (b, a)):
+            me = acc(canon(me_k))
+            if drop:
+                me["filtered_out"]["paired"] += 1
+                continue
+            me["events"].append({"t": t, "type": "paired", "status": ex["status"],
+                                 "eid": eid, "other": canon(other)})
+
+    # DISPUTED claims, by and about
+    for k in sorted(owners):
+        cur = {h["row_digest"] for h in heads[k].values()}
+        for row in rows_by_key[k]:
+            if not row["disputed"]:
+                continue
+            cp = row["counterparty"]
+            c = {"claim": "DISPUTED", "exchange_id": row["exchange_id"], "signer": k,
+                 "counterparty": cp, "reason": row["reason"], "at": row["at"],
+                 "reaction": row["reaction"], "row_digest": row["row_digest"],
+                 "current": row["row_digest"] in cur, "counted": exclusion(k, cp) is None}
+            acc(canon(k))["claims"].append({**c, "role": "by"})
+            if canon(cp) in ids and canon(cp) != canon(k):
+                acc(canon(cp))["claims"].append({**c, "role": "about"})
+
+    windows = [(r["windows"][0]["name"], now - span), ("all", None)]
+    out = []
+    for i, a in ids.items():
+        blocks = {name: _window(a, start, now) for name, start in windows}
+        exchanges = blocks["all"]["exchanges"]
+        age = (now - a["first"]).days if a["first"] else None
+        because = []
+        if exchanges < UNRATED_UNDER_EXCHANGES:
+            because.append(f"{exchanges} exchanges, under {UNRATED_UNDER_EXCHANGES}")
+        if age is None:
+            because.append("no dated row")
+        elif age < UNRATED_UNDER_DAYS:
+            because.append(f"{age} days old, under {UNRATED_UNDER_DAYS}")
+        flags = list(blocks["all"]["flags"]) + (["unrated"] if because else [])
+        findings = []
+        if a["future"]:
+            findings.append(f"{a['future']} row(s) dated after now: in no window")
+        out.append({"id": i, "flags": flags, "keys": sorted(a["keys"]),
+                    "chains": a["chains"], "unrated": bool(because),
+                    "unrated_because": because, "first_row_at": _ts(a["first"]),
+                    "age_days": age, "windows": blocks,
+                    "record_broken": a["record_broken"], "claims": a["claims"],
+                    "excluded": a["excluded"], "filtered_out": a["filtered_out"],
+                    "findings": findings})
+    out.sort(key=lambda x: (0 if "BROKEN" in x["flags"] else 1, x["id"]))
+    r["ids"] = out
+
+    if broken_top:
+        r["verdict"], r["reason"] = V.BROKEN, "; ".join(broken_top)
+    elif cnl_chains:
+        r.update({k: v for k, v in V.could_not_look(
+            "every chain given", "the chains given", "unreadable",
+            "; ".join(cnl_chains)).items()})
+        r["verdict"] = V.COULD_NOT_LOOK
+    else:
+        r["verdict"] = V.VERIFIED
+        r["reason"] = (f"{len(r['chains'])} chain(s) verify and every reaction row checks "
+                       f"under its chain's key; {len(out)} ID(s)")
+    r["findings"] = broken_top + cnl_chains
+    return r
+
+
+def _of(n: int, total: int) -> str:
+    return f"{n} of {total}"
+
+
+def _window(a: dict, start: datetime | None, now: datetime) -> dict:
+    said = {w: 0 for w in WORDS}
+    recv = {w: 0 for w in WORDS}
+    paired = {s: 0 for s in X.STATUSES}
+    exchanges, others = set(), set()
+    broken = len(a["record_broken"])
+    for ev in a["events"]:
+        t = ev["t"]
+        if t is None or t > now or (start is not None and t < start):
+            continue
+        if ev["type"] == "said":
+            said[ev["word"]] += 1
+        elif ev["type"] == "received":
+            recv[ev["word"]] += 1
+            broken += ev["word"] == V.BROKEN
+        else:
+            paired[ev["status"]] += 1
+            exchanges.add((ev["eid"], ev["other"]))
+            others.add(ev["other"])
+            broken += ev["status"] == "broken"
+
+    def inwin(at: Any) -> bool:
+        t = _at(at)
+        return bool(t and t <= now and (start is None or t >= start))
+
+    disputes = sum(1 for c in a["claims"] if c["counted"] and c["current"] and inwin(c["at"]))
+    excluded = sum(1 for e in a["excluded"] if inwin(e["at"]))
+    flags = (["BROKEN"] if broken else []) + (["DISPUTED"] if disputes else [])
+    st, sr, sp = sum(said.values()), sum(recv.values()), sum(paired.values())
+    return {"flags": flags, "broken": broken,
+            "said": {**said, "total": st, "share_verified": _of(said[V.VERIFIED], st)},
+            "received": {**recv, "total": sr, "share_verified": _of(recv[V.VERIFIED], sr)},
+            "paired": {**paired, "total": sp, "share_clean": _of(paired["clean"], sp)},
+            "exchanges": len(exchanges), "counterparties_with_records": len(others),
+            "disagreements": paired["mismatch"] + paired["missing"],
+            "disputed": disputes, "excluded": excluded}
+
+
+# --- text ------------------------------------------------------------------------------------
+
+_ROWS = (
+    ("flags", lambda b: " ".join(b["flags"]) or "-"),
+    ("broken", lambda b: str(b["broken"])),
+    ("said VERIFIED", lambda b: b["said"]["share_verified"]),
+    ("said COULD NOT LOOK", lambda b: str(b["said"][V.COULD_NOT_LOOK])),
+    ("said BROKEN", lambda b: str(b["said"][V.BROKEN])),
+    ("received VERIFIED", lambda b: b["received"]["share_verified"]),
+    ("received COULD NOT LOOK", lambda b: str(b["received"][V.COULD_NOT_LOOK])),
+    ("received BROKEN", lambda b: str(b["received"][V.BROKEN])),
+    ("paired clean", lambda b: b["paired"]["share_clean"]),
+    ("paired mismatch", lambda b: str(b["paired"]["mismatch"])),
+    ("paired missing", lambda b: str(b["paired"]["missing"])),
+    ("paired not_verified", lambda b: str(b["paired"]["not_verified"])),
+    ("paired broken", lambda b: str(b["paired"]["broken"])),
+    ("exchanges", lambda b: str(b["exchanges"])),
+    ("counterparties with records", lambda b: str(b["counterparties_with_records"])),
+    ("disagreements", lambda b: str(b["disagreements"])),
+    ("DISPUTED claims (current)", lambda b: str(b["disputed"])),
+    ("excluded self-trades", lambda b: str(b["excluded"])),
+)
+
+
+def render(r: dict) -> str:
+    lines = [SENTENCE, f"tally {r['verdict']}: {r['reason']}", f"now {r['now']}; {r['order']}"]
+    for c in r["chains"]:
+        lines.append(f"chain {c.get('log')}: {c.get('verdict') or 'skipped'}"
+                     + (f" owner {c['owner']}" if c.get("owner") else "")
+                     + (f" ({c['reason']})" if c.get("verdict") != V.VERIFIED else ""))
+    for a in r["aliases"]:
+        lines.append(f"alias {a['new']} -> {a['old']}: "
+                     + ("applied (signed by both keys)" if a["applied"] else a["finding"]))
+    names = [w["name"] for w in r["windows"]]
+    for i in r["ids"]:
+        lines.append("")
+        lines.append(f"{i['id']}  {' '.join(i['flags']) or '-'}")
+        if i["unrated"]:
+            lines.append(f"  unrated: {'; '.join(i['unrated_because'])}")
+        if len(i["keys"]) > 1 or i["keys"] != [i["id"]]:
+            lines.append(f"  keys: {', '.join(i['keys'])}")
+        lines.append(f"  first row {i['first_row_at'] or '-'}, age "
+                     f"{'-' if i['age_days'] is None else i['age_days']} days")
+        lines.append(f"  {'':28}" + "".join(f"  {n:>16}" for n in names))
+        for label, fn in _ROWS:
+            lines.append(f"  {label:28}"
+                         + "".join(f"  {fn(i['windows'][n]):>16}" for n in names))
+        for f in i["record_broken"]:
+            lines.append(f"  BROKEN record: {f}")
+        for c in i["claims"]:
+            lines.append(f"  DISPUTED {c['role']} {c['signer']} on {c['exchange_id']} at "
+                         f"{c['at']}{'' if c['current'] else ' (superseded)'}"
+                         f"{'' if c['counted'] else ' (self-trade, not counted)'}: {c['reason']}")
+        for e in i["excluded"]:
+            lines.append(f"  excluded {e['exchange_id']} ({e['side']}, {e['counterparty']}): "
+                         f"{e['reason']}")
+        fo = i["filtered_out"]
+        if any(fo.values()):
+            lines.append(f"  filtered out: {fo['said']} said, {fo['received']} received, "
+                         f"{fo['paired']} paired")
+        for f in i["findings"]:
+            lines.append(f"  note: {f}")
+    lines += ["", "no score, no weight, no ranking: anything that counts more can be bought",
+              SENTENCE]
+    return "\n".join(lines)
+
+
+# --- CLI ---------------------------------------------------------------------------------------
+
+USAGE = """usage: arcaeon tally build CHAIN.jsonl... [--json] [--settled-only]
+                           [--checked-only] [--window 30d] [--groups FILE]
+                           [--aliases FILE] [--now T]
+       arcaeon tally alias --old-key SEEDFILE --new-key SEEDFILE [--at T]"""
+
+HELP = USAGE + """
+
+build reads exchange reaction chains (arcaeon exchange react, one per account
+key) and prints, per ID, facts in columns for --window (default 30d) and for
+all time side by side: words the ID said, words counterparties said about it,
+paired outcomes (clean, mismatch, missing, not_verified, broken), exchanges,
+counterparties with their own records, disagreements, DISPUTED claims, account
+age. Every share is printed with its count ("9 of 10"). No score, no weight,
+no ranking. An ID with any broken record or BROKEN reaction about it shows
+BROKEN first; under 10 exchanges or 14 days it is unrated. Self-trades (one
+key, one ID by alias, one --groups group) are listed and not counted.
+
+alias prints an alias entry for --aliases: the new key inherits the old key's
+record. Both keys sign it. A fresh key with no alias is a new, unrated ID.
+
+clean means unchanged and labeled, never true.
+
+Exit codes: build 0 VERIFIED (every chain reads), 1 BROKEN (a chain, a row
+or an alias signature), 3 COULD NOT LOOK, 2 bad usage; alias 0 printed, 2
+refused. Spec and limits: docs/TALLY.md."""
+
+
+class _Usage(Exception):
+    pass
+
+
+_BUILD_SPEC = {"--json": "bool", "--settled-only": "bool", "--checked-only": "bool",
+               "--window": "value", "--groups": "value", "--aliases": "value", "--now": "value"}
+_ALIAS_SPEC = {"--old-key": "value", "--new-key": "value", "--at": "value"}
+
+
+def _parse(argv, spec):
+    from arcaeon.prove.envelope import _parse as p, _Usage as EU
+    try:
+        return p(argv, spec)
+    except EU as e:
+        raise _Usage(str(e)) from None
+
+
+def _build_cli(argv: list[str]) -> int:
+    pos, o = _parse(argv, _BUILD_SPEC)
+    if not pos:
+        raise _Usage("build takes one or more chains")
+    try:
+        r = build(pos, window=o.get("--window", DEFAULT_WINDOW),
+                  settled_only=bool(o.get("--settled-only")),
+                  checked_only=bool(o.get("--checked-only")), groups=o.get("--groups"),
+                  aliases=o.get("--aliases"), now=o.get("--now"))
+    except TallyError as e:
+        raise _Usage(str(e)) from None
+    print(json.dumps(r, indent=1, ensure_ascii=False) if o.get("--json") else render(r))
+    return V.exit_for(r["verdict"])
+
+
+def _alias_cli(argv: list[str]) -> int:
+    from arcaeon.prove.envelope import SealError, _load_seed
+    pos, o = _parse(argv, _ALIAS_SPEC)
+    if pos:
+        raise _Usage(f"alias takes no positional argument (got {pos[0]!r})")
+    if "--old-key" not in o or "--new-key" not in o:
+        raise _Usage("alias needs --old-key and --new-key")
+    try:
+        at = parse_now(o["--at"]) if "--at" in o else None
+        e = sign_alias(_load_seed(o["--old-key"]), _load_seed(o["--new-key"]), at)
+    except (SealError, TallyError) as ex:
+        print(f"arcaeon tally alias: {ex}; nothing printed", file=sys.stderr)
+        return V.EXIT_USAGE
+    except Exception as ex:  # noqa: BLE001  no backend
+        print(f"arcaeon tally alias: signing needs arcaeon[sign] ({type(ex).__name__})",
+              file=sys.stderr)
+        return V.EXIT_USAGE
+    print(json.dumps(e, indent=1))
+    return V.EXIT_GOOD
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv or argv[0] in ("-h", "--help", "help") or any(a in ("-h", "--help") for a in argv):
+        print(HELP)
+        return V.EXIT_GOOD if argv else V.EXIT_USAGE
+    sub, rest = argv[0], argv[1:]
+    try:
+        if sub == "build":
+            return _build_cli(rest)
+        if sub == "alias":
+            return _alias_cli(rest)
+        raise _Usage(f"unknown subcommand {sub!r} (build or alias)")
+    except _Usage as e:
+        print(f"arcaeon tally: {e}\n{USAGE}", file=sys.stderr)
+        return V.EXIT_USAGE
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())

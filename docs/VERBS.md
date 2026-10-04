@@ -21,7 +21,7 @@ make it look like one or the other.
 
 Contents: Record (`log`, `verify`, `receipt`, `once`, `proxy`, `pin`, `deal`,
 `mandate`), Prove (`reconcile`, `audit`, `vet`, `badge`, `seal`, `baseline`,
-`compact`, `second-read`, `evidence-pack`, `export`, `envelope`, `gate`, `exchange`), Save (`distill`, `dedup`,
+`compact`, `second-read`, `evidence-pack`, `export`, `envelope`, `gate`, `exchange`, `tally`), Save (`distill`, `dedup`,
 `meter`), Hosted (`stamp`, `credits`, `buy`), Serve (`mcp`, `serve`, `connect`,
 `schema`, `open`), This install (`status`, `selftest`, `version`, `doctor`,
 `demo`).
@@ -782,6 +782,46 @@ VERIFIED: both chains verify and every reaction row checks under its log's key; 
 log a: VERIFIED a.jsonl owner did:key:z6MkA... (first_row)
 log b: VERIFIED b.jsonl owner did:key:z6MkB... (first_row)
 ex-17: clean
+```
+
+## `tally`
+
+Answers: what do the reaction chains say about each ID, as facts? `build`
+reads exchange reaction chains (one per account key) and prints, per ID,
+columns for a recent window (`--window`, default 30d) and for all time, side
+by side: the words it said, the words counterparties with their own chains
+said about it, paired outcomes, exchanges, counterparties with records,
+disagreements, DISPUTED claims and account age. Every share is printed with
+its count ("9 of 10"). There is no score, no weight and no ranking: anything
+that counts more can be bought. BROKEN shows first; an ID under 10 exchanges
+or 14 days is unrated; self-trades (one key, one ID by a signed alias, one
+`--groups` group) are listed and not counted. `alias` prints an alias entry,
+signed by both keys, that lets a new key inherit an old record; a fresh key
+with no alias is a new, unrated ID. clean means unchanged and labeled, never
+true. The columns, the gaming rules and the limits are
+[TALLY.md](TALLY.md); the library is `arcaeon.prove.tally.build`.
+
+**Usage**
+
+```text
+usage: arcaeon tally build CHAIN.jsonl... [--json] [--settled-only]
+                           [--checked-only] [--window 30d] [--groups FILE]
+                           [--aliases FILE] [--now T]
+       arcaeon tally alias --old-key SEEDFILE --new-key SEEDFILE [--at T]
+```
+
+**Exit codes:** `build`: 0 VERIFIED (every chain reads; read the columns), 1
+BROKEN (a chain, a row or an alias signature), 3 COULD NOT LOOK (a chain, the
+groups file or the aliases file could not be read, no chain given, or no
+Ed25519 backend), 2 bad usage (a window or time that does not parse).
+`alias`: 0 printed, 2 refused. New in 0.10.x, so `--legacy-exit` changes
+nothing here.
+
+```console
+$ arcaeon tally build a.jsonl b.jsonl c.jsonl --window 30d
+clean means unchanged and labeled, never true
+tally VERIFIED: 3 chain(s) verify and every reaction row checks under its chain's key; 3 ID(s)
+$ arcaeon tally alias --old-key old.key --new-key new.key > aliases.json
 ```
 
 ## `distill`
