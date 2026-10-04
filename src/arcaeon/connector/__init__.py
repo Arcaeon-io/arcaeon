@@ -19,14 +19,17 @@ Stdlib only.
 """
 from __future__ import annotations
 
-from .core import (ATTESTATION_CLAIMED, ATTESTATION_NONE, MAX_DEPTH, MAX_PAYLOAD_BYTES,
-                   MAX_STR, OUR_WORDS, ROW_KIND, AdapterError, Extracted, VendorAdapter,
-                   adapter_for, import_verdict, map_word, recheck, register)
+from .core import (ATTESTATION_CLAIMED, ATTESTATION_NONE, JCS_DIGEST_PREFIX, JCS_DIGEST_SCHEME,
+                   MAX_DEPTH, MAX_PAYLOAD_BYTES, MAX_STR, OUR_WORDS, ROW_KIND, AdapterError,
+                   Extracted, VendorAdapter, adapter_for, import_verdict, jcs_digest, map_word,
+                   mark_could_not_look, recheck, register, relayed_row)
 from .intoto import (MEDIA_TYPE, PREDICATE_TYPE, STATEMENT_TYPE, StatementError, export_row,
                      parse_statement, statement_bytes, statement_for_check)
 
 __all__ = ["ATTESTATION_CLAIMED", "ATTESTATION_NONE", "MAX_DEPTH", "MAX_PAYLOAD_BYTES",
            "MAX_STR", "OUR_WORDS", "ROW_KIND", "AdapterError", "Extracted", "VendorAdapter",
            "adapter_for", "import_verdict", "map_word", "recheck", "register",
+           "JCS_DIGEST_PREFIX", "JCS_DIGEST_SCHEME", "jcs_digest", "mark_could_not_look",
+           "relayed_row",
            "MEDIA_TYPE", "PREDICATE_TYPE", "STATEMENT_TYPE", "StatementError", "export_row",
            "parse_statement", "statement_bytes", "statement_for_check"]

@@ -5,8 +5,9 @@ Agent Scan) prints, records one relayed row per scanned MCP tool with a digest o
 the tool definition it scanned, and later answers one question: is the tool an
 agent is about to call the same definition mcp-scan reported scanning?
 
-Library only. This base has no `arcaeon connector` group (the connector package
-lives on branch d011-connector-adapter), so there is no verb yet. Stdlib only.
+Library only, no verb yet. Stdlib only. The adapter, `McpScanAdapter` (registered
+as `MCP_SCAN`), subclasses `arcaeon.connector.core.VendorAdapter`, the one adapter
+base class ([CONNECTOR_ADAPTER.md](CONNECTOR_ADAPTER.md), "One base class").
 
 ```python
 from arcaeon.prove.mcp_scan import ingest, verify_tool_called
@@ -70,15 +71,13 @@ description, v0.3.x) lived in its local storage file, never in `--json` output.
 
 ## The row
 
-Same field names as `arcaeon.connector.core` on d011-connector-adapter
-(7fea54d), restated self-contained here because that module is not on this base:
-`kind: "check.verdict.relayed"`, `relayed: true`, `checked_by_us: false`,
+The relayed row of [CONNECTOR_ADAPTER.md](CONNECTOR_ADAPTER.md) ("What a relayed
+row says"), built by the base class's `base_row`. For mcp-scan:
 `vendor: {"name": "mcp-scan", "adapter_version": "1"}`, `vendor_id: null`,
-`vendor_word`, `relayed_verdict`, `mapping`, `subject`, `attestation`
-(always `{"status": "NONE", ...}`: the output is unsigned, so every row is
-reported by sender), `vendor_payload_digest` (raw bytes of the whole JSON),
-`vendor_payload_bytes`, `received_at`, and `could_not_look` when it applies. No
-bare `verdict` key.
+`attestation` always `{"status": "NONE", ...}` (the output is unsigned, so every
+row is reported by sender), and `vendor_payload_digest` over the raw bytes of the
+whole JSON. No bare `verdict` key. `recheck` does not re-read these rows (one
+payload, many rows); it says COULD NOT LOOK. Use `verify_tool_called`.
 
 One adapter-specific key, `tool`: `name`, `server`, `server_index`,
 `entity_index`, `scan_path`, `client`, `format` (`v0.5-path-keyed` or
@@ -100,15 +99,14 @@ summary of what mcp-scan reported, mapped by this table (the whole mapping):
 
 ## The digest
 
-```
-tool.digest = "sha256:jcs:v1:" + hex(SHA-256(JCS({"name": name,
-                                                   "description": description or null,
-                                                   "inputSchema": inputSchema or null})))
-```
+`tool.digest` is the base class's digest (the scheme is defined once, in
+[CONNECTOR_ADAPTER.md](CONNECTOR_ADAPTER.md), "The sha256:jcs:v1 digest") of
+the object `{"name": name, "description": description or null, "inputSchema":
+inputSchema or null}`.
 
-JCS is RFC 8785 (`arcaeon.prove.jcs`). Key order and extra fields do not change
-it; an absent description and `null` digest the same. `digest_parts` holds the
-SHA-256 of each of the three parts' JCS, so a BROKEN can name which part changed.
+Key order and extra fields do not change it; an absent description and `null`
+digest the same. `digest_parts` holds the hex part of the same digest for each
+of the three fields alone, so a BROKEN can name which part changed.
 `subject.sha256` is the hex of `tool.digest`.
 
 It does **not** match mcp-scan's own hash. mcp-scan v0.3.x pinned md5 over the

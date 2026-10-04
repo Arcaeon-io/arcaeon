@@ -7,45 +7,44 @@ agent is about to call is the one that was scanned.
 Library only (no verb): this base has no `connector` CLI group. docs/MCP_SCAN.md
 cites the mcp-scan sources this reads and lists what it does not prove.
 
-THE ROW. Same shape and field names as arcaeon.connector.core on branch
-d011-connector-adapter (7fea54d), which is not on this base, so the shape is
-restated here self-contained:
+THE ADAPTER. McpScanAdapter subclasses arcaeon.connector.core.VendorAdapter, the
+one adapter base class; MCP_SCAN is its registered instance. One mcp-scan payload
+becomes many rows (one per tool), so it builds rows with the base's `base_row`
+and `mark_could_not_look` instead of import_verdict, and `recheck` says COULD NOT
+LOOK for its rows (use verify_tool_called).
 
-    kind                 "check.verdict.relayed"
-    relayed              True. mcp-scan's reading, not ours.
-    checked_by_us        False. We did not re-run the scan or judge the tool.
+THE ROW. The check.verdict.relayed row of arcaeon.connector.core (field list in
+that module and in docs/CONNECTOR_ADAPTER.md). For mcp-scan:
+
     vendor               {"name": "mcp-scan", "adapter_version": "1"}
     vendor_id            None (mcp-scan's JSON carries no scan id)
     vendor_word          the adapter's per-tool summary of mcp-scan's output (mcp-scan
                          writes no per-tool word): "no_findings", "findings",
                          "error", "not_inspected" or "not_analyzed"
     relayed_verdict      that word in our words, from TABLE
-    mapping              {"rule": "table"} or {"rule": "not_read"}
     subject              {"name": "<server>/<tool>", "sha256": <hex of the tool digest>}
-    attestation          {"status": "NONE", "checked_by_us": False, "claimed": None}:
-                         mcp-scan output is unsigned, so every row is reported by sender
-    vendor_payload_digest  "sha256:raw-bytes:v1:<hex>" over the whole JSON as received
-    vendor_payload_bytes   its length
-    received_at          our clock (ISO 8601 UTC)
-    could_not_look       {looked_for, where, reason_word, reason}, when it applies
+    attestation          always NONE: mcp-scan output is unsigned, so every row is
+                         reported by sender
 
 plus ONE adapter-specific key, `tool`:
 
     tool.name, tool.server, tool.server_index, tool.entity_index, tool.scan_path,
     tool.client, tool.format ("v0.5-path-keyed" | "v0.6-scan-response"),
     tool.findings        issue codes / risk names that point at this tool or its server
-    tool.digest          "sha256:jcs:v1:<hex>" of TOOL_DIGEST_KEYS, or None
-    tool.digest_parts    {name, description, inputSchema}: sha256 hex of each part's JCS
+    tool.digest          the base's digest (connector.core.jcs_digest) of
+                         TOOL_DIGEST_KEYS, or None
+    tool.digest_parts    {name, description, inputSchema}: the hex of each part's digest
     tool.mcp_scan_hash   mcp-scan's OWN pin rule recomputed by us (md5 of the
                          description, v0.3.x hash_entity); mcp-scan's --json never
                          published it
 
 There is no bare `verdict` key, as in d011.
 
-DIGEST. tool.digest = "sha256:jcs:v1:" + hex(SHA-256(RFC 8785 JCS(
-{"name": name, "description": description-or-null, "inputSchema": schema-or-null}))).
-Only those three fields: a change to title, annotations, outputSchema or _meta is
-not seen. It is not mcp-scan's hash (theirs was md5 over the description alone).
+DIGEST. tool.digest is the base's digest (scheme defined once, in
+docs/CONNECTOR_ADAPTER.md, "The sha256:jcs:v1 digest") of the object
+{"name", "description" (or null), "inputSchema" (or null)}. Only those three
+fields: a change to title, annotations, outputSchema or _meta is not seen. It is
+not mcp-scan's hash (theirs was md5 over the description alone).
 
 Never raises on what a scanner sends. Stdlib only.
 """
@@ -53,27 +52,29 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
 from typing import Any
 
+from arcaeon.connector.core import (JCS_DIGEST_PREFIX, MAX_STR, ROW_KIND, AdapterError,
+                                    Extracted, VendorAdapter, _now_iso, _safe_str, _too_deep,
+                                    register)
 from arcaeon.prove import jcs
-from arcaeon.record.row import digest_bytes, loads_strict
+from arcaeon.record.row import loads_strict
 from arcaeon.verdict import BROKEN, COULD_NOT_LOOK, VERIFIED, could_not_look
 
 __all__ = ["ROW_KIND", "VENDOR", "ADAPTER_VERSION", "TABLE", "TOOL_DIGEST_KEYS",
            "DIGEST_PREFIX", "MAX_PAYLOAD_BYTES", "MAX_DEPTH", "MAX_STR", "MAX_ROWS",
-           "tool_digest", "mcp_scan_md5", "ingest", "verify_tool_called"]
+           "McpScanAdapter", "MCP_SCAN", "tool_digest", "mcp_scan_md5", "ingest",
+           "verify_tool_called"]
 
-ROW_KIND = "check.verdict.relayed"
 VENDOR = "mcp-scan"
 ADAPTER_VERSION = "1"
-DIGEST_PREFIX = "sha256:jcs:v1:"
+#: The base's digest prefix (arcaeon.connector.core.JCS_DIGEST_PREFIX).
+DIGEST_PREFIX = JCS_DIGEST_PREFIX
 TOOL_DIGEST_KEYS = ("name", "description", "inputSchema")
-#: A scan of many servers is bigger than one vendor verdict (d011 uses 1 MiB).
+#: A scan of many servers is bigger than one vendor verdict (the base uses 1 MiB).
 MAX_PAYLOAD_BYTES = 8 << 20
 #: Path -> servers -> signature -> tools -> inputSchema leaves room for a schema.
 MAX_DEPTH = 64
-MAX_STR = 256
 #: More tools than this in one payload: the rest are not read, and a row says so.
 MAX_ROWS = 10000
 
@@ -93,36 +94,24 @@ _CHECKED = ("that the called tool's name, description and inputSchema hash to th
             "of a tool definition mcp-scan reported scanning; NOT that the tool is safe")
 
 
+class McpScanAdapter(VendorAdapter):
+    """mcp-scan on the one adapter base. One payload, many rows: read it with
+    `ingest`, not import_verdict (whose `extract` path refuses it as not one verdict)."""
+    name = VENDOR
+    version = ADAPTER_VERSION
+    table = TABLE
+    max_payload_bytes = MAX_PAYLOAD_BYTES
+    max_depth = MAX_DEPTH
+    one_row_per_payload = False
+
+    def extract(self, doc: dict) -> Extracted:
+        raise AdapterError("an mcp-scan result is one row per tool; read it with "
+                           "arcaeon.prove.mcp_scan.ingest")
+
+
+MCP_SCAN = register(McpScanAdapter())
+
 # ---------------------------------------------------------------- small helpers
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
-
-
-def _safe_str(v: Any) -> str | None:
-    if not isinstance(v, str):
-        return None
-    return v.encode("utf-8", "backslashreplace").decode("utf-8")[:MAX_STR]
-
-
-def _too_deep(doc: Any, limit: int) -> bool:
-    stack = [(doc, 1)]
-    while stack:
-        node, d = stack.pop()
-        if isinstance(node, dict):
-            kids = node.values()
-        elif isinstance(node, list):
-            kids = node
-        else:
-            continue
-        if d > limit:
-            return True
-        stack.extend((k, d + 1) for k in kids)
-    return False
-
-
-def _jcs_hex(value: Any) -> str:
-    return hashlib.sha256(jcs.canonicalize(value)).hexdigest()
 
 
 def tool_digest(tool: Any) -> tuple[str, dict] | None:
@@ -141,8 +130,8 @@ def tool_digest(tool: Any) -> tuple[str, dict] | None:
         if _too_deep(schema, MAX_DEPTH):
             return None
         canon = {"name": tool["name"], "description": desc, "inputSchema": schema}
-        parts = {k: _jcs_hex(canon[k]) for k in TOOL_DIGEST_KEYS}
-        return DIGEST_PREFIX + _jcs_hex(canon), parts
+        parts = {k: jcs.sha256_hex(canon[k]) for k in TOOL_DIGEST_KEYS}
+        return MCP_SCAN.digest(canon), parts
     except Exception:  # noqa: BLE001 - hostile input is a could-not-look, never a traceback
         return None
 
@@ -170,27 +159,10 @@ def mcp_scan_md5(tool: Any) -> dict | None:
 # ---------------------------------------------------------------- the row
 
 def _base(received_at: str, raw: bytes | None) -> dict:
-    return {
-        "kind": ROW_KIND,
-        "relayed": True,
-        "checked_by_us": False,
-        "vendor": {"name": VENDOR, "adapter_version": ADAPTER_VERSION},
-        "vendor_id": None,
-        "vendor_word": None,
-        "relayed_verdict": COULD_NOT_LOOK,
-        "mapping": {"rule": "not_read"},
-        "subject": None,
-        "attestation": {"status": "NONE", "checked_by_us": False, "claimed": None},
-        "vendor_payload_digest": digest_bytes(raw) if raw is not None else None,
-        "vendor_payload_bytes": len(raw) if raw is not None else None,
-        "received_at": received_at,
-    }
+    return MCP_SCAN.base_row(raw, received_at)
 
 
-def _cnl(row: dict, looked_for: str, where: str, reason_word: str, reason: str) -> dict:
-    row["relayed_verdict"] = COULD_NOT_LOOK
-    row["could_not_look"] = could_not_look(looked_for, where, reason_word, reason)
-    return row
+_cnl = MCP_SCAN.mark_could_not_look
 
 
 def _tool_row(base: dict, *, fmt: str, scan_path: Any, client: Any, server: Any,

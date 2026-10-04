@@ -31,6 +31,20 @@ and, when it applies:
 There is deliberately NO bare `verdict` key. A script that greps rows for
 `verdict == "VERIFIED"` must not mistake a vendor's pass for our own check.
 
+ONE BASE CLASS. Every adapter subclasses VendorAdapter: the mock vendor here
+(arcaeon.connector.mockscan, one row per payload, read by import_verdict) and the
+mcp-scan adapter (arcaeon.prove.mcp_scan, one row per scanned tool, read by its
+ingest). The base owns what they share: the row skeleton (`base_row`, via
+`relayed_row`), the could-not-look marking (`mark_could_not_look`), the table
+check, and the content digest (`digest`, which is `jcs_digest`). A row built by
+the base is unsigned unless the vendor's payload claims a signature, and even
+then the claim is never checked: such a row is "reported by the sender", and no
+relayed row is ever our own VERIFIED.
+
+DIGEST. `jcs_digest` is the one implementation of the "sha256:jcs:v1" scheme;
+the scheme is defined in docs/CONNECTOR_ADAPTER.md, section "The sha256:jcs:v1
+digest". Nothing else restates it.
+
 THE RULE: a word the adapter's table does not hold, a word that is not a string,
 a payload that is not JSON, too big, too deep, carries a duplicate key, or that
 the adapter cannot read, all map to COULD NOT LOOK. Nothing unknown maps to
@@ -44,12 +58,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
+from arcaeon.prove import jcs
 from arcaeon.record.row import digest_bytes, loads_strict
 from arcaeon.verdict import BROKEN, COULD_NOT_LOOK, VERIFIED, could_not_look
 
 __all__ = ["ROW_KIND", "OUR_WORDS", "MAX_PAYLOAD_BYTES", "MAX_DEPTH", "MAX_STR",
-           "ATTESTATION_CLAIMED", "ATTESTATION_NONE", "AdapterError", "Extracted",
-           "VendorAdapter", "register", "adapter_for", "map_word", "import_verdict",
+           "ATTESTATION_CLAIMED", "ATTESTATION_NONE", "JCS_DIGEST_SCHEME", "JCS_DIGEST_PREFIX",
+           "AdapterError", "Extracted", "VendorAdapter", "jcs_digest", "relayed_row",
+           "mark_could_not_look", "register", "adapter_for", "map_word", "import_verdict",
            "recheck"]
 
 ROW_KIND = "check.verdict.relayed"
@@ -64,6 +80,18 @@ MAX_STR = 256
 
 ATTESTATION_CLAIMED = "CLAIMED"
 ATTESTATION_NONE = "NONE"
+
+#: The content-digest scheme name; defined in docs/CONNECTOR_ADAPTER.md.
+JCS_DIGEST_SCHEME = "sha256:jcs:v1"
+JCS_DIGEST_PREFIX = JCS_DIGEST_SCHEME + ":"
+
+
+def jcs_digest(value: Any) -> str:
+    """The "sha256:jcs:v1" digest of a JSON value: the one implementation of the
+    scheme in docs/CONNECTOR_ADAPTER.md ("The sha256:jcs:v1 digest"). Raises
+    arcaeon.prove.jcs.JcsError on a value JCS refuses; callers reading hostile
+    input catch it."""
+    return JCS_DIGEST_PREFIX + jcs.sha256_hex(value)
 
 #: The keys a re-check recomputes and compares. received_at is ours, not theirs,
 #: and ts / chain are the ledger's.
@@ -87,7 +115,10 @@ class Extracted:
 
 
 class VendorAdapter:
-    """One vendor's format. Subclass, set `name`, `version`, `table`, write `extract`.
+    """The one adapter base class. Subclass, set `name`, `version`, `table`, write
+    `extract` (one row per payload, read by import_verdict); an adapter that writes
+    many rows per payload sets `one_row_per_payload = False` and builds its rows
+    with `base_row` and `mark_could_not_look` (see arcaeon.prove.mcp_scan).
 
     `table` maps the vendor's verdict words (written casefolded) to one of
     OUR_WORDS. A table that maps anywhere else, or holds two keys that fold to
@@ -97,6 +128,27 @@ class VendorAdapter:
     name: str = ""
     version: str = "1"
     table: dict = {}
+    #: A payload over this is digested but never parsed.
+    max_payload_bytes: int = MAX_PAYLOAD_BYTES
+    #: Containers nested deeper than this are refused.
+    max_depth: int = MAX_DEPTH
+    #: False for an adapter whose one payload becomes many rows; recheck reads
+    #: only one-row adapters and says COULD NOT LOOK for the others.
+    one_row_per_payload: bool = True
+
+    #: The content digest every adapter uses ("sha256:jcs:v1", see jcs_digest).
+    digest = staticmethod(jcs_digest)
+
+    def base_row(self, raw: bytes | None = None, received_at: str | None = None) -> dict:
+        """The shared row skeleton for this adapter: relayed, not checked by us,
+        unsigned (attestation NONE), COULD NOT LOOK until something maps a word."""
+        return relayed_row(self, raw, received_at)
+
+    @staticmethod
+    def mark_could_not_look(row: dict, looked_for: str, where: str, reason_word: str,
+                            reason: str) -> dict:
+        """Set a row to COULD NOT LOOK with its reason (the module function)."""
+        return mark_could_not_look(row, looked_for, where, reason_word, reason)
 
     def __init__(self):
         if not isinstance(self.name, str) or not self.name:
@@ -132,6 +184,7 @@ def adapter_for(name: str) -> VendorAdapter | None:
         return None
     if name not in _ADAPTERS:
         from . import mockscan  # noqa: F401  (registers itself)
+        from arcaeon.prove import mcp_scan  # noqa: F401  (registers itself)
     return _ADAPTERS.get(name)
 
 
@@ -202,8 +255,12 @@ def _attestation(claim: Any) -> dict:
     return {"status": ATTESTATION_CLAIMED, "checked_by_us": False, "claimed": out}
 
 
-def _base(adapter: Any, received_at: str | None) -> dict:
+def relayed_row(adapter: Any, raw: Any = None, received_at: str | None = None) -> dict:
+    """The row skeleton every adapter builds on (VendorAdapter.base_row). Unsigned
+    (attestation NONE) and COULD NOT LOOK until a table word is mapped. With `raw`
+    bytes, the payload digest and length are filled in."""
     name = getattr(adapter, "name", None)
+    raw_ok = isinstance(raw, (bytes, bytearray))
     return {
         "kind": ROW_KIND,
         "relayed": True,
@@ -215,16 +272,26 @@ def _base(adapter: Any, received_at: str | None) -> dict:
         "mapping": {"rule": "not_read"},
         "subject": None,
         "attestation": _attestation(None),
-        "vendor_payload_digest": None,
-        "vendor_payload_bytes": None,
+        "vendor_payload_digest": digest_bytes(bytes(raw)) if raw_ok else None,
+        "vendor_payload_bytes": len(raw) if raw_ok else None,
         "received_at": received_at if isinstance(received_at, str) else _now_iso(),
     }
 
 
-def _cnl(row: dict, looked_for: str, reason_word: str, reason: str) -> dict:
+def mark_could_not_look(row: dict, looked_for: str, where: str, reason_word: str,
+                        reason: str) -> dict:
+    """Set a row to COULD NOT LOOK with its reason (arcaeon.verdict.could_not_look)."""
     row["relayed_verdict"] = COULD_NOT_LOOK
-    row["could_not_look"] = could_not_look(looked_for, "vendor payload", reason_word, reason)
+    row["could_not_look"] = could_not_look(looked_for, where, reason_word, reason)
     return row
+
+
+def _base(adapter: Any, received_at: str | None) -> dict:
+    return relayed_row(adapter, None, received_at)
+
+
+def _cnl(row: dict, looked_for: str, reason_word: str, reason: str) -> dict:
+    return mark_could_not_look(row, looked_for, "vendor payload", reason_word, reason)
 
 
 def import_verdict(adapter: VendorAdapter, raw: Any, *, received_at: str | None = None,
@@ -244,10 +311,10 @@ def import_verdict(adapter: VendorAdapter, raw: Any, *, received_at: str | None 
         return _cnl(row, "an adapter", "missing", "no VendorAdapter was given")
     if not raw:
         return _cnl(row, "vendor verdict JSON", "empty", "the payload is empty")
-    if len(raw) > MAX_PAYLOAD_BYTES:
+    if len(raw) > adapter.max_payload_bytes:
         return _cnl(row, "vendor verdict JSON", "unreadable",
-                    f"payload is {len(raw)} bytes, over the {MAX_PAYLOAD_BYTES}-byte parse limit; "
-                    f"digested, not read")
+                    f"payload is {len(raw)} bytes, over the {adapter.max_payload_bytes}-byte "
+                    f"parse limit; digested, not read")
     try:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
@@ -259,9 +326,9 @@ def import_verdict(adapter: VendorAdapter, raw: Any, *, received_at: str | None 
     except ValueError as e:  # includes duplicate keys and too-deep nesting
         return _cnl(row, "vendor verdict JSON", "unreadable",
                     f"payload is not one unambiguous JSON value: {type(e).__name__}")
-    if _too_deep(doc, MAX_DEPTH):
+    if _too_deep(doc, adapter.max_depth):
         return _cnl(row, "vendor verdict JSON", "unreadable",
-                    f"payload nests deeper than {MAX_DEPTH}")
+                    f"payload nests deeper than {adapter.max_depth}")
     if not isinstance(doc, dict):
         return _cnl(row, "vendor verdict object", "unreadable",
                     f"payload is a JSON {type(doc).__name__}, not an object")
@@ -339,6 +406,12 @@ def recheck(row: Any, payload: Any = None, *, adapter: VendorAdapter | None = No
         return _result(COULD_NOT_LOOK, "no adapter for this vendor", row,
                        **could_not_look(f"an adapter for {vendor.get('name')!r}", "registry",
                                         "missing", "no adapter by the row's vendor name"))
+    if not ad.one_row_per_payload:
+        return _result(COULD_NOT_LOOK, "this adapter writes many rows per payload; recheck "
+                                       "re-reads one-row adapters only", row,
+                       **could_not_look(f"a one-row adapter for {vendor.get('name')!r}",
+                                        "registry", "missing",
+                                        "the adapter's rows are not re-read by recheck"))
     if ad.version != vendor.get("adapter_version"):
         return _result(COULD_NOT_LOOK, "the adapter version differs from the one the row was read with",
                        row, **could_not_look(f"adapter version {vendor.get('adapter_version')!r}",

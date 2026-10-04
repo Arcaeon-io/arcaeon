@@ -9,7 +9,8 @@ can then be exported as an in-toto Statement that tools outside Arcaeon can read
 
 This is not the MCP connector (`arcaeon mcp`, the `arcaeon.mcp` package). It is
 the library `arcaeon.connector`, phase 1: the adapter shape, one mock vendor
-(`mockscan`), and no command-line verb yet.
+(`mockscan`), the mcp-scan adapter on the same base class, and no command-line
+verb yet.
 
 ## What a relayed row says
 
@@ -141,6 +142,48 @@ Rules for the table and `extract`:
 
 The table is checked when the adapter is built: a key that is not casefolded,
 a key twice, or a value outside our three words raises `TypeError`.
+
+## One base class
+
+Every adapter subclasses `VendorAdapter` in `arcaeon.connector.core`: the mock
+vendor (`arcaeon.connector.mockscan`) and the mcp-scan tool-hash adapter
+(`arcaeon.prove.mcp_scan`, see [MCP_SCAN.md](MCP_SCAN.md)). The base owns what
+they share:
+
+- the row skeleton (`base_row`), relayed, `checked_by_us: false`, attestation
+  `NONE` unless the payload claims a signature, and COULD NOT LOOK until a
+  table word is mapped;
+- the COULD NOT LOOK marking (`mark_could_not_look`);
+- the table check above;
+- the content digest (`digest`, the function `jcs_digest`), below.
+
+An adapter whose one payload becomes many rows (mcp-scan: one row per scanned
+tool) sets `one_row_per_payload = False` and builds its rows with `base_row`.
+`recheck` re-reads one-row adapters only; for the others it says COULD NOT LOOK.
+
+## The sha256:jcs:v1 digest
+
+This is the one place the scheme is defined. `arcaeon.connector.core.jcs_digest`
+is its one implementation; every adapter reaches it as `adapter.digest`.
+
+```
+digest = "sha256:jcs:v1:" + hex(SHA-256(JCS(value)))
+```
+
+- `value` is a JSON value (object, array, string, number, boolean, null).
+- JCS is RFC 8785, the JSON Canonicalization Scheme (`arcaeon.prove.jcs`): keys
+  sorted by UTF-16 code units, no whitespace, numbers in their shortest
+  round-trip form, strings minimally escaped, encoded as UTF-8.
+- `hex` is 64 lower-case hex characters.
+- `v1` names this exact recipe. A change to any step is a new version, never a
+  silent change to `v1`.
+
+Two values that are equal as JSON (whatever their key order or spacing) have the
+same digest. A value JCS refuses (NaN, Infinity, a lone surrogate, a non-JSON
+type) has no digest: the caller records COULD NOT LOOK, never a guess.
+
+This is a digest of content we hold, not of the bytes a vendor sent: the raw
+payload keeps its own `sha256:raw-bytes:v1:` digest in `vendor_payload_digest`.
 
 ## Honest limits
 
