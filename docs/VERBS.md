@@ -704,6 +704,24 @@ answers VERIFIED, BROKEN or COULD NOT LOOK. `deal dispute` reads only
 `deal.*` rows and ignores this one. No row is written without a pack (an
 allow, or no deal id).
 
+`--checks FILE` (repeatable) adds a checker's word on top of the envelope's.
+Each FILE is JSONL of `check.verdict.relayed` rows: a scanner's verdict (for
+example mcp-scan's) relayed into your chain, with `vendor`, `relayed_verdict`
+and `subject` (`name`, `sha256`). When the envelope reads VERIFIED and any
+row says BROKEN for the handed file's sha256, `act`, `pay` and
+`irreversible` are refused as `checker-broken`, naming the checker (its
+vendor name, subject, vendor id, and the file and line of its row); the
+verdict stays VERIFIED, because the bytes do match what was sealed. `read`
+stays allowed, and its sentence names the checker. Rows for another sha256,
+rows that say VERIFIED or COULD NOT LOOK, and rows of other kinds are
+ignored. An unsigned row counts: it is the sender's report, and it can only
+turn allow into refuse, never refuse into allow. A FILE that cannot be read
+refuses the same three actions as `checks-unreadable`, since a BROKEN in it
+cannot be ruled out. The veto is a refusal like any other: with `--deal` it
+writes the pack (its `evidence.json` carries `checks`) and a `gate.evidence`
+row with `verdict` VERIFIED and `veto` `checker-broken`. The library
+parameter is `check_files=`.
+
 `gate packet` renders a refusal as one page a marketplace's dispute process
 can take, in markdown and JSON (kind `arcaeon.dispute.packet/v1`): what was
 handed (file name, sha256, size), by whom (the signer the envelope names and
@@ -713,7 +731,11 @@ failed, what was not checked, the verdict and the decision, and ENVELOPE.md's
 evidence pack (a refusal with a deal id); `--decision FILE.json` reads the
 `decide --json` output, so a refusal without a deal id, which writes no
 pack, can be rendered too. Only file names reach the packet, never the directories.
-A decision that allowed the action has nothing to dispute (exit 2). The
+A refusal on a VERIFIED envelope renders too, and the packet's `refused_by`
+says what refused: `checker-broken` or `checks-unreadable` (`--checks`
+above), or `nonparty-check` (the non-party check rule); a refusal on the
+envelope's own word reads `envelope`. A decision that allowed the action,
+VERIFIED or not, has nothing to dispute (exit 2). The
 library is `arcaeon.prove.dispute_packet`.
 
 **Usage**
@@ -722,12 +744,14 @@ library is `arcaeon.prove.dispute_packet`.
 usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
                            --action {read,act,pay,irreversible}
                            [--deal ID --ledger PATH] [--purpose TEXT]
-                           [--file PATH] [--record-dir DIR] [--json]
+                           [--checks FILE ...] [--file PATH]
+                           [--record-dir DIR] [--json]
        arcaeon gate packet (--evidence DIR | --decision FILE.json)
                            [--out DIR] [--json]
 ```
 
-**Exit codes:** 0 allow, 1 refuse (BROKEN), 3 refuse (COULD NOT LOOK), 2 bad
+**Exit codes:** 0 allow, 1 refuse (BROKEN, or `checker-broken`), 3 refuse
+(COULD NOT LOOK, or `checks-unreadable`), 2 bad
 usage (a missing `--envelope`, `--audience`, `--signer` or `--action`, an
 action that is not one of the four, or `--deal` without `--ledger`). `packet`: 0 written, 2 bad usage or
 nothing to dispute, 3 the input is not a readable gate record. New in 0.10.x,

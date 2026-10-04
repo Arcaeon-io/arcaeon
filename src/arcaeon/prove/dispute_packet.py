@@ -23,6 +23,13 @@ the receiver's machine are left out (a dispute needs the bytes and their
 sha256, not the receiver's disk layout), and any absolute path left inside a
 reason sentence is cut to its last part.
 
+A refusal on a VERIFIED envelope renders too (D067): the bytes match, and a
+rule on top refused, either a checker that says BROKEN for the same sha256
+(`checks.veto` checker-broken or checks-unreadable, D067) or the non-party
+check rule (D061, `nonparty_check`, or its reason sentence). The packet's
+`refused_by` names which: envelope, checker-broken, checks-unreadable,
+nonparty-check, or other.
+
 A decision that allowed the action has nothing to dispute: rendering one
 raises NothingToDispute. Stdlib only.
 """
@@ -38,7 +45,8 @@ from typing import Any
 from arcaeon import verdict as V
 
 __all__ = ["KIND", "SECTIONS", "DOES_NOT_PROVE", "LIMITS_SOURCE", "PACKET_LIMITS",
-           "PacketError", "NothingToDispute", "from_evidence", "from_decision",
+           "PacketError", "NothingToDispute", "ENVELOPE", "NONPARTY", "OTHER",
+           "REFUSED_BY_PLAIN", "from_evidence", "from_decision",
            "from_decision_file", "render_markdown", "render_json", "TEMPLATE"]
 
 KIND = "arcaeon.dispute.packet/v1"
@@ -87,6 +95,27 @@ PACKET_LIMITS = (
     "A refusal is the receiver's answer about the envelope, not a finding about the "
     "content or about who is at fault.",
 )
+
+#: refused_by values. CHECKER_BROKEN and CHECKS_UNREADABLE are the gate's own
+#: (arcaeon.prove.gate, D067), restated so this module imports nothing at load.
+ENVELOPE, NONPARTY, OTHER = "envelope", "nonparty-check", "other"
+CHECKER_BROKEN, CHECKS_UNREADABLE = "checker-broken", "checks-unreadable"
+#: D061's rule name and the words its refusal sentence carries (branch
+#: d061-nonparty-check-rule: "refuse <action>: VERIFIED, but the non-party
+#: check rule refuses it: ..." or "... the non-party check rule (over CAP)
+#: could not look: ...").
+NONPARTY_RULE = "require_nonparty_check_above"
+NONPARTY_REASON = ", but the non-party check rule "
+REFUSED_BY_PLAIN = {
+    ENVELOPE: "the envelope check's own word",
+    CHECKER_BROKEN: "a checker that says BROKEN for the same sha256 (checker-broken); "
+                    "the envelope itself reads VERIFIED",
+    CHECKS_UNREADABLE: "a check file that could not be read (checks-unreadable); the "
+                       "envelope itself reads VERIFIED",
+    NONPARTY: "the non-party check rule: no signed non-party check counts for this amount; "
+              "the envelope itself reads VERIFIED",
+    OTHER: "a gate rule on top of a VERIFIED envelope (see the gate's sentence)",
+}
 
 _SIG_PLAIN = {
     V.VERIFIED: "checked: the signature verifies and is by a key the receiver named",
@@ -150,14 +179,31 @@ def _hash(path: Path) -> dict | None:
 
 
 def _refusal_check(verdict, decision) -> None:
-    if verdict == V.VERIFIED:
-        raise NothingToDispute("VERIFIED: nothing to dispute. The gate allowed every action; "
-                               "a dispute packet renders a refusal.")
+    if verdict not in (V.VERIFIED, V.BROKEN, V.COULD_NOT_LOOK):
+        raise PacketError(f"unknown verdict word {verdict!r}")
     if decision != "refuse":
+        if verdict == V.VERIFIED:
+            raise NothingToDispute("VERIFIED: nothing to dispute. The gate allowed the "
+                                   "action; a dispute packet renders a refusal.")
         raise NothingToDispute(f"the gate's decision was {decision!r}, not 'refuse': nothing "
                                f"was refused, so there is nothing to dispute.")
-    if verdict not in (V.BROKEN, V.COULD_NOT_LOOK):
-        raise PacketError(f"unknown verdict word {verdict!r}")
+
+
+def _refused_by(rec: dict) -> str:
+    """What refused: the envelope's own word, or, on a VERIFIED envelope, a
+    rule on top of it (D067's checker veto, D061's non-party check rule)."""
+    if rec.get("verdict") != V.VERIFIED:
+        return ENVELOPE
+    checks = rec.get("checks") if isinstance(rec.get("checks"), dict) else {}
+    if checks.get("veto") in (CHECKER_BROKEN, CHECKS_UNREADABLE):
+        return checks["veto"]
+    np = rec.get("nonparty_check")
+    reason = str(rec.get("reason") or "")
+    if (isinstance(np, dict) and np.get("rule") == NONPARTY_RULE) or NONPARTY_REASON in reason:
+        return NONPARTY
+    if f": {CHECKER_BROKEN}: " in reason:
+        return CHECKER_BROKEN
+    return OTHER
 
 
 def _packet(*, source, rec: dict, report: dict, handed: dict, evidence: dict,
@@ -168,7 +214,8 @@ def _packet(*, source, rec: dict, report: dict, handed: dict, evidence: dict,
     binding = sealed.get("binding") if isinstance(sealed.get("binding"), dict) else {}
     steps = report.get("steps") if isinstance(report.get("steps"), dict) else {}
     reasons = [str(r) for r in (rec.get("reasons") or []) if r]
-    failed = reasons if verdict == V.BROKEN else []
+    refused_by = _refused_by(rec)
+    failed = reasons if (verdict == V.BROKEN or refused_by == CHECKER_BROKEN) else []
     not_checked: list[str] = []
     cnc = rec.get("could_not_check") or ({k: report.get(k) for k in
                                           ("looked_for", "where", "reason_word")}
@@ -181,6 +228,8 @@ def _packet(*, source, rec: dict, report: dict, handed: dict, evidence: dict,
         # verify's whole sentence when it is there: the gate's `reasons` split it on "; "
         whole = report.get("reason")
         not_checked.extend([str(whole)] if whole else reasons)
+    elif refused_by in (NONPARTY, CHECKS_UNREADABLE, OTHER):
+        not_checked.extend(r for r in reasons if r not in not_checked)
     not_checked.extend(str(x) for x in (report.get("not_checked") or []))
     for s in _STEPS:
         w = steps.get(s)
@@ -195,6 +244,8 @@ def _packet(*, source, rec: dict, report: dict, handed: dict, evidence: dict,
         "verdict": verdict,
         "decision": decision,
         "action": rec.get("action"),
+        "refused_by": refused_by,
+        "refused_by_plain": REFUSED_BY_PLAIN[refused_by],
         "reason": rec.get("reason"),
         "steps": {s: steps.get(s) for s in _STEPS} if steps else None,
         "handed": {**handed, "label": sealed.get("label"), "sealed_bytes": sealed.get("bytes")},
@@ -351,9 +402,13 @@ def render_markdown(packet: dict) -> str:
     steps = p.get("steps") or {}
     summary = (f"The receiver refused to **{_text(p['action'])}** on the file "
                f"{_code(h.get('file'))}. The envelope check answered **{p['verdict']}**.")
+    if p.get("refused_by") not in (None, ENVELOPE):
+        summary += f" The refusal came from {_text(p.get('refused_by_plain') or p['refused_by'])}."
     verdict_block = _rows([
         ("Verdict", f"**{p['verdict']}**"),
         ("Decision", f"**{p['decision']}** `{_one(p['action'])}`"),
+        ("Refused by", f"{_code(p.get('refused_by'))}: {_text(p.get('refused_by_plain'))}"
+         if p.get("refused_by") else "not recorded"),
         ("The gate's sentence", _text(p.get("reason") or "not recorded")),
         ("Each step's word", ", ".join(f"{s} {steps.get(s) or 'not reached'}" for s in _STEPS)
          if steps else "not recorded"),

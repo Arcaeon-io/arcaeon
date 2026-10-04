@@ -50,7 +50,8 @@ writer the deal lane's rows go through (no second chain format):
     {"kind": "gate.evidence", "deal", "file_sha256", "verdict", "reason",
      "pack", "pack_digest", "pack_digest_of", "at"}   (+ "ts", "chain")
 
-`verdict` is the word refused on: BROKEN or COULD NOT LOOK. The ledger is
+`verdict` is the envelope's word: BROKEN or COULD NOT LOOK, or VERIFIED on a
+check veto (D067), whose row adds `"veto"`. The ledger is
 `ledger=` (`--ledger`), the receiver's own deal chain, and it is required
 whenever a deal id is given (D066): a row written next to the pack could be
 rewritten along with it. `deal dispute` reads only `deal.*` rows, so this row
@@ -67,9 +68,30 @@ it matches, BROKEN when the pack changed, COULD NOT LOOK when the pack or the
 row cannot be read. It says the pack still matches the row; that the row
 itself was not rewritten is the chain's and a witness pin's job.
 
+A CHECKER THAT SAYS BROKEN (D067). `check_files=` (`--checks FILE`, repeatable)
+names JSONL files of `check.verdict.relayed` rows (arcaeon.connector.core's
+shape, read here as plain JSON: kind, vendor {name, adapter_version},
+vendor_id, vendor_word, relayed_verdict, subject {name, sha256}, attestation).
+Any row whose relayed_verdict is BROKEN and whose subject.sha256 is the handed
+file's sha256 (64 hex, case and a `sha256:` prefix ignored) vetoes act, pay
+and irreversible on a VERIFIED envelope: the verdict stays VERIFIED (the bytes
+match), the decision is refuse, `checks.veto` is CHECKER_BROKEN and the reason
+names the checker. `read` stays allowed and its reason names the checker.
+Rows for another sha256, rows that say VERIFIED or COULD NOT LOOK, and rows
+of any other kind are ignored. An unsigned row counts: it is reported by the
+sender and can only turn allow into refuse, never refuse into allow. A file
+that cannot be read (missing, too big, a line that is not a JSON object)
+refuses those three actions as CHECKS_UNREADABLE: a veto that could be in it
+cannot be ruled out. The veto is evidence like any refusal: with a deal id it
+writes the pack, evidence.json carries `checks`, and the gate.evidence row
+carries `"veto": "checker-broken"` with verdict VERIFIED. Exit code 1 on
+checker-broken (a checker said BROKEN), 3 on checks-unreadable.
+
 THE DISPUTE PACKET. `arcaeon gate packet` (arcaeon.prove.dispute_packet)
 renders a refusal, from an evidence pack or from a decision's to_dict(), as
-one page in markdown and JSON for a marketplace's dispute process.
+one page in markdown and JSON for a marketplace's dispute process. A refusal
+on a VERIFIED envelope (checker-broken, or a non-party check rule) renders
+too; a VERIFIED allow is nothing to dispute.
 
 Stdlib only (verify loads the [sign] backend itself). `decide` raises only on
 an unknown action; anything else is an answer.
@@ -91,7 +113,8 @@ from arcaeon.prove import envelope as E
 
 __all__ = ["ACTIONS", "ALLOW", "REFUSE", "RULES", "GateDecision", "decide", "resolve",
            "EVIDENCE_KIND", "CHAIN_KIND", "PACK_DIGEST_OF", "PACK_DIGEST_OF_V1",
-           "pack_digest",
+           "pack_digest", "CHECK_ROW_KIND", "CHECKER_BROKEN", "CHECKS_UNREADABLE",
+           "VETOED", "read_check_rows",
            "verify_evidence_pack", "main"]
 
 ACTIONS = ("read", "act", "pay", "irreversible")
@@ -118,13 +141,25 @@ _NEEDS_LEDGER = ("--deal needs --ledger: the gate.evidence row goes in your own 
                  "chain (a row written beside the pack could be rewritten along with it)")
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 
+#: The row kind a --checks file is read for: arcaeon.connector.core.ROW_KIND.
+#: connector is not on this base; once the stack merges, import it from there.
+CHECK_ROW_KIND = "check.verdict.relayed"
+#: The veto reasons (D067). checker-broken: a check row says BROKEN for these
+#: bytes. checks-unreadable: a --checks file could not be read.
+CHECKER_BROKEN = "checker-broken"
+CHECKS_UNREADABLE = "checks-unreadable"
+#: The actions a check veto refuses; `read` is never among them.
+VETOED = frozenset({"act", "pay", "irreversible"})
+#: A --checks file bigger than this is not read (and so vetoes).
+MAX_CHECKS_BYTES = 16 << 20
+
 ALLOW_MEANS = ("allow means the bytes are unchanged since the key you named sealed them "
                "and they are labeled for you and in date; it does not say the content is "
                "true or safe")
 LIMITS = [
     ALLOW_MEANS,
-    "the gate decides from the envelope's verdict alone; checking the content is other "
-    "tools' job",
+    "the gate decides from the envelope's verdict, plus any check rows given that say "
+    "BROKEN for the same sha256; checking the content is other tools' job",
     "a third party who can edit the sidecar can turn allow into refuse, never into allow",
     "the evidence pack's copy is taken after the check; its sha256 is of the bytes copied",
 ]
@@ -158,6 +193,9 @@ class GateDecision:
     chain_error: str | None = None
     report: dict = field(default_factory=dict)
     limits: list = field(default_factory=lambda: list(LIMITS))
+    #: the --checks answer (D067), only when check files were given:
+    #: {files, rows, file_sha256, broken, problems, veto}
+    checks: dict | None = None
 
     @property
     def allowed(self) -> bool:
@@ -167,13 +205,26 @@ class GateDecision:
         return self.allowed
 
     @property
+    def veto(self) -> str | None:
+        return (self.checks or {}).get("veto")
+
+    @property
     def exit_code(self) -> int:
-        """0 allow; 1 refuse on BROKEN; 3 refuse on COULD NOT LOOK."""
+        """0 allow; 1 refuse on BROKEN or checker-broken; 3 refuse on COULD NOT
+        LOOK or checks-unreadable."""
         if self.allowed:
             return V.EXIT_GOOD
-        return V.EXIT_BAD if self.verdict == V.BROKEN else V.EXIT_COULD_NOT_LOOK
+        if self.verdict == V.BROKEN or self.veto == CHECKER_BROKEN:
+            return V.EXIT_BAD
+        return V.EXIT_COULD_NOT_LOOK
 
     def to_dict(self) -> dict:
+        out = self._dict()
+        if self.checks is not None:                  # only when check files were given
+            out["checks"] = self.checks
+        return out
+
+    def _dict(self) -> dict:
         return {"decision": self.decision, "action": self.action, "verdict": self.verdict,
                 "reason": self.reason, "reasons": list(self.reasons),
                 "could_not_check": dict(self.could_not_check) if self.could_not_check else None,
@@ -262,6 +313,8 @@ def _write_evidence(d: GateDecision, file: Path, env_path: Path, signers: list,
           "at": _utc(now), "file": parts["file"], "envelope": parts["envelope"],
           "audience": d.audience, "purpose": d.purpose, "signers": list(signers), "limits": list(d.limits),
           "report": d.report}
+    if d.checks is not None:
+        ev["checks"] = d.checks
     (out / "evidence.json").write_text(json.dumps(ev, indent=1, ensure_ascii=False) + "\n",
                                        encoding="utf-8", newline="\n")
     return out
@@ -370,9 +423,127 @@ def _append_chain_row(d: GateDecision, pack: Path, ledger: Path, now: datetime) 
            "verdict": d.verdict, "reason": ev.get("reason"), "pack": pack.name,
            "pack_digest": pack_digest(pack), "pack_digest_of": PACK_DIGEST_OF,
            "at": _utc(now)}
-    row["ts"] = row["at"]                     # as Deal._write: the returned row is the line
+    if d.veto:                                # D067: a refusal on a VERIFIED envelope
+        row["veto"] = d.veto
+    row["ts"] = row["at"]                    # as Deal._write: the returned row is the line
     row["chain"] = Ledger(ledger).append(row)
     return row
+
+
+def _norm_sha(v: Any) -> str | None:
+    if not isinstance(v, str):
+        return None
+    s = v.strip().lower()
+    if s.startswith("sha256:"):
+        s = s[len("sha256:"):]
+    return s if _HEX64.fullmatch(s) else None
+
+
+def read_check_rows(paths) -> tuple[list[tuple[str, int, dict]], list[str]]:
+    """((file name, line number, row) for every check.verdict.relayed row in
+    `paths`, problems). A row is plain JSON with arcaeon.connector.core's field
+    names (read here without importing it). A problem is a file that cannot be
+    read: missing, over MAX_CHECKS_BYTES, not UTF-8, or a non-blank line that
+    is not a JSON object. Rows of other kinds are skipped. Never raises."""
+    from arcaeon.record.row import loads_strict
+    rows: list[tuple[str, int, dict]] = []
+    problems: list[str] = []
+    for p in paths or ():
+        p = Path(p)
+        try:
+            if p.stat().st_size > MAX_CHECKS_BYTES:
+                problems.append(f"{p.name}: over {MAX_CHECKS_BYTES} bytes, not read")
+                continue
+            text = p.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as e:
+            problems.append(f"{p.name}: cannot be read ({type(e).__name__})")
+            continue
+        for n, line in enumerate(text.splitlines(), 1):
+            if not line.strip():
+                continue
+            try:
+                row = loads_strict(line)
+            except ValueError as e:
+                problems.append(f"{p.name} line {n}: not JSON ({type(e).__name__})")
+                continue
+            if not isinstance(row, dict):
+                problems.append(f"{p.name} line {n}: not a JSON object")
+            elif row.get("kind") == CHECK_ROW_KIND:
+                rows.append((p.name, n, row))
+    return rows, problems
+
+
+def _who(b: dict) -> str:
+    s = f"{b['checker']!r}"
+    extra = [f"subject {b['subject']!r}" if b.get("subject") else None,
+             f"vendor id {b['vendor_id']!r}" if b.get("vendor_id") else None,
+             f"{b['file']} line {b['line']}"]
+    return s + " (" + ", ".join(x for x in extra if x) + ")"
+
+
+def _judge_checks(paths, file: Path) -> dict:
+    """The --checks answer for `file`: which rows say BROKEN for its sha256."""
+    from arcaeon.record.row import file_pin
+    rows, problems = read_check_rows(paths)
+    pin = file_pin(file)
+    sha = pin.get("sha256")
+    if not sha:
+        problems.append(f"the handed file's sha256 could not be taken ({pin.get('error')})")
+    broken = []
+    for name, n, row in rows:
+        subj = row.get("subject") if isinstance(row.get("subject"), dict) else {}
+        if not sha or row.get("relayed_verdict") != V.BROKEN or _norm_sha(subj.get("sha256")) != sha:
+            continue
+        vendor = row.get("vendor") if isinstance(row.get("vendor"), dict) else {}
+        att = row.get("attestation") if isinstance(row.get("attestation"), dict) else {}
+        keep = {k: v for k, v in row.items() if k != "vendor_payload"}
+        broken.append({"checker": str(vendor.get("name") or "an unnamed checker")[:128],
+                       "adapter_version": vendor.get("adapter_version"),
+                       "vendor_id": row.get("vendor_id"), "vendor_word": row.get("vendor_word"),
+                       "subject": subj.get("name"), "sha256": sha,
+                       "attestation": att.get("status") or "NONE",
+                       "reported_by": "sender", "file": name, "line": n, "row": keep})
+    return {"files": [Path(p).name for p in paths], "rows": len(rows), "file_sha256": sha,
+            "broken": broken, "problems": problems, "veto": None}
+
+
+def _broken_finding(b: dict) -> str:
+    return (f"checker {_who(b)} says BROKEN (its word {b.get('vendor_word')!r}) for sha256 "
+            f"{b['sha256']}; reported by the sender, attestation {b['attestation']}, "
+            f"not checked by us")
+
+
+def _apply_checks(d: GateDecision, info: dict) -> None:
+    """Fold the --checks answer into a VERIFIED decision (D067)."""
+    d.checks = info
+    names = ", ".join(_who(b) for b in info["broken"])
+    if d.action not in VETOED:
+        if info["broken"]:
+            d.reason += (f" Note: {names} says BROKEN for these bytes ({CHECKER_BROKEN}); "
+                         f"read is allowed, act, pay and irreversible would be refused.")
+        return
+    if info["broken"]:
+        info["veto"] = CHECKER_BROKEN
+        d.decision = REFUSE
+        d.reasons = [_broken_finding(b) for b in info["broken"]]
+        d.reason = (f"refuse {d.action}: {CHECKER_BROKEN}: {names} says BROKEN for sha256 "
+                    f"{info['file_sha256']}, the bytes the envelope sealed. The envelope "
+                    f"reads VERIFIED (the bytes are unchanged since the key you named "
+                    f"sealed them); the checker's word vetoes {d.action}. Its row is "
+                    f"reported by the sender, not checked by us: it can turn allow into "
+                    f"refuse, never into allow. Read is allowed; keep the file, the "
+                    f"envelope and the check row as evidence.")
+    elif info["problems"]:
+        info["veto"] = CHECKS_UNREADABLE
+        d.decision = REFUSE
+        d.reasons = list(info["problems"])
+        d.could_not_check = {"looked_for": "a check row that says BROKEN for these bytes",
+                             "where": ", ".join(info["files"]) or "--checks",
+                             "reason_word": "unreadable"}
+        d.reason = (f"refuse {d.action}: {CHECKS_UNREADABLE}: the envelope reads VERIFIED, "
+                    f"but a check file could not be read ({'; '.join(info['problems'])}), "
+                    f"so a checker's BROKEN in it cannot be ruled out. Only read is "
+                    f"allowed until it can be read.")
 
 
 def _reason(action: str, verdict: str, r: dict, audience, deal) -> str:
@@ -396,7 +567,8 @@ def _reason(action: str, verdict: str, r: dict, audience, deal) -> str:
 def decide(file: str | Path, *, action: str, audience: str | None,
            signers=(), deal: str | None = None, envelope: str | Path | None = None,
            purpose: str | None = None, record_dir: str | Path | None = None,
-           ledger: str | Path | None = None, now: datetime | None = None) -> GateDecision:
+           ledger: str | Path | None = None, now: datetime | None = None,
+           check_files=()) -> GateDecision:
     """allow or refuse `action` on `file`, from `envelope.verify`'s verdict.
 
     `file` is the handed file; `envelope` its sidecar (default: beside it).
@@ -406,7 +578,10 @@ def decide(file: str | Path, *, action: str, audience: str | None,
     `record_dir` (default: the current directory) and one gate.evidence row
     is appended to `ledger`, the party's own chain. `ledger` is required with
     `deal` (D066): a row written beside the pack could be rewritten with it.
-    Raises ValueError on an unknown action or a `deal` without a `ledger`,
+    `check_files` (paths to JSONL of check.verdict.relayed rows, D067): on a
+    VERIFIED envelope, a row saying BROKEN for the file's sha256 refuses act,
+    pay and irreversible as CHECKER_BROKEN (an unreadable file: as
+    CHECKS_UNREADABLE); read stays allowed. Raises ValueError on an unknown action or a `deal` without a `ledger`,
     before anything is read or written; otherwise never raises."""
     if action not in ACTIONS:
         raise ValueError(f"action must be one of {ACTIONS}, got {action!r}")
@@ -435,6 +610,15 @@ def decide(file: str | Path, *, action: str, audience: str | None,
                      could_not_check=cnc, file=str(file), envelope=str(env_path),
                      audience=audience, deal=deal, purpose=purpose, signers=list(signers),
                      at=_utc(now), report=r)
+    check_files = list(check_files or ())
+    if check_files and verdict == V.VERIFIED:
+        try:
+            _apply_checks(d, _judge_checks(check_files, file))
+        except Exception as e:  # noqa: BLE001  never a green on a crash
+            _apply_checks(d, {"files": [Path(p).name for p in check_files], "rows": 0,
+                              "file_sha256": None, "broken": [], "veto": None,
+                              "problems": [f"the checks could not be read ({type(e).__name__})"]})
+        allowed = d.decision == ALLOW
     if not allowed and deal is not None:
         try:
             out = _write_evidence(d, file, env_path, signers,
@@ -462,7 +646,8 @@ def decide(file: str | Path, *, action: str, audience: str | None,
 USAGE = """usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
                            --action {read,act,pay,irreversible}
                            [--deal ID --ledger PATH] [--purpose TEXT]
-                           [--file PATH] [--record-dir DIR] [--json]
+                           [--checks FILE ...] [--file PATH]
+                           [--record-dir DIR] [--json]
        arcaeon gate packet (--evidence DIR | --decision FILE.json)
                            [--out DIR] [--json]"""
 
@@ -494,13 +679,22 @@ row beside the pack could be rewritten along with it, so there is no default.
 The pack digest hashes each file with CRLF read as LF, so a line-ending
 rewrite of the pack still matches. `deal dispute` ignores the row.
 
+--checks FILE (repeatable) names JSONL files of check.verdict.relayed rows
+(a scanner's verdict relayed into your chain, e.g. mcp-scan). On a VERIFIED
+envelope, any row saying BROKEN for the handed file's sha256 refuses act, pay
+and irreversible as checker-broken, naming the checker (exit 1); the verdict
+stays VERIFIED. read stays allowed. Rows for another sha256, or saying
+VERIFIED or COULD NOT LOOK, are ignored. A FILE that cannot be read refuses
+those three actions as checks-unreadable (exit 3). An unsigned row counts: it
+can turn allow into refuse, never into allow.
+
 Allow means the bytes are unchanged since the key you named sealed them and
 are labeled for you and in date. It does not say the content is true or safe.
 
 Prints one line, `allow <action>: ...` or `refuse <action>: ...` (--json:
 the whole decision).
-Exit codes: 0 allow, 1 refuse (BROKEN), 3 refuse (COULD NOT LOOK), 2 bad
-usage. Spec and limits: docs/ENVELOPE.md.
+Exit codes: 0 allow, 1 refuse (BROKEN or checker-broken), 3 refuse (COULD
+NOT LOOK or checks-unreadable), 2 bad usage. Spec and limits: docs/ENVELOPE.md.
 
 packet renders a refusal as one page a dispute process can take: what was
 handed (name, sha256, size), by whom, for whom, when, what failed, what was
@@ -516,7 +710,8 @@ the action), 3 the input could not be read as a gate record."""
 
 _SPEC = {"--envelope": "value", "--audience": "value", "--signer": "list",
          "--action": "value", "--deal": "value", "--purpose": "value", "--file": "value",
-         "--record-dir": "value", "--ledger": "value", "--json": "bool"}
+         "--record-dir": "value", "--ledger": "value", "--checks": "list",
+         "--json": "bool"}
 
 
 def _decide_cli(argv: list[str]) -> int:
@@ -533,7 +728,8 @@ def _decide_cli(argv: list[str]) -> int:
     file, env_path = resolve(o["--envelope"], o.get("--file"))
     d = decide(file, envelope=env_path, action=o["--action"], audience=o["--audience"],
                signers=o["--signer"], deal=o.get("--deal"), purpose=o.get("--purpose"),
-               record_dir=o.get("--record-dir"), ledger=o.get("--ledger"))
+               record_dir=o.get("--record-dir"), ledger=o.get("--ledger"),
+               check_files=o.get("--checks") or ())
     if o.get("--json"):
         print(json.dumps(d.to_dict(), indent=1, ensure_ascii=False))
     else:
