@@ -97,8 +97,30 @@ A2A. `arcaeon gate a2a` (arcaeon.prove.a2a_receiver) takes the envelope from
 an A2A Artifact's metadata under https://arcaeon.io/a2a/witness/v1 and runs
 `decide` on it (docs/A2A.md).
 
+A NON-PARTY CHECK ABOVE A CAP (TE-35). A receiver may add one rule on top of
+the table: `require_nonparty_check_above=CAP`. When the deal's amount is over
+CAP, a VERIFIED envelope allows act, pay and irreversible only if at least one
+check (a check.verdict.relayed row, TE-31) counts. A check counts when:
+
+    (a) its own envelope sidecar (CHECK.envelope.json) verifies, through the
+        same envelope.verify, under a key that is neither a key that signed
+        the handed envelope (or that the receiver named for it) nor the
+        audience: a non-party (and, with `checkers`, one of those keys);
+    (b) a row in it names the handed file's sha256 as its subject.sha256;
+    (c) that row's relayed_verdict is VERIFIED.
+
+An unsigned row is the sender's report and never counts, whatever its
+`attestation` claims. A counting key's row on the same sha256 that says
+BROKEN vetoes. No amount (neither `amount` nor the deal record carries one)
+refuses those three actions as could-not-look. `read` and every case at or
+under the cap are the table above, unchanged. The amount is the LARGER of
+`amount` and every commit total / pay amount in the deal record
+(record_dir/DEAL-<deal>/{buyer,seller}.deal.jsonl), so neither source can
+lower it below the other. Limit: this raises the cost of collusion between
+the two parties; it does not prove the checker is independent of them.
+
 Stdlib only (verify loads the [sign] backend itself). `decide` raises only on
-an unknown action; anything else is an answer.
+an unknown action or an unreadable cap; anything else is an answer.
 """
 from __future__ import annotations
 
@@ -109,17 +131,20 @@ import re
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
 
 from arcaeon import verdict as V
 from arcaeon.prove import envelope as E
+from arcaeon.record.row import file_pin, loads_strict
 
 __all__ = ["ACTIONS", "ALLOW", "REFUSE", "RULES", "GateDecision", "decide", "resolve",
            "EVIDENCE_KIND", "CHAIN_KIND", "PACK_DIGEST_OF", "PACK_DIGEST_OF_V1",
            "pack_digest", "CHECK_ROW_KIND", "CHECKER_BROKEN", "CHECKS_UNREADABLE",
            "VETOED", "read_check_rows",
-           "verify_evidence_pack", "main"]
+           "verify_evidence_pack", "GUARDED", "CHECK_KIND", "NONPARTY_RULE",
+           "main"]
 
 ACTIONS = ("read", "act", "pay", "irreversible")
 ALLOW, REFUSE = "allow", "refuse"
@@ -170,6 +195,18 @@ LIMITS = [
 
 _SAFE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 
+#: the actions the non-party check rule guards; `read` is never among them.
+GUARDED = frozenset({"act", "pay", "irreversible"})
+#: the only row kind a check file is read for (arcaeon.connector, TE-31).
+CHECK_KIND = "check.verdict.relayed"
+NONPARTY_RULE = "require_nonparty_check_above"
+NONPARTY_LIMIT = ("the non-party check rule raises the cost of collusion between the two "
+                  "parties; it does not prove the checker is independent of them (a party "
+                  "can make a new key, or pay a checker)")
+#: a check file bigger than this is not read: a few rows are a few KiB.
+MAX_CHECK_BYTES = 1 << 20
+_MAX_ROWS = 1000
+
 
 @dataclass
 class GateDecision:
@@ -200,6 +237,8 @@ class GateDecision:
     #: the --checks answer (D067), only when check files were given:
     #: {files, rows, file_sha256, broken, problems, veto}
     checks: dict | None = None
+    #: the non-party check rule's answer (D061), only when the rule was set
+    nonparty_check: dict | None = None
 
     @property
     def allowed(self) -> bool:
@@ -226,6 +265,8 @@ class GateDecision:
         out = self._dict()
         if self.checks is not None:                  # only when check files were given
             out["checks"] = self.checks
+        if self.nonparty_check is not None:          # only when the rule was set
+            out["nonparty_check"] = self.nonparty_check
         return out
 
     def _dict(self) -> dict:
@@ -319,6 +360,8 @@ def _write_evidence(d: GateDecision, file: Path, env_path: Path, signers: list,
           "report": d.report}
     if d.checks is not None:
         ev["checks"] = d.checks
+    if d.nonparty_check is not None:
+        ev["nonparty_check"] = d.nonparty_check
     (out / "evidence.json").write_text(json.dumps(ev, indent=1, ensure_ascii=False) + "\n",
                                        encoding="utf-8", newline="\n")
     return out
@@ -568,11 +611,216 @@ def _reason(action: str, verdict: str, r: dict, audience, deal) -> str:
             f"until that can be checked.")
 
 
+# --- the non-party check rule (TE-35) ---------------------------------------------
+
+def _decimal(v: Any) -> Decimal | None:
+    """A finite, non-negative amount, or None."""
+    if isinstance(v, bool) or not isinstance(v, (str, int, Decimal)):
+        return None
+    try:
+        d = Decimal(str(v).strip())
+    except (InvalidOperation, ValueError):
+        return None
+    return d if d.is_finite() and d >= 0 else None
+
+
+def _deal_amounts(record_dir: Path, deal: str) -> tuple[list, str, list]:
+    """Every readable commit total and pay amount for `deal` in its record
+    (DEAL-<deal>/{buyer,seller}.deal.jsonl). Returns (amounts, where, notes)."""
+    base = record_dir / _deal_dir_name(deal)
+    amounts, notes = [], []
+    for name in ("buyer.deal.jsonl", "seller.deal.jsonl"):
+        p = base / name
+        try:
+            if not p.is_file():
+                continue
+            if p.stat().st_size > 16 * MAX_CHECK_BYTES:
+                notes.append(f"{name}: over {16 * MAX_CHECK_BYTES} bytes, not read")
+                continue
+            lines = p.read_bytes().decode("utf-8").splitlines()
+        except (OSError, UnicodeDecodeError) as e:
+            notes.append(f"{name}: not read ({type(e).__name__})")
+            continue
+        for n, line in enumerate(lines, 1):
+            if not line.strip():
+                continue
+            try:
+                row = loads_strict(line)
+            except ValueError:
+                notes.append(f"{name} line {n}: not one JSON object, skipped")
+                continue
+            if not isinstance(row, dict) or row.get("deal", deal) != deal:
+                continue
+            shared = row.get("shared") if isinstance(row.get("shared"), dict) else {}
+            if row.get("kind") == "deal.commit" and isinstance(shared.get("terms"), dict):
+                a = _decimal(shared["terms"].get("total"))
+            elif row.get("kind") == "deal.pay":
+                a = _decimal(shared.get("amount"))
+            else:
+                continue
+            if a is not None:
+                amounts.append(a)
+    return amounts, str(base), notes
+
+
+def _read_check_rows(path: Path) -> tuple[list | None, str]:
+    """The rows in a check file (one JSON object, a JSON list, or JSON lines),
+    or (None, why). Never raises on content."""
+    try:
+        if not path.is_file():
+            return None, "not there" if not path.exists() else "not a regular file"
+        if path.stat().st_size > MAX_CHECK_BYTES:
+            return None, f"over {MAX_CHECK_BYTES} bytes, not read"
+        text = path.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        return None, f"cannot be read as UTF-8 text ({type(e).__name__})"
+    try:
+        doc = loads_strict(text)
+        rows = doc if isinstance(doc, list) else [doc]
+    except ValueError:
+        try:
+            rows = [loads_strict(ln) for ln in text.splitlines() if ln.strip()]
+        except ValueError as e:
+            return None, f"not JSON or JSON lines ({str(e)[:80]})"
+    if not rows or len(rows) > _MAX_ROWS or not all(isinstance(x, dict) for x in rows):
+        return None, "not a list of check rows (JSON objects)"
+    return rows, ""
+
+
+def _judge_check(path: Path, *, sha: str, parties: set, checkers: list, audience, deal,
+                 now: datetime) -> dict:
+    """Does one check file count toward the rule? Never raises."""
+    out: dict[str, Any] = {"check": path.name, "counts": False, "vetoes": False,
+                           "signed_by": [], "nonparty": [], "row_verdict": None, "why": ""}
+    try:
+        rows, why = _read_check_rows(path)
+        if rows is None:
+            out["why"] = f"unreadable: {why}"
+            return out
+        side = E.envelope_path(path)
+        if not side.exists():
+            out["why"] = (f"unsigned (no {side.name}): a row nobody signed is reported by the "
+                          f"sender, never a check")
+            return out
+        first = E.verify(path, side, audience=audience, deal=deal, signers=(), now=now)
+        valid = [k for k in (first.get("signers") or []) if isinstance(k, str)]
+        out["signed_by"] = valid
+        if first.get("verdict") == V.BROKEN:
+            out["why"] = f"its envelope is BROKEN: {first.get('reason')}"
+            return out
+        if not valid:
+            out["why"] = f"its envelope does not verify under any key: {first.get('reason')}"
+            return out
+        nonparty = [k for k in valid if k not in parties]
+        if checkers:
+            nonparty = [k for k in nonparty if k in checkers]
+        out["nonparty"] = nonparty
+        if not nonparty:
+            out["why"] = ("signed only by a party (the envelope's signer or the audience)"
+                          if not checkers or not [k for k in valid if k not in parties]
+                          else "signed by no key you named with --checker")
+            return out
+        second = E.verify(path, side, audience=audience, deal=deal, signers=nonparty, now=now)
+        if second.get("verdict") != V.VERIFIED:
+            out["why"] = f"its envelope reads {second.get('verdict')}: {second.get('reason')}"
+            return out
+        mine = [x for x in rows if x.get("kind") == CHECK_KIND
+                and isinstance(x.get("subject"), dict)
+                and isinstance(x["subject"].get("sha256"), str)
+                and x["subject"]["sha256"].lower() == sha]
+        if not mine:
+            out["why"] = f"signed by a non-party, but no {CHECK_KIND} row names sha256 {sha}"
+            return out
+        words = [x.get("relayed_verdict") for x in mine]
+        if V.BROKEN in words:
+            out.update(row_verdict=V.BROKEN, vetoes=True,
+                       why="a non-party signed a check that says BROKEN for these bytes")
+        elif V.VERIFIED in words:
+            out.update(row_verdict=V.VERIFIED, counts=True,
+                       why=f"signed by non-party {nonparty[0]}, names this sha256, says VERIFIED")
+        else:
+            out["row_verdict"] = str(words[0])[:64]
+            out["why"] = f"signed by a non-party, but it says {out['row_verdict']}, not VERIFIED"
+        return out
+    except Exception as e:  # noqa: BLE001  a hostile check is an answer, never a traceback
+        out.update(counts=False, vetoes=False,
+                   why=f"unreadable: the check could not finish ({type(e).__name__})")
+        return out
+
+
+def _nonparty_rule(*, cap: Decimal, amount, checks, checkers, file: Path, r: dict,
+                   signers: list, audience, deal, record_dir: Path, now: datetime) -> dict:
+    """The rule's answer: {applies, satisfied, amount, ...}; `satisfied` None means
+    the amount could not be found (could not look)."""
+    given = _decimal(amount) if amount is not None else None
+    sources = []
+    if given is not None:
+        sources.append(("--amount", given))
+    info: dict[str, Any] = {"rule": NONPARTY_RULE, "cap": str(cap), "amount": None,
+                            "amount_source": None, "amount_notes": [], "applies": None,
+                            "satisfied": None, "checks": [], "limit": NONPARTY_LIMIT}
+    if amount is not None and given is None:
+        info["amount_notes"].append(f"--amount {str(amount)[:40]!r} is not a readable amount")
+    where = None
+    if deal is not None:
+        found, where, notes = _deal_amounts(record_dir, deal)
+        info["amount_notes"].extend(notes)
+        if found:
+            sources.append(("deal record", max(found)))
+    if not sources:
+        info["could_not_check"] = V.could_not_look(
+            "the deal's amount (--amount, or a commit total or pay amount in the deal record)",
+            where or "--amount", "missing",
+            "no amount was given and no deal record carries one, so whether the cap applies "
+            "cannot be checked")
+        return info
+    src, amt = max(sources, key=lambda s: s[1])
+    info["amount"], info["amount_source"] = str(amt), src
+    info["applies"] = amt > cap
+    if not info["applies"]:
+        return info
+    sha = (file_pin(file).get("sha256") or "").lower()
+    parties = {k for k in list(signers) + list(r.get("signers") or []) if isinstance(k, str)}
+    sealed = r.get("sealed") if isinstance(r.get("sealed"), dict) else {}
+    by = sealed.get("sealed_by") if isinstance(sealed.get("sealed_by"), dict) else {}
+    if isinstance(by.get("key"), str):
+        parties.add(by["key"])
+    if isinstance(audience, str):
+        parties.add(audience)
+    judged = [_judge_check(Path(c), sha=sha, parties=parties, checkers=list(checkers or ()),
+                           audience=audience, deal=deal, now=now) for c in (checks or ())]
+    info["checks"] = judged
+    info["satisfied"] = (bool(sha) and any(j["counts"] for j in judged)
+                         and not any(j["vetoes"] for j in judged))
+    return info
+
+
+def _nonparty_reason(action: str, verdict: str, info: dict, base: str) -> str:
+    cap = info["cap"]
+    if info["applies"] is None:
+        c = info["could_not_check"]
+        return (f"refuse {action}: {verdict}, but the non-party check rule (over {cap}) could "
+                f"not look: could not check {c['looked_for']} ({c['reason_word']}): "
+                f"{c['reason']}. Only read is allowed until it can be checked.")
+    amt = f"amount {info['amount']} (from {info['amount_source']})"
+    if info["satisfied"]:
+        ok = next(j for j in info["checks"] if j["counts"])
+        return (f"{base} The {amt} is over the cap {cap}, and {ok['check']} is a check "
+                f"{ok['why']}.")
+    why = "; ".join(f"{j['check']}: {j['why']}" for j in info["checks"]) or "no --check was given"
+    return (f"refuse {action}: {verdict}, but the non-party check rule refuses it: the {amt} "
+            f"is over the cap {cap} and no check counts ({why}). A check counts only when "
+            f"a key that is neither the envelope's signer nor the audience signed it, it "
+            f"names this file's sha256 and it says VERIFIED; a row nobody signed is the "
+            f"sender's report. Only read is allowed until one does.")
+
+
 def decide(file: str | Path, *, action: str, audience: str | None,
            signers=(), deal: str | None = None, envelope: str | Path | None = None,
            purpose: str | None = None, record_dir: str | Path | None = None,
            ledger: str | Path | None = None, now: datetime | None = None,
-           check_files=()) -> GateDecision:
+           check_files=(), require_nonparty_check_above=None,
+           amount=None, checks=(), checkers=()) -> GateDecision:
     """allow or refuse `action` on `file`, from `envelope.verify`'s verdict.
 
     `file` is the handed file; `envelope` its sidecar (default: beside it).
@@ -585,12 +833,25 @@ def decide(file: str | Path, *, action: str, audience: str | None,
     `check_files` (paths to JSONL of check.verdict.relayed rows, D067): on a
     VERIFIED envelope, a row saying BROKEN for the file's sha256 refuses act,
     pay and irreversible as CHECKER_BROKEN (an unreadable file: as
-    CHECKS_UNREADABLE); read stays allowed. Raises ValueError on an unknown action or a `deal` without a `ledger`,
-    before anything is read or written; otherwise never raises."""
+    CHECKS_UNREADABLE); read stays allowed.
+    `require_nonparty_check_above` (an amount, D061) adds the non-party check
+    rule (module docstring): over it, a VERIFIED envelope allows act, pay and
+    irreversible only with a counting check among `checks` (paths); `amount`
+    is the deal's amount (the larger of it and the deal record's is used);
+    `checkers` optionally narrows which non-party keys count. Unset, nothing
+    changes. `checks` (D061) and `check_files` (D067) are separate inputs.
+    Raises ValueError on an unknown action, a `deal` without a `ledger` or an
+    unreadable cap, before anything is read or written; otherwise never raises."""
     if action not in ACTIONS:
         raise ValueError(f"action must be one of {ACTIONS}, got {action!r}")
     if deal is not None and ledger is None:
         raise ValueError(_NEEDS_LEDGER)
+    cap = None
+    if require_nonparty_check_above is not None:
+        cap = _decimal(require_nonparty_check_above)
+        if cap is None:
+            raise ValueError(f"require_nonparty_check_above must be a non-negative amount, "
+                             f"got {require_nonparty_check_above!r}")
     now = now or datetime.now(timezone.utc)
     file = Path(file)
     env_path = Path(envelope) if envelope is not None else E.envelope_path(file)
@@ -609,11 +870,37 @@ def decide(file: str | Path, *, action: str, audience: str | None,
         reasons = []
     cnc = ({k: r.get(k) for k in ("looked_for", "where", "reason_word")}
            if verdict == V.COULD_NOT_LOOK else None)
+    reason = _reason(action, verdict, r, audience, deal)
+    policy = None
+    if cap is not None:
+        policy = {"rule": NONPARTY_RULE, "cap": str(cap), "applies": False, "satisfied": None,
+                  "checks": [], "limit": NONPARTY_LIMIT,
+                  "note": "the table decides: read, or a verdict that already refuses"}
+        if verdict == V.VERIFIED and action in GUARDED:
+            try:
+                policy = _nonparty_rule(
+                    cap=cap, amount=amount, checks=checks, checkers=checkers, file=file, r=r,
+                    signers=signers, audience=audience, deal=deal, now=now,
+                    record_dir=Path(record_dir) if record_dir is not None else Path.cwd())
+            except Exception as e:  # noqa: BLE001  never a green on a crash
+                policy.update(applies=None, could_not_check=V.could_not_look(
+                    "the non-party check rule's inputs", "gate", "unreadable",
+                    f"the rule could not finish ({type(e).__name__})"))
+            if policy["applies"] is None or (policy["applies"] and not policy["satisfied"]):
+                allowed = False
+                cnc = policy.get("could_not_check") or V.could_not_look(
+                    "a signed non-party check that says VERIFIED for this sha256",
+                    ", ".join(str(c) for c in checks) or "--check", "missing",
+                    "no check given counts toward the non-party check rule")
+                reasons = [j["check"] + ": " + j["why"] for j in policy["checks"]] or \
+                    [cnc["reason"]]
+            reason = _nonparty_reason(action, verdict, policy, reason) \
+                if policy["applies"] is not False else reason
     d = GateDecision(decision=ALLOW if allowed else REFUSE, action=action, verdict=verdict,
-                     reason=_reason(action, verdict, r, audience, deal), reasons=reasons,
+                     reason=reason, reasons=reasons,
                      could_not_check=cnc, file=str(file), envelope=str(env_path),
                      audience=audience, deal=deal, purpose=purpose, signers=list(signers),
-                     at=_utc(now), report=r)
+                     at=_utc(now), report=r, nonparty_check=policy)
     check_files = list(check_files or ())
     if check_files and verdict == V.VERIFIED:
         try:
@@ -651,7 +938,10 @@ USAGE = """usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
                            --action {read,act,pay,irreversible}
                            [--deal ID --ledger PATH] [--purpose TEXT]
                            [--checks FILE ...] [--file PATH]
-                           [--record-dir DIR] [--json]
+                           [--record-dir DIR]
+                           [--require-nonparty-check-above AMOUNT
+                            [--amount N] [--check FILE ...] [--checker DID ...]]
+                           [--json]
        arcaeon gate packet (--evidence DIR | --decision FILE.json)
                            [--out DIR] [--json]
        arcaeon gate a2a --message FILE.json --audience ID --signer DID
@@ -699,10 +989,23 @@ can turn allow into refuse, never into allow.
 Allow means the bytes are unchanged since the key you named sealed them and
 are labeled for you and in date. It does not say the content is true or safe.
 
+--require-nonparty-check-above AMOUNT: when the deal's amount is over AMOUNT,
+a VERIFIED envelope allows act, pay and irreversible only if one --check
+FILE counts: a check.verdict.relayed row naming this file's sha256 and
+saying VERIFIED, in a file whose own envelope (FILE.envelope.json, labeled
+for you) verifies under a key that is neither the handed envelope's signer
+nor the audience (with --checker, one of those keys). An unsigned row is the
+sender's report and never counts; a counting key's BROKEN vetoes. The amount
+is the larger of --amount and the deal record's commit total / pay amount
+(DIR/DEAL-<deal>/); with neither, those actions are refused (exit 3). read,
+and anything at or under AMOUNT, follow the table. This raises the cost of
+collusion between the parties; it does not prove the checker independent.
+
 Prints one line, `allow <action>: ...` or `refuse <action>: ...` (--json:
 the whole decision).
 Exit codes: 0 allow, 1 refuse (BROKEN or checker-broken), 3 refuse (COULD
-NOT LOOK or checks-unreadable), 2 bad usage. Spec and limits: docs/ENVELOPE.md.
+NOT LOOK, checks-unreadable, or no counting non-party check), 2 bad usage.
+Spec and limits: docs/ENVELOPE.md.
 
 packet renders a refusal as one page a dispute process can take: what was
 handed (name, sha256, size), by whom, for whom, when, what failed, what was
@@ -729,7 +1032,9 @@ COULD NOT LOOK (read only). Same exit codes as decide."""
 _SPEC = {"--envelope": "value", "--audience": "value", "--signer": "list",
          "--action": "value", "--deal": "value", "--purpose": "value", "--file": "value",
          "--record-dir": "value", "--ledger": "value", "--checks": "list",
-         "--json": "bool"}
+         "--json": "bool",
+         "--require-nonparty-check-above": "value", "--amount": "value", "--check": "list",
+         "--checker": "list"}
 
 
 def _decide_cli(argv: list[str]) -> int:
@@ -743,11 +1048,22 @@ def _decide_cli(argv: list[str]) -> int:
         raise E._Usage(f"--action must be one of {', '.join(ACTIONS)}")
     if o.get("--deal") is not None and not o.get("--ledger"):
         raise E._Usage(_NEEDS_LEDGER)
+    cap = o.get("--require-nonparty-check-above")
+    if cap is None:
+        for dep in ("--amount", "--check", "--checker"):
+            if o.get(dep):
+                raise E._Usage(f"{dep} needs --require-nonparty-check-above AMOUNT")
+    else:
+        for flag in ("--require-nonparty-check-above", "--amount"):
+            if o.get(flag) is not None and _decimal(o[flag]) is None:
+                raise E._Usage(f"{flag} must be a non-negative amount, got {o[flag]!r}")
     file, env_path = resolve(o["--envelope"], o.get("--file"))
     d = decide(file, envelope=env_path, action=o["--action"], audience=o["--audience"],
                signers=o["--signer"], deal=o.get("--deal"), purpose=o.get("--purpose"),
                record_dir=o.get("--record-dir"), ledger=o.get("--ledger"),
-               check_files=o.get("--checks") or ())
+               check_files=o.get("--checks") or (), require_nonparty_check_above=cap,
+               amount=o.get("--amount"), checks=o.get("--check", []),
+               checkers=o.get("--checker", []))
     if o.get("--json"):
         print(json.dumps(d.to_dict(), indent=1, ensure_ascii=False))
     else:

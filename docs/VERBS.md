@@ -722,6 +722,34 @@ writes the pack (its `evidence.json` carries `checks`) and a `gate.evidence`
 row with `verdict` VERIFIED and `veto` `checker-broken`. The library
 parameter is `check_files=`.
 
+**A non-party check above a cap** (`--require-nonparty-check-above AMOUNT`,
+library `require_nonparty_check_above=`). The two parties to a deal can
+collude: the sender seals, the receiver's agent pays, and nobody else looked.
+With this option, when the deal's amount is over AMOUNT, a VERIFIED envelope
+allows `act`, `pay` and `irreversible` only if at least one `--check FILE`
+counts. A check counts when (a) its own envelope (`FILE.envelope.json`,
+labeled for you) verifies, through the same `envelope verify`, under a key
+that is neither a key that signed the handed envelope (or that you named with
+`--signer`) nor the audience; with `--checker DID` it must also be one of
+those keys; (b) a `check.verdict.relayed` row in it (the connector row shape)
+names the handed file's sha256 as `subject.sha256`; and (c) that row's
+`relayed_verdict` is `VERIFIED`. A row nobody signed is the sender's report
+and never counts, whatever its `attestation` claims; a counting key's row on
+the same sha256 that says `BROKEN` vetoes. The amount is the larger of
+`--amount N` and every commit total and pay amount in the deal record
+(`DIR/DEAL-<deal>/buyer.deal.jsonl` and `seller.deal.jsonl`, with `--deal`),
+so neither source can lower it below the other. With no amount at all, those
+three actions are refused, exit 3, naming the missing amount. A missing,
+unreadable or hostile check file is refused with its reason, never a
+traceback. `read`, any verdict that already refuses, and any amount at or
+under AMOUNT follow the table above unchanged; without the option nothing
+changes. `--json` adds `nonparty_check` (`rule`, `cap`, `amount`,
+`amount_source`, `applies`, `satisfied`, `checks`, `limit`) only when the
+option is set. **The limit:** this raises the cost of collusion between the
+two parties; it does not prove the checker is independent of them. A party
+can make a new key or pay a checker, so without `--checker` any key you have
+not seen as a party counts.
+
 `gate packet` renders a refusal as one page a marketplace's dispute process
 can take, in markdown and JSON (kind `arcaeon.dispute.packet/v1`): what was
 handed (file name, sha256, size), by whom (the signer the envelope names and
@@ -755,7 +783,10 @@ usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
                            --action {read,act,pay,irreversible}
                            [--deal ID --ledger PATH] [--purpose TEXT]
                            [--checks FILE ...] [--file PATH]
-                           [--record-dir DIR] [--json]
+                           [--record-dir DIR]
+                           [--require-nonparty-check-above AMOUNT
+                            [--amount N] [--check FILE ...] [--checker DID ...]]
+                           [--json]
        arcaeon gate packet (--evidence DIR | --decision FILE.json)
                            [--out DIR] [--json]
        arcaeon gate a2a --message FILE.json --audience ID --signer DID
@@ -765,9 +796,13 @@ usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
 ```
 
 **Exit codes:** 0 allow, 1 refuse (BROKEN, or `checker-broken`), 3 refuse
-(COULD NOT LOOK, or `checks-unreadable`), 2 bad
-usage (a missing `--envelope`, `--audience`, `--signer` or `--action`, an
-action that is not one of the four, or `--deal` without `--ledger`). `packet`: 0 written, 2 bad usage or
+(COULD NOT LOOK, `checks-unreadable`, or no counting non-party check over the
+cap), 2 bad usage (a missing `--envelope`, `--audience`, `--signer` or
+`--action`, an action that is not one of the four, `--deal` without
+`--ledger`, an AMOUNT or `--amount` that is not a non-negative number, or
+`--amount`, `--check` or `--checker` without `--require-nonparty-check-above`).
+`--checks` (D067) and `--check` (the non-party rule) are separate options.
+`packet`: 0 written, 2 bad usage or
 nothing to dispute, 3 the input is not a readable gate record. `a2a`: as
 `decide`. New in 0.10.x,
 so `--legacy-exit` changes nothing here.
