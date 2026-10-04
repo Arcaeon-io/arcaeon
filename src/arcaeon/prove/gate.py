@@ -58,7 +58,8 @@ writer the deal lane's rows go through (no second chain format):
      "pack", "pack_digest", "pack_digest_of", "at"}   (+ "ts", "chain")
 
 `verdict` is the envelope's word: BROKEN or COULD NOT LOOK, or VERIFIED on a
-check veto (D067), whose row adds `"veto"`. The ledger is
+refusal by a rule on top of it, whose row adds `"veto"`: checker-broken or
+checks-unreadable (D067), or nonparty-check (the non-party rule). The ledger is
 `ledger=` (`--ledger`), the receiver's own deal chain, and it is required
 whenever a deal id is given (D066): a row written next to the pack could be
 rewritten along with it. `deal dispute` reads only `deal.*` rows, so this row
@@ -120,7 +121,10 @@ An unsigned row is the sender's report and never counts, whatever its
 `attestation` claims. A counting key's row on the same sha256 that says
 BROKEN vetoes. No amount (neither `amount` nor the deal record carries one)
 refuses those three actions as could-not-look. `read` and every case at or
-under the cap are the table above, unchanged. The amount is the LARGER of
+under the cap are the table above, unchanged. A refusal by this rule carries
+`nonparty_check.veto` NONPARTY_VETO ("nonparty-check"), and so does its
+gate.evidence row; its reason and exit 3 stand when a --checks file would
+also veto (that answer is kept under `checks.would_veto`). The amount is the LARGER of
 `amount` and every commit total / pay amount in the deal record
 (record_dir/DEAL-<deal>/{buyer,seller}.deal.jsonl), so neither source can
 lower it below the other. Limit: this raises the cost of collusion between
@@ -149,7 +153,7 @@ from arcaeon.record.row import file_pin, loads_strict
 __all__ = ["ACTIONS", "ALLOW", "REFUSE", "RULES", "NEEDS_EXCHANGE", "GateDecision", "decide", "resolve",
            "EVIDENCE_KIND", "CHAIN_KIND", "PACK_DIGEST_OF", "PACK_DIGEST_OF_V1",
            "pack_digest", "CHECK_ROW_KIND", "CHECKER_BROKEN", "CHECKS_UNREADABLE",
-           "VETOED", "read_check_rows",
+           "VETOED", "NONPARTY_VETO", "read_check_rows",
            "verify_evidence_pack", "GUARDED", "CHECK_KIND", "NONPARTY_RULE",
            "main"]
 
@@ -211,6 +215,9 @@ GUARDED = frozenset({"act", "pay", "irreversible"})
 #: the only row kind a check file is read for (arcaeon.connector, TE-31).
 CHECK_KIND = "check.verdict.relayed"
 NONPARTY_RULE = "require_nonparty_check_above"
+#: The veto word a non-party check rule refusal carries (its evidence row and
+#: `nonparty_check.veto`), beside D067's checker-broken / checks-unreadable.
+NONPARTY_VETO = "nonparty-check"
 NONPARTY_LIMIT = ("the non-party check rule raises the cost of collusion between the two "
                   "parties; it does not prove the checker is independent of them (a party "
                   "can make a new key, or pay a checker)")
@@ -260,12 +267,14 @@ class GateDecision:
 
     @property
     def veto(self) -> str | None:
-        return (self.checks or {}).get("veto")
+        """What refused a VERIFIED envelope, if anything: checker-broken or
+        checks-unreadable (D067), or nonparty-check (the non-party rule)."""
+        return (self.checks or {}).get("veto") or (self.nonparty_check or {}).get("veto")
 
     @property
     def exit_code(self) -> int:
         """0 allow; 1 refuse on BROKEN or checker-broken; 3 refuse on COULD NOT
-        LOOK or checks-unreadable."""
+        LOOK, checks-unreadable or nonparty-check."""
         if self.allowed:
             return V.EXIT_GOOD
         if self.verdict == V.BROKEN or self.veto == CHECKER_BROKEN:
@@ -572,8 +581,16 @@ def _broken_finding(b: dict) -> str:
 
 
 def _apply_checks(d: GateDecision, info: dict) -> None:
-    """Fold the --checks answer into a VERIFIED decision (D067)."""
+    """Fold the --checks answer into a VERIFIED decision (D067). After a
+    non-party rule refusal the rule's reason, reasons and exit 3 stand: the
+    answer is recorded, and what it would have vetoed is `would_veto` (F9)."""
     d.checks = info
+    if d.veto == NONPARTY_VETO:
+        would = (CHECKER_BROKEN if info["broken"] else
+                 CHECKS_UNREADABLE if info["problems"] else None)
+        if would and d.action in VETOED:
+            info["would_veto"] = would
+        return
     names = ", ".join(_who(b) for b in info["broken"])
     if d.action not in VETOED:
         if info["broken"]:
@@ -932,6 +949,7 @@ def decide(file: str | Path, *, action: str, audience: str | None,
                     "no check given counts toward the non-party check rule")
                 reasons = [j["check"] + ": " + j["why"] for j in policy["checks"]] or \
                     [cnc["reason"]]
+                policy["veto"] = NONPARTY_VETO
             reason = _nonparty_reason(action, verdict, policy, reason) \
                 if policy["applies"] is not False else reason
     d = GateDecision(decision=ALLOW if allowed else REFUSE, action=action, verdict=verdict,

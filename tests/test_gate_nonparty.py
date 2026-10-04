@@ -265,6 +265,51 @@ def test_rule_does_not_change_broken_or_could_not_look(tmp_path):
     assert broken.verdict == V.BROKEN and broken.exit_code == 1
 
 
+# --- the non-party rule beside the checker veto (F9, D067) ------------------------------
+
+def _veto_file(tmp_path: Path, name: str, content: str) -> Path:
+    p = tmp_path / "veto" / name
+    p.parent.mkdir(exist_ok=True)
+    p.write_text(content, encoding="utf-8")
+    return p
+
+
+@pytest.mark.parametrize("veto", ["broken", "unreadable"])
+def test_nonparty_refusal_keeps_its_reason_and_exit_3_beside_a_checker_veto(tmp_path, veto):
+    f, did, _ = _handed(tmp_path)
+    u, _ = _check(tmp_path, "unsigned", None)
+    content = json.dumps(_row(word=V.BROKEN)) if veto == "broken" else "{not json\n"
+    v = _veto_file(tmp_path, "veto.jsonl", content)
+    d = _decide(f, did, require_nonparty_check_above="10", amount="11", checks=[u],
+                check_files=[v])
+    assert d.decision == "refuse" and d.verdict == V.VERIFIED
+    assert d.reason.startswith("refuse pay: VERIFIED, but the non-party check rule refuses it")
+    assert d.exit_code == 3, d.reason
+    assert d.veto == G.NONPARTY_VETO and d.checks["veto"] is None
+    assert d.checks["would_veto"] == (G.CHECKER_BROKEN if veto == "broken"
+                                      else G.CHECKS_UNREADABLE)
+    assert d.could_not_check["looked_for"].startswith("a signed non-party check")
+
+
+def test_nonparty_refusal_row_carries_its_veto(tmp_path):
+    f, did, _ = _handed(tmp_path)
+    u, _ = _check(tmp_path, "unsigned", None)
+    d = _decide(f, did, require_nonparty_check_above="10", amount="11", checks=[u])
+    assert d.decision == "refuse" and d.evidence and d.chain_row
+    assert d.chain_row["verdict"] == V.VERIFIED and d.chain_row["veto"] == "nonparty-check"
+    assert d.to_dict()["nonparty_check"]["veto"] == "nonparty-check"
+    ok = _decide(f, did, require_nonparty_check_above="10", amount="5")      # under the cap
+    assert ok.decision == "allow" and ok.veto is None
+
+
+def test_under_cap_checker_veto_is_unchanged(tmp_path):
+    f, did, _ = _handed(tmp_path)
+    v = _veto_file(tmp_path, "veto.jsonl", json.dumps(_row(word=V.BROKEN)))
+    d = _decide(f, did, require_nonparty_check_above="10", amount="5", check_files=[v])
+    assert d.decision == "refuse" and d.veto == G.CHECKER_BROKEN and d.exit_code == 1
+    assert d.chain_row["veto"] == G.CHECKER_BROKEN
+
+
 def test_bad_cap_raises_in_the_library(tmp_path):
     f, did, _ = _handed(tmp_path)
     for cap in ("ten", "-1", "NaN", True):

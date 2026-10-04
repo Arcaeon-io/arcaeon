@@ -751,7 +751,10 @@ changes. `--json` adds `nonparty_check` (`rule`, `cap`, `amount`,
 option is set. **The limit:** this raises the cost of collusion between the
 two parties; it does not prove the checker is independent of them. A party
 can make a new key or pay a checker, so without `--checker` any key you have
-not seen as a party counts.
+not seen as a party counts. A refusal by this rule carries `veto`
+`nonparty-check` (in `nonparty_check` and on its `gate.evidence` row, verdict
+VERIFIED), exits 3, and keeps its own reason even when a `--checks` row would
+also veto; that answer is kept as `checks.would_veto`.
 
 `gate packet` renders a refusal as one page a marketplace's dispute process
 can take, in markdown and JSON (kind `arcaeon.dispute.packet/v1`): what was
