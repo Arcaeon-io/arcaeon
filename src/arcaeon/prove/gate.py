@@ -133,7 +133,8 @@ lower it below the other. Limit: this raises the cost of collusion between
 the two parties; it does not prove the checker is independent of them.
 
 Stdlib only (verify loads the [sign] backend itself). `decide` raises only on
-an unknown action or an unreadable cap; anything else is an answer.
+a caller error, the list in decide's docstring (the one place it is stated),
+before anything is read or written; anything else is an answer.
 """
 from __future__ import annotations
 

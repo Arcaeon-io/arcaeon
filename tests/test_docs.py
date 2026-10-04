@@ -1164,3 +1164,61 @@ def test_hud_stale_green_turns_grey_and_colors_come_from_words():
     for cls in ("state-ok", "state-bad", "state-unknown"):
         assert cls in text, cls
     assert "`POST /v1/seal` is not a tile" in text
+
+
+# --- the gate's raise rule, stated once (F5) -----------------------------------------
+
+def _python_calls(text: str, func: str) -> list:
+    """Every call to `<x>.func(...)` in the ```python blocks of `text`, as ast.Call."""
+    import ast
+    calls = []
+    for block in re.findall(r"```python\n(.*?)```", text, re.S):
+        for node in ast.walk(ast.parse(block)):
+            if isinstance(node, ast.Call) and getattr(node.func, "attr", None) == func:
+                calls.append(node)
+    return calls
+
+
+@pytest.mark.parametrize("doc,module,func", [
+    ("docs/A2A.md", "arcaeon.prove.a2a_receiver", "receive"),
+    ("src/arcaeon/prove/gate.py", "arcaeon.prove.gate", "decide")])
+def test_documented_examples_match_the_signature_and_the_ledger_rule(doc, module, func):
+    """The examples pass only parameters the function has, and a deal id with a
+    ledger (D066), so copied as written they do not raise."""
+    import importlib
+    import inspect
+    mod = importlib.import_module(module)
+    text = (mod.__doc__ if doc.endswith(".py") else "")
+    if doc.endswith(".py"):
+        text = "```python\n" + "\n".join(
+            ln[4:] for ln in text.splitlines()[2:10] if ln.startswith("    ")) + "\n```"
+    else:
+        text = (ROOT / doc).read_text(encoding="utf-8")
+    calls = _python_calls(text, func)
+    assert calls, f"no {func}(...) example in {doc}"
+    params = inspect.signature(getattr(mod, func)).parameters
+    for call in calls:
+        names = {k.arg for k in call.keywords}
+        assert names <= set(params), (doc, names - set(params))
+        if "deal" in names:
+            assert "ledger" in names, f"{doc}: a deal id without ledger raises (D066)"
+        if {"pay", "irreversible"} & {getattr(k.value, "value", None) for k in call.keywords
+                                      if k.arg == "action"}:
+            assert {"deal", "purpose"} <= names, f"{doc}: pay needs deal and purpose (F2)"
+
+
+def test_gate_states_its_raise_rule_once():
+    """decide's docstring lists every caller error; the module docstring points at
+    it rather than restating a shorter list."""
+    from arcaeon.prove import gate as G
+    rule = " ".join(G.decide.__doc__.split())
+    assert ("Raises ValueError on an unknown action, a `deal` without a `ledger` or an "
+            "unreadable cap") in rule
+    mod = " ".join(G.__doc__.split())
+    said = [s for s in re.split(r"(?<=\.)\s", mod) if re.search(r"\braises (only|ValueError)", s)]
+    assert said and all("decide's docstring" in s for s in said), said
+    f = ROOT / "README.md"                                 # any readable file: raises first
+    for kw in ({"action": "fly"}, {"action": "read", "deal": "d-1"},
+               {"action": "read", "require_nonparty_check_above": "lots"}):
+        with pytest.raises(ValueError):
+            G.decide(f, audience="a", **kw)
