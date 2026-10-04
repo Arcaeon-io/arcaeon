@@ -21,7 +21,7 @@ make it look like one or the other.
 
 Contents: Record (`log`, `verify`, `receipt`, `once`, `proxy`, `pin`, `deal`,
 `mandate`), Prove (`reconcile`, `audit`, `vet`, `badge`, `seal`, `baseline`,
-`compact`, `second-read`, `evidence-pack`, `export`), Save (`distill`, `dedup`,
+`compact`, `second-read`, `evidence-pack`, `export`, `envelope`), Save (`distill`, `dedup`,
 `meter`), Hosted (`stamp`, `credits`, `buy`), Serve (`mcp`, `serve`, `connect`,
 `schema`, `open`), This install (`status`, `selftest`, `version`, `doctor`,
 `demo`).
@@ -631,6 +631,44 @@ is missing or unreadable).
 
 ```console
 $ arcaeon export calls.jsonl --format agent-audit-trail --out calls.aat.jsonl
+```
+
+## `envelope`
+
+Answers: is the file I was handed the file that was sealed for me, for this
+deal, and is the seal still in date? `seal` writes `FILE.envelope.json` beside
+the file: an in-toto Statement (the file's sha256, a label, who sealed it and
+when, optional chain id, pin ref and witness ref, flags) in a DSSE envelope,
+bound to one audience, deal, purpose and not-after time. An unbound envelope
+is refused. `verify` is the receiving side, verify-before-act: VERIFIED act,
+BROKEN refuse and keep the evidence, COULD NOT LOOK do not act on money or an
+irreversible step. It proves who sealed the bytes and for whom, never that
+the content is true. The spec and its limits are [ENVELOPE.md](ENVELOPE.md).
+
+**Usage**
+
+```text
+usage: arcaeon envelope seal <file> --label TEXT --audience ID --deal ID
+                               --purpose TEXT --not-after WHEN [--key SEEDFILE]
+                               [--by NAME] [--chain ID] [--pin-ref REF]
+                               [--witness-ref REF] [--flag NAME ...] [--force]
+       arcaeon envelope verify <file> [--audience ID] [--signer DID ...]
+                               [--deal ID] [--purpose TEXT] [--envelope PATH]
+                               [--require-witness]
+```
+
+**Exit codes:** `verify`: 0 VERIFIED, 1 BROKEN (changed bytes, a bad or
+unexpected signature, an edited field, an unbound or expired envelope, another
+audience, deal or purpose), 3 COULD NOT LOOK (no or unreadable sidecar, an
+unsigned envelope, no `--signer` or `--audience` given, no Ed25519 backend).
+`seal`: 0 written, 2 refused (a missing binding field, a past not-after, an
+existing envelope without `--force`), 3 the file to seal is not there. 2 bad
+usage. New in 0.10, so `--legacy-exit` changes nothing here.
+
+```console
+$ arcaeon envelope seal grades.csv --label "week 3 grades" --audience instructor-1 --deal d-7f3a --purpose grading --not-after 7d --key seal.key
+$ arcaeon envelope verify grades.csv --audience instructor-1 --signer did:key:z6Mk...
+VERIFIED: the file's bytes are the bytes the named key sealed, ...
 ```
 
 ## `distill`

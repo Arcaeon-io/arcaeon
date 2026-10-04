@@ -1,0 +1,723 @@
+# SPDX-License-Identifier: MIT
+"""arcaeon.prove.envelope: the labeled-exchange envelope (truth-economy phase 1).
+
+    arcaeon envelope seal FILE --label TEXT --audience ID --deal ID \\
+                               --purpose TEXT --not-after WHEN [--key SEEDFILE]
+    arcaeon envelope verify FILE --audience ID --signer DID [--deal ID] [--purpose TEXT]
+
+`seal` writes FILE.envelope.json beside FILE. `verify` answers in one of three
+words, verify-before-act: VERIFIED (act), BROKEN (refuse, keep the evidence),
+COULD NOT LOOK (do not act on money or an irreversible step). The spec,
+with what a VERIFIED does and does not prove, is docs/ENVELOPE.md.
+
+THE SHAPE. We did not invent one. The sidecar is a DSSE envelope carrying an
+in-toto Statement v1, packaged in the style of a Sigstore bundle (one JSON
+object beside the file; it is NOT a conformant Sigstore bundle: no
+certificate, no transparency-log entry):
+
+  {"mediaType": "application/vnd.arcaeon.envelope.v1+json",
+   "dsseEnvelope": {"payloadType": "application/vnd.in-toto+json",
+                    "payload": base64(Statement JSON),
+                    "signatures": [{"keyid": "did:key:z...", "sig": base64}]}}
+
+  Statement = {"_type": "https://in-toto.io/Statement/v1",
+               "subject": [{"name": basename, "digest": {"sha256": hex}}],
+               "predicateType": "https://arcaeon.io/labeled-exchange/v1",
+               "predicate": {label, sealed_by, sealed_at, chain, pin_ref,
+                             witness_ref, flags, binding, bytes, version}}
+
+  binding = {audience, deal, purpose, not_after}: all four MANDATORY. An
+  unbound envelope can be replayed into another deal or at another receiver
+  (threat T3), so `seal` refuses to write one and `verify` reads one as BROKEN.
+
+SIGNING. Ed25519 over the DSSE pre-authentication encoding (PAE), through the
+same backend the vet receipts use (arcaeon.prove.vet.receipts, the [sign]
+extra; imported only when a signature is made or checked, so the base install
+stays stdlib-only). The key id is a did:key, self-certifying: the public key is
+in the id. `seal` without --key writes an UNSIGNED envelope; `verify` answers
+COULD NOT LOOK on it, because a sidecar anyone can rewrite proves nothing
+about who sealed the bytes. A signed envelope verifies VERIFIED only against a
+key the receiver names (--signer): a valid signature from a key you did not
+name says only that SOME key signed it.
+
+PIN AND WITNESS REFS are recorded and shape-checked, never resolved: resolving
+them needs the network and is out of scope here. Present, the witness step
+reads COULD NOT LOOK (and, with --require-witness, so does the verdict).
+
+Never raises from verify(): a sidecar that cannot be read is an answer too.
+"""
+from __future__ import annotations
+
+import base64
+import binascii
+import json
+import re
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Any
+
+from arcaeon import verdict as V
+from arcaeon.record.row import file_pin, loads_strict
+
+__all__ = ["MEDIA_TYPE", "PAYLOAD_TYPE", "STATEMENT_TYPE", "PREDICATE_TYPE", "SUFFIX",
+           "BINDING_FIELDS", "SealError", "pae", "envelope_path", "build_statement",
+           "seal", "verify", "main"]
+
+MEDIA_TYPE = "application/vnd.arcaeon.envelope.v1+json"
+PAYLOAD_TYPE = "application/vnd.in-toto+json"
+STATEMENT_TYPE = "https://in-toto.io/Statement/v1"
+PREDICATE_TYPE = "https://arcaeon.io/labeled-exchange/v1"
+SUFFIX = ".envelope.json"
+PREDICATE_VERSION = 1
+BINDING_FIELDS = ("audience", "deal", "purpose", "not_after")
+#: A sidecar bigger than this is not read: an envelope is a few KiB.
+MAX_ENVELOPE_BYTES = 1 << 20
+#: A step that was not claimed at all (no pin or witness ref recorded).
+NOT_CLAIMED = "NOT CLAIMED"
+
+_HEX64 = re.compile(r"[0-9a-f]{64}")
+_PIN_REF = re.compile(r"sha256:(json-c14n:v1:|raw-bytes:v1:)?[0-9a-f]{64}")
+_WITNESS_REF = re.compile(r"(https://[^\s]{1,2040}|urn:[a-z0-9][a-z0-9-]{0,31}:[^\s]{1,2000})")
+_FLAG = re.compile(r"[a-z0-9][a-z0-9_.:-]{0,63}")
+_DURATION = re.compile(r"([1-9][0-9]{0,4})([dhm])")
+_TS_FMT = "%Y-%m-%dT%H:%M:%SZ"
+_TOP_KEYS = {"mediaType", "dsseEnvelope"}
+_DSSE_KEYS = {"payloadType", "payload", "signatures"}
+_PREDICATE_KEYS = {"version", "label", "sealed_by", "sealed_at", "chain", "pin_ref",
+                   "witness_ref", "flags", "binding", "bytes"}
+
+PROVES = ("the file's bytes are the bytes the named key sealed, under this label, "
+          "for this audience, deal and purpose, before not_after")
+DOES_NOT_PROVE = ("that the content is true or safe (a member can seal a lie honestly, T1), "
+                  "that the key belongs to who the label says (you chose to trust it, T6), "
+                  "or anything about the pin or witness refs (recorded, not resolved)")
+
+
+class SealError(ValueError):
+    """`seal` refused: a binding field is missing or malformed, or the file or
+    key could not be used. Nothing was written."""
+
+
+# --- small shared pieces ------------------------------------------------------
+
+def envelope_path(file: str | Path) -> Path:
+    """The sidecar for `file`: FILE.envelope.json beside it."""
+    p = Path(file)
+    return p.with_name(p.name + SUFFIX)
+
+
+def pae(payload_type: str, payload: bytes) -> bytes:
+    """DSSE v1 pre-authentication encoding: what is signed, never the JSON."""
+    t = payload_type.encode("utf-8")
+    return b"DSSEv1 %d %s %d %s" % (len(t), t, len(payload), payload)
+
+
+def _utc(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).strftime(_TS_FMT)
+
+
+def _parse_time(text: str) -> datetime | None:
+    """An RFC 3339 time WITH a zone (Z or +hh:mm), or None. A time with no
+    zone is refused: two readers would place it in two different hours."""
+    if not isinstance(text, str) or not text.strip():
+        return None
+    t = text.strip()
+    if t.endswith(("Z", "z")):
+        t = t[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(t)
+    except ValueError:
+        return None
+    return dt if dt.tzinfo is not None else None
+
+
+def _not_after(text: str, now: datetime) -> datetime:
+    """--not-after: an RFC 3339 time with a zone, or a span from now (7d, 12h, 30m)."""
+    m = _DURATION.fullmatch(str(text).strip())
+    if m:
+        n, unit = int(m.group(1)), m.group(2)
+        return now + timedelta(**{{"d": "days", "h": "hours", "m": "minutes"}[unit]: n})
+    dt = _parse_time(text)
+    if dt is None:
+        raise SealError(f"--not-after {text!r} is not a time with a zone "
+                        f"(2026-10-11T00:00:00Z) or a span (7d, 12h, 30m)")
+    return dt
+
+
+def _text_ok(v: Any, limit: int = 512) -> bool:
+    return (isinstance(v, str) and 0 < len(v.strip()) and len(v) <= limit
+            and not any(ord(c) < 0x20 or ord(c) == 0x7f for c in v))
+
+
+#: base58btc, the alphabet did:key uses (the same as arcaeon.prove.vet.receipts,
+#: repeated here so reading a key id does not import the signing backend).
+_B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
+
+
+def _b58decode(s: str) -> bytes:
+    n = 0
+    for ch in s:
+        i = _B58.find(ch)
+        if i < 0:
+            raise ValueError("not base58")
+        n = n * 58 + i
+    raw = n.to_bytes((n.bit_length() + 7) // 8, "big") if n else b""
+    return b"\x00" * (len(s) - len(s.lstrip("1"))) + raw
+
+
+def _pubkey_from_did(did: str) -> bytes:
+    """The raw Ed25519 key inside a did:key, or ValueError."""
+    if not isinstance(did, str) or not did.startswith("did:key:z"):
+        raise ValueError("keyid is not a did:key")
+    raw = _b58decode(did[len("did:key:z"):])
+    if len(raw) != 34 or raw[:2] != b"\xed\x01":
+        raise ValueError("did:key is not an Ed25519 key")
+    return raw[2:]
+
+
+def _b64(data: bytes) -> str:
+    return base64.b64encode(data).decode("ascii")
+
+
+def _unb64(text: Any) -> bytes:
+    if not isinstance(text, str):
+        raise ValueError("not a base64 string")
+    try:
+        return base64.b64decode(text, validate=True)
+    except (binascii.Error, ValueError) as e:
+        raise ValueError(f"not base64 ({e})") from None
+
+
+def _load_seed(key_file: str | Path) -> bytes:
+    """A 32-byte Ed25519 seed, base64 on one line (the vet receipts' key-file
+    shape). Read only from the file named: no environment variable, no default."""
+    try:
+        raw = Path(key_file).read_text(encoding="ascii").strip()
+    except (OSError, UnicodeDecodeError) as e:
+        raise SealError(f"the key file could not be read ({type(e).__name__})") from None
+    try:
+        seed = base64.b64decode(raw, validate=True)
+    except (binascii.Error, ValueError):
+        raise SealError("the key file is not base64") from None
+    if len(seed) != 32:
+        raise SealError(f"the key file must decode to 32 bytes, got {len(seed)}")
+    return seed
+
+
+# --- seal -----------------------------------------------------------------------
+
+def build_statement(file: str | Path, *, label: str, audience: str, deal: str, purpose: str,
+                    not_after: str, sealed_by: str | None = None, key_id: str | None = None,
+                    chain: str | None = None, pin_ref: str | None = None,
+                    witness_ref: str | None = None, flags: list[str] | tuple = (),
+                    now: datetime | None = None) -> dict:
+    """The in-toto Statement for `file`. SealError when a binding field is
+    missing or malformed or the file cannot be read; nothing is written."""
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).replace(microsecond=0)
+    fields = {"label": label, "audience": audience, "deal": deal, "purpose": purpose,
+              "not-after": not_after}
+    missing = [k for k, v in fields.items() if not (isinstance(v, str) and v.strip())]
+    if missing:
+        raise SealError("refusing to seal an unbound envelope: missing "
+                        + ", ".join("--" + k for k in missing)
+                        + " (audience, deal, purpose and not-after bind it to one exchange)")
+    for k in ("label", "audience", "deal", "purpose"):
+        if not _text_ok(fields[k]):
+            raise SealError(f"--{k} must be one line of text, at most 512 characters")
+    if sealed_by is not None and not _text_ok(sealed_by):
+        raise SealError("--by must be one line of text, at most 512 characters")
+    na = _not_after(not_after, now)
+    if na <= now:
+        raise SealError(f"--not-after {_utc(na)} is not after now ({_utc(now)})")
+    if chain is not None and not _text_ok(chain, 256):
+        raise SealError("--chain must be one line of text, at most 256 characters")
+    if pin_ref is not None and not _PIN_REF.fullmatch(pin_ref):
+        raise SealError("--pin-ref must be sha256:<64 hex> (or sha256:json-c14n:v1:<64 hex>, "
+                        "sha256:raw-bytes:v1:<64 hex>)")
+    if witness_ref is not None and not _WITNESS_REF.fullmatch(witness_ref):
+        raise SealError("--witness-ref must be an https:// URL or a urn:")
+    flags = list(flags or ())
+    bad = [f for f in flags if not (isinstance(f, str) and _FLAG.fullmatch(f))]
+    if bad:
+        raise SealError(f"--flag {bad[0]!r}: lower-case letters, digits and _ . : - only, "
+                        f"at most 64 characters")
+    pin = file_pin(file)
+    if "sha256" not in pin:
+        raise SealError(f"cannot read the file to seal ({pin.get('error')})")
+    return {
+        "_type": STATEMENT_TYPE,
+        "subject": [{"name": Path(file).name, "digest": {"sha256": pin["sha256"]}}],
+        "predicateType": PREDICATE_TYPE,
+        "predicate": {
+            "version": PREDICATE_VERSION,
+            "label": label,
+            "sealed_by": {"name": sealed_by, "key": key_id},
+            "sealed_at": _utc(now),
+            "chain": chain,
+            "pin_ref": pin_ref,
+            "witness_ref": witness_ref,
+            "flags": sorted(set(flags)),
+            "binding": {"audience": audience, "deal": deal, "purpose": purpose,
+                        "not_after": _utc(na)},
+            "bytes": pin["bytes"],
+        },
+    }
+
+
+def seal(file: str | Path, *, key_file: str | Path | None = None, force: bool = False,
+         **fields) -> dict:
+    """Write FILE.envelope.json and return the envelope. `fields` are
+    build_statement's keywords. With `key_file` the statement is signed
+    (Ed25519 over PAE); without it the envelope is UNSIGNED. SealError on any
+    refusal, before anything is written."""
+    out = envelope_path(file)
+    if out.exists() and not force:
+        raise SealError(f"{out.name} already exists; pass --force to replace it")
+    seed = pub = None
+    key_id = None
+    if key_file is not None:
+        seed = _load_seed(key_file)
+        try:
+            from arcaeon.prove.vet import receipts as R
+            pub = R.public_key_from_seed(seed)
+        except Exception as e:  # noqa: BLE001  ReceiptsUnavailable: no backend
+            raise SealError(f"signing needs an Ed25519 backend: pip install 'arcaeon[sign]' "
+                            f"({type(e).__name__})") from None
+        key_id = R.did_key(pub)
+    statement = build_statement(file, key_id=key_id, **fields)
+    payload = json.dumps(statement, sort_keys=True, separators=(",", ":"),
+                         ensure_ascii=False).encode("utf-8")
+    sigs = []
+    if seed is not None:
+        sig = R._sign_bytes(seed, pae(PAYLOAD_TYPE, payload))
+        sigs.append({"keyid": key_id, "sig": _b64(sig)})
+    env = {"mediaType": MEDIA_TYPE,
+           "dsseEnvelope": {"payloadType": PAYLOAD_TYPE, "payload": _b64(payload),
+                            "signatures": sigs}}
+    with open(out, "w", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(env, indent=1) + "\n")
+    return env
+
+
+# --- verify ---------------------------------------------------------------------
+
+def _report(file, env_path) -> dict:
+    return {"verdict": None, "reason": None, "file": str(file), "envelope": str(env_path),
+            "steps": {"envelope": None, "signature": None, "file": None, "binding": None,
+                      "witness": None},
+            "sealed": None, "signers": [], "findings": [], "not_checked": [],
+            "proves": PROVES, "does_not_prove": DOES_NOT_PROVE}
+
+
+def _could_not_look(r: dict, step: str, looked_for: str, where, reason_word: str,
+                    reason: str) -> dict:
+    r["steps"][step] = V.COULD_NOT_LOOK
+    r.update({"verdict": V.COULD_NOT_LOOK, "reason": reason,
+              **V.could_not_look(looked_for, str(where), reason_word, reason)})
+    return r
+
+
+def _read_envelope(r: dict, env_path: Path):
+    """The sidecar as (dsse dict, payload bytes), or None with r set to COULD NOT LOOK."""
+    if not env_path.exists():
+        return _could_not_look(r, "envelope", "the envelope sidecar", env_path, "missing",
+                               f"no {env_path.name} beside the file: nothing says what it is "
+                               f"or who sealed it")
+    try:
+        if env_path.stat().st_size > MAX_ENVELOPE_BYTES:
+            return _could_not_look(r, "envelope", "the envelope sidecar", env_path, "unreadable",
+                                   f"the sidecar is over {MAX_ENVELOPE_BYTES} bytes; not read")
+        text = env_path.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        return _could_not_look(r, "envelope", "the envelope sidecar", env_path, "unreadable",
+                               f"the sidecar cannot be read as UTF-8 text ({type(e).__name__})")
+    try:
+        env = loads_strict(text)
+    except ValueError as e:
+        return _could_not_look(r, "envelope", "the envelope sidecar", env_path, "unreadable",
+                               f"the sidecar is not one JSON object ({str(e)[:120]})")
+    if not isinstance(env, dict) or env.get("mediaType") != MEDIA_TYPE:
+        return _could_not_look(r, "envelope", "an arcaeon envelope", env_path, "unreadable",
+                               f"the sidecar is not an envelope this verifier reads "
+                               f"(mediaType must be {MEDIA_TYPE})")
+    dsse = env.get("dsseEnvelope")
+    if not isinstance(dsse, dict) or dsse.get("payloadType") != PAYLOAD_TYPE \
+            or not isinstance(dsse.get("signatures"), list):
+        return _could_not_look(r, "envelope", "a DSSE envelope with an in-toto payload",
+                               env_path, "unreadable",
+                               "the sidecar's dsseEnvelope is missing or not an in-toto DSSE envelope")
+    try:
+        payload = _unb64(dsse.get("payload"))
+    except ValueError as e:
+        return _could_not_look(r, "envelope", "the DSSE payload", env_path, "unreadable",
+                               f"the payload is {e}")
+    extra = sorted((set(env) - _TOP_KEYS) | {"dsseEnvelope." + k for k in set(dsse) - _DSSE_KEYS})
+    if extra:
+        r["findings"].append(f"fields outside the signed payload: {', '.join(extra)}")
+        r["steps"]["envelope"] = V.BROKEN
+    else:
+        r["steps"]["envelope"] = V.VERIFIED
+    return dsse, payload
+
+
+def _check_signatures(r: dict, dsse: dict, payload: bytes, signers: tuple) -> None:
+    sigs = dsse["signatures"]
+    st = r["steps"]
+    if not sigs:
+        st["signature"] = V.COULD_NOT_LOOK
+        r["_cnl"].append(("signature", "a signature on the envelope", "missing",
+                          "the envelope is UNSIGNED: anyone who can write the sidecar could "
+                          "have written it, so who sealed the bytes cannot be checked"))
+        return
+    try:
+        from arcaeon.prove.vet import receipts as R
+        R._require_backend()
+    except Exception:  # noqa: BLE001  no Ed25519 backend in this install
+        st["signature"] = V.COULD_NOT_LOOK
+        r["_cnl"].append(("signature", "an Ed25519 backend to check the signature", "missing",
+                          "this install cannot check Ed25519: pip install 'arcaeon[sign]'"))
+        return
+    message = pae(PAYLOAD_TYPE, payload)
+    valid = []
+    for i, s in enumerate(sigs):
+        try:
+            if not isinstance(s, dict):
+                raise ValueError("not an object")
+            pub = _pubkey_from_did(s.get("keyid"))
+            sig = _unb64(s.get("sig"))
+        except ValueError as e:
+            r["findings"].append(f"signature {i}: {e}")
+            continue
+        if R._verify_bytes(pub, message, sig):
+            valid.append(s["keyid"])
+        else:
+            r["findings"].append(f"signature {i} by {s['keyid']} does not verify over the payload "
+                                 f"(the payload or the signature was changed)")
+    r["signers"] = valid
+    if len(valid) != len(sigs):
+        st["signature"] = V.BROKEN
+        return
+    if not signers:
+        st["signature"] = V.COULD_NOT_LOOK
+        r["_cnl"].append(("signature", "the key you trust (--signer)", "bounded",
+                          f"signed by {', '.join(valid)}, a valid signature from a key you did "
+                          f"not name: pass --signer with the key you expect"))
+        return
+    if not set(valid) & set(signers):
+        st["signature"] = V.BROKEN
+        r["findings"].append(f"signed by {', '.join(valid)}, not by the signer you named")
+        return
+    st["signature"] = V.VERIFIED
+
+
+def _statement(r: dict, payload: bytes):
+    """The decoded Statement, or None (r's envelope step set)."""
+    try:
+        stmt = loads_strict(payload.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as e:
+        r["_cnl"].append(("envelope", "an in-toto Statement in the payload", "unreadable",
+                          f"the payload is not JSON ({type(e).__name__})"))
+        return None
+    if not isinstance(stmt, dict) or stmt.get("_type") != STATEMENT_TYPE \
+            or stmt.get("predicateType") != PREDICATE_TYPE:
+        r["_cnl"].append(("envelope", "an in-toto Statement of the labeled-exchange type",
+                          "unreadable", f"the payload is not a {STATEMENT_TYPE} statement with "
+                          f"predicateType {PREDICATE_TYPE}"))
+        return None
+    return stmt
+
+
+def _check_predicate(r: dict, stmt: dict, file: Path, audience, deal, purpose,
+                     now: datetime) -> None:
+    st, find = r["steps"], r["findings"]
+    pred = stmt.get("predicate")
+    subj = stmt.get("subject")
+    # --- the file -----------------------------------------------------------
+    want = None
+    if isinstance(subj, list) and len(subj) == 1 and isinstance(subj[0], dict) \
+            and isinstance(subj[0].get("digest"), dict):
+        want = subj[0]["digest"].get("sha256")
+    if not (isinstance(want, str) and _HEX64.fullmatch(want)):
+        st["file"] = V.BROKEN
+        find.append("the statement does not name exactly one subject with a sha256 digest")
+    else:
+        pin = file_pin(file)
+        if "sha256" not in pin:
+            st["file"] = V.COULD_NOT_LOOK
+            rw = pin.get("reason_word", "unreadable")
+            r["_cnl"].append(("file", "the file the envelope names", rw if rw in V.REASON_WORDS
+                              else "unreadable", f"the file cannot be read ({pin.get('error')})"))
+        elif pin["sha256"] != want:
+            st["file"] = V.BROKEN
+            find.append(f"the file's sha256 is {pin['sha256']}, the envelope sealed {want}: "
+                        f"the bytes changed after sealing")
+        else:
+            st["file"] = V.VERIFIED
+            if subj[0].get("name") != file.name:
+                r["note"] = (f"sealed under the name {subj[0].get('name')!r}; the bytes match, "
+                             f"the name is not part of the check")
+    # --- the predicate and its binding ---------------------------------------
+    if not isinstance(pred, dict):
+        st["binding"] = V.BROKEN
+        find.append("the statement carries no predicate: an unbound envelope is refused")
+        return
+    r["sealed"] = {k: pred.get(k) for k in sorted(_PREDICATE_KEYS)}
+    key = (pred.get("sealed_by") or {}).get("key") if isinstance(pred.get("sealed_by"), dict) \
+        else None
+    if key is not None and r["signers"] and key not in r["signers"]:
+        st["signature"] = V.BROKEN
+        find.append(f"the label says sealed by {key}, the signature is by "
+                    f"{', '.join(r['signers'])}")
+    if pred.get("version") != PREDICATE_VERSION or not _text_ok(pred.get("label")):
+        st["binding"] = V.BROKEN
+        find.append("the predicate has no label or an unknown version")
+        return
+    b = pred.get("binding")
+    absent = [k for k in BINDING_FIELDS if not (isinstance(b, dict) and _text_ok(b.get(k)))]
+    if absent:
+        st["binding"] = V.BROKEN
+        find.append(f"unbound envelope refused: no {', '.join(absent)} (T3: it could be "
+                    f"replayed into another exchange)")
+        return
+    na = _parse_time(b["not_after"])
+    if na is None:
+        st["binding"] = V.BROKEN
+        find.append(f"not_after {b['not_after']!r} is not a time with a zone")
+        return
+    bad = []
+    if now > na:
+        bad.append(f"expired: not_after {_utc(na)} is before now ({_utc(now)})")
+    for name, given in (("audience", audience), ("deal", deal), ("purpose", purpose)):
+        if given is not None and given != b[name]:
+            bad.append(f"{name}: sealed for {b[name]!r}, you are checking for {given!r}")
+    if bad:
+        st["binding"] = V.BROKEN
+        find.extend(bad)
+    elif audience is None:
+        st["binding"] = V.COULD_NOT_LOOK
+        r["_cnl"].append(("binding", "who you are (--audience)", "bounded",
+                          f"sealed for {b['audience']!r}; pass --audience so the envelope is "
+                          f"checked against its receiver"))
+    else:
+        st["binding"] = V.VERIFIED
+        for name, given in (("deal", deal), ("purpose", purpose)):
+            if given is None:
+                r["not_checked"].append(f"{name} (recorded as {b[name]!r}; pass --{name} to hold "
+                                        f"the envelope to it)")
+    # --- pin and witness refs: shape only ------------------------------------
+    pin_ref, wit = pred.get("pin_ref"), pred.get("witness_ref")
+    shape = []
+    if pin_ref is not None and not (isinstance(pin_ref, str) and _PIN_REF.fullmatch(pin_ref)):
+        shape.append("pin_ref is not sha256:<64 hex>")
+    if wit is not None and not (isinstance(wit, str) and _WITNESS_REF.fullmatch(wit)):
+        shape.append("witness_ref is not an https:// URL or a urn:")
+    chain = pred.get("chain")
+    if chain is not None and not _text_ok(chain, 256):
+        shape.append("chain is not one line of text")
+    if shape:
+        st["witness"] = V.BROKEN
+        find.extend(shape)
+    elif pin_ref is None and wit is None:
+        st["witness"] = NOT_CLAIMED
+    else:
+        st["witness"] = V.COULD_NOT_LOOK
+        r["not_checked"].append("pin_ref / witness_ref: recorded and shape-checked, not resolved "
+                                "(resolving them needs the network; out of scope here)")
+
+
+def verify(file: str | Path, envelope: str | Path | None = None, *, audience: str | None = None,
+           deal: str | None = None, purpose: str | None = None, signers=(),
+           require_witness: bool = False, now: datetime | None = None) -> dict:
+    """VERIFIED / BROKEN / COULD NOT LOOK for FILE against its envelope.
+
+    BROKEN if anything checked came out wrong (bytes, signature, a field
+    outside the signature, an unbound or expired envelope, another audience,
+    deal or purpose than the one given). Else COULD NOT LOOK if a step that
+    decides the verdict could not be checked (missing or garbage sidecar,
+    unsigned, no --signer, no --audience, no Ed25519 backend; the witness step
+    only under require_witness). Else VERIFIED. Never raises."""
+    file = Path(file)
+    env_path = Path(envelope) if envelope is not None else envelope_path(file)
+    r = _report(file, env_path)
+    try:
+        return _verify(r, file, env_path, audience, deal, purpose, tuple(signers or ()),
+                       require_witness, (now or datetime.now(timezone.utc)))
+    except Exception as e:  # noqa: BLE001  never a traceback, never a green
+        r.pop("_cnl", None)
+        return _could_not_look(r, "envelope", "a finished check", env_path, "unreadable",
+                               f"the check could not finish ({type(e).__name__})")
+
+
+def _verify(r, file, env_path, audience, deal, purpose, signers, require_witness, now) -> dict:
+    got = _read_envelope(r, env_path)
+    if isinstance(got, dict):
+        return got                                   # COULD NOT LOOK already set
+    dsse, payload = got
+    if not file.exists():
+        return _could_not_look(r, "file", "the file the envelope names", file, "missing",
+                               "the file is not there; the envelope alone proves nothing")
+    r["_cnl"] = []
+    _check_signatures(r, dsse, payload, signers)
+    stmt = _statement(r, payload)
+    if stmt is not None:
+        _check_predicate(r, stmt, file, audience, deal, purpose, now.astimezone(timezone.utc))
+    cnl = r.pop("_cnl")
+    steps = r["steps"]
+    if V.BROKEN in steps.values():
+        broken = [k for k, v in steps.items() if v == V.BROKEN]
+        r["verdict"] = V.BROKEN
+        r["reason"] = "; ".join(r["findings"]) or f"step(s) {', '.join(broken)} failed"
+        return r
+    if require_witness and steps["witness"] in (V.COULD_NOT_LOOK, NOT_CLAIMED):
+        cnl.append(("witness", "a resolved pin / witness ref", "network",
+                    "--require-witness: the pin and witness refs are not resolved offline "
+                    "(or none was recorded), so the witness step could not look"))
+    if cnl:
+        step, looked_for, rw, reason = cnl[0]
+        r.update(V.could_not_look(looked_for, str(env_path if step != "file" else file),
+                                  rw, reason))
+        r["verdict"] = V.COULD_NOT_LOOK
+        r["reason"] = "; ".join(c[3] for c in cnl)      # every step that could not look
+        return r
+    r["verdict"] = V.VERIFIED
+    r["reason"] = PROVES
+    return r
+
+
+# --- CLI ------------------------------------------------------------------------
+
+USAGE = """usage: arcaeon envelope seal <file> --label TEXT --audience ID --deal ID
+                               --purpose TEXT --not-after WHEN [--key SEEDFILE]
+                               [--by NAME] [--chain ID] [--pin-ref REF]
+                               [--witness-ref REF] [--flag NAME ...] [--force]
+       arcaeon envelope verify <file> [--audience ID] [--signer DID ...]
+                               [--deal ID] [--purpose TEXT] [--envelope PATH]
+                               [--require-witness]"""
+
+HELP = USAGE + """
+
+seal writes <file>.envelope.json: an in-toto Statement (subject = the file's
+sha256) in a DSSE envelope, bound to one exchange. --label, --audience,
+--deal, --purpose and --not-after are required (an unbound envelope is refused).
+--not-after is a time with a zone (2026-10-11T00:00:00Z) or a span (7d, 12h,
+30m). --key signs with Ed25519 (a 32-byte seed, base64, one line; needs
+arcaeon[sign]); without it the envelope is UNSIGNED and verify will answer
+COULD NOT LOOK on it.
+
+verify answers VERIFIED (act), BROKEN (refuse, keep the evidence) or COULD NOT
+LOOK (do not act on money or an irreversible step), as JSON on stdout and one
+line on stderr. VERIFIED needs a signature by a key you name (--signer
+did:key:...) and your own id (--audience). Pin and witness refs are recorded
+and shape-checked, never resolved (that needs the network).
+
+Exit codes: 0 VERIFIED (seal: written), 1 BROKEN, 2 bad usage or a refused
+seal, 3 COULD NOT LOOK. Spec and limits: docs/ENVELOPE.md."""
+
+
+class _Usage(Exception):
+    pass
+
+
+def _parse(argv: list[str], spec: dict[str, str]) -> tuple[list[str], dict]:
+    """A tiny flag parser: spec maps --flag to 'value', 'list' or 'bool'."""
+    pos, opts, i = [], {}, 0
+    while i < len(argv):
+        a = argv[i]
+        if a.startswith("--") and "=" in a:
+            a, val = a.split("=", 1)
+            argv = argv[:i] + [a, val] + argv[i + 1:]
+        if a.startswith("-") and len(a) > 1:
+            kind = spec.get(a)
+            if kind is None:
+                raise _Usage(f"unknown option {a}")
+            if kind == "bool":
+                opts[a] = True
+                i += 1
+                continue
+            if i + 1 >= len(argv):
+                raise _Usage(f"{a} needs a value")
+            if kind == "list":
+                opts.setdefault(a, []).append(argv[i + 1])
+            else:
+                opts[a] = argv[i + 1]
+            i += 2
+            continue
+        pos.append(a)
+        i += 1
+    return pos, opts
+
+
+_SEAL_SPEC = {"--label": "value", "--audience": "value", "--deal": "value",
+              "--purpose": "value", "--not-after": "value", "--key": "value", "--by": "value",
+              "--chain": "value", "--pin-ref": "value", "--witness-ref": "value",
+              "--flag": "list", "--force": "bool"}
+_VERIFY_SPEC = {"--audience": "value", "--signer": "list", "--deal": "value",
+                "--purpose": "value", "--envelope": "value", "--require-witness": "bool"}
+
+
+def _seal_cli(argv: list[str]) -> int:
+    pos, o = _parse(argv, _SEAL_SPEC)
+    if len(pos) != 1:
+        raise _Usage("seal takes one file")
+    target = Path(pos[0])
+    if not target.is_file():
+        why = "it does not exist" if not target.exists() else "it is not a regular file"
+        cnl = V.could_not_look("the file to seal", pos[0], "missing" if not target.exists()
+                               else "unreadable", f"cannot seal {pos[0]}: {why}")
+        print(json.dumps({"ok": False, "verdict": V.COULD_NOT_LOOK, **cnl}, indent=1))
+        print(f"{V.COULD_NOT_LOOK}: cannot seal {pos[0]}: {why}; nothing was written",
+              file=sys.stderr)
+        return V.EXIT_COULD_NOT_LOOK
+    try:
+        env = seal(target, key_file=o.get("--key"), force=bool(o.get("--force")),
+                   label=o.get("--label"), audience=o.get("--audience"), deal=o.get("--deal"),
+                   purpose=o.get("--purpose"), not_after=o.get("--not-after"),
+                   sealed_by=o.get("--by"), chain=o.get("--chain"), pin_ref=o.get("--pin-ref"),
+                   witness_ref=o.get("--witness-ref"), flags=o.get("--flag", []))
+    except SealError as e:
+        print(f"arcaeon envelope seal: {e}; nothing was written", file=sys.stderr)
+        return V.EXIT_USAGE
+    stmt = json.loads(base64.b64decode(env["dsseEnvelope"]["payload"]))
+    signed = bool(env["dsseEnvelope"]["signatures"])
+    print(json.dumps({"ok": True, "envelope": str(envelope_path(target)),
+                      "signed": signed,
+                      "signer": stmt["predicate"]["sealed_by"]["key"],
+                      "statement": stmt}, indent=1, ensure_ascii=False))
+    if not signed:
+        print("UNSIGNED: no --key, so `envelope verify` will answer COULD NOT LOOK on who "
+              "sealed it", file=sys.stderr)
+    return V.EXIT_GOOD
+
+
+def _verify_cli(argv: list[str]) -> int:
+    pos, o = _parse(argv, _VERIFY_SPEC)
+    if len(pos) != 1:
+        raise _Usage("verify takes one file")
+    r = verify(pos[0], o.get("--envelope"), audience=o.get("--audience"), deal=o.get("--deal"),
+               purpose=o.get("--purpose"), signers=o.get("--signer", []),
+               require_witness=bool(o.get("--require-witness")))
+    print(json.dumps(r, indent=1, ensure_ascii=False))
+    print(f"{r['verdict']}: {r['reason']}", file=sys.stderr)
+    return V.exit_for(r["verdict"])
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if not argv or argv[0] in ("-h", "--help", "help") or any(a in ("-h", "--help") for a in argv):
+        print(HELP)
+        return V.EXIT_GOOD if argv else V.EXIT_USAGE
+    sub, rest = argv[0], argv[1:]
+    try:
+        if sub == "seal":
+            return _seal_cli(rest)
+        if sub == "verify":
+            return _verify_cli(rest)
+        raise _Usage(f"unknown subcommand {sub!r} (seal or verify)")
+    except _Usage as e:
+        print(f"arcaeon envelope: {e}\n{USAGE}", file=sys.stderr)
+        return V.EXIT_USAGE
+
+
+if __name__ == "__main__":  # pragma: no cover
+    sys.exit(main())
