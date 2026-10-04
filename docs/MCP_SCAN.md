@@ -126,11 +126,13 @@ other tools in the payload still read.
 relayed rows (other vendors' rows are ignored).
 
 - **VERIFIED**: a row of the same name (and server, if given) carries the same
-  digest. The result also carries that row's `relayed_verdict` and `findings`:
-  a VERIFIED match on a tool mcp-scan flagged (`relayed_verdict: BROKEN`) is
-  the flagged tool, unchanged.
-- **BROKEN**: rows of that name carry digests and none matches. The definition
-  changed after the scan (a rug pull). `fields` names `description`,
+  digest, and no such matching row says BROKEN. The result also carries that
+  row's `relayed_verdict` and `findings`, with `matched: true`.
+- **BROKEN**, the flagged tool: a matching row's `relayed_verdict` is BROKEN.
+  The called tool is the one mcp-scan scanned, unchanged, and mcp-scan flagged
+  it; `matched: true`, and the row's `findings` are returned.
+- **BROKEN**, a rug pull: rows of that name carry digests and none matches. The
+  definition changed after the scan. `fields` names `description`,
   `inputSchema` (or `name`, or `digest` when the row has no parts).
 - **COULD NOT LOOK**: the definition or rows cannot be read, no row has that
   name (`name_not_found`), or every row of that name has no digest (`missing`:

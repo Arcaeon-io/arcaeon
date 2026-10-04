@@ -399,10 +399,12 @@ def verify_tool_called(tool_definition: Any, rows: Any, *, server: str | None = 
     """Is the tool being called the tool mcp-scan reported scanning?
 
     VERIFIED: its digest equals the digest on a relayed mcp-scan row of the same name
-    (and server, if given). The matching row's own relayed_verdict and findings are
-    returned too: a VERIFIED match on a tool mcp-scan flagged is still flagged.
-    BROKEN: a row of that name carries a digest and none equals this one (the
-    definition changed after the scan: a rug pull). `fields` names the parts that differ.
+    (and server, if given), and no such matching row says BROKEN. The matching row's
+    relayed_verdict and findings are returned too (`matched` True).
+    BROKEN: a matching row's relayed_verdict is BROKEN (the same tool, and mcp-scan
+    flagged it: `matched` True, its findings returned); or a row of that name carries
+    a digest and none equals this one (the definition changed after the scan: a rug
+    pull). `fields` names the parts that differ.
     COULD NOT LOOK: the definition or rows cannot be read, the name was never scanned,
     or every row of that name carries no digest (v0.6 output, not inspected).
     Never raises."""
@@ -437,12 +439,20 @@ def verify_tool_called(tool_definition: Any, rows: Any, *, server: str | None = 
                            name, digest,
                            **could_not_look(f"an mcp-scan row for tool {_safe_str(name)!r}",
                                             "rows", "name_not_found", "never scanned"))
-        for i, r, t in cands:
-            if t.get("digest") == digest:
-                return _result(VERIFIED, "the called tool's digest equals the scanned digest",
-                               name, digest, row_index=i, server=t.get("server"),
-                               relayed_verdict=r.get("relayed_verdict"),
-                               findings=t.get("findings"), checked_by_us=False, relayed=True)
+        matched = [(i, r, t) for i, r, t in cands if t.get("digest") == digest]
+        if matched:
+            flagged = [m for m in matched if m[1].get("relayed_verdict") == BROKEN]
+            i, r, t = (flagged or matched)[0]
+            if flagged:                      # F12: the same tool, and mcp-scan flagged it
+                return _result(BROKEN, "the called tool is the one mcp-scan scanned, and "
+                                       "mcp-scan flagged it (relayed BROKEN)", name, digest,
+                               matched=True, row_index=i, server=t.get("server"),
+                               relayed_verdict=BROKEN, findings=t.get("findings"),
+                               checked_by_us=False, relayed=True)
+            return _result(VERIFIED, "the called tool's digest equals the scanned digest",
+                           name, digest, matched=True, row_index=i, server=t.get("server"),
+                           relayed_verdict=r.get("relayed_verdict"),
+                           findings=t.get("findings"), checked_by_us=False, relayed=True)
         pinned = [(i, r, t) for i, r, t in cands if isinstance(t.get("digest"), str)]
         if pinned:
             fields = set()

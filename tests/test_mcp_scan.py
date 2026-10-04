@@ -153,10 +153,22 @@ def test_same_definition_is_verified(rows05):
     assert r["checked_by_us"] is False and r["server"] == "weather"
 
 
-def test_verified_match_still_carries_the_scanners_findings(rows05):
+def test_match_on_a_tool_the_scanner_flagged_is_broken(rows05):
+    """F12: the digest matches, but mcp-scan's own word on that row is BROKEN."""
     r = M.verify_tool_called(_tools()[1], rows05)
-    assert r["verdict"] == VERIFIED
+    assert r["verdict"] == BROKEN and r["matched"] is True
     assert r["relayed_verdict"] == BROKEN and r["findings"] == ["E001"]
+    assert "flagged" in r["reason"] and r["row_index"] == 1
+
+
+def test_any_flagged_matching_row_makes_it_broken(rows05):
+    flagged = copy.deepcopy(rows05[0])
+    flagged["tool"]["server"] = "mirror"
+    flagged["relayed_verdict"], flagged["tool"]["findings"] = BROKEN, ["E002"]
+    r = M.verify_tool_called(_tools()[0], [*rows05, flagged])
+    assert r["verdict"] == BROKEN and r["server"] == "mirror" and r["findings"] == ["E002"]
+    ok = M.verify_tool_called(_tools()[0], rows05)
+    assert ok["verdict"] == VERIFIED and ok["matched"] is True
 
 
 def test_definition_as_json_bytes_or_text(rows05):
