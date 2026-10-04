@@ -190,11 +190,15 @@ d.a2a           # extension, carrier, id, listed, activated, file_from
 - `file` is the artifact's file as bytes or a path. Left out, the bytes come
   from the carrier's one inline `raw` part; a `url` part is never fetched.
 - `artifact_id` picks the carrier when several hold an envelope.
-- On BROKEN with a deal id, the gate's evidence pack also keeps the A2A
-  message as `bundle/a2a-message.json`, and `evidence.json` gains an `a2a`
-  object with its sha256.
-- It raises only on an unknown action. A hostile message is an answer, never
-  a traceback, and never an allow beyond `read`.
+- When the gate itself refuses with a deal id (an envelope and file were
+  found, and verify answered BROKEN, or COULD NOT LOOK on anything but
+  `read`; a deal id needs `ledger`, D066), the gate's evidence pack keeps
+  the A2A message as `bundle/a2a-message.json`, and `evidence.json` gains an
+  `a2a` object with its sha256.
+- It raises `ValueError` only on a caller error, before anything is read: an
+  unknown action, or a deal id without `ledger`. A hostile message, or an
+  exception from the gate, is an answer (COULD NOT LOOK, naming only the
+  exception's type), never a traceback, and never an allow beyond `read`.
 
 `A.attach_envelope(artifact, envelope)` is the sender's side;
 `A.agent_extension()` is the AgentCard entry; `A.declares(card)` checks one.

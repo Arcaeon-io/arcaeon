@@ -382,6 +382,28 @@ def test_pay_without_deal_is_could_not_look_not_a_traceback(tmp_path, action):
     assert d.evidence and d.chain_row                # a refusal with a deal is evidence
 
 
+@pytest.mark.parametrize("where", ["decide", "on_pack"])
+def test_gate_raising_is_could_not_look_not_a_traceback(tmp_path, monkeypatch, where):
+    """F1: receive's own catch-all covers G.decide and on_pack; type named, no message."""
+    secret = "C:/secret/path/do-not-echo"
+    real = A.G.decide
+
+    def fake(*a, on_pack=None, **kw):
+        if where == "decide":
+            raise RuntimeError(secret)
+        on_pack(tmp_path / "no-such-pack")              # a decide that lets on_pack raise
+        return real(*a, on_pack=on_pack, **kw)
+
+    monkeypatch.setattr(A.G, "decide", fake)
+    monkeypatch.setattr(A, "_evidence_a2a", lambda *a: (_ for _ in ()).throw(OSError(secret)))
+    env, did = _sealed(tmp_path)
+    d = A.receive(_b(_task(_artifact(env))), BODY, action="pay", audience=ME, signers=[did],
+                  **_ex(tmp_path))
+    assert d.verdict == V.COULD_NOT_LOOK and d.decision == "refuse" and not d.allowed
+    word = "RuntimeError" if where == "decide" else "OSError"
+    assert word in d.reason and secret not in json.dumps(d.to_dict(), default=str)
+
+
 def test_cli_gate_a2a_pay_without_deal_is_3(tmp_path, capsys):
     env, did = _sealed(tmp_path)
     m = tmp_path / "msg.json"

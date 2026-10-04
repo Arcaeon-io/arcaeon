@@ -5,7 +5,8 @@ response, and the buyer's check before an escrow rule releases (TE-24).
     from arcaeon.prove import x402_ext as X
     paid = X.attach(settlement_response, envelope)          # seller side
     c = X.check(paid, body_bytes, "buyer-agent-7", "pay",   # buyer side
-                signers=["did:key:z6Mk..."], deal="d-7f3a")
+                signers=["did:key:z6Mk..."], deal="d-7f3a",
+                purpose="market-data", ledger="deals/buyer.chain.jsonl")
     c.release        # True only on VERIFIED with the settlement saying success
     c.decision       # the gate's GateDecision (allow / refuse, the three words)
 
@@ -32,9 +33,13 @@ There is no third word: this path never refunds (D068, docs/X402.md "BROKEN
 is a hold, not a refund").
 
 BROKEN: HOLD, and a dispute packet (arcaeon.prove.dispute_packet) is made
-and kept on the check. With a deal id the gate's evidence pack is written,
-plus the settlement response as received and the packet (dispute-packet.json
-and .md). COULD NOT LOOK: HOLD, no packet (the gate writes no pack for it).
+and kept on the check. COULD NOT LOOK: HOLD, no dispute packet. With a deal
+id (which needs a ledger, D066) the gate writes its evidence pack and a
+gate.evidence row on either refusal; the settlement response as received goes
+into the pack, and on BROKEN the packet too (dispute-packet.json and .md).
+An exception that escapes gate.decide is COULD NOT LOOK, HOLD, no pack from
+this module, the reason naming only the exception's type (gate.decide itself
+swallows one from the pack hook, and its own verdict stands).
 
 THE MOCK RAIL. `MockEscrowRail` is in memory and test-only: nothing is held
 or moved, there is no network and no key. It has no refund method. A refund
@@ -42,7 +47,8 @@ comes only from the escrow rule's own timer or dispute outcome, never from
 here.
 
 Stdlib only. `attach` raises ValueError on a bad argument; `check` raises
-only on an action other than `pay` or `act` and otherwise always answers.
+ValueError only on a caller error, before anything is read (an action other
+than `pay` or `act`, or a deal id without a ledger), and otherwise answers.
 """
 from __future__ import annotations
 
@@ -293,9 +299,12 @@ def check(response: Any, file_bytes: bytes, audience: str | None, action: str, *
             if ev.get("verdict") == V.BROKEN:
                 made["packet"] = _dispute_pack(out)
 
-        d = G.decide(body, envelope=side, action=action, audience=audience, signers=signers,
-                     deal=deal, purpose=purpose, record_dir=record_dir, ledger=ledger,
-                     now=now, on_pack=on_pack)
+        try:
+            d = G.decide(body, envelope=side, action=action, audience=audience,
+                         signers=signers, deal=deal, purpose=purpose, record_dir=record_dir,
+                         ledger=ledger, now=now, on_pack=on_pack)
+        except Exception as e:  # noqa: BLE001  a crash is a HOLD, never a traceback
+            d = _crashed(e, action, audience, signers, deal, purpose)
         # BROKEN is a HOLD with a dispute packet; made while the body still exists
         packet, packet_error = None, None
         if d.verdict == V.BROKEN and not d.allowed:
@@ -315,6 +324,27 @@ def check(response: Any, file_bytes: bytes, audience: str | None, action: str, *
     return X402Check(release=release, decision=d, extension=state, reason=reason,
                      settled=settled, deal=deal, evidence=d.evidence, dispute=packet,
                      dispute_error=packet_error)
+
+
+def _crashed(e: BaseException, action, audience, signers, deal, purpose) -> G.GateDecision:
+    """The refusal when gate.decide (or on_pack inside it) raised: COULD NOT
+    LOOK, not BROKEN, since nothing was checked to the end and BROKEN would
+    claim a finding (and open a dispute) that no check made. Only the
+    exception's type is named: its message can carry a path."""
+    what = f"the gate could not finish ({type(e).__name__}); nothing was checked to the end"
+    cnc = V.could_not_look("a finished gate check", "the gate", "unreadable", what)
+    try:
+        signers = [str(s) for s in signers or ()]
+    except Exception:  # noqa: BLE001  a signers value decide could not read either
+        signers = []
+    return G.GateDecision(decision=G.REFUSE, action=action, verdict=V.COULD_NOT_LOOK,
+                          reason=f"refuse {action}: COULD NOT LOOK. {what}, so nothing is "
+                                 f"released.", reasons=[what],
+                          could_not_check={k: cnc[k] for k in
+                                           ("looked_for", "where", "reason_word")},
+                          audience=audience, deal=deal, purpose=purpose,
+                          signers=signers,
+                          report={"verdict": V.COULD_NOT_LOOK, **cnc})
 
 
 def _dispute_pack(ev: Path) -> tuple[dict | None, str | None]:

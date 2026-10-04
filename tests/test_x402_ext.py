@@ -338,3 +338,66 @@ def test_pay_without_deal_holds_could_not_look_no_traceback(tmp_path):
     c = _check(paid, BODY, did, tmp_path, purpose=None)
     assert c.release is False and c.verdict == V.COULD_NOT_LOOK
     assert "pass --purpose so the envelope is held to this exchange" in c.decision.reasons
+
+
+# --- F1: an exception inside the gate is a HOLD, never a traceback ----------------------
+
+SECRET = "C:/secret/path/do-not-echo"
+
+
+def _assert_held_on_crash(c, rail, word):
+    assert c.release is False and c.escrow == "HOLD" and c.verdict == V.COULD_NOT_LOOK
+    assert c.decision.decision == "refuse" and c.dispute is None
+    assert word in c.reason and SECRET not in json.dumps(c.to_dict(), default=str)
+    assert "Traceback" not in c.reason
+    out = rail.settle("d-x402-1", c)
+    assert out["released"] is False and rail.state("d-x402-1") == X.HELD
+    assert rail.refunds == []
+
+
+def test_decide_raising_is_a_hold_not_a_traceback(tmp_path, monkeypatch):
+    paid, did = _paid(tmp_path)
+
+    def boom(*a, **kw):
+        raise RuntimeError(SECRET)
+
+    monkeypatch.setattr(X.G, "decide", boom)                   # the gate as x402_ext sees it
+    rail = RefundTrapRail()
+    rail.hold("d-x402-1", "0.01", "USDC")
+    _assert_held_on_crash(_check(paid, BODY, did, tmp_path), rail, "RuntimeError")
+
+
+def test_on_pack_raising_is_a_hold_not_a_traceback(tmp_path, monkeypatch):
+    paid, did = _paid(tmp_path)
+    real = X.G.decide
+
+    def leaky(*a, on_pack=None, **kw):                         # a decide that lets on_pack raise
+        on_pack(tmp_path / "no-such-pack")
+        return real(*a, on_pack=on_pack, **kw)
+
+    monkeypatch.setattr(X.G, "decide", leaky)
+    rail = RefundTrapRail()
+    rail.hold("d-x402-1", "0.01", "USDC")
+    _assert_held_on_crash(_check(paid, BODY, did, tmp_path), rail, "FileNotFoundError")
+
+
+def test_unreadable_signers_is_a_hold_not_a_traceback(tmp_path):
+    paid, _ = _paid(tmp_path)
+    rail = RefundTrapRail()
+    rail.hold("d-x402-1", "0.01", "USDC")
+    c = X.check(paid, BODY, "buyer-agent-7", "pay", signers=7, deal="d-x402-1",
+                purpose="market-data", record_dir=tmp_path / "records",
+                ledger=tmp_path / "ledger.jsonl")
+    _assert_held_on_crash(c, rail, "TypeError")
+
+
+def test_dispute_pack_raising_inside_the_real_gate_still_holds(tmp_path, monkeypatch):
+    paid, did = _paid(tmp_path)
+
+    def boom(*a, **kw):
+        raise RuntimeError(SECRET)
+
+    monkeypatch.setattr(X, "_dispute_pack", boom)              # the real decide swallows on_pack
+    c = _check(paid, BODY.replace(b"101.20", b"999.99"), did, tmp_path)
+    assert c.release is False and c.escrow == "HOLD" and c.verdict == V.BROKEN
+    json.dumps(c.to_dict(), default=str)

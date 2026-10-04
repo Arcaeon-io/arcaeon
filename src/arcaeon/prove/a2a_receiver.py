@@ -32,8 +32,10 @@ are unsigned. They are recorded under `a2a` and change no verdict: a missing
 listing does not refuse a good envelope, and a listing does not make a missing
 one good.
 
-Stdlib only (verify loads the [sign] backend itself). `receive` raises only on
-an unknown action, like `gate.decide`; a hostile message is an answer.
+Stdlib only (verify loads the [sign] backend itself). `receive` raises
+ValueError only on a caller error, before anything is read (an unknown action,
+or a deal id without a ledger, D066); a hostile message, or an exception from
+gate.decide, is a COULD NOT LOOK answer naming only the exception's type.
 """
 from __future__ import annotations
 
