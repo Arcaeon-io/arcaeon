@@ -856,6 +856,8 @@ usage: arcaeon exchange react --exchange ID --counterparty ID --file PATH
                               --reaction {VERIFIED,BROKEN,"COULD NOT LOOK"}
                               --key SEEDFILE [--disputed REASON]
                               [--supersedes ROWDIGEST] [--log PATH]
+       arcaeon exchange bind --account acct:NAME@arcaeon.io --key SEEDFILE
+                              [--log PATH]
        arcaeon exchange pair A.jsonl B.jsonl [--owner-a DID] [--owner-b DID]
                               [--json] [--strict]
 ```

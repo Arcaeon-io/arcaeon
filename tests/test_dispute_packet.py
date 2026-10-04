@@ -198,7 +198,8 @@ def test_receiver_not_passing_purpose_reads_not_given(tmp_path):
 
 def test_verified_refuses_to_make_a_packet(tmp_path):
     f, did = TG._make(tmp_path, V.VERIFIED)
-    d = G.decide(f, action="pay", audience=AUD, signers=[did])
+    # an allow: read on VERIFIED (pay now needs --deal and --purpose, D073)
+    d = G.decide(f, action="read", audience=AUD, signers=[did])
     with pytest.raises(P.NothingToDispute, match="VERIFIED: nothing to dispute"):
         P.from_decision(d.to_dict())
 
@@ -270,7 +271,8 @@ def test_cli_decide_json_pipes_into_packet(tmp_path, capsys):
 
 def test_cli_packet_errors(tmp_path, capsys):
     f, did = TG._make(tmp_path, V.VERIFIED)
-    d = G.decide(f, action="pay", audience=AUD, signers=[did])
+    # an allow: read on VERIFIED (pay now needs --deal and --purpose, D073)
+    d = G.decide(f, action="read", audience=AUD, signers=[did])
     (tmp_path / "ok.json").write_text(json.dumps(d.to_dict()), encoding="utf-8")
     assert cli.main(["gate", "packet", "--decision", str(tmp_path / "ok.json")]) == 2
     assert "nothing to dispute" in capsys.readouterr().err
