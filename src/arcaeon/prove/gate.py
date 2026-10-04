@@ -3,7 +3,8 @@
 
     from arcaeon.prove import gate
     d = gate.decide("grades.csv", action="pay", audience="instructor-1",
-                    signers=["did:key:z6Mk..."], deal="d-7f3a", record_dir="deals",
+                    signers=["did:key:z6Mk..."], deal="d-7f3a", purpose="grading",
+                    record_dir="deals",
                     ledger="my-deal-tape.jsonl")
     d.decision        # "allow" or "refuse"
     d.reason          # one plain sentence or three
@@ -18,6 +19,12 @@ into allow or refuse:
     VERIFIED         allow   allow   allow   allow
     BROKEN           refuse  refuse  refuse  refuse
     COULD NOT LOOK   allow   refuse  refuse  refuse
+
+pay and irreversible need the exchange named: without `deal` (or without
+`purpose`) the verdict is COULD NOT LOOK before the table is read, with the
+reason "pass --deal so the envelope is held to this exchange" (or "pass
+--purpose ..."), so an envelope sealed for one deal cannot be replayed into a
+pay that names none. A BROKEN verdict stays BROKEN. read and act are unchanged.
 
 Allow means: the bytes are unchanged since the key you named sealed them, and
 they were labeled for you, for this deal when you gave one, and are in date.
@@ -139,7 +146,7 @@ from arcaeon import verdict as V
 from arcaeon.prove import envelope as E
 from arcaeon.record.row import file_pin, loads_strict
 
-__all__ = ["ACTIONS", "ALLOW", "REFUSE", "RULES", "GateDecision", "decide", "resolve",
+__all__ = ["ACTIONS", "ALLOW", "REFUSE", "RULES", "NEEDS_EXCHANGE", "GateDecision", "decide", "resolve",
            "EVIDENCE_KIND", "CHAIN_KIND", "PACK_DIGEST_OF", "PACK_DIGEST_OF_V1",
            "pack_digest", "CHECK_ROW_KIND", "CHECKER_BROKEN", "CHECKS_UNREADABLE",
            "VETOED", "read_check_rows",
@@ -152,6 +159,10 @@ ALLOW, REFUSE = "allow", "refuse"
 RULES = {V.VERIFIED: frozenset(ACTIONS), V.BROKEN: frozenset(),
          V.COULD_NOT_LOOK: frozenset({"read"})}
 EVIDENCE_KIND = "arcaeon.gate.evidence/v1"
+#: actions that need the exchange named (deal and purpose) before any allow.
+NEEDS_EXCHANGE = frozenset({"pay", "irreversible"})
+NEED_DEAL = "pass --deal so the envelope is held to this exchange"
+NEED_PURPOSE = "pass --purpose so the envelope is held to this exchange"
 #: The ledger row kind a refusal's evidence pack is chained under (D056).
 CHAIN_KIND = "gate.evidence"
 #: Names the pack digest rule (module docstring, docs/VERBS.md `gate`). v2
@@ -593,6 +604,21 @@ def _apply_checks(d: GateDecision, info: dict) -> None:
                     f"allowed until it can be read.")
 
 
+def _unbound(action: str, deal, purpose) -> dict | None:
+    """The could-not-look keys when `action` needs the exchange named and it
+    is not: pay and irreversible need both `deal` and `purpose`, so an envelope
+    sealed for one exchange cannot be replayed into another. None otherwise."""
+    if action not in NEEDS_EXCHANGE:
+        return None
+    if not deal:
+        return V.could_not_look("the deal this exchange is for (--deal)", "the gate call",
+                                "missing", NEED_DEAL)
+    if not purpose:
+        return V.could_not_look("the purpose this exchange is for (--purpose)",
+                                "the gate call", "missing", NEED_PURPOSE)
+    return None
+
+
 def _reason(action: str, verdict: str, r: dict, audience, deal) -> str:
     allowed = action in RULES.get(verdict, frozenset())
     head = f"{ALLOW if allowed else REFUSE} {action}: {verdict}"
@@ -865,6 +891,15 @@ def decide(file: str | Path, *, action: str, audience: str | None,
     verdict = r.get("verdict")
     if verdict not in RULES:                     # never a green on an unknown word
         verdict = V.COULD_NOT_LOOK
+    unbound = _unbound(action, deal, purpose)
+    if unbound is not None and verdict != V.BROKEN:   # before the table: no replay
+        if verdict == V.VERIFIED:
+            r = {**r, "verdict": V.COULD_NOT_LOOK, "verify_verdict": V.VERIFIED,
+                 **unbound}
+        else:
+            r = {**r, "reason": "; ".join(s for s in (unbound["reason"], r.get("reason"))
+                                          if s)}
+        verdict = V.COULD_NOT_LOOK
     allowed = action in RULES[verdict]
     if verdict == V.BROKEN:
         reasons = list(r.get("findings") or [r.get("reason")])
@@ -968,6 +1003,10 @@ action you are about to take:
   BROKEN          refuses all four
   COULD NOT LOOK  allows read only; refuses act, pay and irreversible,
                   naming what could not be checked
+
+pay and irreversible need --deal and --purpose: without either the answer is
+COULD NOT LOOK (refuse, exit 3), so an envelope sealed for one exchange cannot
+be replayed into another.
 
 Every refusal with --deal writes an evidence pack (the file and envelope
 bytes, their sha256, the verdict, the reasons, the UTC time) to

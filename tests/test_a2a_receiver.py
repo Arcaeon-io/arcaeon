@@ -69,14 +69,24 @@ def _b(o) -> bytes:
     return json.dumps(o).encode("utf-8")
 
 
+def _ex(tmp_path: Path) -> dict:
+    """pay and irreversible need the exchange named (F2); a deal needs a ledger (D066)."""
+    return {"deal": "d-7f3a", "purpose": "grading", "ledger": tmp_path / "ledger.jsonl",
+            "record_dir": tmp_path / "rec"}
+
+
+def _ex_cli(tmp_path: Path) -> list:
+    return ["--deal", "d-7f3a", "--purpose", "grading",
+            "--ledger", str(tmp_path / "ledger.jsonl"), "--record-dir", str(tmp_path / "rec")]
+
+
 # --- the fixture cases the item names -------------------------------------------------
 
 def test_good_artifact_allows_every_action(tmp_path):
     env, did = _sealed(tmp_path)
     msg = _b(_task(_artifact(env)))
     for action in G.ACTIONS:
-        d = A.receive(msg, BODY, action=action, audience=ME, signers=[did], deal="d-7f3a",
-                      ledger=tmp_path / "ledger.jsonl")
+        d = A.receive(msg, BODY, action=action, audience=ME, signers=[did], **_ex(tmp_path))
         assert d.verdict == V.VERIFIED and d.decision == "allow", d.reason
         assert d.exit_code == 0
     assert d.a2a["carrier"] == "artifact" and d.a2a["id"] == "grades-001"
@@ -86,7 +96,8 @@ def test_good_artifact_allows_every_action(tmp_path):
 
 def test_good_artifact_inline_raw_part(tmp_path):
     env, did = _sealed(tmp_path)
-    d = A.receive(_b(_task(_artifact(env))), None, action="pay", audience=ME, signers=[did])
+    d = A.receive(_b(_task(_artifact(env))), None, action="pay", audience=ME, signers=[did],
+                  **_ex(tmp_path))
     assert d.verdict == V.VERIFIED and d.allowed and d.a2a["file_from"] == "inline part"
 
 
@@ -174,7 +185,8 @@ def test_listing_and_activation_change_no_verdict(tmp_path):
     a["extensions"] = []                              # value present, not listed
     msg = _b(_task(a))
     for activated in (None, "", "https://example.com/other/v1", f"x/v1, {URI}"):
-        d = A.receive(msg, BODY, action="pay", audience=ME, signers=[did], activated=activated)
+        d = A.receive(msg, BODY, action="pay", audience=ME, signers=[did], activated=activated,
+                      **_ex(tmp_path))
         assert d.verdict == V.VERIFIED and d.allowed
         assert d.a2a["listed"] is False
         assert d.a2a["activated"] is (None if activated is None else URI in activated)
@@ -205,10 +217,10 @@ def test_message_carrier_and_bare_artifact_and_update_event(tmp_path):
     shapes = [{"jsonrpc": "2.0", "id": 1, "method": "SendMessage", "params": {"message": m}},
               _artifact(env), {"taskId": "t", "contextId": "c", "artifact": _artifact(env)}]
     for o in shapes:
-        d = A.receive(_b(o), None, action="pay", audience=ME, signers=[did])
+        d = A.receive(_b(o), None, action="pay", audience=ME, signers=[did], **_ex(tmp_path))
         assert d.verdict == V.VERIFIED, (o, d.reason)
     assert A.receive(_b(shapes[0]), None, action="pay", audience=ME,
-                     signers=[did]).a2a["carrier"] == "message"
+                     signers=[did], **_ex(tmp_path)).a2a["carrier"] == "message"
 
 
 def test_v03_file_part_shape(tmp_path):
@@ -217,7 +229,7 @@ def test_v03_file_part_shape(tmp_path):
         "bytes": base64.b64encode(BODY).decode(), "name": "grades.csv", "mimeType": "text/csv"}}]}
     A.attach_envelope(a, env)
     d = A.receive(_b({"kind": "task", "id": "t", "artifacts": [a]}), None, action="pay",
-                  audience=ME, signers=[did])
+                  audience=ME, signers=[did], **_ex(tmp_path))
     assert d.verdict == V.VERIFIED
 
 
@@ -226,7 +238,8 @@ def test_two_carriers_need_an_artifact_id(tmp_path):
     msg = _b(_task(_artifact(env, art_id="a1"), _artifact(env, art_id="a2")))
     d = A.receive(msg, BODY, action="read", audience=ME, signers=[did])
     assert d.verdict == V.COULD_NOT_LOOK and d.could_not_check["reason_word"] == "bounded"
-    d = A.receive(msg, BODY, action="pay", audience=ME, signers=[did], artifact_id="a2")
+    d = A.receive(msg, BODY, action="pay", audience=ME, signers=[did], artifact_id="a2",
+                  **_ex(tmp_path))
     assert d.verdict == V.VERIFIED and d.a2a["id"] == "a2"
     d = A.receive(msg, BODY, action="read", audience=ME, signers=[did], artifact_id="nope")
     assert d.verdict == V.COULD_NOT_LOOK and d.could_not_check["reason_word"] == "missing"
@@ -317,9 +330,9 @@ def test_cli_gate_a2a(tmp_path, capsys):
     f = tmp_path / "grades.csv"
     f.write_bytes(BODY)
     base = ["gate", "a2a", "--message", str(m), "--audience", ME, "--signer", did]
-    assert cli.main(base + ["--action", "pay", "--file", str(f)]) == 0
+    assert cli.main(base + ["--action", "pay", "--file", str(f), *_ex_cli(tmp_path)]) == 0
     assert capsys.readouterr().out.startswith("allow pay: VERIFIED")
-    assert cli.main(base + ["--action", "pay"]) == 0                      # inline raw part
+    assert cli.main(base + ["--action", "pay", *_ex_cli(tmp_path)]) == 0                      # inline raw part
     f.write_bytes(BODY + b"x")
     capsys.readouterr()
     assert cli.main(base + ["--action", "read", "--file", str(f), "--json"]) == 1
@@ -339,7 +352,7 @@ def test_cli_json_carries_a2a(tmp_path, capsys):
     m.write_bytes(_b(_task(_artifact(env))))
     capsys.readouterr()
     assert cli.main(["gate", "a2a", "--message", str(m), "--audience", ME, "--signer", did,
-                     "--action", "pay", "--activated", URI, "--json"]) == 0
+                     "--action", "pay", "--activated", URI, "--json", *_ex_cli(tmp_path)]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["decision"] == "allow" and out["a2a"]["extension"] == URI
     assert out["a2a"]["activated"] is True and out["file"].startswith("A2A artifact")
@@ -349,3 +362,30 @@ def test_deal_without_ledger_raises_before_anything(tmp_path):
     """D066 on the stack: a deal id needs the party's own ledger, as in gate.decide."""
     with pytest.raises(ValueError):
         A.receive(b"{}", BODY, action="pay", audience=ME, deal="d-7f3a")
+
+
+# --- F2: pay / irreversible need the exchange named (no cross-deal replay) -----------
+
+@pytest.mark.parametrize("action", ["pay", "irreversible"])
+def test_pay_without_deal_is_could_not_look_not_a_traceback(tmp_path, action):
+    env, did = _sealed(tmp_path)                    # sealed for deal d-7f3a, purpose grading
+    msg = _b(_task(_artifact(env)))
+    d = A.receive(msg, BODY, action=action, audience=ME, signers=[did])
+    assert d.verdict == V.COULD_NOT_LOOK and d.decision == "refuse" and d.exit_code == 3
+    assert "pass --deal so the envelope is held to this exchange" in d.reasons
+    assert d.evidence is None and d.a2a["carrier"] == "artifact"
+    json.dumps(d.to_dict())
+    d = A.receive(msg, BODY, action=action, audience=ME, signers=[did], deal="d-7f3a",
+                  ledger=tmp_path / "ledger.jsonl", record_dir=tmp_path / "rec")
+    assert d.verdict == V.COULD_NOT_LOOK and not d.allowed
+    assert "pass --purpose so the envelope is held to this exchange" in d.reasons
+    assert d.evidence and d.chain_row                # a refusal with a deal is evidence
+
+
+def test_cli_gate_a2a_pay_without_deal_is_3(tmp_path, capsys):
+    env, did = _sealed(tmp_path)
+    m = tmp_path / "msg.json"
+    m.write_bytes(_b(_task(_artifact(env))))
+    assert cli.main(["gate", "a2a", "--message", str(m), "--audience", ME, "--signer", did,
+                     "--action", "pay"]) == 3
+    assert "pass --deal so the envelope is held to this exchange" in capsys.readouterr().out

@@ -73,6 +73,9 @@ def _check(tmp_path: Path, name: str, key: Path | None, row: dict | None = None,
 
 def _decide(f, did, action="pay", **kw):
     kw.setdefault("record_dir", f.parent.parent / "rec")
+    if action in G.NEEDS_EXCHANGE:                 # F2: pay / irreversible name the exchange
+        kw.setdefault("deal", DEAL)
+        kw.setdefault("purpose", "grading")
     if kw.get("deal") is not None:                # D066: a deal id needs the party's ledger
         kw.setdefault("ledger", f.parent.parent / "ledger.jsonl")
     return G.decide(f, action=action, audience=AUD, signers=[did], **kw)
@@ -270,7 +273,9 @@ def test_cli_flags(tmp_path, capsys):
     f, did, _ = _handed(tmp_path)
     c, _ = _check(tmp_path, "good", _key(tmp_path, "checker"))
     u, _ = _check(tmp_path, "unsigned", None)
-    rule = ["--action", "pay", "--require-nonparty-check-above", "1000"]
+    rule = ["--action", "pay", "--require-nonparty-check-above", "1000",
+            "--deal", DEAL, "--purpose", "grading", "--ledger", str(tmp_path / "ledger.jsonl"),
+            "--record-dir", str(tmp_path / "rec")]
     assert _cli(f, did, *rule, "--amount", "5000", "--check", str(c)) == 0
     assert capsys.readouterr().out.startswith("allow pay: VERIFIED")
     assert _cli(f, did, *rule, "--amount", "5000", "--check", str(u), "--json") == 3

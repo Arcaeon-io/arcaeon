@@ -177,8 +177,8 @@ the `[sign]` extra as `envelope verify` does):
 from arcaeon.prove import a2a_receiver as A
 
 d = A.receive(message_bytes, file_bytes, action="pay", audience="instructor-1",
-              signers=["did:key:z6Mk..."], deal="d-7f3a",
-              activated=request_headers.get("A2A-Extensions"))
+              signers=["did:key:z6Mk..."], deal="d-7f3a", purpose="grading",
+              ledger="my-deal-tape.jsonl", activated=request_headers.get("A2A-Extensions"))
 d.decision      # "allow" or "refuse"
 d.verdict       # VERIFIED, BROKEN or COULD NOT LOOK
 d.a2a           # extension, carrier, id, listed, activated, file_from
@@ -202,7 +202,7 @@ d.a2a           # extension, carrier, id, listed, activated, file_from
 On the command line:
 
 ```console
-$ arcaeon gate a2a --message task.json --file grades.csv --audience instructor-1 --signer did:key:z6Mk... --action pay
+$ arcaeon gate a2a --message task.json --file grades.csv --audience instructor-1 --signer did:key:z6Mk... --action pay --deal d-7f3a --purpose grading --ledger my-deal-tape.jsonl
 allow pay: VERIFIED. The bytes are unchanged since the key you named sealed them, ...
 ```
 

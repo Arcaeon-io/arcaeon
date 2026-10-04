@@ -69,20 +69,25 @@ TABLE = [(V.VERIFIED, "read", "allow"), (V.VERIFIED, "act", "allow"),
                          ids=[f"{v.replace(' ', '_')}-{a}" for v, a, _ in TABLE])
 def test_rule_table_cell(tmp_path, verdict, action, want):
     f, did = _make(tmp_path, verdict)
+    named = action in G.NEEDS_EXCHANGE                 # pay / irreversible name the exchange
+    bind = ({"deal": BIND["deal"], "purpose": BIND["purpose"],
+             "ledger": tmp_path / "tape.jsonl"} if named else {})
     d = G.decide(f, action=action, audience="instructor-1", signers=[did],
-                 record_dir=tmp_path / "rec")
+                 record_dir=tmp_path / "rec", **bind)
     assert d.verdict == verdict
     assert d.decision == want and d.allowed is (want == "allow") and bool(d) is d.allowed
     assert d.reason.startswith(f"{want} {action}: {verdict}")
     want_exit = 0 if want == "allow" else (1 if verdict == V.BROKEN else 3)
     assert d.exit_code == want_exit
-    assert not (tmp_path / "rec").exists()             # no deal id: nothing written
+    # a pack only on a refusal with a deal id (D066)
+    assert (tmp_path / "rec").exists() is (named and want == "refuse")
     assert len(TABLE) == 12
 
 
 def test_allow_never_claims_true_or_safe(tmp_path):
     f, did = _make(tmp_path, V.VERIFIED)
-    d = G.decide(f, action="irreversible", audience="instructor-1", signers=[did])
+    d = G.decide(f, action="irreversible", audience="instructor-1", signers=[did],
+                 deal=BIND["deal"], purpose=BIND["purpose"], ledger=tmp_path / "tape.jsonl")
     assert "unchanged since the key you named sealed them" in d.reason
     assert "does not say the content is true or safe" in d.reason
     low = d.reason.lower().replace("does not say the content is true or safe", "")
@@ -147,7 +152,7 @@ def test_no_pack_on_allow_with_deal(tmp_path):
         sub.mkdir()
         f, did = _make(sub, verdict)
         d = G.decide(f, action=action, audience="instructor-1", signers=[did], deal="d-7f3a",
-                     record_dir=sub / "rec", ledger=sub / "tape.jsonl")
+                     purpose="grading", record_dir=sub / "rec", ledger=sub / "tape.jsonl")
         assert d.decision == "allow"
         assert d.evidence is None and not (sub / "rec").exists()
         assert not (sub / "tape.jsonl").exists()
@@ -250,6 +255,94 @@ def test_wrong_deal_is_broken_and_packed_in_the_receivers_deal(tmp_path):
     assert Path(d.evidence).parent.parent.name == "DEAL-d-other"
 
 
+# --- pay / irreversible need the exchange named (F2: cross-deal replay) ---------------
+
+NEED_DEAL = "pass --deal so the envelope is held to this exchange"
+NEED_PURPOSE = "pass --purpose so the envelope is held to this exchange"
+
+
+def _sealed_for(tmp_path: Path, deal="d-1", purpose="preview"):
+    f = tmp_path / "in" / "offer.txt"
+    f.parent.mkdir(exist_ok=True)
+    f.write_bytes(BODY)
+    env = E.seal(f, key_file=_key(tmp_path), label="offer", audience="instructor-1",
+                 deal=deal, purpose=purpose, not_after="7d")
+    return f, env["dsseEnvelope"]["signatures"][0]["keyid"]
+
+
+def _assert_needs(d, action, want, packed=False):
+    assert d.decision == "refuse" and not d.allowed
+    assert d.verdict == V.COULD_NOT_LOOK and d.exit_code == 3
+    assert want in d.reasons and want in d.reason
+    assert d.reason.startswith(f"refuse {action}: {V.COULD_NOT_LOOK}")
+    assert d.could_not_check["reason_word"] == "missing"
+    assert (d.evidence is not None) is packed
+
+
+@pytest.mark.parametrize("action", ["pay", "irreversible"])
+def test_replay_without_deal_is_could_not_look(tmp_path, action):
+    # no deal, so the D066 ledger rule never applies: an answer, not a ValueError
+    f, did = _sealed_for(tmp_path)
+    d = G.decide(f, action=action, audience="instructor-1", signers=[did], purpose="preview")
+    _assert_needs(d, action, NEED_DEAL)
+    d = G.decide(f, action=action, audience="instructor-1", signers=[did])   # neither
+    _assert_needs(d, action, NEED_DEAL)
+    assert "No deal id was given" in d.reason
+
+
+@pytest.mark.parametrize("action", ["pay", "irreversible"])
+def test_replay_with_deal_but_no_purpose_is_could_not_look(tmp_path, action):
+    f, did = _sealed_for(tmp_path)
+    led = tmp_path / "tape.jsonl"
+    d = G.decide(f, action=action, audience="instructor-1", signers=[did], deal="d-1",
+                 ledger=led, record_dir=tmp_path / "rec")
+    _assert_needs(d, action, NEED_PURPOSE, packed=True)          # a refusal is evidence (D066)
+    rows = [json.loads(x) for x in led.read_text(encoding="utf-8").splitlines() if x.strip()]
+    assert rows[-1]["kind"] == G.CHAIN_KIND and rows[-1]["verdict"] == V.COULD_NOT_LOOK
+
+
+@pytest.mark.parametrize("action", ["pay", "irreversible"])
+def test_deal_and_purpose_named_still_allows(tmp_path, action):
+    f, did = _sealed_for(tmp_path)
+    led = tmp_path / "tape.jsonl"
+    d = G.decide(f, action=action, audience="instructor-1", signers=[did], deal="d-1",
+                 purpose="preview", ledger=led)
+    assert d.decision == "allow" and d.verdict == V.VERIFIED
+    d = G.decide(f, action=action, audience="instructor-1", signers=[did], deal="d-2",
+                 purpose="preview", record_dir=tmp_path / "rec", ledger=led)
+    assert d.decision == "refuse" and d.verdict == V.BROKEN       # the other deal: BROKEN
+
+
+@pytest.mark.parametrize("action", ["read", "act"])
+def test_read_and_act_unchanged_without_deal(tmp_path, action):
+    f, did = _sealed_for(tmp_path)
+    d = G.decide(f, action=action, audience="instructor-1", signers=[did])
+    assert d.decision == "allow" and d.verdict == V.VERIFIED and d.reasons == []
+
+
+@pytest.mark.parametrize("action", ["pay", "irreversible"])
+def test_cli_replay_without_deal_or_purpose_refuses_3(tmp_path, capsys, action):
+    f, did = _sealed_for(tmp_path)
+    assert _cli(f, did, "--action", action) == 3
+    out = capsys.readouterr().out
+    assert out.startswith(f"refuse {action}: {V.COULD_NOT_LOOK}") and NEED_DEAL in out
+    led = ("--ledger", str(tmp_path / "tape.jsonl"), "--record-dir", str(tmp_path / "rec"))
+    assert _cli(f, did, "--action", action, "--deal", "d-1", "--json", *led) == 3
+    j = json.loads(capsys.readouterr().out)
+    assert j["decision"] == "refuse" and j["verdict"] == V.COULD_NOT_LOOK
+    assert NEED_PURPOSE in j["reasons"]
+    assert _cli(f, did, "--action", action, "--deal", "d-1", "--purpose", "preview",
+                *led) == 0
+    assert capsys.readouterr().out.startswith(f"allow {action}: VERIFIED")
+
+
+def test_broken_without_deal_on_pay_stays_broken(tmp_path):
+    f, did = _sealed_for(tmp_path)
+    f.write_bytes(BODY + b"x")
+    d = G.decide(f, action="pay", audience="instructor-1", signers=[did])
+    assert d.verdict == V.BROKEN and d.exit_code == 1
+
+
 # --- one verifier ---------------------------------------------------------------------
 
 def test_gate_uses_envelope_verify_and_nothing_else(tmp_path, monkeypatch):
@@ -287,9 +380,11 @@ def _cli(f, did, *extra):
 
 def test_cli_exit_codes_and_output(tmp_path, capsys):
     f, did = _make(tmp_path, V.VERIFIED)
-    assert _cli(f, did, "--action", "pay") == 0
+    ex = ("--deal", BIND["deal"], "--purpose", BIND["purpose"],
+          "--ledger", str(tmp_path / "tape.jsonl"))
+    assert _cli(f, did, "--action", "pay", *ex) == 0
     assert capsys.readouterr().out.startswith("allow pay: VERIFIED")
-    assert _cli(f, did, "--action", "pay", "--json") == 0
+    assert _cli(f, did, "--action", "pay", "--json", *ex) == 0
     j = json.loads(capsys.readouterr().out)
     assert j["decision"] == "allow" and j["exit_code"] == 0 and j["verdict"] == V.VERIFIED
     # the handed file itself, sidecar beside it

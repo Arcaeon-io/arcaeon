@@ -117,7 +117,7 @@ def test_allow_writes_no_row(tmp_path):
     f, did = _make(tmp_path, V.VERIFIED)
     led = tmp_path / "tape.jsonl"
     d = G.decide(f, action="pay", audience="instructor-1", signers=[did], deal="d-7f3a",
-                 record_dir=tmp_path / "rec", ledger=led)
+                 purpose="grading", record_dir=tmp_path / "rec", ledger=led)
     assert d.decision == "allow" and d.chain_row is None
     assert not led.exists() and not (tmp_path / "rec").exists()
 

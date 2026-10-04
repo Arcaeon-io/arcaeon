@@ -51,8 +51,9 @@ def _paid(tmp_path, **kw):
     return X.attach(SETTLED, env), did
 
 
-def _check(resp, body, did, tmp_path, audience="buyer-agent-7", action="pay", deal="d-x402-1"):
-    return X.check(resp, body, audience, action, signers=[did], deal=deal,
+def _check(resp, body, did, tmp_path, audience="buyer-agent-7", action="pay", deal="d-x402-1",
+           purpose="market-data"):
+    return X.check(resp, body, audience, action, signers=[did], deal=deal, purpose=purpose,
                    record_dir=tmp_path / "records",
                    ledger=tmp_path / "ledger.jsonl" if deal is not None else None)
 
@@ -157,8 +158,9 @@ def test_rail_refuses_a_check_run_for_another_deal_or_none(tmp_path):
     rail = X.MockEscrowRail()
     rail.hold("d-other", "0.01", "USDC")
     assert rail.settle("d-other", _check(paid, BODY, did, tmp_path))["released"] is False
-    c = _check(paid, BODY, did, tmp_path, deal=None)        # deal not held: a replay risk
-    assert c.release is True
+    c = _check(paid, BODY, did, tmp_path, deal=None)        # deal not named: a replay (F2)
+    assert c.release is False and c.verdict == V.COULD_NOT_LOOK and c.escrow == "HOLD"
+    assert "pass --deal so the envelope is held to this exchange" in c.decision.reasons
     assert rail.settle("d-other", c)["released"] is False
     assert rail.state("d-other") == X.HELD
 
@@ -223,7 +225,7 @@ def test_hostile_body_and_deep_response_dict(tmp_path):
 def test_hostile_sidecar_name_stays_in_the_temp_dir(tmp_path):
     paid, did = _paid(tmp_path)
     c = X.check(paid, BODY, "buyer-agent-7", "pay", signers=[did], deal="d-x402-1",
-                file_name="../../escape.json", ledger=tmp_path / "ledger.jsonl")
+                purpose="market-data", file_name="../../escape.json", ledger=tmp_path / "ledger.jsonl")
     assert c.release is True and not (tmp_path / "escape.json").exists()
 
 
@@ -319,3 +321,20 @@ def test_verified_path_unchanged(tmp_path):
     out = rail.settle("d-x402-1", c)
     assert out["released"] is True and out["escrow"] == "RELEASE"
     assert rail.state("d-x402-1") == X.RELEASED and rail.refunds == []
+
+
+# --- F2: pay needs the exchange named (no cross-deal replay) ---------------------------
+
+def test_pay_without_deal_holds_could_not_look_no_traceback(tmp_path):
+    paid, did = _paid(tmp_path)                     # sealed for d-x402-1 / market-data
+    rail = RefundTrapRail()
+    rail.hold("d-x402-1", "0.01", "USDC")
+    c = X.check(paid, BODY, "buyer-agent-7", "pay", signers=[did])
+    assert c.release is False and c.escrow == "HOLD" and c.verdict == V.COULD_NOT_LOOK
+    assert "pass --deal so the envelope is held to this exchange" in c.decision.reasons
+    assert c.evidence is None and c.dispute is None
+    json.dumps(c.to_dict(), default=str)
+    assert rail.settle("d-x402-1", c)["released"] is False and rail.refunds == []
+    c = _check(paid, BODY, did, tmp_path, purpose=None)
+    assert c.release is False and c.verdict == V.COULD_NOT_LOOK
+    assert "pass --purpose so the envelope is held to this exchange" in c.decision.reasons

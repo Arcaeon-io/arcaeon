@@ -56,13 +56,19 @@ def _verified(tmp_path):
     return f, did, hashlib.sha256(f.read_bytes()).hexdigest()
 
 
+def _ex(tmp_path) -> dict:
+    """pay and irreversible need the exchange named (F2); a deal needs a ledger (D066)."""
+    return {"deal": "d-7f3a", "purpose": "grading", "ledger": tmp_path / "tape.jsonl",
+            "record_dir": tmp_path / "rec"}
+
+
 # --- the veto ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("action", GUARDED)
 def test_broken_check_on_same_digest_vetoes_guarded_actions(tmp_path, action):
     f, did, sha = _verified(tmp_path)
     c = _checks(tmp_path, [_row(sha)])
-    d = G.decide(f, action=action, audience=AUD, signers=[did], check_files=[c])
+    d = G.decide(f, action=action, audience=AUD, signers=[did], check_files=[c], **_ex(tmp_path))
     assert d.decision == "refuse" and d.verdict == V.VERIFIED
     assert d.reason.startswith(f"refuse {action}: {G.CHECKER_BROKEN}: ")
     assert "mcp-scan" in d.reason and "files/read_file" in d.reason
@@ -86,7 +92,7 @@ def test_broken_row_for_another_digest_is_ignored(tmp_path):
     f, did, sha = _verified(tmp_path)
     other = hashlib.sha256(b"some other bytes").hexdigest()
     c = _checks(tmp_path, [_row(other), _row(None)])
-    d = G.decide(f, action="pay", audience=AUD, signers=[did], check_files=[c])
+    d = G.decide(f, action="pay", audience=AUD, signers=[did], check_files=[c], **_ex(tmp_path))
     assert d.decision == "allow" and d.checks["broken"] == [] and d.checks["veto"] is None
     assert d.checks["rows"] == 2
 
@@ -95,7 +101,8 @@ def test_broken_row_for_another_digest_is_ignored(tmp_path):
 def test_non_broken_rows_do_not_veto(tmp_path, word):
     f, did, sha = _verified(tmp_path)
     c = _checks(tmp_path, [_row(sha, word)])
-    d = G.decide(f, action="irreversible", audience=AUD, signers=[did], check_files=[c])
+    d = G.decide(f, action="irreversible", audience=AUD, signers=[did], check_files=[c],
+                 **_ex(tmp_path))
     assert d.decision == "allow" and d.checks["veto"] is None
 
 
@@ -105,14 +112,14 @@ def test_other_row_kinds_are_ignored(tmp_path):
     bad["verdict"] = V.BROKEN
     c = _checks(tmp_path, [bad, {"kind": "gate.evidence", "verdict": V.BROKEN,
                                  "file_sha256": sha}])
-    d = G.decide(f, action="pay", audience=AUD, signers=[did], check_files=[c])
+    d = G.decide(f, action="pay", audience=AUD, signers=[did], check_files=[c], **_ex(tmp_path))
     assert d.decision == "allow" and d.checks["rows"] == 0
 
 
 def test_prefixed_and_uppercase_digest_still_matches(tmp_path):
     f, did, sha = _verified(tmp_path)
     c = _checks(tmp_path, [_row("sha256:" + sha.upper())])
-    d = G.decide(f, action="pay", audience=AUD, signers=[did], check_files=[c])
+    d = G.decide(f, action="pay", audience=AUD, signers=[did], check_files=[c], **_ex(tmp_path))
     assert d.decision == "refuse" and d.checks["veto"] == G.CHECKER_BROKEN
 
 
@@ -130,7 +137,8 @@ def test_unreadable_checks_file_refuses_guarded_and_allows_read(tmp_path):
     bad = tmp_path / "bad.jsonl"
     bad.write_text('{"kind": "check.verdict.relayed"\n', encoding="utf-8")
     for c in (bad, tmp_path / "missing.jsonl"):
-        d = G.decide(f, action="pay", audience=AUD, signers=[did], check_files=[c])
+        d = G.decide(f, action="pay", audience=AUD, signers=[did], check_files=[c],
+                     **_ex(tmp_path))
         assert d.decision == "refuse" and d.verdict == V.VERIFIED
         assert d.checks["veto"] == G.CHECKS_UNREADABLE and d.exit_code == V.EXIT_COULD_NOT_LOOK
         assert d.could_not_check and d.could_not_check["looked_for"]
@@ -140,7 +148,7 @@ def test_unreadable_checks_file_refuses_guarded_and_allows_read(tmp_path):
 
 def test_no_checks_given_changes_nothing(tmp_path):
     f, did, _ = _verified(tmp_path)
-    d = G.decide(f, action="pay", audience=AUD, signers=[did])
+    d = G.decide(f, action="pay", audience=AUD, signers=[did], **_ex(tmp_path))
     assert d.decision == "allow" and d.checks is None and "checks" not in d.to_dict()
 
 
@@ -150,7 +158,8 @@ def _vetoed_with_deal(tmp_path):
     f, did, sha = _verified(tmp_path)
     c = _checks(tmp_path, [_row(sha)])
     d = G.decide(f, action="pay", audience=AUD, signers=[did], deal="d-7f3a",
-                 record_dir=tmp_path / "rec", ledger=tmp_path / "tape.jsonl", check_files=[c])
+                 purpose="grading", record_dir=tmp_path / "rec", ledger=tmp_path / "tape.jsonl",
+                 check_files=[c])
     assert d.decision == "refuse" and d.evidence and d.chain_row, d.reason
     return f, sha, d
 
@@ -183,7 +192,9 @@ def test_cli_checks_flag_is_repeatable(tmp_path, capsys):
     f, did, sha = _verified(tmp_path)
     a = _checks(tmp_path, [_row(sha, V.VERIFIED)], "a.jsonl")
     b = _checks(tmp_path, [_row(sha, vendor="mockscan", name="grades.csv")], "b.jsonl")
-    base = ["gate", "decide", "--envelope", str(f), "--audience", AUD, "--signer", did]
+    base = ["gate", "decide", "--envelope", str(f), "--audience", AUD, "--signer", did,
+            "--deal", "d-7f3a", "--purpose", "grading", "--ledger", str(tmp_path / "tape.jsonl"),
+            "--record-dir", str(tmp_path / "rec")]
     rc = cli.main(base + ["--action", "pay", "--checks", str(a), "--checks", str(b), "--json"])
     out = json.loads(capsys.readouterr().out)
     assert rc == V.EXIT_BAD and out["decision"] == "refuse" and out["verdict"] == V.VERIFIED
@@ -272,7 +283,7 @@ def test_nonparty_detected_by_reason_alone(tmp_path):
 def test_verified_allow_with_checks_is_still_nothing_to_dispute(tmp_path):
     f, did, sha = _verified(tmp_path)
     c = _checks(tmp_path, [_row(sha, V.VERIFIED)])
-    d = G.decide(f, action="pay", audience=AUD, signers=[did], check_files=[c])
+    d = G.decide(f, action="pay", audience=AUD, signers=[did], check_files=[c], **_ex(tmp_path))
     assert d.decision == "allow"
     with pytest.raises(P.NothingToDispute, match="VERIFIED: nothing to dispute"):
         P.from_decision(d.to_dict())

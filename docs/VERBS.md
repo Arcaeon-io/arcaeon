@@ -677,7 +677,10 @@ Answers: may I take this action on the file I was handed? `gate decide` runs
 `envelope verify` (the same verifier, not a second one) and turns its word
 into allow or refuse for one of four actions: VERIFIED allows `read`, `act`,
 `pay` and `irreversible`; BROKEN refuses all four; COULD NOT LOOK allows
-`read` only and refuses the rest, naming what could not be checked. On any
+`read` only and refuses the rest, naming what could not be checked. `pay`
+and `irreversible` need `--deal` and `--purpose`: without either the answer
+is COULD NOT LOOK ("pass --deal so the envelope is held to this exchange"),
+so an envelope sealed for one deal cannot be replayed into another. On any
 refusal with `--deal` (BROKEN, or COULD NOT LOOK on `act`, `pay` or
 `irreversible`), it writes an evidence pack into the deal's record:
 `DIR/DEAL-<deal>/gate/<UTC stamp>-<sha256 prefix>/` holding `bundle/` (copies
@@ -809,7 +812,7 @@ nothing to dispute, 3 the input is not a readable gate record. `a2a`: as
 so `--legacy-exit` changes nothing here.
 
 ```console
-$ arcaeon gate decide --envelope grades.csv.envelope.json --audience instructor-1 --signer did:key:z6Mk... --action pay --deal d-7f3a --ledger my-deal-tape.jsonl
+$ arcaeon gate decide --envelope grades.csv.envelope.json --audience instructor-1 --signer did:key:z6Mk... --action pay --deal d-7f3a --purpose grading --ledger my-deal-tape.jsonl
 allow pay: VERIFIED. The bytes are unchanged since the key you named sealed them, ...
 ```
 
