@@ -797,9 +797,16 @@ that counts more can be bought. BROKEN shows first; an ID under 10 exchanges
 or 14 days is unrated; self-trades (one key, one ID by a signed alias, one
 `--groups` group) are listed and not counted. `alias` prints an alias entry,
 signed by both keys, that lets a new key inherit an old record; a fresh key
-with no alias is a new, unrated ID. clean means unchanged and labeled, never
-true. The columns, the gaming rules and the limits are
-[TALLY.md](TALLY.md); the library is `arcaeon.prove.tally.build`.
+with no alias is a new, unrated ID. `seal` appends the tally, paths replaced
+by file names, to a tally chain of its own as a `tally.snapshot` row that
+commits to each exchange log's sha256 and chain tip; `verify` checks that
+chain (a backdated or reordered row is BROKEN) and, with `--inputs`, that the
+logs still hold the sealed rows; `pin --dry-run` prints the pin statement for
+its tip (dry run is the only mode: the live pin is the operator's scheduled
+task). Un-editable, not un-gameable: a wash trade is sealed as a wash trade.
+clean means unchanged and labeled, never true. The columns, the gaming rules,
+the tally chain and the limits are [TALLY.md](TALLY.md); the libraries are
+`arcaeon.prove.tally.build` and `arcaeon.prove.tally_chain`.
 
 **Usage**
 
@@ -808,20 +815,34 @@ usage: arcaeon tally build CHAIN.jsonl... [--json] [--settled-only]
                            [--checked-only] [--window 30d] [--groups FILE]
                            [--aliases FILE] [--now T]
        arcaeon tally alias --old-key SEEDFILE --new-key SEEDFILE [--at T]
+       arcaeon tally seal CHAIN.jsonl... --log TALLY_CHAIN.jsonl [--out FILE]
+                          [--json] [build options]
+       arcaeon tally pin --log TALLY_CHAIN.jsonl --dry-run [--out S.json]
+                         [--chain-id ID] [--prev-pin-sha256 HEX]
+       arcaeon tally verify --log TALLY_CHAIN.jsonl [--inputs CHAIN.jsonl...]
+                            [--statement S.json] [--groups FILE]
+                            [--aliases FILE] [--json]
 ```
 
 **Exit codes:** `build`: 0 VERIFIED (every chain reads; read the columns), 1
 BROKEN (a chain, a row or an alias signature), 3 COULD NOT LOOK (a chain, the
 groups file or the aliases file could not be read, no chain given, or no
 Ed25519 backend), 2 bad usage (a window or time that does not parse).
-`alias`: 0 printed, 2 refused. New in 0.10.x, so `--legacy-exit` changes
-nothing here.
+`alias`: 0 printed, 2 refused. `seal`: 0 written, 3 an input cannot be read,
+2 refused (two inputs with one file name). `pin`: 0 printed, 1 the tally
+chain does not verify, 3 missing or empty, 2 refused (no `--dry-run`).
+`verify`: 0 VERIFIED, 1 BROKEN, 3 COULD NOT LOOK (an input not given or
+unreadable, a chain missing or empty), 2 bad usage. New in 0.10.x, so
+`--legacy-exit` changes nothing here.
 
 ```console
 $ arcaeon tally build a.jsonl b.jsonl c.jsonl --window 30d
 clean means unchanged and labeled, never true
 tally VERIFIED: 3 chain(s) verify and every reaction row checks under its chain's key; 3 ID(s)
 $ arcaeon tally alias --old-key old.key --new-key new.key > aliases.json
+$ arcaeon tally seal a.jsonl b.jsonl --log TALLY_CHAIN.jsonl
+$ arcaeon tally verify --log TALLY_CHAIN.jsonl --inputs a.jsonl b.jsonl
+$ arcaeon tally pin --log TALLY_CHAIN.jsonl --dry-run --out S.json
 ```
 
 ## `distill`

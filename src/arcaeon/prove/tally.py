@@ -4,6 +4,7 @@
     arcaeon tally build CHAIN.jsonl... [--json] [--settled-only] [--checked-only]
                         [--window 30d] [--groups FILE] [--aliases FILE] [--now T]
     arcaeon tally alias --old-key SEEDFILE --new-key SEEDFILE [--at T]
+    arcaeon tally seal|pin|verify ...   (the tally chain: arcaeon.prove.tally_chain)
 
 Reads exchange reaction chains (docs/EXCHANGE.md, one per account key) and
 prints, per ID, facts in columns for a recent window and for all time, side
@@ -632,7 +633,14 @@ def render(r: dict) -> str:
 USAGE = """usage: arcaeon tally build CHAIN.jsonl... [--json] [--settled-only]
                            [--checked-only] [--window 30d] [--groups FILE]
                            [--aliases FILE] [--now T]
-       arcaeon tally alias --old-key SEEDFILE --new-key SEEDFILE [--at T]"""
+       arcaeon tally alias --old-key SEEDFILE --new-key SEEDFILE [--at T]
+       arcaeon tally seal CHAIN.jsonl... --log TALLY_CHAIN.jsonl [--out FILE]
+                          [--json] [build options]
+       arcaeon tally pin --log TALLY_CHAIN.jsonl --dry-run [--out S.json]
+                         [--chain-id ID] [--prev-pin-sha256 HEX]
+       arcaeon tally verify --log TALLY_CHAIN.jsonl [--inputs CHAIN.jsonl...]
+                            [--statement S.json] [--groups FILE]
+                            [--aliases FILE] [--json]"""
 
 HELP = USAGE + """
 
@@ -649,11 +657,24 @@ key, one ID by alias, one --groups group) are listed and not counted.
 alias prints an alias entry for --aliases: the new key inherits the old key's
 record. Both keys sign it. A fresh key with no alias is a new, unrated ID.
 
+seal runs build, replaces every local path with the file's name, and appends
+one tally.snapshot row to the tally chain (--log): the tally's sha256 and,
+per exchange log read, its name, sha256 and chain tip. --out writes the
+sealed tally JSON. pin --dry-run prints the pin statement for the tally
+chain's tip; --dry-run is the only mode, the live pin is the operator's
+scheduled task. verify checks the tally chain, that no row is backdated, and
+with --inputs that every snapshot's logs still hold the sealed rows (rows
+appended since are fine), with --statement that it commits to this chain.
+Un-editable, not un-gameable: a wash trade is sealed as a wash trade.
+
 clean means unchanged and labeled, never true.
 
 Exit codes: build 0 VERIFIED (every chain reads), 1 BROKEN (a chain, a row
 or an alias signature), 3 COULD NOT LOOK, 2 bad usage; alias 0 printed, 2
-refused. Spec and limits: docs/TALLY.md."""
+refused; seal 0 written, 3 an input cannot be read, 2 refused; pin 0
+printed, 1 the chain does not verify, 3 missing or empty, 2 refused (no
+--dry-run); verify 0 VERIFIED, 1 BROKEN, 3 COULD NOT LOOK, 2 bad usage.
+Spec and limits: docs/TALLY.md."""
 
 
 class _Usage(Exception):
@@ -720,7 +741,13 @@ def main(argv: list[str] | None = None) -> int:
             return _build_cli(rest)
         if sub == "alias":
             return _alias_cli(rest)
-        raise _Usage(f"unknown subcommand {sub!r} (build or alias)")
+        if sub in ("seal", "pin", "verify"):
+            from arcaeon.prove import tally_chain as TC
+            try:
+                return {"seal": TC.seal_cli, "pin": TC.pin_cli, "verify": TC.verify_cli}[sub](rest)
+            except TC.Usage as e:
+                raise _Usage(str(e)) from None
+        raise _Usage(f"unknown subcommand {sub!r} (build, alias, seal, pin or verify)")
     except _Usage as e:
         print(f"arcaeon tally: {e}\n{USAGE}", file=sys.stderr)
         return V.EXIT_USAGE

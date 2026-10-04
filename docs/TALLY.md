@@ -153,6 +153,111 @@ read, or no chain was given (an unreadable groups or aliases file prints no
 IDs: counts that miss the exclusions you asked for would be wrong); else
 VERIFIED. Exit 0 VERIFIED, 1 BROKEN, 3 COULD NOT LOOK, 2 bad usage.
 
+## The tally chain (TE-47)
+
+A tally printed today can be printed differently tomorrow. The tally chain
+makes each tally you publish a row nobody can edit afterwards without it
+showing, and ties that row to the exact exchange logs it read.
+
+```console
+$ arcaeon tally seal a.jsonl b.jsonl --log TALLY_CHAIN.jsonl --out tally.json
+sealed row 5f0c... in TALLY_CHAIN.jsonl: tally VERIFIED, tally_sha256 9a1e...
+$ arcaeon tally pin --log TALLY_CHAIN.jsonl --dry-run --out S.json
+$ arcaeon tally verify --log TALLY_CHAIN.jsonl --inputs a.jsonl b.jsonl --statement S.json
+VERIFIED: the tally chain verifies: 1 snapshot(s), well formed, in order; ...
+```
+
+**`seal`** runs `tally build` with the same options, replaces every local
+path in the result with the file's name, and appends one row through
+`Ledger.append` (the writer the exchange, deal and gate rows use):
+
+```json
+{"kind": "tally.snapshot", "v": 1, "tally_kind": "arcaeon.tally/v1",
+ "tally_sha256": HEX64, "tally_verdict": "VERIFIED",
+ "options": {"window": "30d", "settled_only": false, "checked_only": false,
+             "now": "2026-10-04T12:00:00Z", "groups": null, "aliases": null},
+ "inputs": [{"name": "a.jsonl", "sha256": HEX64, "sha256_of": "lf", "rows": 12,
+             "chain_tip": "..."}],
+ "at": "2026-10-04T12:00:03Z", "ts": "2026-10-04T12:00:03Z", "chain": "..."}
+```
+
+`tally_sha256` is sha256 of the json-c14n v1 bytes of the tally with paths
+replaced by names (`--out` writes exactly that tally). Each input is named by
+its file name only, never a path, with the sha256 of its LF-canonical bytes
+(every CRLF read as LF; a missing final LF supplied), its row count and the
+`chain` value of its last row. `options.groups` and `options.aliases` are
+`null` or `{name, sha256, sha256_of}`. Two inputs with one file name are
+refused (the row could not tell them apart); an input that cannot be read is
+refused and nothing is written (exit 3). A BROKEN or COULD NOT LOOK tally is
+still sealed: the row records the tally's own verdict in `tally_verdict`.
+
+**`verify`** reads the tally chain with the ledger's strict verify and checks
+each row is a well-formed snapshot (a row of any other kind is BROKEN). `at`
+and the ledger's `ts` must never go backwards from one row to the next; an
+earlier `at` is BACKDATED and an earlier `ts` is REORDERED, both BROKEN, so a
+re-minted chain with its rows swapped is caught even though its hashes link.
+Equal seconds are fine. With `--inputs`, each snapshot's inputs are matched by
+file name against the logs given: the sealed rows must be an exact prefix of
+the log now (rows appended since are fine and are named as not covered); a
+past row edited, removed or re-serialized is BROKEN, a log with fewer rows is
+TRUNCATED (BROKEN), and an input that was not given or cannot be read is
+COULD NOT LOOK. When every input matches, the tally is rebuilt from the
+sealed prefixes with the sealed options and must hash to `tally_sha256`
+(BROKEN otherwise). A snapshot that used a groups or aliases file is rebuilt
+only when you pass the same file (`--groups`, `--aliases`; a different file
+is BROKEN); without it the rebuild is skipped and says so.
+
+**`pin --dry-run`** prints the pin statement for the tally chain's current
+tip, and with `--out` writes it to a new file (an existing file is never
+overwritten). It writes nothing else. `--dry-run` is the only mode: without
+it the verb refuses (exit 2) and says why. A chain that does not verify gets
+no statement (exit 1); a missing or empty one is exit 3. **The live pin is
+the operator's scheduled task, not this verb's:** the Bitcoin timestamp and
+the public mirror copy are done by the operator's own witness job, on its
+schedule. This verb ships the dry-run entry only.
+
+The statement is the v2 pin statement of the operator's canon witness,
+reproduced field for field from `bridge/witness/seal_chain.py`
+(`build_pin_statement_v2`, `statement_canonical`) and checked as
+`bridge/witness/verify_pins.py` checks it, both at commit `25a88340` of the
+operator's witness repository (not public):
+
+```json
+{"chain": "arcaeon-tally", "chain_values_sha256": HEX64, "file_sha256": HEX64,
+ "file_sha256_of": "lf", "prev_pin_sha256": null, "rows": 3,
+ "stated_at": "2026-10-04T12:10:00+00:00", "tip": "...", "v": 2}
+```
+
+- `chain`: `--chain-id`, default `arcaeon-tally`.
+- `chain_values_sha256`: sha256 of every row's `chain` value, rows 1..N in
+  order, each followed by one LF.
+- `file_sha256`: sha256 of the chain file's LF-canonical bytes;
+  `file_sha256_of` is `lf`.
+- `prev_pin_sha256`: `--prev-pin-sha256` (the previous pin statement's
+  sha256), else `null`.
+- `stated_at`: the sealer's clock, `+00:00` form; never a proof time.
+- Serialized with sorted keys, `,` and `:` separators, UTF-8, not
+  ASCII-escaped; the statement's sha256 is over exactly those bytes.
+  `public_listing_sha256` (the witness's listing of earlier pin folders) is
+  not built here; `verify --statement` accepts a statement that carries it.
+
+`verify --statement S.json` checks the statement commits to this chain:
+`rows` no more than the chain has, `tip` is row N's chain value, and
+`chain_values_sha256` and `file_sha256` match rows 1..N. A statement for an
+older tip of the same chain still verifies and names the rows after it as
+not covered; any mismatch is BROKEN; a file that is not a v2 pin statement is
+COULD NOT LOOK. `tests/test_tally_chain.py` holds a statement the witness
+builder produced and checks this builder's bytes equal it.
+
+**Un-editable, not un-gameable.** The chain proves a tally was not changed
+after it was sealed and which exchange-log bytes it read. It does not prove
+those exchanges were real. A wash trade between two keys one owner runs is
+sealed faithfully, as a wash trade, forever: the seal makes the record
+permanent, it does not make it honest. The gaming rules above still decide
+what counts. `at` and `ts` are the sealer's clock: going backwards is caught,
+a wrong clock is not. And a truncated or re-minted tally chain still verifies
+on its own; only a pin of its tip held outside your control closes that gap.
+
 ## Limits
 
 - **Clean means unchanged and labeled, never true.** The tally counts what
