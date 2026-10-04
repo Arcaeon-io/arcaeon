@@ -26,7 +26,8 @@ COUNCIL_VERBS = ["log", "verify", "reconcile", "pin", "seal", "stamp", "vet", "b
 #: deal: DEAL_LANE_DESIGN_2026-09-24.md (the witnessed-transaction lane).
 #: status: Daniel's HUD slice 1 (batch lane B, B015), reads the activity journal.
 #: envelope: the labeled-exchange envelope, truth-economy connector phase 1 (D010).
-ADDED_VERBS = ["deal", "status", "envelope"]
+#: gate: the rule as code over the envelope verdict, truth-economy phase 2 (D050 / TE-21).
+ADDED_VERBS = ["deal", "status", "envelope", "gate"]
 #: Registered up front by the 9/27 plug-in batch (BATCH_OPUS_2026-09-27_PLUGIN.md,
 #: K001), each dispatched lazily to a module a later item builds.
 PLUGIN_VERBS = ["serve", "connect", "schema", "second-read", "evidence-pack", "export",

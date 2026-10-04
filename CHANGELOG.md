@@ -6,6 +6,7 @@ that adds a JSON field or a verb.
 
 ## Unreleased
 
+- **D050 / TE-21, the gate as code (branch d050-gate-decide).** New verb `arcaeon gate decide --envelope PATH --audience ID --signer DID --action {read,act,pay,irreversible} [--deal ID] [--json]` and library `arcaeon.prove.gate.decide(...)`, which runs `envelope verify` (no second verifier) and answers allow or refuse: VERIFIED allows all four actions, BROKEN refuses all four, COULD NOT LOOK allows `read` only and names what could not be checked. On BROKEN with a deal id it writes an evidence pack to `DIR/DEAL-<deal>/gate/<UTC stamp>-<sha256 prefix>/` (`bundle/` copies of the file and envelope, `evidence.json` with their sha256, the verdict, reasons, action and UTC time). Exit 0 allow, 1 refuse on BROKEN, 3 refuse on COULD NOT LOOK, 2 bad usage. Allow means unchanged and labeled for you, never true or safe.
 - **Bearer classes (branch bearer-class-2026-09-27).** Every sentence on an evidence pack's README.md ends in `[bytes]`, `[order]` or `[asserted]` (an `[asserted]` one names its falsifier), and a new `README.json` twin lists each sentence id, its sha256, line and class. `evidence-pack verify` breaks an untagged, misclassed or falsifier-less sentence naming its id and reports the counts under `bearer`. `pack_schema` is now 2; a schema 1 pack with no README.json and no brackets still verifies and prints "bearer classes: not present (pack schema 1)".
 
 ## 0.10.0 (2026-09-27)

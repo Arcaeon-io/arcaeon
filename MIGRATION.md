@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **The gate (`arcaeon gate decide`, `arcaeon.prove.gate`).** A new verb; nothing existing changed. `--json` prints `decision` (`allow` / `refuse`), `action`, `verdict`, `reason`, `reasons`, `could_not_check` (`looked_for`, `where`, `reason_word`, or `null`), `file`, `envelope`, `audience`, `deal`, `evidence` (the pack directory or `null`), `evidence_error`, `exit_code`, `limits` and `report` (the envelope verify report, unchanged). A pack's `evidence.json` holds `kind` (`arcaeon.gate.evidence/v1`), `deal`, `action`, `decision`, `verdict`, `reason`, `reasons`, `at`, `file` and `envelope` (`path`, `copy`, `sha256`, `bytes`), `audience`, `signers`, `limits` and `report`.
+
 - **Bearer classes.** A pack's manifest now reads `pack_schema` 2 and the pack holds `README.json` (`bearer_schema`, `page`, `classes`, `counts`, and `sentences`: `id`, `line`, `sha256`, `class`, and `falsifier` on an `asserted` one), hashed in `files`. Each sentence line of README.md ends in `[bytes]`, `[order]` or `[asserted; falsifier: ...]`, and page one gains a legend line. `evidence-pack verify --json` adds `bearer` (the class counts, `null` for a schema 1 pack). A schema 1 pack with no README.json and no brackets verifies as before and prints `bearer classes: not present (pack schema 1)`.
 
 ## 0.10.0 (2026-09-27)

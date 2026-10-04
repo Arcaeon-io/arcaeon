@@ -21,7 +21,7 @@ make it look like one or the other.
 
 Contents: Record (`log`, `verify`, `receipt`, `once`, `proxy`, `pin`, `deal`,
 `mandate`), Prove (`reconcile`, `audit`, `vet`, `badge`, `seal`, `baseline`,
-`compact`, `second-read`, `evidence-pack`, `export`, `envelope`), Save (`distill`, `dedup`,
+`compact`, `second-read`, `evidence-pack`, `export`, `envelope`, `gate`), Save (`distill`, `dedup`,
 `meter`), Hosted (`stamp`, `credits`, `buy`), Serve (`mcp`, `serve`, `connect`,
 `schema`, `open`), This install (`status`, `selftest`, `version`, `doctor`,
 `demo`).
@@ -669,6 +669,40 @@ usage. New in 0.10, so `--legacy-exit` changes nothing here.
 $ arcaeon envelope seal grades.csv --label "week 3 grades" --audience instructor-1 --deal d-7f3a --purpose grading --not-after 7d --key seal.key
 $ arcaeon envelope verify grades.csv --audience instructor-1 --signer did:key:z6Mk...
 VERIFIED: the file's bytes are the bytes the named key sealed, ...
+```
+
+## `gate`
+
+Answers: may I take this action on the file I was handed? `gate decide` runs
+`envelope verify` (the same verifier, not a second one) and turns its word
+into allow or refuse for one of four actions: VERIFIED allows `read`, `act`,
+`pay` and `irreversible`; BROKEN refuses all four; COULD NOT LOOK allows
+`read` only and refuses the rest, naming what could not be checked. On
+BROKEN with `--deal`, it writes an evidence pack into the deal's record:
+`DIR/DEAL-<deal>/gate/<UTC stamp>-<sha256 prefix>/` holding `bundle/` (copies
+of the file and its envelope) and `evidence.json` (the sha256 of each copy,
+the verdict, the reasons, the action, the UTC time and the verify report).
+Allow means the bytes are unchanged since the key you named sealed them and
+are labeled for you and in date; it does not say the content is true or safe.
+The library function is `arcaeon.prove.gate.decide`.
+
+**Usage**
+
+```text
+usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
+                           --action {read,act,pay,irreversible} [--deal ID]
+                           [--purpose TEXT] [--file PATH] [--record-dir DIR]
+                           [--json]
+```
+
+**Exit codes:** 0 allow, 1 refuse (BROKEN), 3 refuse (COULD NOT LOOK), 2 bad
+usage (a missing `--envelope`, `--audience`, `--signer` or `--action`, or an
+action that is not one of the four). New in 0.10.x, so `--legacy-exit`
+changes nothing here.
+
+```console
+$ arcaeon gate decide --envelope grades.csv.envelope.json --audience instructor-1 --signer did:key:z6Mk... --action pay --deal d-7f3a
+allow pay: VERIFIED. The bytes are unchanged since the key you named sealed them, ...
 ```
 
 ## `distill`
