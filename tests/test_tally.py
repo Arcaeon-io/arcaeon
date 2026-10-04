@@ -202,13 +202,14 @@ def test_unrated_under_fourteen_days(w):
 
 
 def test_unpaired_rows_do_not_count_toward_rating(w):
-    """Ten rows naming keys with no chain among the inputs: said counts them,
-    nothing pairs, the ID stays unrated."""
+    """Ten rows naming keys with no chain among the inputs: said_unpaired shows
+    them, said does not count them (F6), nothing pairs, the ID stays unrated."""
     a = w["a"]
     for n in range(10):
         react(w, a, Party(w["tmp"], f"ghost{n}"), f"ex-{n}", days_ago=20)
     ia = by_id(tally(a), a.did)
-    assert ia["windows"]["all"]["said"]["share_verified"] == "10 of 10"
+    assert ia["windows"]["all"]["said"]["share_verified"] == "0 of 0"
+    assert ia["windows"]["all"]["said_unpaired"][V.VERIFIED] == 10
     assert ia["windows"]["all"]["exchanges"] == 0
     assert ia["windows"]["all"]["counterparties_with_records"] == 0
     assert ia["unrated"]
@@ -277,9 +278,10 @@ def test_broken_chain_flags_the_owner_and_the_tally(w):
     assert r["verdict"] == V.BROKEN
     ia = by_id(r, a.did)
     assert ia["flags"][0] == "BROKEN" and ia["record_broken"]
-    ib = by_id(r, b.did)                 # its pair with a holds the broken row
-    assert ib["flags"][0] == "BROKEN" and ib["record_broken"] == []
-    assert ib["windows"]["all"]["paired"]["broken"] == 1
+    ib = by_id(r, b.did)                 # F10: a's BROKEN chain credits and flags nothing
+    assert "BROKEN" not in ib["flags"] and ib["record_broken"] == []
+    assert ib["windows"]["all"]["paired"]["total"] == 0
+    assert ib["windows"]["all"]["from_broken_chain"]["paired"] == 2
     assert {i["id"] for i in r["ids"][:2]} == {a.did, b.did}
     assert cli.main(["tally", "build", str(a.log), str(b.log), "--now", NOW_S]) == 1
 
@@ -437,18 +439,141 @@ def test_build_is_importable_with_paths():
 
 
 def test_account_id_counterparty_is_a_distinct_id_not_paired(w):
-    """D071: an acct:NAME@arcaeon.io counterparty is stored as given; the tally
-    does not bind it to a did:key, so it never pairs with b's chain."""
+    """D071: an acct:NAME@arcaeon.io counterparty is stored as given; with no
+    binding row (D077) the tally does not bind it to a did:key, so it never
+    pairs with b's chain and a's row is said_unpaired."""
     a, b = w["a"], w["b"]
     react(w, a, "acct:b-owner@arcaeon.io", "ex-1")
     react(w, b, a, "ex-1")
     r = tally(a, b)
     assert r["verdict"] == V.VERIFIED, r["reason"]
     ia, ib = by_id(r, a.did), by_id(r, b.did)
-    assert ia["windows"]["all"]["said"]["total"] == 1
+    assert ia["windows"]["all"]["said"]["total"] == 0
+    assert ia["windows"]["all"]["said_unpaired"]["total"] == 1
     # b's row names a's key, so the exchange pairs; a's row names an account, not
     # b's key, so the pair reads mismatch on counterparty for both sides
     for i in (ia, ib):
         assert i["windows"]["all"]["paired"]["mismatch"] == 1
         assert i["windows"]["all"]["paired"]["clean"] == 0
     assert "acct:b-owner@arcaeon.io" not in [i["id"] for i in r["ids"]]
+
+
+# --- D077: F6 paired-only said, F7 retracted, F10 broken chains, account bindings ----------
+
+def test_f6_invented_counterparties_do_not_inflate_said(w):
+    """Rows naming made-up keys (or a real chain that never answered) are shown
+    in said_unpaired and never folded into said or its share."""
+    a, b, c = w["a"], w["b"], w["c"]
+    both(w, a, b, "real-1", rp=V.BROKEN)
+    for n in range(5):
+        react(w, a, Party(w["tmp"], f"ghost{n}"), f"inv-{n}")
+    react(w, a, c, "no-answer")                      # c's chain is here, no row for it
+    react(w, c, b, "other")
+    al = by_id(tally(a, b, c), a.did)["windows"]["all"]
+    assert al["said"]["share_verified"] == "0 of 1"
+    assert al["said"][V.BROKEN] == 1 and al["said"]["total"] == 1
+    assert al["said_unpaired"][V.VERIFIED] == 6 and al["said_unpaired"]["total"] == 6
+    assert "said unpaired" in T.render(tally(a, b, c))
+
+
+def test_f7_retracted_broken_leaves_a_mark(w):
+    a, b = w["a"], w["b"]
+    react(w, a, b, "ex-1")
+    old = react(w, b, a, "ex-1", V.BROKEN, days_ago=2)
+    react(w, b, a, "ex-1", V.VERIFIED, days_ago=1, supersedes=old["row_digest"])
+    r = tally(a, b)
+    ia, ib = by_id(r, a.did), by_id(r, b.did)
+    assert ia["windows"]["all"]["paired"]["clean"] == 1
+    assert ib["windows"]["all"]["retracted"] == {"said": 1, "received": 0}
+    assert ia["windows"]["all"]["retracted"] == {"said": 0, "received": 1}
+    assert ib["windows"]["30d"]["retracted"]["said"] == 1
+    assert "retracted" in T.render(r)
+
+
+def _break_chain_not_rows(party: Party):
+    """Edit an unsigned ledger stamp: the chain fails, every row's signature still checks."""
+    lines = party.log.read_text(encoding="utf-8").splitlines()
+    row = json.loads(lines[0])
+    row["ts"] = "1999-01-01T00:00:00Z"
+    lines[0] = json.dumps(row)
+    party.log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_f10_rows_from_a_broken_chain_do_not_credit_counterparties(w):
+    a, b = w["a"], w["b"]
+    both(w, a, b, "ex-1")
+    both(w, a, b, "ex-2")
+    _break_chain_not_rows(a)
+    r = tally(a, b)
+    assert r["verdict"] == V.BROKEN
+    ia, ib = by_id(r, a.did), by_id(r, b.did)
+    assert ia["flags"][0] == "BROKEN" and ia["record_broken"]
+    al = ib["windows"]["all"]
+    assert al["received"]["total"] == 0                 # a's words credit nobody
+    assert al["paired"]["total"] == 0 and al["exchanges"] == 0
+    assert al["counterparties_with_records"] == 0
+    assert al["from_broken_chain"] == {"received": 2, "paired": 2}   # marked, not dropped
+    assert "from broken chain" in T.render(r)
+
+
+def test_f10_broken_chain_said_broken_does_not_flag_counterparty(w):
+    a, b = w["a"], w["b"]
+    both(w, a, b, "ex-1", rp=V.BROKEN)
+    _break_chain_not_rows(a)
+    ib = by_id(tally(a, b), b.did)
+    assert ib["windows"]["all"]["received"][V.BROKEN] == 0
+    assert ib["windows"]["all"]["from_broken_chain"]["received"] == 1
+
+
+ACCT_A = "acct:a-owner@arcaeon.io"
+
+
+def test_account_id_pairs_through_a_binding_row(w):
+    a, b = w["a"], w["b"]
+    X.bind(a.log, key_file=a.key, account=ACCT_A, at=NOW - timedelta(days=3))
+    react(w, a, b, "ex-1")
+    react(w, b, ACCT_A, "ex-1")
+    r = tally(a, b)
+    assert r["verdict"] == V.VERIFIED, r["reason"]
+    ia, ib = by_id(r, a.did), by_id(r, b.did)
+    assert ib["windows"]["all"]["said"]["total"] == 1
+    assert ib["windows"]["all"]["said_unpaired"]["total"] == 0
+    assert ia["windows"]["all"]["received"][V.VERIFIED] == 1
+    for i in (ia, ib):
+        assert i["windows"]["all"]["paired"]["clean"] == 1
+    assert r["bindings"] == [{"account": ACCT_A, "key": a.did, "applied": True,
+                              "finding": None}]
+
+
+def test_account_id_without_binding_is_unpaired(w):
+    a, b = w["a"], w["b"]
+    react(w, a, b, "ex-1")
+    react(w, b, ACCT_A, "ex-1")
+    ib = by_id(tally(a, b), b.did)
+    assert ib["windows"]["all"]["said"]["total"] == 0
+    assert ib["windows"]["all"]["said_unpaired"]["total"] == 1
+    assert ib["windows"]["all"]["paired"]["clean"] == 0
+
+
+def test_forged_account_binding_is_broken_and_not_applied(w):
+    a, b, c = w["a"], w["b"], w["c"]
+    react(w, a, b, "ex-1")
+    react(w, b, ACCT_A, "ex-1")
+    forged = X.build_binding(seed=c.seed, account=ACCT_A, at=NOW - timedelta(days=1))
+    Ledger(a.log).append(dict(forged))                 # c's key signs into a's chain
+    r = tally(a, b)
+    assert r["verdict"] == V.BROKEN
+    assert r["bindings"] == []
+    assert by_id(r, b.did)["windows"]["all"]["paired"]["clean"] == 0
+
+
+def test_account_bound_by_two_chains_is_not_applied(w):
+    a, b, c = w["a"], w["b"], w["c"]
+    X.bind(a.log, key_file=a.key, account=ACCT_A, at=NOW - timedelta(days=3))
+    X.bind(c.log, key_file=c.key, account=ACCT_A, at=NOW - timedelta(days=3))
+    react(w, a, b, "ex-1")
+    react(w, b, ACCT_A, "ex-1")
+    r = tally(a, b, c)
+    assert {x["applied"] for x in r["bindings"]} == {False}
+    assert all(V.COULD_NOT_LOOK in x["finding"] for x in r["bindings"])
+    assert by_id(r, b.did)["windows"]["all"]["said_unpaired"]["total"] == 1

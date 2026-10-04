@@ -52,8 +52,9 @@ for `all`, side by side:
 | column | where it comes from |
 |---|---|
 | `flags` | `BROKEN` first if anything broken is in the window, then `DISPUTED` if a current DISPUTED claim is |
-| `broken` | broken findings: this ID's chain does not verify or holds a BROKEN row (these have no trusted date, so they count in every window), a counterparty said BROKEN about an exchange with it, or a paired exchange with it is `broken` |
-| `said` | **its own reactions**: the words this ID wrote in its own chain, its latest non-superseded row per exchange. `VERIFIED`, `COULD NOT LOOK`, `BROKEN`, `total`, `share_verified` ("9 of 10") |
+| `broken` | broken findings: this ID's chain does not verify or holds a BROKEN row (these have no trusted date, so they count in every window), a counterparty whose chain does not read BROKEN said BROKEN about an exchange with it, or a paired exchange with it is `broken` |
+| `said` | **its own reactions, paired only**: the words this ID wrote in its own chain, its latest non-superseded row per exchange, counted ONLY when the counterparty pairs (a chain it owns is among the inputs and holds a current row for the same exchange). `VERIFIED`, `COULD NOT LOOK`, `BROKEN`, `total`, `share_verified` ("9 of 10") |
+| `said_unpaired` | the same words for every other exchange: a counterparty with no chain here, an account id with no binding row, or no answering row. `VERIFIED`, `COULD NOT LOOK`, `BROKEN`, `total`. Shown apart, never folded into `said` or its share: an invented counterparty cannot move `said` |
 | `received` | **what counterparties said**: the latest row per exchange of every other chain among the inputs that names this ID. Same five fields |
 | `paired` | **paired outcomes**: exchanges where both parties' chains are among the inputs, lined up as `arcaeon exchange pair` does: `clean`, `mismatch`, `missing`, `not_verified`, `broken`, `total`, `share_clean` |
 | `exchanges` | distinct paired exchanges (counterparty has its own chain among the inputs), self-trades excluded |
@@ -61,6 +62,19 @@ for `all`, side by side:
 | `disagreements` | paired exchanges whose status is `mismatch` or `missing` |
 | `disputed` | current DISPUTED claims by or about this ID, self-trades excluded (each claim is listed in `claims`) |
 | `excluded` | self-trades in the window, each listed in `excluded` with its reason |
+| `retracted` | `said`: BROKEN rows this ID wrote and later superseded with another word; `received`: the same by a counterparty about an exchange with this ID. One per exchange, dated by the retracted row's `at`. The current row is what counts elsewhere; the retraction stays visible here |
+| `from_broken_chain` | rows from a chain that reads BROKEN, about this ID: `received` (words it would have received) and `paired` (exchanges it would have paired). They credit nothing and flag nothing; they are counted here, never silently dropped |
+
+**Rows from a BROKEN chain credit nobody.** When a chain reads BROKEN (its
+hash chain fails or it holds a BROKEN row), its owner is flagged BROKEN
+(`record_broken`) as before, and its rows do not enter any counterparty's
+`received`, `paired`, `exchanges` or `counterparties_with_records`, and its
+DISPUTED claims about others are listed but not counted. Each such row is
+counted in the counterparty's `from_broken_chain` instead. The owner's own
+`said` still counts its own rows (it is flagged BROKEN beside them).
+
+`retracted` and `from_broken_chain` are marks: they are counted before the
+`--checked-only` / `--settled-only` filters, which never hide them.
 
 So the three words are counted twice, kept apart: from its own reactions
 (`said`) and from what others said about it (`received`), and the paired
@@ -271,8 +285,14 @@ on its own; only a pin of its tip held outside your control closes that gap.
   among the inputs is not counted, and a truncated or re-minted chain still
   verifies (see EXCHANGE.md).
 - **A key is not a person.** An ID is a `did:key`.
-- **An account id is a distinct ID.** A row whose counterparty is an arcaeon.io
-  account id (`acct:NAME@arcaeon.io`, EXCHANGE.md) is counted as said, but it
-  never matches any chain's `did:key`, so such an exchange never pairs
-  `clean`. Which key an account binds is checked on the account
-  side, not here (COULD NOT LOOK here).
+- **An account id pairs only through a binding row.** `acct:NAME@arcaeon.io`
+  is the confirmed account form (EXCHANGE.md). A row naming an account
+  resolves to a key ONLY when exactly one chain among the inputs holds a
+  valid signed binding row for it (the account's own chain, signed by its
+  `did:key`, naming the account; `arcaeon exchange bind`). Then it pairs like
+  a row naming that key. Without one the binding is COULD NOT LOOK and the
+  row is `said_unpaired`; a binding signed by another key is a BROKEN row
+  (the tally is BROKEN) and never resolves; two chains binding one account
+  resolve to neither. Each account is listed under `bindings` with
+  `applied` and a finding. A binding is the key holder's claim: arcaeon.io's
+  own record is not consulted here.

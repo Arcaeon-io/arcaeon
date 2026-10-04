@@ -48,11 +48,51 @@ host; `NAME` is 1 to 64 characters of dot-separated labels, each lower-case
 `a-z`, `0-9` and `-`, not starting or ending with `-`. That form is defined
 once, as `ACCOUNT_ID_RE` in `arcaeon.prove.exchange_log`. Anything else is
 refused before writing (exit 2). Nothing resolves an account over the
-network: the row holds the text given. `pair` and `tally` compare IDs as
-text, so `acct:...` and `did:key:...` are two distinct IDs; no row records
-which key an account binds. A row that names an account therefore reads
-`mismatch` on counterparty, and the finding says the binding was not checked
-here. The binding is checked on the account side; here it is COULD NOT LOOK.
+network: the row holds the text given. An account id pairs **only** through a
+binding row (below); without one, `pair` and `tally` treat `acct:...` and
+`did:key:...` as two distinct IDs, a row that names the account reads
+`mismatch` on counterparty, and the finding says which key it binds is COULD
+NOT LOOK here.
+
+## The binding row (D077)
+
+`acct:NAME@arcaeon.io` is the confirmed account form. An account id pairs
+with a log ONLY through a signed account-to-`did:key` binding row in that
+log: the account's own chain, signed by its `did:key`, naming the account.
+
+```console
+$ arcaeon exchange bind --account acct:dealer-7@arcaeon.io --key b.key --log b.jsonl
+```
+
+The row is kind `exchange.binding`, v `1`, appended with `Ledger.append`:
+
+| field | what |
+|---|---|
+| `kind`, `v` | `exchange.binding`, `1` |
+| `account` | `acct:NAME@arcaeon.io` |
+| `at` | UTC time, `YYYY-MM-DDTHH:MM:SSZ` |
+| `signer` | the bound `did:key`, which must own the log |
+| `sig` | base64 Ed25519 over `PAE("application/vnd.arcaeon.exchange.binding.v1+json", C)`, `C` the json-c14n v1 bytes of the five fields above |
+
+The rules:
+
+- With a valid binding row in log B for `acct:X`, a row in log A naming
+  `acct:X` reads as naming B's key, and the exchange can pair `clean`.
+- Without one, that side is COULD NOT LOOK (as before): `mismatch` on
+  counterparty, and the finding says log B holds no binding row for it.
+- A binding row signed by any key other than the log's owner, a changed
+  field, or a field outside the signature is a BROKEN row, so the log and the
+  pair read BROKEN. A forged binding never resolves.
+- If more than one log among the inputs binds the same account, it resolves
+  to none of them (COULD NOT LOOK) and the finding says so.
+- `bind` refuses (exit 2) a malformed account id or a key that does not own
+  the log.
+
+**The limit:** a binding is the key holder's own signed claim. It proves the
+key said "I am `acct:X`", not that arcaeon.io agrees. Two keys claiming one
+account among your inputs are caught (neither resolves); one key claiming an
+account it does not hold, with no rival among the inputs, is not. The
+arcaeon.io account record is not consulted here.
 
 **The row digest** is `sha256:json-c14n:v1:` + sha256(`C`). `react` prints
 it; `--supersedes` takes it.
@@ -62,6 +102,13 @@ Editing a row in place breaks the chain, and editing a signed field breaks
 the signature too. The pair reader reads, per party and exchange, the latest
 row that no later row supersedes; if a party left two rows unsuperseded it
 reads the last and says so.
+
+**A retracted BROKEN leaves a mark.** When a row that said BROKEN is
+superseded and the current row says another word, the current row is read
+and the head carries `retracted` (how many BROKEN rows were superseded) and
+`retracted_at` (the latest one's `at`). `pair` lists the side under the
+exchange's `retracted`, adds a finding, and counts them in the report's
+`retracted`. A BROKEN superseded by another BROKEN is not a retraction.
 
 **DISPUTED is a claim, not a verdict.** `--disputed REASON` signs a claim with
 a reason. `pair` lists claims apart from the statuses and never turns one into
@@ -74,7 +121,8 @@ The verdict is about the record: BROKEN if either chain does not verify
 (strict: every row chained from genesis), any reaction row is BROKEN (bad
 shape, a field outside the signature, a signature that does not verify, a
 signer other than the log's owner, a `supersedes` that points at nothing
-earlier for the same exchange) or both logs belong to one key. COULD NOT LOOK
+earlier for the same exchange), any binding row is BROKEN, or both logs
+belong to one key. COULD NOT LOOK
 if a log is missing, empty, not UTF-8, not a chained ledger or too big, or if
 the install cannot check Ed25519. Else VERIFIED. A broken row is listed with
 its line, never dropped. Exit 0 VERIFIED, 1 BROKEN, 3 COULD NOT LOOK.
@@ -88,7 +136,8 @@ when you know it).
 
 Per exchange, `status` is:
 
-- `clean`: both said VERIFIED, about the same sha256, each naming the other's key;
+- `clean`: both said VERIFIED, about the same sha256, each naming the other's key
+  (or an account the other's log binds by a valid binding row);
 - `mismatch`: the reactions, the sha256 or the counterparty differ (`differs` names which);
 - `not_verified`: both said the same word, and it is not VERIFIED;
 - `missing`: one party wrote nothing for it;

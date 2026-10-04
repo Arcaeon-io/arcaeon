@@ -49,10 +49,21 @@ _TS_FMT = "%Y-%m-%dT%H:%M:%SZ"
 _WINDOW = re.compile(r"([1-9][0-9]{0,4})([dh])")
 
 DEFINITIONS = {
-    "said": "the words this ID wrote in its own chain: its latest non-superseded reaction "
-            "per exchange (what it said about the bytes it got)",
+    "said": "the words this ID wrote in its own chain, its latest non-superseded reaction "
+            "per exchange, counted ONLY when the counterparty pairs: a chain the counterparty "
+            "owns is among the inputs and holds a current row for the same exchange",
+    "said_unpaired": "the same words for every other exchange (a counterparty with no chain "
+                     "here, an account id with no binding row, or no answering row); shown "
+                     "apart, never folded into said or its share",
+    "retracted": "BROKEN rows later superseded by another word: `said`, by this ID; "
+                 "`received`, by a counterparty about an exchange with it. Dated by the "
+                 "retracted row; counted before filters",
+    "from_broken_chain": "rows from a chain that reads BROKEN, about this ID: `received` "
+                         "words and `paired` exchanges they would have made. They credit and "
+                         "flag nothing; they are counted here, before filters",
     "received": "the words counterparties wrote about exchanges with this ID: their latest "
-                "reaction per exchange, read only from chains among the inputs",
+                "reaction per exchange, read only from chains among the inputs that do not "
+                "read BROKEN (those are in from_broken_chain)",
     "paired": "exchanges where both parties' chains are among the inputs, lined up by "
               "exchange_id as `arcaeon exchange pair` does: clean, mismatch, missing, "
               "not_verified, broken",
@@ -62,8 +73,9 @@ DEFINITIONS = {
                                    "counts only if a chain it owns is among the inputs",
     "disagreements": "paired exchanges whose status is mismatch or missing",
     "broken": "findings that make the BROKEN flag: this ID's chain does not verify or holds "
-              "a BROKEN row (dated in every window), a counterparty said BROKEN about an "
-              "exchange with it, or a paired exchange is broken",
+              "a BROKEN row (dated in every window), a counterparty whose chain does not "
+              "read BROKEN said BROKEN about an exchange with it, or a paired exchange is "
+              "broken",
     "checked": "a reaction that is VERIFIED or BROKEN (someone looked); COULD NOT LOOK is not "
                "checked. --checked-only drops unchecked rows and any pair holding one",
     "settled": "an exchange with a current row from both parties (both chains among the "
@@ -85,9 +97,10 @@ LIMITS = (
     "a fresh key with no alias cannot be stopped; it is shown as a new, unrated ID",
     "an alias needs both keys' signatures, so an ID with a bad record will not sign one: "
     "the alias carries history forward only when the holder chooses to",
-    "a counterparty named by arcaeon.io account id (acct:NAME@arcaeon.io) is a distinct ID "
-    "from every did:key: no row records which key an account binds, so that binding is "
-    "not checked here (COULD NOT LOOK) and such a row never pairs clean",
+    "a counterparty named by arcaeon.io account id (acct:NAME@arcaeon.io) resolves to a key "
+    "ONLY through a signed binding row in that key's own chain among the inputs; without "
+    "one, or when two chains bind it, the binding is COULD NOT LOOK and the row is unpaired. "
+    "A binding is the key holder's claim: arcaeon.io's record is not consulted",
     "`at` is signed but not witnessed: an owner can backdate rows to look older; pin chain "
     "heads outside your control",
 )
@@ -234,7 +247,8 @@ def _skeleton(now: datetime, span: timedelta, window: str, settled: bool, checke
             "thresholds": {"unrated_under_exchanges": UNRATED_UNDER_EXCHANGES,
                            "unrated_under_days": UNRATED_UNDER_DAYS},
             "filters": {"settled_only": settled, "checked_only": checked},
-            "definitions": DEFINITIONS, "chains": [], "aliases": [], "groups": [],
+            "definitions": DEFINITIONS, "chains": [], "aliases": [], "bindings": [],
+            "groups": [],
             "ids": [], "findings": [], "proves": PROVES, "does_not_prove": DOES_NOT_PROVE,
             "limits": list(LIMITS)}
 
@@ -330,6 +344,7 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
     rows_by_key: dict[str, list[dict]] = {}
     broken_rows_by_key: dict[str, list[dict]] = {}
     record_broken: dict[str, list[str]] = {}
+    bound: dict[str, set[str]] = {}
     cnl_chains: list[str] = []
     seen_paths: set[str] = set()
     for i, p in enumerate(paths, 1):
@@ -362,11 +377,33 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
             record_broken.setdefault(own, []).append(f"chain {p.name}: {side['reason']}")
         if own is None:
             continue
+        for acct in side.get("accounts", []):
+            bound.setdefault(acct, set()).add(own)
         rows_by_key.setdefault(own, []).extend(rows)
         broken_rows_by_key.setdefault(own, []).extend(side["broken_rows"])
 
     owners = set(rows_by_key)
+    broken_owners = set(record_broken) | {k for k, v in broken_rows_by_key.items() if v}
     heads = {k: X.latest_heads({"_rows": v}) for k, v in rows_by_key.items()}
+    acct_key: dict[str, str] = {}
+    for acct in sorted(bound):
+        keys = sorted(bound[acct])
+        if len(keys) == 1:
+            acct_key[acct] = keys[0]
+            r["bindings"].append({"account": acct, "key": keys[0], "applied": True,
+                                  "finding": None})
+            continue
+        for k in keys:
+            r["bindings"].append({"account": acct, "key": k, "applied": False, "finding":
+                                  f"{V.COULD_NOT_LOOK}: {len(keys)} chains among the inputs "
+                                  f"bind {acct}; not resolved"})
+    shared = {a for a, ks in bound.items() if len(ks) > 1}
+    ids_of: dict[str, set[str]] = {k: {k} for k in owners}
+    for acct, k in acct_key.items():
+        ids_of[k].add(acct)
+
+    def resolve(cp: str) -> str:
+        return acct_key.get(cp, cp)
     group_of: dict[str, set[str]] = {}
     for g in glist:
         for m in g["members"]:
@@ -422,7 +459,7 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
             elif t and (me["first"] is None or t < me["first"]):
                 me["first"] = t
         for eid, h in sorted(heads[k].items()):
-            cp, t = h["counterparty"], _at(h["at"])
+            cp, t = resolve(h["counterparty"]), _at(h["at"])
             why = exclusion(k, cp)
             if why:
                 me["excluded"].append({"exchange_id": eid, "counterparty": cp, "side": "said",
@@ -432,17 +469,28 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
                         {"exchange_id": eid, "counterparty": k, "side": "received",
                          "at": h["at"], "reason": why})
                 continue
-            if cp in owners:
+            here = cp in owners
+            if here:
                 pairs.add(pair_key(k, cp, eid))
+            answered = here and eid in heads[cp]
+            credit = here and k not in broken_owners
+            if h.get("retracted"):
+                rt = _at(h["retracted_at"])
+                me["events"].append({"t": rt, "type": "retracted_said"})
+                if credit:
+                    acc(canon(cp))["events"].append({"t": rt, "type": "retracted_received"})
+            if here and not credit:
+                acc(canon(cp))["events"].append({"t": t, "type": "broken_received"})
             drop = (checked_only and h["reaction"] == V.COULD_NOT_LOOK) or \
                 (settled_only and not settled(k, cp, eid))
             if drop:
                 me["filtered_out"]["said"] += 1
-                if cp in owners:
+                if credit:
                     acc(canon(cp))["filtered_out"]["received"] += 1
                 continue
-            me["events"].append({"t": t, "type": "said", "word": h["reaction"]})
-            if cp in owners:
+            me["events"].append({"t": t, "type": "said" if answered else "said_unpaired",
+                                 "word": h["reaction"]})
+            if credit:
                 acc(canon(cp))["events"].append({"t": t, "type": "received",
                                                  "word": h["reaction"]})
 
@@ -451,7 +499,7 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
         ha, hb = heads[a].get(eid), heads[b].get(eid)
         ba = [x for x in broken_rows_by_key.get(a, []) if x["exchange_id"] == eid]
         bb = [x for x in broken_rows_by_key.get(b, []) if x["exchange_id"] == eid]
-        ex = X.pair_exchange(eid, ha, hb, a, b, ba, bb)
+        ex = X.pair_exchange(eid, ha, hb, a, b, ba, bb, ids_of[a], ids_of[b], shared)
         times = [t for t in (_at(h["at"]) if h else None for h in (ha, hb)) if t]
         t = max(times) if times else None
         present = [h for h in (ha, hb) if h]
@@ -459,6 +507,9 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
             (settled_only and not settled(a, b, eid))
         for me_k, other in ((a, b), (b, a)):
             me = acc(canon(me_k))
+            if other in broken_owners:          # F10: marked, never credited
+                me["events"].append({"t": t, "type": "broken_paired"})
+                continue
             if drop:
                 me["filtered_out"]["paired"] += 1
                 continue
@@ -471,14 +522,18 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
         for row in rows_by_key[k]:
             if not row["disputed"]:
                 continue
-            cp = row["counterparty"]
+            cp = resolve(row["counterparty"])
             c = {"claim": "DISPUTED", "exchange_id": row["exchange_id"], "signer": k,
-                 "counterparty": cp, "reason": row["reason"], "at": row["at"],
+                 "counterparty": row["counterparty"], "reason": row["reason"], "at": row["at"],
                  "reaction": row["reaction"], "row_digest": row["row_digest"],
-                 "current": row["row_digest"] in cur, "counted": exclusion(k, cp) is None}
+                 "current": row["row_digest"] in cur, "counted": exclusion(k, cp) is None,
+                 "from_broken_chain": k in broken_owners}
             acc(canon(k))["claims"].append({**c, "role": "by"})
             if canon(cp) in ids and canon(cp) != canon(k):
-                acc(canon(cp))["claims"].append({**c, "role": "about"})
+                about = {**c, "role": "about"}
+                if k in broken_owners:
+                    about["counted"] = False
+                acc(canon(cp))["claims"].append(about)
 
     windows = [(r["windows"][0]["name"], now - span), ("all", None)]
     out = []
@@ -528,7 +583,10 @@ def _of(n: int, total: int) -> str:
 
 def _window(a: dict, start: datetime | None, now: datetime) -> dict:
     said = {w: 0 for w in WORDS}
+    unpaired = {w: 0 for w in WORDS}
     recv = {w: 0 for w in WORDS}
+    retracted = {"said": 0, "received": 0}
+    from_broken = {"received": 0, "paired": 0}
     paired = {s: 0 for s in X.STATUSES}
     exchanges, others = set(), set()
     broken = len(a["record_broken"])
@@ -538,6 +596,12 @@ def _window(a: dict, start: datetime | None, now: datetime) -> dict:
             continue
         if ev["type"] == "said":
             said[ev["word"]] += 1
+        elif ev["type"] == "said_unpaired":
+            unpaired[ev["word"]] += 1
+        elif ev["type"].startswith("retracted_"):
+            retracted[ev["type"][len("retracted_"):]] += 1
+        elif ev["type"].startswith("broken_"):
+            from_broken[ev["type"][len("broken_"):]] += 1
         elif ev["type"] == "received":
             recv[ev["word"]] += 1
             broken += ev["word"] == V.BROKEN
@@ -557,11 +621,13 @@ def _window(a: dict, start: datetime | None, now: datetime) -> dict:
     st, sr, sp = sum(said.values()), sum(recv.values()), sum(paired.values())
     return {"flags": flags, "broken": broken,
             "said": {**said, "total": st, "share_verified": _of(said[V.VERIFIED], st)},
+            "said_unpaired": {**unpaired, "total": sum(unpaired.values())},
             "received": {**recv, "total": sr, "share_verified": _of(recv[V.VERIFIED], sr)},
             "paired": {**paired, "total": sp, "share_clean": _of(paired["clean"], sp)},
             "exchanges": len(exchanges), "counterparties_with_records": len(others),
             "disagreements": paired["mismatch"] + paired["missing"],
-            "disputed": disputes, "excluded": excluded}
+            "disputed": disputes, "excluded": excluded, "retracted": retracted,
+            "from_broken_chain": from_broken}
 
 
 # --- text ------------------------------------------------------------------------------------
@@ -572,6 +638,8 @@ _ROWS = (
     ("said VERIFIED", lambda b: b["said"]["share_verified"]),
     ("said COULD NOT LOOK", lambda b: str(b["said"][V.COULD_NOT_LOOK])),
     ("said BROKEN", lambda b: str(b["said"][V.BROKEN])),
+    ("said unpaired VERIFIED", lambda b: str(b["said_unpaired"][V.VERIFIED])),
+    ("said unpaired total", lambda b: str(b["said_unpaired"]["total"])),
     ("received VERIFIED", lambda b: b["received"]["share_verified"]),
     ("received COULD NOT LOOK", lambda b: str(b["received"][V.COULD_NOT_LOOK])),
     ("received BROKEN", lambda b: str(b["received"][V.BROKEN])),
@@ -585,6 +653,10 @@ _ROWS = (
     ("disagreements", lambda b: str(b["disagreements"])),
     ("DISPUTED claims (current)", lambda b: str(b["disputed"])),
     ("excluded self-trades", lambda b: str(b["excluded"])),
+    ("retracted BROKEN said", lambda b: str(b["retracted"]["said"])),
+    ("retracted BROKEN received", lambda b: str(b["retracted"]["received"])),
+    ("from broken chain received", lambda b: str(b["from_broken_chain"]["received"])),
+    ("from broken chain paired", lambda b: str(b["from_broken_chain"]["paired"])),
 )
 
 
@@ -594,6 +666,9 @@ def render(r: dict) -> str:
         lines.append(f"chain {c.get('log')}: {c.get('verdict') or 'skipped'}"
                      + (f" owner {c['owner']}" if c.get("owner") else "")
                      + (f" ({c['reason']})" if c.get("verdict") != V.VERIFIED else ""))
+    for b in r.get("bindings", []):
+        lines.append(f"binding {b['account']} -> {b['key']}: "
+                     + ("applied (signed binding row)" if b["applied"] else b["finding"]))
     for a in r["aliases"]:
         lines.append(f"alias {a['new']} -> {a['old']}: "
                      + ("applied (signed by both keys)" if a["applied"] else a["finding"]))
@@ -614,9 +689,13 @@ def render(r: dict) -> str:
         for f in i["record_broken"]:
             lines.append(f"  BROKEN record: {f}")
         for c in i["claims"]:
+            if c.get("from_broken_chain") and c["role"] == "about":
+                tag = " (from a BROKEN chain, not counted)"
+            else:
+                tag = "" if c["counted"] else " (self-trade, not counted)"
             lines.append(f"  DISPUTED {c['role']} {c['signer']} on {c['exchange_id']} at "
-                         f"{c['at']}{'' if c['current'] else ' (superseded)'}"
-                         f"{'' if c['counted'] else ' (self-trade, not counted)'}: {c['reason']}")
+                         f"{c['at']}{'' if c['current'] else ' (superseded)'}{tag}: "
+                         f"{c['reason']}")
         for e in i["excluded"]:
             lines.append(f"  excluded {e['exchange_id']} ({e['side']}, {e['counterparty']}): "
                          f"{e['reason']}")

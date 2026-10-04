@@ -5,6 +5,7 @@
                            --reaction {VERIFIED,BROKEN,"COULD NOT LOOK"}
                            [--disputed REASON] [--supersedes ROWDIGEST]
                            --key SEEDFILE [--log PATH]
+    arcaeon exchange bind --account acct:NAME@arcaeon.io --key SEEDFILE [--log PATH]
     arcaeon exchange pair A.jsonl B.jsonl [--owner-a DID] [--owner-b DID] [--json]
                           [--strict]
 
@@ -50,8 +51,22 @@ dot-separated labels, each lower-case a-z, 0-9 and "-", not starting or ending
 with "-"). Nothing here resolves an account over the network. A row that
 names an account is compared as text: the pair reader and the tally treat
 acct:... and did:key:... as two distinct IDs, because no row records which
-key an account binds. That binding is checked elsewhere (the account side,
-TE-41); here it is COULD NOT LOOK, and the pair finding says so.
+key an account binds, unless the log holds a binding row (below).
+
+THE BINDING ROW (kind "exchange.binding", v 1; D077). acct:NAME@arcaeon.io is
+the confirmed account form. An account id pairs ONLY through a signed binding
+row in the bound key's own log: {"kind", "v", "account", "at", "signer"} +
+"sig", Ed25519 by `signer` over PAE(BIND_PAYLOAD_TYPE, canon_json(those five
+fields)), signer = the log's owner. A binding signed by any other key, or
+with a field changed, is a BROKEN row. With a valid binding, a row naming the
+account is read as naming that log's key; without one (or when both logs bind
+the same account) that side is COULD NOT LOOK, and the pair finding says so.
+The binding is the key holder's own claim: whether arcaeon.io agrees that the
+account is theirs is not checked here.
+
+A row that said BROKEN and was later superseded by a row with another word is
+RETRACTED: the current row is read, and the retraction stays visible as a mark
+(`retracted` on the head, in the pair and in the tally). Never erased.
 
 Never raises from pair(): an unreadable or hostile log is COULD NOT LOOK.
 The spec and its limits: docs/EXCHANGE.md.
@@ -71,6 +86,8 @@ from arcaeon import verdict as V
 from arcaeon.record.row import canon_json, digest_json, file_pin, loads_strict
 
 __all__ = ["KIND", "ROW_VERSION", "SIG_PAYLOAD_TYPE", "REACTIONS", "SIGNED_FIELDS",
+           "BIND_KIND", "BIND_PAYLOAD_TYPE", "BIND_SIGNED", "build_binding", "check_binding",
+           "bind",
            "PAIR_KIND", "STATUSES", "ACCOUNT_ID_RE", "ACCOUNT_ID_FORM", "ExchangeError",
            "text_ok", "is_did", "is_account_id", "is_counterparty_id", "signed_fields",
            "signing_bytes", "row_digest", "build_row", "react", "check_row", "read_side",
@@ -83,6 +100,9 @@ PAIR_KIND = "arcaeon.exchange.pair/v1"
 REACTIONS = (V.VERIFIED, V.BROKEN, V.COULD_NOT_LOOK)
 SIGNED_FIELDS = ("kind", "v", "exchange_id", "counterparty", "file_sha256", "reaction",
                  "disputed", "reason", "supersedes", "at", "signer")
+BIND_KIND = "exchange.binding"
+BIND_PAYLOAD_TYPE = "application/vnd.arcaeon.exchange.binding.v1+json"
+BIND_SIGNED = ("kind", "v", "account", "at", "signer")
 #: Keys a row may carry outside the signature: the signature and the ledger's stamps.
 UNSIGNED_FIELDS = ("sig", "ts", "chain")
 #: A log bigger than this is not read.
@@ -268,10 +288,84 @@ def build_row(*, seed: bytes, exchange_id: str, counterparty: str, file_sha256: 
     return row
 
 
-def _own_rows(path: Path) -> list[dict]:
-    """The exchange.reaction rows already in a log, parsed loosely (write side)."""
+def _bind_bytes(row: dict) -> bytes:
+    from arcaeon.prove.envelope import pae
+    return pae(BIND_PAYLOAD_TYPE, canon_json({k: row[k] for k in BIND_SIGNED}))
+
+
+def build_binding(*, seed: bytes, account: str, at: datetime | None = None) -> dict:
+    """A signed exchange.binding row: the seed's did:key binds `account`."""
+    if not is_account_id(account):
+        raise ExchangeError(f"--account {account!r} is not an arcaeon.io account id "
+                            f"({ACCOUNT_ID_FORM})")
+    try:
+        from arcaeon.prove.vet import receipts as R
+        pub = R.public_key_from_seed(seed)
+    except Exception as e:  # noqa: BLE001  ReceiptsUnavailable: no backend
+        raise ExchangeError(f"signing needs an Ed25519 backend: pip install 'arcaeon[sign]' "
+                            f"({type(e).__name__})") from None
+    when = (at or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    row = {"kind": BIND_KIND, "v": ROW_VERSION, "account": account,
+           "at": when.strftime(_TS_FMT), "signer": R.did_key(pub)}
+    row["sig"] = base64.b64encode(R._sign_bytes(seed, _bind_bytes(row))).decode("ascii")
+    return row
+
+
+def check_binding(row: Any) -> str | None:
+    """None when a binding row is well formed and signed by its `signer`; else why
+    it is BROKEN. (Whether the signer owns the log is the reader's check.)"""
+    if not isinstance(row, dict):
+        return "not a JSON object"
+    keys = set(row)
+    missing = [k for k in BIND_SIGNED + ("sig",) if k not in keys]
+    if missing:
+        return f"binding row missing field(s) {', '.join(missing)}"
+    extra = sorted(keys - set(BIND_SIGNED) - set(UNSIGNED_FIELDS))
+    if extra:
+        return f"binding row has fields outside the signature: {', '.join(extra)}"
+    if row["v"] != ROW_VERSION or isinstance(row["v"], bool):
+        return f"unknown binding row version {row['v']!r}"
+    if not is_account_id(row["account"]):
+        return f"binding row account is not {ACCOUNT_ID_FORM}"
+    if not _parse_at(row["at"]):
+        return "binding row at is not a UTC time"
+    if not is_did(row["signer"]) or not isinstance(row["sig"], str):
+        return "binding row signer is not an Ed25519 did:key or sig is not text"
+    from arcaeon.prove.envelope import _pubkey_from_did
+    from arcaeon.prove.vet import receipts as R
+    try:
+        sig = base64.b64decode(row["sig"], validate=True)
+    except (binascii.Error, ValueError):
+        return "binding row sig is not base64"
+    if not R._verify_bytes(_pubkey_from_did(row["signer"]), _bind_bytes(row), sig):
+        return (f"the binding signature by {row['signer']} does not verify (a field or the "
+                f"signature was changed)")
+    return None
+
+
+def bind(log: str | Path, *, key_file: str | Path, account: str,
+         at: datetime | None = None) -> dict:
+    """Append a signed binding row (this key binds `account`) to the key's own log."""
+    from arcaeon.prove.envelope import SealError, _load_seed
     from arcaeon.record.ledger import Ledger
-    return [r for r in Ledger(path) if isinstance(r, dict) and r.get("kind") == KIND]
+    try:
+        seed = _load_seed(key_file)
+    except SealError as e:
+        raise ExchangeError(str(e)) from None
+    row = build_binding(seed=seed, account=account, at=at)
+    log = Path(log)
+    owners = [r.get("signer") for r in _own_rows(log) if isinstance(r.get("signer"), str)]
+    if owners and owners[0] != row["signer"]:
+        raise ExchangeError(f"this log belongs to {owners[0]}; the key given is "
+                            f"{row['signer']}. A binding goes in the bound key's own log")
+    chain = Ledger(log).append(dict(row))
+    return {"log": str(log), "row": row, "chain": chain}
+
+
+def _own_rows(path: Path) -> list[dict]:
+    """The reaction and binding rows already in a log, parsed loosely (write side)."""
+    from arcaeon.record.ledger import Ledger
+    return [r for r in Ledger(path) if isinstance(r, dict) and r.get("kind") in (KIND, BIND_KIND)]
 
 
 def react(log: str | Path, *, key_file: str | Path, exchange_id: str, counterparty: str,
@@ -303,7 +397,7 @@ def react(log: str | Path, *, key_file: str | Path, exchange_id: str, counterpar
         target = None
         for r in existing:
             try:
-                if row_digest(r) == supersedes:
+                if r.get("kind") == KIND and row_digest(r) == supersedes:
                     target = r
             except (KeyError, ValueError, TypeError):
                 continue
@@ -330,8 +424,8 @@ def read_side(path: Path, owner: str | None, name: str) -> dict:
     from arcaeon.record.ledger import verify_file
     side: dict[str, Any] = {"log": str(path), "verdict": None, "reason": None,
                             "owner": owner, "owner_from": "named" if owner else None,
-                            "chain": None, "reaction_rows": 0, "broken_rows": [],
-                            "_rows": []}
+                            "chain": None, "reaction_rows": 0, "binding_rows": 0,
+                            "broken_rows": [], "accounts": [], "_rows": []}
     looked = f"log {name} (an exchange reactions log)"
     try:
         if not path.exists():
@@ -363,21 +457,30 @@ def read_side(path: Path, owner: str | None, name: str) -> dict:
     res = verify_file(path, strict=True)
     side["chain"] = {"ok": res.ok, "rows": res.rows, "breaks": res.breaks,
                      "first_break": res.first_break}
-    cand = [(i, o) for i, o in parsed if isinstance(o, dict) and o.get("kind") == KIND]
-    side["reaction_rows"] = len(cand)
+    cand = [(i, o) for i, o in parsed
+            if isinstance(o, dict) and o.get("kind") in (KIND, BIND_KIND)]
+    side["reaction_rows"] = sum(1 for _, o in cand if o["kind"] == KIND)
+    side["binding_rows"] = len(cand) - side["reaction_rows"]
     checked = []
     for i, o in cand:
-        problem = check_row(o)
+        problem = check_row(o) if o["kind"] == KIND else check_binding(o)
         checked.append((i, o, problem))
     if side["owner"] is None:
         first = next((o["signer"] for _, o, p in checked if p is None), None)
         side["owner"] = first
         side["owner_from"] = "first_row" if first else None
     seen: dict[str, dict] = {}
+    accounts: set[str] = set()
     for i, o, problem in checked:
         if problem is None and o["signer"] != side["owner"]:
-            problem = (f"signed by {o['signer']}, not by the key that owns this log "
-                       f"({side['owner']})")
+            problem = (f"{'binding row ' if o['kind'] == BIND_KIND else ''}signed by "
+                       f"{o['signer']}, not by the key that owns this log ({side['owner']})")
+        if o["kind"] == BIND_KIND:
+            if problem is None:
+                accounts.add(o["account"])
+            else:
+                side["broken_rows"].append({"line": i, "exchange_id": None, "finding": problem})
+            continue
         if problem is None and o["supersedes"] is not None:
             tgt = seen.get(o["supersedes"])
             if tgt is None:
@@ -393,6 +496,7 @@ def read_side(path: Path, owner: str | None, name: str) -> dict:
         r = {**signed_fields(o), "line": i, "row_digest": d}
         seen[d] = r
         side["_rows"].append(r)
+    side["accounts"] = sorted(accounts)
     findings = []
     if res.ok is False:
         findings.append(f"the chain does not verify ({res.first_break})")
@@ -406,16 +510,25 @@ def read_side(path: Path, owner: str | None, name: str) -> dict:
 
 
 def latest_heads(side: dict) -> dict[str, dict]:
-    """exchange_id -> the latest non-superseded row (with notes on forks)."""
+    """exchange_id -> the latest non-superseded row (with notes on forks). A head
+    that is not BROKEN, for an exchange where this log said BROKEN in a row now
+    superseded, carries `retracted` (how many such rows) and `retracted_at` (the
+    latest one's `at`): the retraction is a mark, never erased (F7)."""
     rows = side["_rows"]
     superseded = {r["supersedes"] for r in rows if r["supersedes"]}
     by_ex: dict[str, list[dict]] = {}
+    gone: dict[str, list[dict]] = {}
     for r in rows:
         if r["row_digest"] not in superseded:
             by_ex.setdefault(r["exchange_id"], []).append(r)
+        elif r["reaction"] == V.BROKEN:
+            gone.setdefault(r["exchange_id"], []).append(r)
     out = {}
     for eid, heads in by_ex.items():
         head = dict(heads[-1])
+        if head["reaction"] != V.BROKEN and gone.get(eid):
+            head["retracted"] = len(gone[eid])
+            head["retracted_at"] = max(g["at"] for g in gone[eid])
         if len(heads) > 1:
             head["note"] = (f"{len(heads)} rows for this exchange are not superseded "
                             f"(lines {', '.join(str(h['line']) for h in heads)}); the last "
@@ -424,22 +537,39 @@ def latest_heads(side: dict) -> dict[str, dict]:
     return out
 
 
-_ACCOUNT_NOTE = ("; an account id and a did:key are distinct IDs here: which key the "
-                 "account binds is not checked here (COULD NOT LOOK; the account side holds it)")
+def _account_note(acct: str, other: str, shared) -> str:
+    if acct in shared:
+        return (f"; more than one log binds {acct}, so it is not resolved to any key: "
+                f"which key it binds is not checked here ({V.COULD_NOT_LOOK})")
+    return (f"; log {other} holds no signed binding row for {acct}: which key it binds is "
+            f"not checked here ({V.COULD_NOT_LOOK})")
 
 
 def _summary(r: dict | None) -> dict | None:
     if r is None:
         return None
     keep = ("reaction", "file_sha256", "counterparty", "signer", "at", "disputed", "reason",
-            "supersedes", "line", "row_digest", "note")
+            "supersedes", "line", "row_digest", "note", "retracted", "retracted_at")
     return {k: r[k] for k in keep if k in r}
 
 
 def pair_exchange(eid: str, a: dict | None, b: dict | None, own_a, own_b,
-                   broken_a: list, broken_b: list) -> dict:
+                   broken_a: list, broken_b: list, ids_a=None, ids_b=None,
+                   shared=()) -> dict:
+    """Line one exchange up. ids_a / ids_b: the IDs that name each party (its key,
+    plus accounts its log binds by a valid binding row); default its key only.
+    shared: accounts both logs bind (resolved to neither)."""
+    ids_a = {own_a} if ids_a is None else set(ids_a)
+    ids_b = {own_b} if ids_b is None else set(ids_b)
     ex: dict[str, Any] = {"exchange_id": eid, "status": None, "differs": [],
-                          "a": _summary(a), "b": _summary(b), "findings": []}
+                          "a": _summary(a), "b": _summary(b), "retracted": [],
+                          "findings": []}
+    for nm, row in (("a", a), ("b", b)):
+        if row and row.get("retracted"):
+            ex["retracted"].append(nm)
+            ex["findings"].append(f"{nm} retracted an earlier BROKEN ({row['retracted']} "
+                                  f"row(s), latest at {row['retracted_at']}); its current row "
+                                  f"says {row['reaction']}")
     if broken_a or broken_b:
         ex["status"] = "broken"
         for nm, bl in (("a", broken_a), ("b", broken_b)):
@@ -457,13 +587,15 @@ def pair_exchange(eid: str, a: dict | None, b: dict | None, own_a, own_b,
         ex["differs"].append("file_sha256")
         ex["findings"].append(f"file_sha256: a reacted to {a['file_sha256']}, "
                               f"b to {b['file_sha256']}")
-    if a["counterparty"] != own_b or b["counterparty"] != own_a:
+    if a["counterparty"] not in ids_b or b["counterparty"] not in ids_a:
         ex["differs"].append("counterparty")
-        for nm, row, other, own in (("a", a, "b", own_b), ("b", b, "a", own_a)):
-            if row["counterparty"] != own:
-                ex["findings"].append(f"counterparty: {nm} names {row['counterparty']}, "
-                                      f"log {other} is owned by {own}"
-                                      + _ACCOUNT_NOTE * is_account_id(row["counterparty"]))
+        for nm, row, other, own, ids in (("a", a, "b", own_b, ids_b),
+                                         ("b", b, "a", own_a, ids_a)):
+            if row["counterparty"] not in ids:
+                cp = row["counterparty"]
+                ex["findings"].append(f"counterparty: {nm} names {cp}, log {other} is owned "
+                                      f"by {own}" + (_account_note(cp, other, shared)
+                                                     if is_account_id(cp) else ""))
     if ex["differs"]:
         ex["status"] = "mismatch"
     elif a["reaction"] != V.VERIFIED:
@@ -487,13 +619,13 @@ def pair(log_a: str | Path, log_b: str | Path, *, owner_a: str | None = None,
     missing / broken; DISPUTED rows are listed under `claims`, never as a
     status. Never raises."""
     r: dict[str, Any] = {"kind": PAIR_KIND, "verdict": None, "reason": None,
-                         "logs": {}, "exchanges": [], "claims": [],
+                         "logs": {}, "exchanges": [], "claims": [], "retracted": 0,
                          "counts": {s: 0 for s in STATUSES}, "findings": [],
                          "proves": PROVES, "does_not_prove": DOES_NOT_PROVE}
     try:
         return _pair(r, Path(log_a), Path(log_b), owner_a, owner_b)
     except Exception as e:  # noqa: BLE001  never a traceback, never a green
-        r.update({"verdict": V.COULD_NOT_LOOK, "exchanges": [], "claims": [],
+        r.update({"verdict": V.COULD_NOT_LOOK, "exchanges": [], "claims": [], "retracted": 0,
                   "counts": {s: 0 for s in STATUSES},
                   "reason": f"the check could not finish ({type(e).__name__})",
                   **V.could_not_look("a finished pair check", f"{log_a}, {log_b}",
@@ -537,12 +669,16 @@ def _pair(r: dict, pa: Path, pb: Path, owner_a, owner_b) -> dict:
             for br in src:
                 if br["exchange_id"] is not None:
                     dst.setdefault(br["exchange_id"], []).append(br)
+        acc_a, acc_b = set(sa["accounts"]), set(sb["accounts"])
+        shared = acc_a & acc_b
+        ids_a, ids_b = {sa["owner"]} | (acc_a - shared), {sb["owner"]} | (acc_b - shared)
         ids = sorted(set(ha) | set(hb) | set(ba) | set(bb))
         for eid in ids:
             ex = pair_exchange(eid, ha.get(eid), hb.get(eid), sa["owner"], sb["owner"],
-                                ba.get(eid, []), bb.get(eid, []))
+                                ba.get(eid, []), bb.get(eid, []), ids_a, ids_b, shared)
             r["exchanges"].append(ex)
             r["counts"][ex["status"]] += 1
+            r["retracted"] += len(ex["retracted"])
         for nm, s in (("a", sa), ("b", sb)):
             heads = {h["row_digest"] for h in (ha if nm == "a" else hb).values()}
             for row in s["_rows"]:
@@ -570,7 +706,7 @@ def _pair(r: dict, pa: Path, pb: Path, owner_a, owner_b) -> dict:
         r["reason"] = (f"both chains verify and every reaction row checks under its log's key; "
                        f"{c['clean']} clean, {c['mismatch']} mismatch, {c['not_verified']} "
                        f"not verified, {c['missing']} missing, {len(r['claims'])} DISPUTED "
-                       f"claim(s)")
+                       f"claim(s), {r['retracted']} retracted BROKEN")
     return r
 
 
@@ -580,6 +716,8 @@ USAGE = """usage: arcaeon exchange react --exchange ID --counterparty ID --file 
                               --reaction {VERIFIED,BROKEN,"COULD NOT LOOK"}
                               --key SEEDFILE [--disputed REASON]
                               [--supersedes ROWDIGEST] [--log PATH]
+       arcaeon exchange bind --account acct:NAME@arcaeon.io --key SEEDFILE
+                              [--log PATH]
        arcaeon exchange pair A.jsonl B.jsonl [--owner-a DID] [--owner-b DID]
                               [--json] [--strict]"""
 
@@ -600,11 +738,19 @@ latest non-superseded row per party per exchange and reports each exchange:
 clean (both VERIFIED, same sha256, each names the other), mismatch (names the
 field), not_verified (both said the same other word), missing (one side
 absent), broken (a row for it is BROKEN). DISPUTED claims are listed apart.
-An account id and a did:key are distinct IDs here: a row naming an account
-reads mismatch on counterparty, and which key the account binds is not
-checked here (COULD NOT LOOK; the account side holds the binding).
+A BROKEN later superseded by another word is listed as retracted, never
+erased.
+
+bind appends one signed row (kind exchange.binding) to the key's own log:
+this did:key binds the account id acct:NAME@arcaeon.io. An account id pairs
+ONLY through such a row in the other party's log, signed by that log's key; a
+binding signed by any other key is a BROKEN row. Without one (or when both
+logs bind the same account) a row naming the account reads mismatch on
+counterparty, and which key it binds is COULD NOT LOOK here. The binding is
+the key holder's claim; arcaeon.io's own record is not consulted.
 
 Exit codes: react 0 written, 2 refused or bad usage, 3 the file is not there.
+bind 0 written, 2 refused or bad usage.
 pair 0 VERIFIED (both logs check; read the statuses), 1 BROKEN, 3 COULD NOT
 LOOK, 2 bad usage. pair --strict: also 1 when both logs check but any
 exchange is mismatch or missing (not_verified stays 0; 3 and 2 unchanged). Spec and limits: docs/EXCHANGE.md."""
@@ -617,6 +763,7 @@ class _Usage(Exception):
 _REACT_SPEC = {"--exchange": "value", "--counterparty": "value", "--file": "value",
                "--reaction": "value", "--disputed": "value", "--supersedes": "value",
                "--key": "value", "--log": "value"}
+_BIND_SPEC = {"--account": "value", "--key": "value", "--log": "value"}
 _PAIR_SPEC = {"--owner-a": "value", "--owner-b": "value", "--json": "bool",
               "--strict": "bool"}
 
@@ -655,11 +802,32 @@ def _react_cli(argv: list[str]) -> int:
     return V.EXIT_GOOD
 
 
+def _bind_cli(argv: list[str]) -> int:
+    from arcaeon.prove.envelope import _parse, _Usage as _EUsage
+    try:
+        pos, o = _parse(argv, _BIND_SPEC)
+    except _EUsage as e:
+        raise _Usage(str(e)) from None
+    if pos:
+        raise _Usage(f"bind takes no positional argument (got {pos[0]!r})")
+    need = [k for k in ("--account", "--key") if k not in o]
+    if need:
+        raise _Usage("bind needs " + ", ".join(need))
+    try:
+        out = bind(o.get("--log", DEFAULT_LOG), key_file=o["--key"], account=o["--account"])
+    except ExchangeError as e:
+        print(f"arcaeon exchange bind: {e}; nothing was written", file=sys.stderr)
+        return V.EXIT_USAGE
+    print(json.dumps({"ok": True, **out}, indent=1, ensure_ascii=True))
+    return V.EXIT_GOOD
+
+
 def _render(r: dict) -> str:
     lines = [f"{r['verdict']}: {r['reason']}"]
     for nm, s in r.get("logs", {}).items():
         lines.append(f"log {nm}: {s.get('verdict')} {s.get('log')} owner {s.get('owner')} "
-                     f"({s.get('owner_from')})")
+                     f"({s.get('owner_from')})"
+                     + (f" binds {', '.join(s['accounts'])}" if s.get("accounts") else ""))
         for br in s.get("broken_rows", []):
             lines.append(f"  BROKEN row line {br['line']}: {br['finding']}")
     for ex in r.get("exchanges", []):
@@ -707,7 +875,9 @@ def main(argv: list[str] | None = None) -> int:
             return _react_cli(rest)
         if sub == "pair":
             return _pair_cli(rest)
-        raise _Usage(f"unknown subcommand {sub!r} (react or pair)")
+        if sub == "bind":
+            return _bind_cli(rest)
+        raise _Usage(f"unknown subcommand {sub!r} (react, bind or pair)")
     except _Usage as e:
         print(f"arcaeon exchange: {e}\n{USAGE}", file=sys.stderr)
         return V.EXIT_USAGE

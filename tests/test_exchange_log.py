@@ -470,3 +470,105 @@ def test_promoted_helpers_are_public():
     for name in ("is_did", "is_account_id", "is_counterparty_id", "text_ok", "read_side",
                  "latest_heads", "pair_exchange"):
         assert callable(getattr(X, name)) and name in X.__all__
+
+
+# --- D077: retracted BROKEN (F7), the account binding row (lead call) --------------------
+
+def test_f7_retracted_broken_leaves_a_mark_in_pair(parties):
+    p = parties
+    _react(p, "a")
+    old = _react(p, "b", V.BROKEN)
+    _react(p, "b", V.VERIFIED, supersedes=old["row_digest"])
+    r = X.pair(p["la"], p["lb"])
+    ex = _only(r)
+    assert ex["status"] == "clean"                 # the current rows agree
+    assert ex["retracted"] == ["b"]                # but the BROKEN b wrote is not gone
+    assert ex["b"]["retracted"] == 1
+    assert any("retracted" in f and "BROKEN" in f for f in ex["findings"])
+    assert r["retracted"] == 1
+    assert "retracted" in X._render(r)
+
+
+def test_f7_broken_superseded_by_broken_is_not_a_retraction(parties):
+    p = parties
+    _react(p, "a", V.BROKEN)
+    old = _react(p, "b", V.BROKEN)
+    _react(p, "b", V.BROKEN, supersedes=old["row_digest"], disputed="still wrong")
+    ex = _only(X.pair(p["la"], p["lb"]))
+    assert ex["retracted"] == [] and ex["b"].get("retracted", 0) == 0
+
+
+def _seed(p, side):
+    return base64.b64decode(p["k" + side].read_text(encoding="ascii").strip())
+
+
+def test_bind_writes_a_signed_binding_row(parties):
+    p = parties
+    out = X.bind(p["lb"], key_file=p["kb"], account=ACCT)
+    row = out["row"]
+    assert row["kind"] == X.BIND_KIND and row["account"] == ACCT and row["signer"] == p["db"]
+    assert X.check_binding(row) is None
+    assert verify_file(p["lb"], strict=True).ok is True
+    with pytest.raises(X.ExchangeError):
+        X.bind(p["lb"], key_file=p["kb"], account="acct:Bad@arcaeon.io")
+    with pytest.raises(X.ExchangeError):
+        X.bind(p["lb"], key_file=p["ka"], account=ACCT)      # one log per key
+
+
+def test_account_pairs_clean_only_through_a_binding_row(parties):
+    p = parties
+    _react(p, "a", counterparty=ACCT)
+    _react(p, "b")
+    ex = _only(X.pair(p["la"], p["lb"]))
+    assert ex["status"] == "mismatch"                        # no binding: as before
+    assert any(ACCT in f and V.COULD_NOT_LOOK in f for f in ex["findings"])
+    X.bind(p["lb"], key_file=p["kb"], account=ACCT)
+    r = X.pair(p["la"], p["lb"])
+    assert r["verdict"] == V.VERIFIED, r["reason"]
+    assert _only(r)["status"] == "clean"
+    assert r["logs"]["b"]["accounts"] == [ACCT]
+
+
+def test_forged_binding_signed_by_another_key_is_broken(parties):
+    p = parties
+    _react(p, "a", counterparty=ACCT)
+    _react(p, "b")
+    forged = X.build_binding(seed=_seed(p, "a"), account=ACCT)   # a's key, in b's log
+    Ledger(p["lb"]).append(dict(forged))
+    r = X.pair(p["la"], p["lb"])
+    assert r["verdict"] == V.BROKEN
+    assert r["logs"]["b"]["accounts"] == []
+    assert _only(r)["status"] != "clean"
+
+
+def test_binding_with_an_edited_account_is_broken(parties):
+    p = parties
+    row = X.build_binding(seed=_seed(p, "b"), account=ACCT)
+    row["account"] = "acct:someone-else@arcaeon.io"
+    assert X.check_binding(row) is not None
+    _react(p, "b")
+    Ledger(p["lb"]).append(dict(row))
+    assert X.pair(p["la"], p["lb"])["verdict"] in (V.BROKEN, V.COULD_NOT_LOOK)
+
+
+def test_account_bound_by_both_logs_does_not_resolve(parties):
+    p = parties
+    _react(p, "a", counterparty=ACCT)
+    _react(p, "b")
+    X.bind(p["lb"], key_file=p["kb"], account=ACCT)
+    X.bind(p["la"], key_file=p["ka"], account=ACCT)
+    ex = _only(X.pair(p["la"], p["lb"]))
+    assert ex["status"] == "mismatch"
+    assert any("more than one log binds" in f for f in ex["findings"])
+
+
+def test_cli_bind(parties, capsys):
+    p = parties
+    rc = cli.main(["exchange", "bind", "--account", ACCT, "--key", str(p["kb"]),
+                   "--log", str(p["lb"])])
+    assert rc == V.EXIT_GOOD
+    assert json.loads(capsys.readouterr().out)["row"]["account"] == ACCT
+    assert cli.main(["exchange", "bind", "--account", "nope", "--key", str(p["kb"]),
+                     "--log", str(p["lb"])]) == V.EXIT_USAGE
+    assert cli.main(["exchange", "bind", "--key", str(p["kb"])]) == V.EXIT_USAGE
+    assert "Traceback" not in capsys.readouterr().err
