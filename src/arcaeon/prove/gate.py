@@ -76,10 +76,11 @@ it matches, BROKEN when the pack changed, COULD NOT LOOK when the pack or the
 row cannot be read. It says the pack still matches the row; that the row
 itself was not rewritten is the chain's and a witness pin's job.
 
-A CHECKER THAT SAYS BROKEN (D067). `check_files=` (`--checks FILE`, repeatable)
-names JSONL files of `check.verdict.relayed` rows (arcaeon.connector.core's
-shape, read here as plain JSON: kind, vendor {name, adapter_version},
-vendor_id, vendor_word, relayed_verdict, subject {name, sha256}, attestation).
+A CHECKER THAT SAYS BROKEN (D067). `check_files=` (`--checks FILE`, repeatable;
+the one check input, which the non-party rule below reads too) names files of
+`check.verdict.relayed` rows, as one JSON object, a list or JSON lines
+(arcaeon.connector.core's shape, read here as plain JSON: kind, vendor
+{name, adapter_version}, vendor_id, vendor_word, relayed_verdict, subject {name, sha256}, attestation).
 Any row whose relayed_verdict is BROKEN and whose subject.sha256 is the handed
 file's sha256 (64 hex, case and a `sha256:` prefix ignored) vetoes act, pay
 and irreversible on a VERIFIED envelope: the verdict stays VERIFIED (the bytes
@@ -108,12 +109,13 @@ an A2A Artifact's metadata under https://arcaeon.io/a2a/witness/v1 and runs
 A NON-PARTY CHECK ABOVE A CAP (TE-35). A receiver may add one rule on top of
 the table: `require_nonparty_check_above=CAP`. When the deal's amount is over
 CAP, a VERIFIED envelope allows act, pay and irreversible only if at least one
-check (a check.verdict.relayed row, TE-31) counts. A check counts when:
+check among the same `check_files` (`--checks`) counts. A check counts when:
 
     (a) its own envelope sidecar (CHECK.envelope.json) verifies, through the
         same envelope.verify, under a key that is neither a key that signed
         the handed envelope (or that the receiver named for it) nor the
-        audience: a non-party (and, with `checkers`, one of those keys);
+        audience: a non-party (and, with `checkers` / `--checker DID`, one of
+        those pinned keys);
     (b) a row in it names the handed file's sha256 as its subject.sha256;
     (c) that row's relayed_verdict is VERIFIED.
 
@@ -509,28 +511,42 @@ def _norm_sha(v: Any) -> str | None:
 def read_check_rows(paths) -> tuple[list[tuple[str, int, dict]], list[str]]:
     """((file name, line number, row) for every check.verdict.relayed row in
     `paths`, problems). A row is plain JSON with arcaeon.connector.core's field
-    names (read here without importing it). A problem is a file that cannot be
-    read: missing, over MAX_CHECKS_BYTES, not UTF-8, or a non-blank line that
-    is not a JSON object. Rows of other kinds are skipped. Never raises."""
+    names (read here without importing it). A file is one JSON object, a JSON
+    list of objects, or JSON lines (the shapes the non-party rule reads too;
+    the number is the line, or the list item, from 1). A problem is a file that
+    cannot be read: missing, over MAX_CHECKS_BYTES, not UTF-8, a list item or
+    a non-blank line that is not a JSON object. Rows of other kinds are
+    skipped. Never raises."""
     from arcaeon.record.row import loads_strict
     rows: list[tuple[str, int, dict]] = []
     problems: list[str] = []
     for p in paths or ():
-        p = Path(p)
         try:
+            p = Path(p)
             if p.stat().st_size > MAX_CHECKS_BYTES:
                 problems.append(f"{p.name}: over {MAX_CHECKS_BYTES} bytes, not read")
                 continue
             text = p.read_text(encoding="utf-8")
-        except (OSError, UnicodeDecodeError) as e:
-            problems.append(f"{p.name}: cannot be read ({type(e).__name__})")
+        except (OSError, UnicodeDecodeError, ValueError, TypeError) as e:
+            problems.append(f"{Path(str(p)).name}: cannot be read ({type(e).__name__})")
+            continue
+        try:
+            doc = loads_strict(text) if text.strip() else None
+        except (ValueError, RecursionError):
+            doc = None                               # not one document: JSON lines below
+        if isinstance(doc, (dict, list)):
+            for n, row in enumerate(doc if isinstance(doc, list) else [doc], 1):
+                if not isinstance(row, dict):
+                    problems.append(f"{p.name} item {n}: not a JSON object")
+                elif row.get("kind") == CHECK_ROW_KIND:
+                    rows.append((p.name, n, row))
             continue
         for n, line in enumerate(text.splitlines(), 1):
             if not line.strip():
                 continue
             try:
                 row = loads_strict(line)
-            except ValueError as e:
+            except (ValueError, RecursionError) as e:
                 problems.append(f"{p.name} line {n}: not JSON ({type(e).__name__})")
                 continue
             if not isinstance(row, dict):
@@ -849,7 +865,7 @@ def _nonparty_reason(action: str, verdict: str, info: dict, base: str) -> str:
         ok = next(j for j in info["checks"] if j["counts"])
         return (f"{base} The {amt} is over the cap {cap}, and {ok['check']} is a check "
                 f"{ok['why']}.")
-    why = "; ".join(f"{j['check']}: {j['why']}" for j in info["checks"]) or "no --check was given"
+    why = "; ".join(f"{j['check']}: {j['why']}" for j in info["checks"]) or "no --checks file was given"
     return (f"refuse {action}: {verdict}, but the non-party check rule refuses it: the {amt} "
             f"is over the cap {cap} and no check counts ({why}). A check counts only when "
             f"a key that is neither the envelope's signer nor the audience signed it, it "
@@ -872,16 +888,16 @@ def decide(file: str | Path, *, action: str, audience: str | None,
     `record_dir` (default: the current directory) and one gate.evidence row
     is appended to `ledger`, the party's own chain. `ledger` is required with
     `deal` (D066): a row written beside the pack could be rewritten with it.
-    `check_files` (paths to JSONL of check.verdict.relayed rows, D067): on a
+    `check_files` (paths of check.verdict.relayed rows, D067): on a
     VERIFIED envelope, a row saying BROKEN for the file's sha256 refuses act,
     pay and irreversible as CHECKER_BROKEN (an unreadable file: as
     CHECKS_UNREADABLE); read stays allowed.
     `require_nonparty_check_above` (an amount, D061) adds the non-party check
     rule (module docstring): over it, a VERIFIED envelope allows act, pay and
-    irreversible only with a counting check among `checks` (paths); `amount`
-    is the deal's amount (the larger of it and the deal record's is used);
-    `checkers` optionally narrows which non-party keys count. Unset, nothing
-    changes. `checks` (D061) and `check_files` (D067) are separate inputs.
+    irreversible only with a counting check among the same `check_files`;
+    `amount` is the deal's amount (the larger of it and the deal record's is
+    used); `checkers` (DIDs) pins which non-party keys count. Unset, nothing
+    changes. `checks` is a deprecated alias: its paths join `check_files`.
     `on_pack(pack_dir)`, when given, runs after the evidence pack is written
     and before its gate.evidence row is appended, so what it adds to the pack
     is covered by the row's pack_digest (the A2A receiver keeps its message
@@ -899,6 +915,7 @@ def decide(file: str | Path, *, action: str, audience: str | None,
             raise ValueError(f"require_nonparty_check_above must be a non-negative amount, "
                              f"got {require_nonparty_check_above!r}")
     now = now or datetime.now(timezone.utc)
+    check_files = list(check_files or ()) + list(checks or ())   # one input (--checks)
     file = Path(file)
     env_path = Path(envelope) if envelope is not None else E.envelope_path(file)
     signers = list(signers or ())
@@ -934,7 +951,8 @@ def decide(file: str | Path, *, action: str, audience: str | None,
         if verdict == V.VERIFIED and action in GUARDED:
             try:
                 policy = _nonparty_rule(
-                    cap=cap, amount=amount, checks=checks, checkers=checkers, file=file, r=r,
+                    cap=cap, amount=amount, checks=check_files, checkers=checkers, file=file,
+                    r=r,
                     signers=signers, audience=audience, deal=deal, now=now,
                     record_dir=Path(record_dir) if record_dir is not None else Path.cwd())
             except Exception as e:  # noqa: BLE001  never a green on a crash
@@ -945,7 +963,7 @@ def decide(file: str | Path, *, action: str, audience: str | None,
                 allowed = False
                 cnc = policy.get("could_not_check") or V.could_not_look(
                     "a signed non-party check that says VERIFIED for this sha256",
-                    ", ".join(str(c) for c in checks) or "--check", "missing",
+                    ", ".join(str(c) for c in check_files) or "--checks", "missing",
                     "no check given counts toward the non-party check rule")
                 reasons = [j["check"] + ": " + j["why"] for j in policy["checks"]] or \
                     [cnc["reason"]]
@@ -957,7 +975,6 @@ def decide(file: str | Path, *, action: str, audience: str | None,
                      could_not_check=cnc, file=str(file), envelope=str(env_path),
                      audience=audience, deal=deal, purpose=purpose, signers=list(signers),
                      at=_utc(now), report=r, nonparty_check=policy)
-    check_files = list(check_files or ())
     if check_files and verdict == V.VERIFIED:
         try:
             _apply_checks(d, _judge_checks(check_files, file))
@@ -1001,7 +1018,7 @@ USAGE = """usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
                            [--checks FILE ...] [--file PATH]
                            [--record-dir DIR]
                            [--require-nonparty-check-above AMOUNT
-                            [--amount N] [--check FILE ...] [--checker DID ...]]
+                            [--amount N] [--checker DID ...]]
                            [--json]
        arcaeon gate packet (--evidence DIR | --decision FILE.json)
                            [--out DIR] [--json]
@@ -1043,9 +1060,10 @@ row beside the pack could be rewritten along with it, so there is no default.
 The pack digest hashes each file with CRLF read as LF, so a line-ending
 rewrite of the pack still matches. `deal dispute` ignores the row.
 
---checks FILE (repeatable) names JSONL files of check.verdict.relayed rows
-(a scanner's verdict relayed into your chain, e.g. mcp-scan). On a VERIFIED
-envelope, any row saying BROKEN for the handed file's sha256 refuses act, pay
+--checks FILE (repeatable) names files of check.verdict.relayed rows (one
+JSON object, a list, or JSON lines: a scanner's verdict relayed into your
+chain, e.g. mcp-scan); the non-party rule below reads the same files. On a
+VERIFIED envelope, any row saying BROKEN for the handed file's sha256 refuses act, pay
 and irreversible as checker-broken, naming the checker (exit 1); the verdict
 stays VERIFIED. read stays allowed. Rows for another sha256, or saying
 VERIFIED or COULD NOT LOOK, are ignored. A FILE that cannot be read refuses
@@ -1056,11 +1074,11 @@ Allow means the bytes are unchanged since the key you named sealed them and
 are labeled for you and in date. It does not say the content is true or safe.
 
 --require-nonparty-check-above AMOUNT: when the deal's amount is over AMOUNT,
-a VERIFIED envelope allows act, pay and irreversible only if one --check
+a VERIFIED envelope allows act, pay and irreversible only if one --checks
 FILE counts: a check.verdict.relayed row naming this file's sha256 and
 saying VERIFIED, in a file whose own envelope (FILE.envelope.json, labeled
 for you) verifies under a key that is neither the handed envelope's signer
-nor the audience (with --checker, one of those keys). An unsigned row is the
+nor the audience (with --checker DID, repeatable, one of those keys). An unsigned row is the
 sender's report and never counts; a counting key's BROKEN vetoes. The amount
 is the larger of --amount and the deal record's commit total / pay amount
 (DIR/DEAL-<deal>/); with neither, those actions are refused (exit 3). read,
@@ -1099,11 +1117,15 @@ _SPEC = {"--envelope": "value", "--audience": "value", "--signer": "list",
          "--action": "value", "--deal": "value", "--purpose": "value", "--file": "value",
          "--record-dir": "value", "--ledger": "value", "--checks": "list",
          "--json": "bool",
-         "--require-nonparty-check-above": "value", "--amount": "value", "--check": "list",
+         "--require-nonparty-check-above": "value", "--amount": "value",
          "--checker": "list"}
+_CHECK_GONE = ("--check is now --checks FILE (repeatable): one flag feeds the checker veto "
+               "and the non-party check rule; --checker DID pins which keys count")
 
 
 def _decide_cli(argv: list[str]) -> int:
+    if any(a == "--check" or a.startswith("--check=") for a in argv):
+        raise E._Usage(_CHECK_GONE)
     pos, o = E._parse(argv, _SPEC)
     if pos:
         raise E._Usage(f"unexpected argument {pos[0]!r}")
@@ -1116,7 +1138,7 @@ def _decide_cli(argv: list[str]) -> int:
         raise E._Usage(_NEEDS_LEDGER)
     cap = o.get("--require-nonparty-check-above")
     if cap is None:
-        for dep in ("--amount", "--check", "--checker"):
+        for dep in ("--amount", "--checker"):
             if o.get(dep):
                 raise E._Usage(f"{dep} needs --require-nonparty-check-above AMOUNT")
     else:
@@ -1128,8 +1150,7 @@ def _decide_cli(argv: list[str]) -> int:
                signers=o["--signer"], deal=o.get("--deal"), purpose=o.get("--purpose"),
                record_dir=o.get("--record-dir"), ledger=o.get("--ledger"),
                check_files=o.get("--checks") or (), require_nonparty_check_above=cap,
-               amount=o.get("--amount"), checks=o.get("--check", []),
-               checkers=o.get("--checker", []))
+               amount=o.get("--amount"), checkers=o.get("--checker", []))
     if o.get("--json"):
         print(json.dumps(d.to_dict(), indent=1, ensure_ascii=False))
     else:

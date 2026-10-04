@@ -88,7 +88,7 @@ def test_over_cap_with_a_good_nonparty_check_allows(tmp_path):
     c, checker = _check(tmp_path, "good", _key(tmp_path, "checker"))
     for action in ("act", "pay", "irreversible"):
         d = _decide(f, did, action, require_nonparty_check_above="1000", amount="5000",
-                    checks=[c])
+                    check_files=[c])
         assert d.decision == "allow" and d.exit_code == 0, d.reason
         assert d.reason.startswith(f"allow {action}: VERIFIED")
         assert "over the cap 1000" in d.reason and checker in d.reason
@@ -102,7 +102,7 @@ def test_over_cap_with_a_good_nonparty_check_allows(tmp_path):
 def test_over_cap_with_a_party_signed_check_refuses(tmp_path):
     f, did, sender_key = _handed(tmp_path)
     c, _ = _check(tmp_path, "self", sender_key)              # the sender vouches for itself
-    d = _decide(f, did, require_nonparty_check_above="1000", amount="5000", checks=[c])
+    d = _decide(f, did, require_nonparty_check_above="1000", amount="5000", check_files=[c])
     assert d.decision == "refuse" and d.verdict == V.VERIFIED and d.exit_code == 3
     assert d.reason.startswith("refuse pay: VERIFIED, but the non-party check rule refuses it")
     assert "signed only by a party" in d.reason
@@ -121,7 +121,7 @@ def test_over_cap_with_a_check_signed_by_the_audience_refuses(tmp_path):
     c, signer = _check(tmp_path, "mine", rk, audience=me)     # the receiver vouches itself
     assert signer == me
     d = G.decide(f, action="act", audience=me, signers=[did], record_dir=tmp_path / "rec",
-                 require_nonparty_check_above=1, amount=2, checks=[c])
+                 require_nonparty_check_above=1, amount=2, check_files=[c])
     assert d.verdict == V.VERIFIED and d.decision == "refuse" and d.exit_code == 3
     assert "signed only by a party" in d.reason
 
@@ -129,7 +129,7 @@ def test_over_cap_with_a_check_signed_by_the_audience_refuses(tmp_path):
 def test_unsigned_vendor_row_refuses(tmp_path):
     f, did, _ = _handed(tmp_path)
     c, _ = _check(tmp_path, "unsigned", None)                # attestation CLAIMED, no sidecar
-    d = _decide(f, did, require_nonparty_check_above="1000", amount="5000", checks=[c])
+    d = _decide(f, did, require_nonparty_check_above="1000", amount="5000", check_files=[c])
     assert d.decision == "refuse" and d.exit_code == 3
     assert "unsigned" in d.reason and "reported by the sender" in d.reason
 
@@ -137,7 +137,7 @@ def test_unsigned_vendor_row_refuses(tmp_path):
 def test_wrong_file_hash_refuses(tmp_path):
     f, did, _ = _handed(tmp_path)
     c, _ = _check(tmp_path, "other", _key(tmp_path, "checker"), _row(sha="ab" * 32))
-    d = _decide(f, did, require_nonparty_check_above="1000", amount="5000", checks=[c])
+    d = _decide(f, did, require_nonparty_check_above="1000", amount="5000", check_files=[c])
     assert d.decision == "refuse" and d.exit_code == 3
     assert f"names sha256 {SHA}" in d.reason
 
@@ -147,7 +147,7 @@ def test_check_sha256_is_normalised_like_the_checks_veto(tmp_path, written):
     """F8: a `sha256:` prefix or upper case names the same digest, as `--checks` reads it."""
     f, did, _ = _handed(tmp_path)
     c, _ = _check(tmp_path, "prefixed", _key(tmp_path, "checker"), _row(sha=written))
-    d = _decide(f, did, require_nonparty_check_above="10", amount="11", checks=[c])
+    d = _decide(f, did, require_nonparty_check_above="10", amount="11", check_files=[c])
     assert d.decision == "allow" and d.exit_code == 0, d.reason
     assert d.nonparty_check["checks"][0]["counts"] is True
 
@@ -156,18 +156,18 @@ def test_check_that_says_broken_or_could_not_look_does_not_count(tmp_path):
     f, did, _ = _handed(tmp_path)
     k = _key(tmp_path, "checker")
     cnl, _ = _check(tmp_path, "cnl", k, _row(word=V.COULD_NOT_LOOK))
-    d = _decide(f, did, require_nonparty_check_above="10", amount="11", checks=[cnl])
+    d = _decide(f, did, require_nonparty_check_above="10", amount="11", check_files=[cnl])
     assert d.decision == "refuse" and "not VERIFIED" in d.reason
     good, _ = _check(tmp_path, "good", k)
     bad, _ = _check(tmp_path, "bad", _key(tmp_path, "checker2"), _row(word=V.BROKEN))
-    d = _decide(f, did, require_nonparty_check_above="10", amount="11", checks=[good, bad])
+    d = _decide(f, did, require_nonparty_check_above="10", amount="11", check_files=[good, bad])
     assert d.decision == "refuse" and "says BROKEN" in d.reason        # a veto
 
 
 def test_checker_pin_narrows_which_nonparty_keys_count(tmp_path):
     f, did, _ = _handed(tmp_path)
     c, checker = _check(tmp_path, "good", _key(tmp_path, "checker"))
-    kw = dict(require_nonparty_check_above="10", amount="11", checks=[c])
+    kw = dict(require_nonparty_check_above="10", amount="11", check_files=[c])
     assert _decide(f, did, checkers=[checker], **kw).decision == "allow"
     d = _decide(f, did, checkers=["did:key:z6MkOther"], **kw)
     assert d.decision == "refuse" and "--checker" in d.reason
@@ -188,7 +188,7 @@ def test_amount_missing_refuses_guarded_actions_could_not_look(tmp_path):
     f, did, _ = _handed(tmp_path)
     c, _ = _check(tmp_path, "good", _key(tmp_path, "checker"))
     for action in ("act", "pay", "irreversible"):
-        d = _decide(f, did, action, require_nonparty_check_above="1000", checks=[c],
+        d = _decide(f, did, action, require_nonparty_check_above="1000", check_files=[c],
                     deal=DEAL)
         assert d.decision == "refuse" and d.verdict == V.VERIFIED and d.exit_code == 3
         assert "could not look" in d.reason and "(missing)" in d.reason
@@ -237,7 +237,7 @@ def test_hostile_check_file_is_an_answer_not_a_traceback(tmp_path, content):
     c = tmp_path / "checks" / "hostile.json"
     c.parent.mkdir(exist_ok=True)
     c.write_bytes(content)
-    d = _decide(f, did, require_nonparty_check_above="1", amount="2", checks=[c])
+    d = _decide(f, did, require_nonparty_check_above="1", amount="2", check_files=[c])
     assert d.decision == "refuse" and d.exit_code == 3
     assert d.nonparty_check["checks"][0]["counts"] is False
 
@@ -247,7 +247,7 @@ def test_hostile_check_paths_and_sidecars(tmp_path):
     c, _ = _check(tmp_path, "good", _key(tmp_path, "checker"))
     E.envelope_path(c).write_text("{not an envelope", encoding="utf-8")
     d = _decide(f, did, require_nonparty_check_above="1", amount="2",
-                checks=[c, tmp_path / "nope.json", tmp_path, "\x00bad"])
+                check_files=[c, tmp_path / "nope.json", tmp_path, "\x00bad"])
     assert d.decision == "refuse" and d.exit_code == 3
     assert len(d.nonparty_check["checks"]) == 4
     assert not any(j["counts"] for j in d.nonparty_check["checks"])
@@ -256,7 +256,7 @@ def test_hostile_check_paths_and_sidecars(tmp_path):
 def test_rule_does_not_change_broken_or_could_not_look(tmp_path):
     f, did, _ = _handed(tmp_path)
     c, _ = _check(tmp_path, "good", _key(tmp_path, "checker"))
-    kw = dict(require_nonparty_check_above="1", amount="2", checks=[c])
+    kw = dict(require_nonparty_check_above="1", amount="2", check_files=[c])
     cnl = G.decide(f, action="pay", audience=AUD, signers=[], **kw)
     assert cnl.verdict == V.COULD_NOT_LOOK and cnl.decision == "refuse"
     assert cnl.reason == G.decide(f, action="pay", audience=AUD, signers=[]).reason
@@ -280,8 +280,7 @@ def test_nonparty_refusal_keeps_its_reason_and_exit_3_beside_a_checker_veto(tmp_
     u, _ = _check(tmp_path, "unsigned", None)
     content = json.dumps(_row(word=V.BROKEN)) if veto == "broken" else "{not json\n"
     v = _veto_file(tmp_path, "veto.jsonl", content)
-    d = _decide(f, did, require_nonparty_check_above="10", amount="11", checks=[u],
-                check_files=[v])
+    d = _decide(f, did, require_nonparty_check_above="10", amount="11", check_files=[u, v])
     assert d.decision == "refuse" and d.verdict == V.VERIFIED
     assert d.reason.startswith("refuse pay: VERIFIED, but the non-party check rule refuses it")
     assert d.exit_code == 3, d.reason
@@ -294,7 +293,7 @@ def test_nonparty_refusal_keeps_its_reason_and_exit_3_beside_a_checker_veto(tmp_
 def test_nonparty_refusal_row_carries_its_veto(tmp_path):
     f, did, _ = _handed(tmp_path)
     u, _ = _check(tmp_path, "unsigned", None)
-    d = _decide(f, did, require_nonparty_check_above="10", amount="11", checks=[u])
+    d = _decide(f, did, require_nonparty_check_above="10", amount="11", check_files=[u])
     assert d.decision == "refuse" and d.evidence and d.chain_row
     assert d.chain_row["verdict"] == V.VERIFIED and d.chain_row["veto"] == "nonparty-check"
     assert d.to_dict()["nonparty_check"]["veto"] == "nonparty-check"
@@ -331,9 +330,9 @@ def test_cli_flags(tmp_path, capsys):
     rule = ["--action", "pay", "--require-nonparty-check-above", "1000",
             "--deal", DEAL, "--purpose", "grading", "--ledger", str(tmp_path / "ledger.jsonl"),
             "--record-dir", str(tmp_path / "rec")]
-    assert _cli(f, did, *rule, "--amount", "5000", "--check", str(c)) == 0
+    assert _cli(f, did, *rule, "--amount", "5000", "--checks", str(c)) == 0
     assert capsys.readouterr().out.startswith("allow pay: VERIFIED")
-    assert _cli(f, did, *rule, "--amount", "5000", "--check", str(u), "--json") == 3
+    assert _cli(f, did, *rule, "--amount", "5000", "--checks", str(u), "--json") == 3
     j = json.loads(capsys.readouterr().out)
     assert j["decision"] == "refuse" and j["nonparty_check"]["satisfied"] is False
     assert _cli(f, did, *rule) == 3                                   # no amount
@@ -341,8 +340,66 @@ def test_cli_flags(tmp_path, capsys):
     assert _cli(f, did, *rule, "--amount", "1000") == 0               # at the cap
     assert _cli(f, did, "--action", "read", "--require-nonparty-check-above", "1") == 0
     capsys.readouterr()
-    assert _cli(f, did, "--action", "pay", "--check", str(c)) == 2    # no rule: usage
+    assert _cli(f, did, "--action", "pay", "--checker", "did:key:z6MkX") == 2   # no rule: usage
     assert _cli(f, did, "--action", "pay", "--amount", "5") == 2
     assert _cli(f, did, *rule[:2], "--require-nonparty-check-above", "x") == 2
     assert _cli(f, did, *rule, "--amount", "-3") == 2
     assert "--require-nonparty-check-above" in capsys.readouterr().err
+
+
+# --- one flag: --checks FILE feeds the checker veto and the non-party rule ---------------
+
+def test_check_flag_is_gone_and_points_at_checks(tmp_path, capsys):
+    f, did, _ = _handed(tmp_path)
+    c, _ = _check(tmp_path, "good", _key(tmp_path, "checker"))
+    rule = ["--action", "act", "--require-nonparty-check-above", "1", "--amount", "2"]
+    assert _cli(f, did, *rule, "--check", str(c)) == 2
+    assert "--checks FILE" in capsys.readouterr().err
+    assert "--check FILE" not in G.USAGE and "[--checks FILE ...]" in G.USAGE
+
+
+def test_checks_flag_counts_for_the_nonparty_rule_with_checker_pins(tmp_path, capsys):
+    f, did, _ = _handed(tmp_path)
+    c, checker = _check(tmp_path, "good", _key(tmp_path, "checker"))
+    rule = ["--action", "act", "--require-nonparty-check-above", "1", "--amount", "2",
+            "--checks", str(c)]
+    assert _cli(f, did, *rule) == 0
+    assert _cli(f, did, *rule, "--checker", "did:key:z6MkOther", "--checker", checker) == 0
+    assert _cli(f, did, *rule, "--checker", "did:key:z6MkOther") == 3
+    assert "--checker" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("shape", ["object", "pretty", "list"])
+def test_checks_file_in_any_rule_shape_is_readable_by_the_veto(tmp_path, shape):
+    """A check file the non-party rule reads (one object, a list, JSON lines) is
+    not checks-unreadable to the checker veto under the cap."""
+    f, did, _ = _handed(tmp_path)
+    row = _row()
+    text = {"object": json.dumps(row), "pretty": json.dumps(row, indent=2),
+            "list": json.dumps([row, _row(sha="ab" * 32)], indent=1)}[shape]
+    c, _ = _check(tmp_path, "good", _key(tmp_path, "checker"))
+    c.write_text(text, encoding="utf-8")
+    d = _decide(f, did, require_nonparty_check_above="10", amount="5", check_files=[c])
+    assert d.decision == "allow" and d.checks["problems"] == [] and d.checks["rows"] >= 1
+    broken = _veto_file(tmp_path, "b.json", json.dumps([_row(word=V.BROKEN)], indent=2))
+    d = _decide(f, did, check_files=[broken])
+    assert d.decision == "refuse" and d.veto == G.CHECKER_BROKEN and d.exit_code == 1
+
+
+def test_unreadable_checks_file_still_refuses(tmp_path):
+    f, did, _ = _handed(tmp_path)
+    bad = _veto_file(tmp_path, "bad.jsonl", "{not json\n")
+    d = _decide(f, did, check_files=[bad])
+    assert d.decision == "refuse" and d.veto == G.CHECKS_UNREADABLE and d.exit_code == 3
+    d = _decide(f, did, check_files=[tmp_path / "missing.jsonl", "\x00bad"])
+    assert d.decision == "refuse" and d.veto == G.CHECKS_UNREADABLE and d.exit_code == 3
+    assert _decide(f, did, "read", check_files=[bad]).decision == "allow"
+
+
+def test_checks_keyword_is_an_alias_of_check_files(tmp_path):
+    f, did, _ = _handed(tmp_path)
+    c, _ = _check(tmp_path, "good", _key(tmp_path, "checker"))
+    kw = dict(require_nonparty_check_above="1", amount="2")
+    a = _decide(f, did, "act", checks=[c], **kw)
+    b = _decide(f, did, "act", check_files=[c], **kw)
+    assert a.decision == b.decision == "allow" and a.checks["files"] == b.checks["files"]

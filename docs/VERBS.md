@@ -707,8 +707,10 @@ answers VERIFIED, BROKEN or COULD NOT LOOK. `deal dispute` reads only
 `deal.*` rows and ignores this one. No row is written without a pack (an
 allow, or no deal id).
 
-`--checks FILE` (repeatable) adds a checker's word on top of the envelope's.
-Each FILE is JSONL of `check.verdict.relayed` rows: a scanner's verdict (for
+`--checks FILE` (repeatable) adds a checker's word on top of the envelope's;
+it is the one check option, and the non-party check rule below reads the same
+files. Each FILE holds `check.verdict.relayed` rows (one JSON object, a JSON
+list, or JSON lines): a scanner's verdict (for
 example mcp-scan's) relayed into your chain, with `vendor`, `relayed_verdict`
 and `subject` (`name`, `sha256`). When the envelope reads VERIFIED and any
 row says BROKEN for the handed file's sha256, `act`, `pay` and
@@ -729,12 +731,12 @@ parameter is `check_files=`.
 library `require_nonparty_check_above=`). The two parties to a deal can
 collude: the sender seals, the receiver's agent pays, and nobody else looked.
 With this option, when the deal's amount is over AMOUNT, a VERIFIED envelope
-allows `act`, `pay` and `irreversible` only if at least one `--check FILE`
+allows `act`, `pay` and `irreversible` only if at least one `--checks FILE`
 counts. A check counts when (a) its own envelope (`FILE.envelope.json`,
 labeled for you) verifies, through the same `envelope verify`, under a key
 that is neither a key that signed the handed envelope (or that you named with
-`--signer`) nor the audience; with `--checker DID` it must also be one of
-those keys; (b) a `check.verdict.relayed` row in it (the connector row shape)
+`--signer`) nor the audience; with `--checker DID` (repeatable) it must also
+be one of those pinned keys; (b) a `check.verdict.relayed` row in it (the connector row shape)
 names the handed file's sha256 as `subject.sha256`; and (c) that row's
 `relayed_verdict` is `VERIFIED`. A row nobody signed is the sender's report
 and never counts, whatever its `attestation` claims; a counting key's row on
@@ -791,7 +793,7 @@ usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
                            [--checks FILE ...] [--file PATH]
                            [--record-dir DIR]
                            [--require-nonparty-check-above AMOUNT
-                            [--amount N] [--check FILE ...] [--checker DID ...]]
+                            [--amount N] [--checker DID ...]]
                            [--json]
        arcaeon gate packet (--evidence DIR | --decision FILE.json)
                            [--out DIR] [--json]
@@ -807,8 +809,8 @@ usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
 cap), 2 bad usage (a missing `--envelope`, `--audience`, `--signer` or
 `--action`, an action that is not one of the four, `--deal` without
 `--ledger`, an AMOUNT or `--amount` that is not a non-negative number, or
-`--amount`, `--check` or `--checker` without `--require-nonparty-check-above`).
-`--checks` (D067) and `--check` (the non-party rule) are separate options.
+`--amount` or `--checker` without `--require-nonparty-check-above`, or the
+retired `--check`, which names `--checks` instead).
 `packet`: 0 written, 2 bad usage or
 nothing to dispute, 3 the input is not a readable gate record. `a2a`: as
 `decide`. New in 0.10.x,
