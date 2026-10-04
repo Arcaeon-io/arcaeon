@@ -53,6 +53,7 @@ VERBS = {
     "export":    ("prove",  "write a ledger out in another record format (agent-audit-trail)"),
     "envelope":  ("prove",  "seal a file for one exchange, or verify one: VERIFIED / BROKEN / COULD NOT LOOK"),
     "gate":      ("prove",  "allow or refuse an action on a sealed file, from its envelope's verdict"),
+    "exchange":  ("prove",  "sign your reaction to an exchange, or pair two parties' reaction logs"),
     "distill":   ("save",   "cut a tool output down to a token budget, with a drop receipt"),
     "dedup":     ("save",   "drop near-verbatim repeats from a list of texts"),
     "meter":     ("save",   "keyed usage metering: keys, usage, export"),
@@ -177,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
 _UNJOURNALED = {"status", "mcp", "serve"}
 #: Verbs whose first positional word is a subcommand, not the target.
 _SUBCOMMAND_VERBS = {"receipt", "once", "audit", "vet", "baseline", "meter", "deal", "distill",
-                     "second-read", "evidence-pack", "mandate", "envelope", "gate"}
+                     "second-read", "evidence-pack", "mandate", "envelope", "gate", "exchange"}
 
 
 def _journal_target(verb: str, rest: list[str]) -> str | None:
@@ -808,6 +809,11 @@ def _gate(argv) -> int:
     return _run(gate.main, argv)
 
 
+def _exchange(argv) -> int:
+    from arcaeon.prove import exchange_log
+    return _run(exchange_log.main, argv)
+
+
 def _baseline(argv) -> int:
     from arcaeon.prove.baseline import cli
     return _run(partial(cli.main, prog="arcaeon baseline"), argv)
@@ -1171,7 +1177,7 @@ def _lazy(verb: str, argv) -> int:
 HANDLERS = {
     "log": _log, "verify": _verify, "receipt": _receipt, "once": _once, "proxy": _proxy,
     "pin": _pin, "deal": _deal, "reconcile": _reconcile, "audit": _audit, "vet": _vet, "badge": _badge,
-    "seal": _seal, "envelope": _envelope, "gate": _gate, "baseline": _baseline, "compact": _compact, "distill": _distill,
+    "seal": _seal, "envelope": _envelope, "gate": _gate, "exchange": _exchange, "baseline": _baseline, "compact": _compact, "distill": _distill,
     "dedup": _dedup, "meter": _meter, "stamp": _stamp, "credits": _credits, "buy": _buy,
     "mcp": _mcp, "status": _status, "selftest": _selftest, "version": _version,
     **{verb: partial(_lazy, verb) for verb in LAZY_VERBS},

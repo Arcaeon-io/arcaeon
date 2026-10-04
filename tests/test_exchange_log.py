@@ -1,0 +1,345 @@
+# SPDX-License-Identifier: MIT
+"""D057 / TE-42: signed exchange reactions and the pair reader.
+
+Every key here is a throwaway seed written to tmp_path; no network."""
+from __future__ import annotations
+
+import base64
+import json
+import secrets
+from pathlib import Path
+
+import pytest
+
+from arcaeon import cli
+from arcaeon import verdict as V
+from arcaeon.prove import exchange_log as X
+from arcaeon.record.ledger import Ledger, verify_file
+
+pytest.importorskip("cryptography", reason="signing needs the [sign] extra")
+
+
+def _key(tmp_path: Path, name: str) -> tuple[Path, str]:
+    from arcaeon.prove.vet import receipts as R
+    seed = secrets.token_bytes(32)
+    p = tmp_path / f"{name}.key"
+    p.write_text(base64.b64encode(seed).decode("ascii") + "\n", encoding="ascii")
+    return p, R.did_key(R.public_key_from_seed(seed))
+
+
+@pytest.fixture
+def parties(tmp_path):
+    ka, da = _key(tmp_path, "a")
+    kb, db = _key(tmp_path, "b")
+    f = tmp_path / "deliverable.csv"
+    f.write_bytes(b"id,grade\n1,A\n")
+    return {"ka": ka, "da": da, "kb": kb, "db": db, "file": f,
+            "la": tmp_path / "a.jsonl", "lb": tmp_path / "b.jsonl", "tmp": tmp_path}
+
+
+def _react(p, side, reaction=V.VERIFIED, ex="ex-1", file=None, **kw):
+    other = "b" if side == "a" else "a"
+    return X.react(p["l" + side], key_file=p["k" + side], exchange_id=ex,
+                   counterparty=kw.pop("counterparty", p["d" + other]),
+                   file=file or p["file"], reaction=reaction, **kw)
+
+
+def _only(r):
+    assert len(r["exchanges"]) == 1, r["exchanges"]
+    return r["exchanges"][0]
+
+
+# --- the happy pair and the marks -----------------------------------------------------
+
+def test_happy_pair_is_clean(parties):
+    out = _react(parties, "a")
+    _react(parties, "b")
+    assert out["row"]["kind"] == "exchange.reaction"
+    assert out["row"]["signer"] == parties["da"]
+    assert out["row_digest"].startswith("sha256:json-c14n:v1:")
+    assert verify_file(parties["la"], strict=True).ok is True
+    r = X.pair(parties["la"], parties["lb"])
+    assert r["verdict"] == V.VERIFIED, r["reason"]
+    ex = _only(r)
+    assert ex["status"] == "clean" and ex["differs"] == []
+    assert r["counts"]["clean"] == 1 and r["claims"] == []
+    assert r["logs"]["a"]["owner"] == parties["da"]
+    assert r["logs"]["a"]["owner_from"] == "first_row"
+
+
+def test_mismatch_reaction_is_named(parties):
+    _react(parties, "a")
+    _react(parties, "b", V.BROKEN)
+    r = X.pair(parties["la"], parties["lb"])
+    ex = _only(r)
+    assert r["verdict"] == V.VERIFIED          # the record is sound; the pair is the mark
+    assert ex["status"] == "mismatch" and ex["differs"] == ["reaction"]
+    assert "a said VERIFIED, b said BROKEN" in ex["findings"][0]
+
+
+def test_mismatch_sha_is_named(parties):
+    other = parties["tmp"] / "other.csv"
+    other.write_bytes(b"id,grade\n1,B\n")
+    _react(parties, "a")
+    _react(parties, "b", file=other)
+    ex = _only(X.pair(parties["la"], parties["lb"]))
+    assert ex["status"] == "mismatch" and ex["differs"] == ["file_sha256"]
+
+
+def test_missing_side(parties):
+    _react(parties, "a", ex="ex-1")
+    _react(parties, "a", ex="ex-2")
+    _react(parties, "b", ex="ex-1")
+    r = X.pair(parties["la"], parties["lb"])
+    st = {e["exchange_id"]: e["status"] for e in r["exchanges"]}
+    assert st == {"ex-1": "clean", "ex-2": "missing"}
+    assert "no reaction from b" in r["exchanges"][1]["findings"]
+
+
+def test_agreed_non_verified_is_not_clean(parties):
+    _react(parties, "a", V.COULD_NOT_LOOK)
+    _react(parties, "b", V.COULD_NOT_LOOK)
+    assert _only(X.pair(parties["la"], parties["lb"]))["status"] == "not_verified"
+
+
+def test_counterparty_mismatch(parties):
+    _, stranger = _key(parties["tmp"], "c")
+    _react(parties, "a", counterparty=stranger)
+    _react(parties, "b")
+    ex = _only(X.pair(parties["la"], parties["lb"]))
+    assert ex["status"] == "mismatch" and ex["differs"] == ["counterparty"]
+    assert stranger in ex["findings"][0]
+
+
+def test_disputed_is_a_claim_not_a_verdict(parties):
+    _react(parties, "a")
+    _react(parties, "b", disputed="the rows arrived after the deadline")
+    r = X.pair(parties["la"], parties["lb"])
+    ex = _only(r)
+    assert ex["status"] == "clean"             # both said VERIFIED about the same bytes
+    assert all(s not in ("DISPUTED", "disputed") for s in X.STATUSES)
+    [c] = r["claims"]
+    assert c["claim"] == "DISPUTED" and c["side"] == "b" and c["current"] is True
+    assert c["reason"] == "the rows arrived after the deadline"
+    assert c["signer"] == parties["db"]
+
+
+def test_disputed_needs_a_reason(parties):
+    with pytest.raises(X.ExchangeError):
+        _react(parties, "a", disputed="  ")
+
+
+# --- forgery, edits, supersede ------------------------------------------------------------
+
+def test_forged_row_signed_with_the_wrong_key_is_broken(parties):
+    _react(parties, "a")
+    _react(parties, "b")
+    kc, dc = _key(parties["tmp"], "mallory")
+    seed = base64.b64decode(kc.read_text(encoding="ascii").strip())
+    forged = X.build_row(seed=seed, exchange_id="ex-1", counterparty=parties["db"],
+                         file_sha256="0" * 64, reaction=V.BROKEN)
+    Ledger(parties["la"]).append(forged)       # chain intact: only the signer is wrong
+    assert verify_file(parties["la"], strict=True).ok is True
+    r = X.pair(parties["la"], parties["lb"])
+    assert r["verdict"] == V.BROKEN
+    [br] = r["logs"]["a"]["broken_rows"]
+    assert "not by the key that owns this log" in br["finding"]
+    assert _only(r)["status"] == "broken"      # never silently dropped
+
+
+def test_row_with_a_bad_signature_is_broken(parties):
+    _react(parties, "a")
+    _react(parties, "b")
+    good = json.loads(parties["la"].read_text(encoding="utf-8").splitlines()[0])
+    for k in ("ts", "chain"):
+        good.pop(k)
+    good["reaction"] = V.BROKEN                # re-chained, but the signature no longer covers it
+    Ledger(parties["la"]).append(good)
+    r = X.pair(parties["la"], parties["lb"])
+    assert r["verdict"] == V.BROKEN
+    assert "does not verify" in r["logs"]["a"]["broken_rows"][0]["finding"]
+
+
+def test_row_edited_in_place_breaks_the_chain(parties):
+    _react(parties, "a")
+    _react(parties, "b")
+    text = parties["la"].read_text(encoding="utf-8")
+    parties["la"].write_text(text.replace('"VERIFIED"', '"BROKEN"'), encoding="utf-8")
+    assert verify_file(parties["la"], strict=True).ok is False
+    r = X.pair(parties["la"], parties["lb"])
+    assert r["verdict"] == V.BROKEN
+    assert r["logs"]["a"]["chain"]["ok"] is False
+    assert "chain does not verify" in r["reason"]
+
+
+def test_extra_field_outside_the_signature_is_broken(parties):
+    out = _react(parties, "a")
+    _react(parties, "b")
+    row = dict(out["row"], note="added later")
+    Ledger(parties["la"]).append(row)
+    r = X.pair(parties["la"], parties["lb"])
+    assert r["verdict"] == V.BROKEN
+    assert "outside the signature" in r["logs"]["a"]["broken_rows"][0]["finding"]
+
+
+def test_supersede_resolves_to_the_latest(parties):
+    first = _react(parties, "a", V.BROKEN)
+    second = _react(parties, "a", V.COULD_NOT_LOOK, supersedes=first["row_digest"])
+    _react(parties, "a", V.VERIFIED, supersedes=second["row_digest"])
+    _react(parties, "b")
+    r = X.pair(parties["la"], parties["lb"])
+    assert r["verdict"] == V.VERIFIED, r["reason"]
+    ex = _only(r)
+    assert ex["status"] == "clean" and ex["a"]["line"] == 3
+    assert "note" not in ex["a"]
+    assert verify_file(parties["la"], strict=True).ok is True   # a new row, nothing edited
+
+
+def test_superseded_dispute_is_listed_not_current(parties):
+    first = _react(parties, "b", V.BROKEN, disputed="wrong file")
+    _react(parties, "b", supersedes=first["row_digest"])
+    _react(parties, "a")
+    r = X.pair(parties["la"], parties["lb"])
+    assert _only(r)["status"] == "clean"
+    [c] = r["claims"]
+    assert c["current"] is False
+
+
+def test_supersede_refused_on_write_when_the_target_is_absent(parties):
+    with pytest.raises(X.ExchangeError, match="no row with that digest"):
+        _react(parties, "a", supersedes="sha256:json-c14n:v1:" + "a" * 64)
+
+
+def test_dangling_supersede_in_the_log_is_broken(parties):
+    seed = base64.b64decode(parties["ka"].read_text(encoding="ascii").strip())
+    row = X.build_row(seed=seed, exchange_id="ex-1", counterparty=parties["db"],
+                      file_sha256="1" * 64, reaction=V.VERIFIED,
+                      supersedes="sha256:json-c14n:v1:" + "b" * 64)
+    Ledger(parties["la"]).append(row)
+    _react(parties, "b")
+    r = X.pair(parties["la"], parties["lb"])
+    assert r["verdict"] == V.BROKEN
+    assert "not earlier in this log" in r["logs"]["a"]["broken_rows"][0]["finding"]
+
+
+def test_two_unsuperseded_rows_read_the_last_and_say_so(parties):
+    _react(parties, "a", V.BROKEN)
+    _react(parties, "a", V.VERIFIED)
+    _react(parties, "b")
+    ex = _only(X.pair(parties["la"], parties["lb"]))
+    assert ex["status"] == "clean" and "not superseded" in ex["a"]["note"]
+
+
+def test_one_log_per_key_on_write(parties):
+    _react(parties, "a")
+    with pytest.raises(X.ExchangeError, match="belongs to"):
+        X.react(parties["la"], key_file=parties["kb"], exchange_id="ex-2",
+                counterparty=parties["da"], file=parties["file"], reaction=V.VERIFIED)
+
+
+def test_named_owner_overrides_first_row(parties):
+    _react(parties, "a")
+    _react(parties, "b")
+    r = X.pair(parties["la"], parties["lb"], owner_a=parties["db"])
+    assert r["verdict"] == V.BROKEN
+    assert r["logs"]["a"]["owner_from"] == "named"
+
+
+def test_same_log_twice_is_broken(parties):
+    _react(parties, "a")
+    r = X.pair(parties["la"], parties["la"])
+    assert r["verdict"] == V.BROKEN and "one key" in r["reason"]
+
+
+def test_signing_encoding_is_pae_over_c14n(parties):
+    from arcaeon.prove.envelope import pae
+    from arcaeon.record.row import canon_json
+    row = _react(parties, "a")["row"]
+    body = {k: row[k] for k in X.SIGNED_FIELDS}
+    assert X.signing_bytes(row) == pae(X.SIG_PAYLOAD_TYPE, canon_json(body))
+    assert set(row) == set(X.SIGNED_FIELDS) | {"sig"}
+    assert X.check_row(row) is None
+
+
+# --- hostile input ------------------------------------------------------------------------
+
+@pytest.mark.parametrize("content", [
+    None,                                   # missing
+    b"",                                    # empty
+    b"\xff\xfe\x00garbage\x00",             # not UTF-8
+    b"[1,2,3]\n",                           # not rows
+    b"{\"a\": 1}\n{\"b\": 2}\n",            # rows, but not a chained ledger
+    b"[" * 200000 + b"\n",                  # nests too deep
+    b"\"just a string\"\n",
+], ids=["missing", "empty", "not-utf8", "array", "unchained", "deep", "scalar"])
+def test_hostile_logs_could_not_look(parties, content):
+    _react(parties, "b")
+    bad = parties["tmp"] / "hostile.jsonl"
+    if content is not None:
+        bad.write_bytes(content)
+    r = X.pair(bad, parties["lb"])
+    assert r["verdict"] == V.COULD_NOT_LOOK, r
+    assert r["reason_word"] in V.REASON_WORDS
+    json.dumps(r)
+
+
+def test_directory_as_log_could_not_look(parties):
+    _react(parties, "b")
+    r = X.pair(parties["tmp"], parties["lb"])
+    assert r["verdict"] == V.COULD_NOT_LOOK
+
+
+def test_hostile_reaction_row_fields_are_broken_not_a_crash(parties):
+    _react(parties, "b")
+    for junk in ({"kind": X.KIND}, {**{k: [] for k in X.SIGNED_FIELDS}, "kind": X.KIND, "sig": 7},
+                 {"kind": X.KIND, "exchange_id": {"x": 1}, "reaction": None}):
+        Ledger(parties["la"]).append(junk)
+    r = X.pair(parties["la"], parties["lb"])
+    assert r["verdict"] == V.BROKEN
+    assert len(r["logs"]["a"]["broken_rows"]) == 3
+    json.dumps(r)
+
+
+# --- CLI --------------------------------------------------------------------------------
+
+def test_cli_react_and_pair(parties, capsys):
+    p = parties
+    rc = cli.main(["exchange", "react", "--exchange", "ex-9", "--counterparty", p["db"],
+                   "--file", str(p["file"]), "--reaction", "COULD NOT LOOK",
+                   "--key", str(p["ka"]), "--log", str(p["la"])])
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["row"]["reaction"] == V.COULD_NOT_LOOK
+    rc = cli.main(["exchange", "react", "--exchange", "ex-9", "--counterparty", p["da"],
+                   "--file", str(p["file"]), "--reaction", "VERIFIED",
+                   "--disputed", "late", "--key", str(p["kb"]), "--log", str(p["lb"])])
+    assert rc == 0
+    capsys.readouterr()
+    rc = cli.main(["exchange", "pair", str(p["la"]), str(p["lb"]), "--json"])
+    r = json.loads(capsys.readouterr().out)
+    assert rc == 0 and r["verdict"] == V.VERIFIED
+    assert r["exchanges"][0]["status"] == "mismatch" and len(r["claims"]) == 1
+    rc = cli.main(["exchange", "pair", str(p["la"]), str(p["lb"])])
+    text = capsys.readouterr().out
+    assert rc == 0 and "ex-9: mismatch" in text and "claim DISPUTED by b" in text
+
+
+def test_cli_exit_codes(parties, capsys):
+    p = parties
+    assert cli.main(["exchange", "react", "--exchange", "x"]) == V.EXIT_USAGE
+    assert cli.main(["exchange", "react", "--exchange", "x", "--counterparty", p["db"],
+                     "--file", str(p["tmp"] / "nope"), "--reaction", "VERIFIED",
+                     "--key", str(p["ka"]), "--log", str(p["la"])]) == V.EXIT_COULD_NOT_LOOK
+    assert cli.main(["exchange", "react", "--exchange", "x", "--counterparty", p["db"],
+                     "--file", str(p["file"]), "--reaction", "DISPUTED",
+                     "--key", str(p["ka"]), "--log", str(p["la"])]) == V.EXIT_USAGE
+    assert not p["la"].exists()
+    assert cli.main(["exchange", "pair", str(p["la"])]) == V.EXIT_USAGE
+    assert cli.main(["exchange", "pair", str(p["la"]), str(p["lb"])]) == V.EXIT_COULD_NOT_LOOK
+    assert cli.main(["exchange", "pair", "a", "b", "--owner-a", "bob"]) == V.EXIT_USAGE
+    _react(p, "a")
+    _react(p, "b")
+    text = p["la"].read_text(encoding="utf-8")
+    p["la"].write_text(text.replace("ex-1", "ex-2"), encoding="utf-8")
+    assert cli.main(["exchange", "pair", str(p["la"]), str(p["lb"])]) == V.EXIT_BAD
+    assert cli.main(["exchange", "--help"]) == 0
