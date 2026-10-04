@@ -73,6 +73,8 @@ def _check(tmp_path: Path, name: str, key: Path | None, row: dict | None = None,
 
 def _decide(f, did, action="pay", **kw):
     kw.setdefault("record_dir", f.parent.parent / "rec")
+    if kw.get("deal") is not None:                # D066: a deal id needs the party's ledger
+        kw.setdefault("ledger", f.parent.parent / "ledger.jsonl")
     return G.decide(f, action=action, audience=AUD, signers=[did], **kw)
 
 

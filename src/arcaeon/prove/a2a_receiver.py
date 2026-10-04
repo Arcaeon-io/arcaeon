@@ -216,7 +216,8 @@ def _activated(activated) -> bool | None:
 def receive(message: bytes | str | dict, file: bytes | str | Path | None = None, *,
             action: str, audience: str | None, signers=(), deal: str | None = None,
             purpose: str | None = None, artifact_id: str | None = None, activated=None,
-            record_dir: str | Path | None = None, now: datetime | None = None) -> A2ADecision:
+            record_dir: str | Path | None = None, ledger: str | Path | None = None,
+            now: datetime | None = None) -> A2ADecision:
     """allow or refuse `action` on an A2A artifact's file, from its envelope.
 
     `message` is the A2A JSON as bytes or text (parsed strictly: a duplicate
@@ -227,10 +228,13 @@ def receive(message: bytes | str | dict, file: bytes | str | Path | None = None,
     (`raw` or 0.3 `file.bytes`); a `url` part is never fetched. `artifact_id`
     picks the carrier when more than one carries the extension. `activated` is
     the A2A-Extensions value the request carried (a comma-separated string or
-    a list), recorded only. The rest goes to `gate.decide` unchanged. Raises
-    ValueError on an unknown action; otherwise never raises."""
+    a list), recorded only. The rest goes to `gate.decide` unchanged; `ledger`
+    is required with `deal`, as there (D066). Raises ValueError on an unknown
+    action or a `deal` without a `ledger`; otherwise never raises."""
     if action not in G.ACTIONS:
         raise ValueError(f"action must be one of {G.ACTIONS}, got {action!r}")
+    if deal is not None and ledger is None:
+        raise ValueError(G._NEEDS_LEDGER)
     now = now or datetime.now(timezone.utc)
     signers = list(signers or ())
     info: dict[str, Any] = {"extension": EXTENSION_URI, "carrier": None, "id": None,
@@ -238,7 +242,7 @@ def receive(message: bytes | str | dict, file: bytes | str | Path | None = None,
                             "file_from": None}
     try:
         return _receive(message, file, action, audience, signers, deal, purpose, artifact_id,
-                        record_dir, now, info)
+                        record_dir, ledger, now, info)
     except Exception as e:  # noqa: BLE001  never a traceback, never a green
         return _cnl(action, audience, deal, purpose, signers, now, info, "a finished check",
                     "the A2A message", "unreadable",
@@ -246,7 +250,7 @@ def receive(message: bytes | str | dict, file: bytes | str | Path | None = None,
 
 
 def _receive(message, file, action, audience, signers, deal, purpose, artifact_id,
-             record_dir, now, info) -> A2ADecision:
+             record_dir, ledger, now, info) -> A2ADecision:
     def cnl(looked_for, where, word, reason, fl="", el=""):
         return _cnl(action, audience, deal, purpose, signers, now, info, looked_for, where,
                     word, reason, fl, el)
@@ -350,14 +354,15 @@ def _receive(message, file, action, audience, signers, deal, purpose, artifact_i
             file_path.write_bytes(data)
         env_path = tdir / (name + E.SUFFIX)
         env_path.write_text(json.dumps(sidecar), encoding="utf-8")
-        d = G.decide(file_path, envelope=env_path, action=action, audience=audience,
-                     signers=signers, deal=deal, purpose=purpose, record_dir=record_dir, now=now)
         labels = {str(env_path): env_label}
         if info["file_from"] != "path":
             labels[str(file_path)] = file_label
+        # before the gate.evidence row is appended, so its pack_digest covers it
+        on_pack = lambda out: _evidence_a2a(out, labels, info, raw_message)  # noqa: E731
+        d = G.decide(file_path, envelope=env_path, action=action, audience=audience,
+                     signers=signers, deal=deal, purpose=purpose, record_dir=record_dir,
+                     ledger=ledger, now=now, on_pack=on_pack)
         d = _relabel(d, labels)
-        if d.evidence:
-            _evidence_a2a(Path(d.evidence), labels, info, raw_message)
     return _wrap(d, info)
 
 
@@ -392,7 +397,8 @@ def _evidence_a2a(out: Path, labels: dict, info: dict, raw_message: bytes | None
             extra["message"] = {"copy": "bundle/a2a-message.json", "bytes": len(raw_message),
                                 "sha256": hashlib.sha256(raw_message).hexdigest()}
         ev["a2a"] = extra
-        ev_path.write_text(json.dumps(ev, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+        ev_path.write_text(json.dumps(ev, indent=1, ensure_ascii=False) + "\n", encoding="utf-8",
+                           newline="\n")
     except Exception:  # noqa: BLE001  the refusal and the gate's pack stand either way
         pass
 
@@ -402,6 +408,8 @@ def receive_files(message: str | Path, file: str | Path | None = None, **kw) -> 
     action = kw.get("action")
     if action not in G.ACTIONS:
         raise ValueError(f"action must be one of {G.ACTIONS}, got {action!r}")
+    if kw.get("deal") is not None and kw.get("ledger") is None:
+        raise ValueError(G._NEEDS_LEDGER)
     p = Path(message)
     try:
         if p.stat().st_size > MAX_MESSAGE_BYTES:
@@ -423,7 +431,8 @@ def receive_files(message: str | Path, file: str | Path | None = None, **kw) -> 
 
 _SPEC = {"--message": "value", "--file": "value", "--audience": "value", "--signer": "list",
          "--action": "value", "--deal": "value", "--purpose": "value", "--artifact": "value",
-         "--activated": "value", "--record-dir": "value", "--json": "bool"}
+         "--activated": "value", "--record-dir": "value", "--ledger": "value",
+         "--json": "bool"}
 
 
 def cli(argv: list[str]) -> int:
@@ -436,10 +445,13 @@ def cli(argv: list[str]) -> int:
             raise E._Usage(f"a2a needs {need}")
     if o["--action"] not in G.ACTIONS:
         raise E._Usage(f"--action must be one of {', '.join(G.ACTIONS)}")
+    if o.get("--deal") is not None and not o.get("--ledger"):
+        raise E._Usage(G._NEEDS_LEDGER)
     d = receive_files(o["--message"], o.get("--file"), action=o["--action"],
                       audience=o["--audience"], signers=o["--signer"], deal=o.get("--deal"),
                       purpose=o.get("--purpose"), artifact_id=o.get("--artifact"),
-                      activated=o.get("--activated"), record_dir=o.get("--record-dir"))
+                      activated=o.get("--activated"), record_dir=o.get("--record-dir"),
+                      ledger=o.get("--ledger"))
     if o.get("--json"):
         print(json.dumps(d.to_dict(), indent=1, ensure_ascii=False))
     else:

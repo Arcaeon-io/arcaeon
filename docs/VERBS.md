@@ -791,8 +791,9 @@ usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
                            [--out DIR] [--json]
        arcaeon gate a2a --message FILE.json --audience ID --signer DID
                         --action {read,act,pay,irreversible} [--file PATH]
-                        [--artifact ID] [--deal ID] [--purpose TEXT]
-                        [--activated URIS] [--record-dir DIR] [--json]
+                        [--artifact ID] [--deal ID --ledger PATH]
+                        [--purpose TEXT] [--activated URIS]
+                        [--record-dir DIR] [--json]
 ```
 
 **Exit codes:** 0 allow, 1 refuse (BROKEN, or `checker-broken`), 3 refuse

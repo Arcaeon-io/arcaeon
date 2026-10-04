@@ -75,7 +75,8 @@ def test_good_artifact_allows_every_action(tmp_path):
     env, did = _sealed(tmp_path)
     msg = _b(_task(_artifact(env)))
     for action in G.ACTIONS:
-        d = A.receive(msg, BODY, action=action, audience=ME, signers=[did], deal="d-7f3a")
+        d = A.receive(msg, BODY, action=action, audience=ME, signers=[did], deal="d-7f3a",
+                      ledger=tmp_path / "ledger.jsonl")
         assert d.verdict == V.VERIFIED and d.decision == "allow", d.reason
         assert d.exit_code == 0
     assert d.a2a["carrier"] == "artifact" and d.a2a["id"] == "grades-001"
@@ -294,7 +295,7 @@ def test_broken_with_deal_writes_evidence_with_the_message(tmp_path):
     env, did = _sealed(tmp_path)
     msg = _b(_task(_artifact(env)))
     d = A.receive(msg, BODY + b"x", action="pay", audience=ME, signers=[did], deal="d-7f3a",
-                  record_dir=tmp_path / "rec")
+                  record_dir=tmp_path / "rec", ledger=tmp_path / "ledger.jsonl")
     assert d.verdict == V.BROKEN and d.evidence
     ev = json.loads((Path(d.evidence) / "evidence.json").read_text(encoding="utf-8"))
     assert ev["a2a"]["message"]["copy"] == "bundle/a2a-message.json"
@@ -304,6 +305,9 @@ def test_broken_with_deal_writes_evidence_with_the_message(tmp_path):
     p = P.from_evidence(d.evidence)
     assert p["verdict"] == V.BROKEN and p["handed"]["file"] == "A2A artifact 'grades-001' file 'grades.csv'"
     assert "arcaeon-a2a-" not in P.render_markdown(p)
+    # D066 on the stack: the message is in the pack before the row, so the row still matches
+    assert d.chain_row and d.chain_error is None
+    assert G.verify_evidence_pack(Path(d.evidence), d.chain_row)["verdict"] == V.VERIFIED
 
 
 def test_cli_gate_a2a(tmp_path, capsys):
@@ -339,3 +343,9 @@ def test_cli_json_carries_a2a(tmp_path, capsys):
     out = json.loads(capsys.readouterr().out)
     assert out["decision"] == "allow" and out["a2a"]["extension"] == URI
     assert out["a2a"]["activated"] is True and out["file"].startswith("A2A artifact")
+
+
+def test_deal_without_ledger_raises_before_anything(tmp_path):
+    """D066 on the stack: a deal id needs the party's own ledger, as in gate.decide."""
+    with pytest.raises(ValueError):
+        A.receive(b"{}", BODY, action="pay", audience=ME, deal="d-7f3a")

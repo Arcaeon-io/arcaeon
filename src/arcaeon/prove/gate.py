@@ -820,7 +820,7 @@ def decide(file: str | Path, *, action: str, audience: str | None,
            purpose: str | None = None, record_dir: str | Path | None = None,
            ledger: str | Path | None = None, now: datetime | None = None,
            check_files=(), require_nonparty_check_above=None,
-           amount=None, checks=(), checkers=()) -> GateDecision:
+           amount=None, checks=(), checkers=(), on_pack=None) -> GateDecision:
     """allow or refuse `action` on `file`, from `envelope.verify`'s verdict.
 
     `file` is the handed file; `envelope` its sidecar (default: beside it).
@@ -840,6 +840,10 @@ def decide(file: str | Path, *, action: str, audience: str | None,
     is the deal's amount (the larger of it and the deal record's is used);
     `checkers` optionally narrows which non-party keys count. Unset, nothing
     changes. `checks` (D061) and `check_files` (D067) are separate inputs.
+    `on_pack(pack_dir)`, when given, runs after the evidence pack is written
+    and before its gate.evidence row is appended, so what it adds to the pack
+    is covered by the row's pack_digest (the A2A receiver keeps its message
+    this way); an exception in it is swallowed.
     Raises ValueError on an unknown action, a `deal` without a `ledger` or an
     unreadable cap, before anything is read or written; otherwise never raises."""
     if action not in ACTIONS:
@@ -921,6 +925,11 @@ def decide(file: str | Path, *, action: str, audience: str | None,
             d.reason += f" The evidence pack could not be written ({type(e).__name__})."
         if d.evidence is not None:
             out = Path(d.evidence)
+            if on_pack is not None:
+                try:
+                    on_pack(out)
+                except Exception:  # noqa: BLE001  the refusal and the pack stand either way
+                    pass
             try:
                 d.chain_row = _append_chain_row(d, out, Path(ledger), now)
             except Exception as e:  # noqa: BLE001  the refusal stands either way
@@ -946,8 +955,9 @@ USAGE = """usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
                            [--out DIR] [--json]
        arcaeon gate a2a --message FILE.json --audience ID --signer DID
                         --action {read,act,pay,irreversible} [--file PATH]
-                        [--artifact ID] [--deal ID] [--purpose TEXT]
-                        [--activated URIS] [--record-dir DIR] [--json]"""
+                        [--artifact ID] [--deal ID --ledger PATH]
+                        [--purpose TEXT] [--activated URIS]
+                        [--record-dir DIR] [--json]"""
 
 HELP = USAGE + """
 
