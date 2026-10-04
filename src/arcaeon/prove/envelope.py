@@ -58,7 +58,7 @@ from pathlib import Path
 from typing import Any
 
 from arcaeon import verdict as V
-from arcaeon.record.row import file_pin, loads_strict
+from arcaeon.record.row import DuplicateKeyError, file_pin, loads_strict
 
 __all__ = ["MEDIA_TYPE", "PAYLOAD_TYPE", "STATEMENT_TYPE", "PREDICATE_TYPE", "SUFFIX",
            "BINDING_FIELDS", "SealError", "pae", "envelope_path", "build_statement",
@@ -91,7 +91,8 @@ PROVES = ("the file's bytes are the bytes the named key sealed, under this label
           "for this audience, deal and purpose, before not_after")
 DOES_NOT_PROVE = ("that the content is true or safe (a member can seal a lie honestly, T1), "
                   "that the key belongs to who the label says (you chose to trust it, T6), "
-                  "or anything about the pin or witness refs (recorded, not resolved)")
+                  "anything about the pin or witness refs (recorded, not resolved), "
+                  "or that the receiver's clock is right (not_after is judged by it)")
 
 
 class SealError(ValueError):
@@ -413,8 +414,18 @@ def _check_signatures(r: dict, dsse: dict, payload: bytes, signers: tuple) -> No
 
 def _statement(r: dict, payload: bytes):
     """The decoded Statement, or None (r's envelope step set)."""
+    # Strict: a duplicate key anywhere in the payload is unreadable, the same as
+    # in the sidecar. Under JSON's last-key-wins two parsers would read two
+    # different labels or bindings from bytes that carry one valid signature.
     try:
         stmt = loads_strict(payload.decode("utf-8"))
+    except DuplicateKeyError as e:
+        if r["steps"]["envelope"] != V.BROKEN:          # never hide a BROKEN
+            r["steps"]["envelope"] = V.COULD_NOT_LOOK
+        r["_cnl"].append(("envelope", "an in-toto Statement in the payload", "unreadable",
+                          f"the payload repeats a key ({str(e)[:120]}): two readers would see "
+                          f"two different statements"))
+        return None
     except (UnicodeDecodeError, ValueError) as e:
         r["_cnl"].append(("envelope", "an in-toto Statement in the payload", "unreadable",
                           f"the payload is not JSON ({type(e).__name__})"))
@@ -488,6 +499,8 @@ def _check_predicate(r: dict, stmt: dict, file: Path, audience, deal, purpose,
     bad = []
     if now > na:
         bad.append(f"expired: not_after {_utc(na)} is before now ({_utc(now)})")
+    # Exact bytes, by design: no Unicode normalization, no case folding, no
+    # trimming. A homoglyph, a case change or a stray space is another receiver.
     for name, given in (("audience", audience), ("deal", deal), ("purpose", purpose)):
         if given is not None and given != b[name]:
             bad.append(f"{name}: sealed for {b[name]!r}, you are checking for {given!r}")

@@ -265,6 +265,169 @@ def test_missing_file_with_sidecar_could_not_look(tmp_path):
     assert r["verdict"] == V.COULD_NOT_LOOK and r["reason_word"] == "missing"
 
 
+# --- frozen-spec amendments ---------------------------------------------------------
+
+def _write_signed(f: Path, payload: bytes, seeds) -> list[str]:
+    """Write a sidecar for `f` carrying `payload` signed by each seed in turn."""
+    from arcaeon.prove.vet import receipts as R
+    sigs, dids = [], []
+    for seed in seeds:
+        did = R.did_key(R.public_key_from_seed(seed))
+        sig = R._sign_bytes(seed, E.pae(E.PAYLOAD_TYPE, payload))
+        sigs.append({"keyid": did, "sig": base64.b64encode(sig).decode()})
+        dids.append(did)
+    E.envelope_path(f).write_text(json.dumps({"mediaType": E.MEDIA_TYPE, "dsseEnvelope": {
+        "payloadType": E.PAYLOAD_TYPE, "payload": base64.b64encode(payload).decode(),
+        "signatures": sigs}}), encoding="utf-8")
+    return dids
+
+
+@pytest.mark.parametrize("original,doubled", [
+    ('"label":"week 3 grades"', '"label":"week 3 grades","label":"week 4 grades"'),
+    ('"audience":"instructor-1"', '"audience":"someone-else","audience":"instructor-1"'),
+    ('"predicateType":', '"predicateType":"https://example.invalid/other","predicateType":'),
+], ids=["label", "binding-audience", "predicateType"])
+def test_duplicate_key_inside_signed_payload_could_not_look(tmp_path, original, doubled):
+    """Amendment (a): a duplicate key inside the payload is unreadable, even
+    when the signature over those exact bytes is valid. Under last-key-wins
+    two parsers would read two different labels."""
+    f = tmp_path / "grades.csv"
+    f.write_bytes(b"name,grade\nunit-a,pass\n")
+    seed = secrets.token_bytes(32)
+    from arcaeon.prove.vet import receipts as R
+    did = R.did_key(R.public_key_from_seed(seed))
+    stmt = E.build_statement(f, key_id=did, **BIND)
+    text = json.dumps(stmt, sort_keys=True, separators=(",", ":"))
+    assert text.count(original) == 1
+    payload = text.replace(original, doubled).encode("utf-8")
+    _write_signed(f, payload, [seed])
+    r = E.verify(f, audience="instructor-1", signers=[did])
+    assert r["steps"]["signature"] == V.VERIFIED, r     # only the duplicate is wrong
+    assert r["verdict"] == V.COULD_NOT_LOOK and r["reason_word"] == "unreadable", r
+    assert r["steps"]["envelope"] == V.COULD_NOT_LOOK
+    assert "repeats a key" in r["reason"], r["reason"]
+
+
+@pytest.mark.parametrize("given", [
+    "instruсtor-1",          # Cyrillic es in place of Latin c (homoglyph)
+    "Instructor-1",               # case
+    "INSTRUCTOR-1",
+    "instructor-1 ",              # trailing space
+    " instructor-1",              # leading space
+    "instructor‑1",          # non-breaking hyphen
+], ids=["homoglyph", "case", "upper", "trailing-space", "leading-space", "nb-hyphen"])
+def test_binding_audience_compares_exact_bytes(tmp_path, given):
+    """Amendment (b): no Unicode normalization, no case folding, no trimming."""
+    f, did = _sealed(tmp_path)
+    r = _ok(f, did, audience=given)
+    assert r["verdict"] == V.BROKEN and r["steps"]["binding"] == V.BROKEN, r
+    assert r["reason"].startswith("audience: sealed for"), r["reason"]
+
+
+def test_binding_homoglyph_sealed_side_is_broken_for_the_latin_receiver(tmp_path):
+    f, did = _sealed(tmp_path, audience="instructor-1".replace("o", "о"))  # Cyrillic o
+    assert _ok(f, did, audience="instructor-1")["verdict"] == V.BROKEN
+    assert _ok(f, did, audience="instructor-1".replace("o", "о"))["verdict"] == V.VERIFIED
+
+
+def test_binding_unicode_normal_forms_are_not_equal(tmp_path):
+    nfc, nfd = "café-desk", "café-desk"
+    f, did = _sealed(tmp_path, audience=nfc)
+    r = _ok(f, did, audience=nfd)
+    assert r["verdict"] == V.BROKEN and "audience" in r["reason"]
+    assert _ok(f, did, audience=nfc)["verdict"] == V.VERIFIED
+
+
+def test_seal_keeps_binding_text_byte_for_byte(tmp_path):
+    f, did = _sealed(tmp_path, audience="instructor-1 ")
+    b = _statement(E.envelope_path(f))["predicate"]["binding"]
+    assert b["audience"] == "instructor-1 "
+    assert _ok(f, did, audience="instructor-1")["verdict"] == V.BROKEN
+    assert _ok(f, did, audience="instructor-1 ")["verdict"] == V.VERIFIED
+
+
+@pytest.mark.parametrize("field,given", [
+    ("deal", "D-7F3A"), ("deal", "d-7f3a "), ("deal", "d-7f3а"),   # Cyrillic a
+    ("purpose", "Grading"), ("purpose", " grading"), ("purpose", "grаding"),
+])
+def test_binding_deal_and_purpose_compare_exact_bytes(tmp_path, field, given):
+    f, did = _sealed(tmp_path)
+    r = _ok(f, did, **{field: given})
+    assert r["verdict"] == V.BROKEN and r["steps"]["binding"] == V.BROKEN, r
+    assert f"{field}: sealed for" in r["reason"]
+
+
+@pytest.mark.parametrize("bad_first", [False, True], ids=["good-then-bad", "bad-then-good"])
+@pytest.mark.parametrize("kind", ["other-payload", "flipped-sig", "malformed-keyid",
+                                  "not-an-object"])
+def test_any_signature_that_fails_is_broken_even_beside_a_good_one(tmp_path, kind, bad_first):
+    """Amendment (c): several signature entries; one fails, one is from the
+    named signer and verifies. BROKEN: a failing entry is tamper evidence."""
+    from arcaeon.prove.vet import receipts as R
+    f = tmp_path / "grades.csv"
+    f.write_bytes(b"name,grade\nunit-a,pass\n")
+    good_seed, other_seed = secrets.token_bytes(32), secrets.token_bytes(32)
+    good = R.did_key(R.public_key_from_seed(good_seed))
+    other = R.did_key(R.public_key_from_seed(other_seed))
+    stmt = E.build_statement(f, key_id=good, **BIND)
+    payload = json.dumps(stmt, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    _write_signed(f, payload, [good_seed])
+    assert E.verify(f, audience="instructor-1", signers=[good])["verdict"] == V.VERIFIED
+    if kind == "other-payload":
+        bad = {"keyid": other, "sig": base64.b64encode(R._sign_bytes(
+            other_seed, E.pae(E.PAYLOAD_TYPE, payload + b" "))).decode()}
+    elif kind == "flipped-sig":
+        raw = bytearray(R._sign_bytes(other_seed, E.pae(E.PAYLOAD_TYPE, payload)))
+        raw[0] ^= 1
+        bad = {"keyid": other, "sig": base64.b64encode(bytes(raw)).decode()}
+    elif kind == "malformed-keyid":
+        bad = {"keyid": "did:key:zNOTAKEY", "sig": base64.b64encode(b"x" * 64).decode()}
+    else:
+        bad = "VERIFIED"
+    side = E.envelope_path(f)
+    env = json.loads(side.read_text(encoding="utf-8"))
+    sigs = env["dsseEnvelope"]["signatures"]
+    env["dsseEnvelope"]["signatures"] = [bad] + sigs if bad_first else sigs + [bad]
+    side.write_text(json.dumps(env), encoding="utf-8")
+    r = E.verify(f, audience="instructor-1", signers=[good])
+    assert r["verdict"] == V.BROKEN and r["steps"]["signature"] == V.BROKEN, r
+    assert any(m.startswith(f"signature {0 if bad_first else 1}") for m in r["findings"]), r
+
+
+def test_two_good_signatures_from_named_signers_verify(tmp_path):
+    from arcaeon.prove.vet import receipts as R
+    f = tmp_path / "grades.csv"
+    f.write_bytes(b"name,grade\nunit-a,pass\n")
+    s1, s2 = secrets.token_bytes(32), secrets.token_bytes(32)
+    d1 = R.did_key(R.public_key_from_seed(s1))
+    stmt = E.build_statement(f, key_id=d1, **BIND)
+    payload = json.dumps(stmt, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    dids = _write_signed(f, payload, [s1, s2])
+    r = E.verify(f, audience="instructor-1", signers=dids)
+    assert r["verdict"] == V.VERIFIED, r
+
+
+def test_not_after_is_judged_by_the_receivers_clock(tmp_path):
+    """Amendment (d), a stated limit: a receiver whose clock is behind accepts
+    an envelope that has expired by the true time."""
+    f, did = _sealed(tmp_path, not_after="1h")
+    true_now = datetime.now(timezone.utc) + timedelta(hours=2)
+    assert _ok(f, did, now=true_now)["verdict"] == V.BROKEN
+    slow_clock = true_now - timedelta(hours=3)
+    assert _ok(f, did, now=slow_clock)["verdict"] == V.VERIFIED
+    assert "receiver's clock" in E.DOES_NOT_PROVE
+
+
+def test_spec_names_the_amendments():
+    doc = (Path(__file__).resolve().parents[1] / "docs" / "ENVELOPE.md").read_text(
+        encoding="utf-8")
+    assert "exact bytes" in doc
+    assert "never into VERIFIED" in doc
+    assert "receiver's clock" in doc
+    assert "duplicate key inside the payload" in doc
+    assert E.PREDICATE_TYPE == "https://arcaeon.io/labeled-exchange/v1"
+
+
 # --- the CLI end to end -------------------------------------------------------------
 
 def test_cli_round_trip_and_exit_codes(tmp_path, capsys):

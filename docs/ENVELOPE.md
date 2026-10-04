@@ -84,6 +84,18 @@ BROKEN.
 The payload is the Statement as compact JSON with sorted keys. A verifier
 reads the bytes it was given; it never re-serializes them.
 
+The `predicateType` is `https://arcaeon.io/labeled-exchange/v1`, the name of
+this spec. Any earlier draft that gave the envelope's predicate as
+`witness-pin/v1` is superseded; a Statement with any other `predicateType`
+reads COULD NOT LOOK (`unreadable`).
+
+**A duplicate key inside the payload is unreadable**, the same as a duplicate
+key in the sidecar: `verify` answers COULD NOT LOOK (`unreadable`), even when
+the signature over those exact bytes is valid. JSON leaves duplicates to the
+parser, and most keep the last one, some the first: two receivers would read
+two different labels or bindings from one signed payload, so this verifier
+reads neither.
+
 | field | what it is | required |
 |---|---|---|
 | `label` | what the file is, in the sealer's words (`--label`) | yes |
@@ -113,6 +125,19 @@ time-bound.
 So `seal` refuses to write an envelope without all four (exit 2, nothing
 written), and `verify` reads a Statement without all four as BROKEN: an
 unbound envelope is refused, never accepted with a warning.
+
+### Binding fields compare as exact bytes
+
+`audience`, `deal` and `purpose` are compared as exact bytes (exact Unicode
+code points, as UTF-8): no Unicode normalization (NFC and NFD forms of the
+same word are different), no case folding, no whitespace trimming, no
+homoglyph mapping. `seal` stores them exactly as given. So `Instructor-1`,
+`instructor-1 ` (trailing space) and `instru`+Cyrillic `с`+`tor-1` are each a
+different receiver from `instructor-1`, and `verify` answers BROKEN naming
+the field (`audience: sealed for ...`). Any folding rule would let one
+envelope bind two receivers that a human cannot tell apart; a receiver that
+wants a looser match must canonicalize its own id before sealing and before
+checking, the same way on both sides.
 
 ## Signing
 
@@ -165,7 +190,12 @@ and what was not checked.
 
 - the file's sha256 is not the one sealed (the bytes changed);
 - a signature does not verify over the payload (the payload or the
-  signature was changed), or the `sealed_by.key` is not the key that signed;
+  signature was changed), or the `sealed_by.key` is not the key that signed.
+  **With several signature entries, any one that fails is BROKEN**, even when
+  another entry, by a signer you named, verifies: a failing entry is tamper
+  evidence, and the envelope is refused rather than read around it. An entry
+  that is not an object, or has a keyid that is not an Ed25519 did:key, or a
+  sig that is not base64, counts as failing;
 - the envelope is signed, but not by any `--signer` you named;
 - a key sits outside the signed payload;
 - the Statement has no subject digest, no label, or no complete binding (an
@@ -184,6 +214,8 @@ the answer could be checked):
 - no sidecar beside the file (`missing`), or one that cannot be read: not
   UTF-8, not JSON, a duplicate key, over 1 MiB, not this media type, not a
   DSSE envelope with an in-toto payload (`unreadable`). Never a traceback;
+- a duplicate key inside the payload, or a payload that is not an in-toto
+  Statement of this `predicateType` (`unreadable`);
 - the file itself is not there or cannot be read;
 - the envelope is unsigned (`missing`);
 - it is signed, but you named no `--signer` (`bounded`): a valid signature
@@ -226,6 +258,15 @@ this audience, deal and purpose, and the not-after time has not passed.
   A stolen key signs anything, and nothing here can tell.
 - **When it was sealed.** `sealed_at` is the sealer's clock. Only a resolved
   witness pin could fix the time from outside, and refs are not resolved yet.
+- **That it has not expired, by anyone's clock but the receiver's.**
+  `not_after` is judged by the receiver's clock. A receiver whose clock is
+  behind accepts an expired envelope; one whose clock is ahead refuses a good
+  one. Keep the receiving machine's clock synced.
+- **That nobody can spoil it.** A third party who can edit the sidecar can
+  turn VERIFIED into BROKEN (add a bad signature entry, a stray key, change a
+  byte) but never into VERIFIED: every change it can make without the
+  sealer's key is caught. BROKEN therefore means "do not act, keep the
+  evidence", not "the sealer lied".
 - **That it was not replayed within its own binding.** Inside one audience,
   deal, purpose and validity window, the same envelope can be presented twice.
   A receiver that must act once keeps the envelopes it has acted on.
