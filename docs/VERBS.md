@@ -644,6 +644,7 @@ is refused. `verify` is the receiving side, verify-before-act: VERIFIED act,
 BROKEN refuse and keep the evidence, COULD NOT LOOK do not act on money or an
 irreversible step. It proves who sealed the bytes and for whom, never that
 the content is true. The spec and its limits are [ENVELOPE.md](ENVELOPE.md).
+An agent calls the same verify as the MCP tool `verify_bundle` on `arcaeon mcp`.
 
 **Usage**
 
@@ -684,7 +685,10 @@ of the file and its envelope) and `evidence.json` (the sha256 of each copy,
 the verdict, the reasons, the action, the UTC time and the verify report).
 Allow means the bytes are unchanged since the key you named sealed them and
 are labeled for you and in date; it does not say the content is true or safe.
-The library function is `arcaeon.prove.gate.decide`.
+The library function is `arcaeon.prove.gate.decide`; an agent calls it as the
+MCP tool `gate_decide` on `arcaeon mcp` (paths must sit under
+`$ARCAEON_BUNDLE_ROOT`, default the working directory; an evidence pack lands
+in the connector's state dir).
 
 **Usage**
 

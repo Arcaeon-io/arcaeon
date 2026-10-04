@@ -66,6 +66,7 @@ def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("ARCAEON_LEDGER_NS_DIR", str(tmp_path / "ledgers"))
     monkeypatch.setenv("MCP_VET_AUDIT_LEDGER", str(tmp_path / "vet_audit.jsonl"))
     monkeypatch.setenv("ARCAEON_CALL_RECORD", str(tmp_path / "arcaeon.calls.jsonl"))
+    monkeypatch.setenv("ARCAEON_BUNDLE_ROOT", str(tmp_path))
     monkeypatch.delenv("ARCAEON_KEY", raising=False)
     for var in ("LICENSE_GATE_REQUIRED", "ARCAEON_LICENSE_KEY",
                 "LICENSE_GATE_MODULE", "LICENSE_GATE_SECRET"):
@@ -123,6 +124,9 @@ def _drive_every_tool_once(tmp_path):
         "ledger": buyer, "out": str(tmp_path / "pack")})
     out["evidence_pack_verify"] = _call("evidence_pack_verify", {
         "pack": str(tmp_path / "pack")})
+    out["verify_bundle"] = _call("verify_bundle", {"file": str(clean)})
+    out["gate_decide"] = _call("gate_decide", {
+        "file": str(clean), "action": "read", "audience": "a"})
     out["arcaeon_status"] = _call("arcaeon_status", {})
     return out
 
@@ -141,7 +145,7 @@ def test_every_tool_leaves_exactly_one_record_with_its_own_name(monkeypatch, tmp
     assert sorted(results) == sorted(ALL_TOOLS), (sorted(results), ALL_TOOLS)
 
     rows = _rows(rec)
-    assert len(rows) == len(ALL_TOOLS) == 19, [r["tool"] for r in rows]
+    assert len(rows) == len(ALL_TOOLS) == 21, [r["tool"] for r in rows]
     assert [r["tool"] for r in rows] == list(results), [r["tool"] for r in rows]
     assert all(r["ok"] is True for r in rows), [(r["tool"], r.get("error")) for r in rows]
     for r in rows:
@@ -164,17 +168,17 @@ def test_the_chain_verifies_and_a_tampered_row_is_named(monkeypatch, tmp_path):
     _drive_every_tool_once(tmp_path)
 
     v = verify_call_record(rec)
-    assert v["ok"] is True and v["rows"] == 19 and v["breaks"] == 0, v
+    assert v["ok"] is True and v["rows"] == 21 and v["breaks"] == 0, v
     assert v["first_break"] is None, v
 
     from arcaeon.record.ledger import verify_file
     lib = verify_file(rec, strict=True)
-    assert lib.ok is True and lib.rows == 19, lib
+    assert lib.ok is True and lib.rows == 21, lib
 
     err, through_tool = _call("ledger_verify_peer_ledger",
                               {"jsonl_text": rec.read_text(encoding="utf-8"), "strict": True})
     assert not err, through_tool
-    assert through_tool["rows"] == 19, through_tool
+    assert through_tool["rows"] == 21, through_tool
     assert through_tool.get("ok", through_tool.get("chain_verified")) is True, through_tool
     # that verification was itself a tool call, so it is row 12 now
     assert [r["tool"] for r in _rows(rec)][-1] == "ledger_verify_peer_ledger"
