@@ -772,15 +772,20 @@ dispute/dispute-packet.json
 
 Answers: after an exchange, did both parties say VERIFIED about the same
 bytes? `react` appends one signed row (kind `exchange.reaction`) to your own
-hash-chained log: the exchange id, the other party's `did:key`, the file's
-sha256, your reaction in the verifier's three words, the UTC time and your
+hash-chained log: the exchange id, the other party's ID (their `did:key`, or
+their arcaeon.io account id `acct:NAME@arcaeon.io`, stored as given and never
+looked up), the file's sha256, your reaction in the verifier's three words, the UTC time and your
 `did:key`, signed with Ed25519 over a canonical encoding of those fields.
 `--disputed REASON` adds a signed DISPUTED claim, never a verdict. Rows are
 append-only: a change is a new row with `--supersedes` naming the old row's
 digest. `pair` verifies both chains and every row signature against each
 log's key, reads the latest non-superseded row per party per exchange and
 reports `clean`, `mismatch` (naming the field), `not_verified`, `missing` or
-`broken`, with DISPUTED claims listed apart. Two clean rows mean both said
+`broken`, with DISPUTED claims listed apart. An account id and a `did:key`
+are distinct IDs to `pair` and `tally`: a row naming an account reads
+`mismatch` on counterparty, because which key an account binds is checked
+on the account side, not here (COULD NOT LOOK here). `--strict` makes a
+`mismatch` or `missing` exchange exit 1. Two clean rows mean both said
 VERIFIED about the same bytes, not that the file is true, and two colluding
 parties write two clean rows. The row, the signature encoding and the limits
 are [EXCHANGE.md](EXCHANGE.md); the library is `arcaeon.prove.exchange_log`.
@@ -788,25 +793,27 @@ are [EXCHANGE.md](EXCHANGE.md); the library is `arcaeon.prove.exchange_log`.
 **Usage**
 
 ```text
-usage: arcaeon exchange react --exchange ID --counterparty DID --file PATH
+usage: arcaeon exchange react --exchange ID --counterparty ID --file PATH
                               --reaction {VERIFIED,BROKEN,"COULD NOT LOOK"}
                               --key SEEDFILE [--disputed REASON]
                               [--supersedes ROWDIGEST] [--log PATH]
        arcaeon exchange pair A.jsonl B.jsonl [--owner-a DID] [--owner-b DID]
-                              [--json]
+                              [--json] [--strict]
 ```
 
 **Exit codes:** `react`: 0 written, 2 refused or bad usage (a missing flag, a
-reaction that is not one of the three words, a counterparty that is not a
-`did:key`, a key that does not own the log, a `--supersedes` digest not in the
+reaction that is not one of the three words, a counterparty that is neither
+a `did:key` nor `acct:NAME@arcaeon.io`, a key that does not own the log, a `--supersedes` digest not in the
 log), 3 the file is not there. `pair`: 0 VERIFIED (both logs check; read the
 per-exchange statuses), 1 BROKEN (a chain or a row), 3 COULD NOT LOOK (a log
 missing, empty, unreadable or not a chained ledger, or no Ed25519 backend), 2
-bad usage. New in 0.10.x, so `--legacy-exit` changes nothing here.
+bad usage. `pair --strict`: also 1 when both logs check but any exchange is
+`mismatch` or `missing` (`not_verified` stays 0; 3 and 2 unchanged). New in
+0.10.x, so `--legacy-exit` changes nothing here.
 
 ```console
 $ arcaeon exchange react --exchange ex-17 --counterparty did:key:z6MkB... --file grades.csv --reaction VERIFIED --key a.key --log a.jsonl
-$ arcaeon exchange pair a.jsonl b.jsonl
+$ arcaeon exchange pair a.jsonl b.jsonl --strict
 VERIFIED: both chains verify and every reaction row checks under its log's key; 1 clean, ...
 log a: VERIFIED a.jsonl owner did:key:z6MkA... (first_row)
 log b: VERIFIED b.jsonl owner did:key:z6MkB... (first_row)

@@ -24,7 +24,7 @@ One row per reaction, kind `exchange.reaction`, appended with
 |---|---|
 | `kind`, `v` | `exchange.reaction`, `1` |
 | `exchange_id` | the exchange, one line of text |
-| `counterparty` | the other party's account key, an Ed25519 `did:key` |
+| `counterparty` | the other party's ID: their account key, an Ed25519 `did:key`, or their arcaeon.io account id `acct:NAME@arcaeon.io` (see below), stored as given |
 | `file_sha256` | sha256 of the file this party reacted to |
 | `reaction` | `VERIFIED`, `BROKEN` or `COULD NOT LOOK`, the verifier's three words |
 | `disputed`, `reason` | `true` and a reason when this party disputes; else `false` and `null` |
@@ -40,6 +40,19 @@ of the eleven fields above from `kind` to `signer`. `sig`, `ts` and `chain`
 are not signed. Any other key in the row is a field outside the signature
 and makes the row BROKEN. The key file is the envelope's: a 32-byte seed,
 base64, one line (`arcaeon[sign]`).
+
+**The counterparty ID.** The ID is the arcaeon.io account, and the account
+binds the `did:key` (TE-41). `counterparty` takes either form. The account id
+is `acct:NAME@arcaeon.io`, the RFC 7565 `acct:` URI under the arcaeon.io
+host; `NAME` is 1 to 64 characters of dot-separated labels, each lower-case
+`a-z`, `0-9` and `-`, not starting or ending with `-`. That form is defined
+once, as `ACCOUNT_ID_RE` in `arcaeon.prove.exchange_log`. Anything else is
+refused before writing (exit 2). Nothing resolves an account over the
+network: the row holds the text given. `pair` and `tally` compare IDs as
+text, so `acct:...` and `did:key:...` are two distinct IDs; no row records
+which key an account binds. A row that names an account therefore reads
+`mismatch` on counterparty, and the finding says the binding was not checked
+here. The binding is checked on the account side; here it is COULD NOT LOOK.
 
 **The row digest** is `sha256:json-c14n:v1:` + sha256(`C`). `react` prints
 it; `--supersedes` takes it.
@@ -65,6 +78,9 @@ earlier for the same exchange) or both logs belong to one key. COULD NOT LOOK
 if a log is missing, empty, not UTF-8, not a chained ledger or too big, or if
 the install cannot check Ed25519. Else VERIFIED. A broken row is listed with
 its line, never dropped. Exit 0 VERIFIED, 1 BROKEN, 3 COULD NOT LOOK.
+With `--strict`, a VERIFIED record holding any `mismatch` or `missing`
+exchange exits 1 instead of 0 (`not_verified` stays 0; 3 and 2 are
+unchanged); without it the exit codes are as above.
 
 A log's owner is the key you name (`--owner-a`, `--owner-b`), else the signer
 of its first row that verifies (trust on first use: say which key you expect

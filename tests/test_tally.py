@@ -434,3 +434,21 @@ def test_missing_chain_and_bad_side_files(w, capsys):
 def test_build_is_importable_with_paths():
     from arcaeon.prove.tally import build  # noqa: F401  D059 stacks on this
     assert T.KIND == "arcaeon.tally/v1"
+
+
+def test_account_id_counterparty_is_a_distinct_id_not_paired(w):
+    """D071: an acct:NAME@arcaeon.io counterparty is stored as given; the tally
+    does not bind it to a did:key, so it never pairs with b's chain."""
+    a, b = w["a"], w["b"]
+    react(w, a, "acct:b-owner@arcaeon.io", "ex-1")
+    react(w, b, a, "ex-1")
+    r = tally(a, b)
+    assert r["verdict"] == V.VERIFIED, r["reason"]
+    ia, ib = by_id(r, a.did), by_id(r, b.did)
+    assert ia["windows"]["all"]["said"]["total"] == 1
+    # b's row names a's key, so the exchange pairs; a's row names an account, not
+    # b's key, so the pair reads mismatch on counterparty for both sides
+    for i in (ia, ib):
+        assert i["windows"]["all"]["paired"]["mismatch"] == 1
+        assert i["windows"]["all"]["paired"]["clean"] == 0
+    assert "acct:b-owner@arcaeon.io" not in [i["id"] for i in r["ids"]]

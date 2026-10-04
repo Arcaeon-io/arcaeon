@@ -85,6 +85,9 @@ LIMITS = (
     "a fresh key with no alias cannot be stopped; it is shown as a new, unrated ID",
     "an alias needs both keys' signatures, so an ID with a bad record will not sign one: "
     "the alias carries history forward only when the holder chooses to",
+    "a counterparty named by arcaeon.io account id (acct:NAME@arcaeon.io) is a distinct ID "
+    "from every did:key: no row records which key an account binds, so that binding is "
+    "not checked here (COULD NOT LOOK) and such a row never pairs clean",
     "`at` is signed but not witnessed: an owner can backdate rows to look older; pin chain "
     "heads outside your control",
 )
@@ -164,7 +167,7 @@ def check_alias(entry: Any) -> tuple[str | None, str | None]:
         return V.COULD_NOT_LOOK, f"fields must be exactly {', '.join(sorted(want))}"
     if entry["kind"] != ALIAS_KIND:
         return V.COULD_NOT_LOOK, f"kind is not {ALIAS_KIND}"
-    if not (X._is_did(entry["old"]) and X._is_did(entry["new"])):
+    if not (X.is_did(entry["old"]) and X.is_did(entry["new"])):
         return V.COULD_NOT_LOOK, "old and new must be Ed25519 did:key"
     if entry["old"] == entry["new"]:
         return V.COULD_NOT_LOOK, "old and new are the same key"
@@ -213,8 +216,8 @@ def _groups(obj: Any) -> tuple[list[dict], str | None]:
         name, members = f"group {n}", g
         if isinstance(g, dict):
             name, members = g.get("name", name), g.get("members")
-        if not X._text_ok(name) or not isinstance(members, list) or len(members) < 2 \
-                or not all(X._is_did(m) for m in members):
+        if not X.text_ok(name) or not isinstance(members, list) or len(members) < 2 \
+                or not all(X.is_did(m) for m in members):
             return [], f"group {n} is not a name and two or more Ed25519 did:key members"
         out.append({"name": name, "members": sorted(set(members))})
     return out, None
@@ -339,7 +342,7 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
                                 "reason": "the same file was given twice; read once"})
             continue
         seen_paths.add(where)
-        side = X._read_side(p, None, f"#{i}")
+        side = X.read_side(p, None, f"#{i}")
         rows = side.pop("_rows", [])
         own = side.get("owner")
         entry = {k: side.get(k) for k in ("log", "verdict", "reason", "owner", "owner_from",
@@ -363,7 +366,7 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
         broken_rows_by_key.setdefault(own, []).extend(side["broken_rows"])
 
     owners = set(rows_by_key)
-    heads = {k: X._heads({"_rows": v}) for k, v in rows_by_key.items()}
+    heads = {k: X.latest_heads({"_rows": v}) for k, v in rows_by_key.items()}
     group_of: dict[str, set[str]] = {}
     for g in glist:
         for m in g["members"]:
@@ -448,7 +451,7 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
         ha, hb = heads[a].get(eid), heads[b].get(eid)
         ba = [x for x in broken_rows_by_key.get(a, []) if x["exchange_id"] == eid]
         bb = [x for x in broken_rows_by_key.get(b, []) if x["exchange_id"] == eid]
-        ex = X._pair_exchange(eid, ha, hb, a, b, ba, bb)
+        ex = X.pair_exchange(eid, ha, hb, a, b, ba, bb)
         times = [t for t in (_at(h["at"]) if h else None for h in (ha, hb)) if t]
         t = max(times) if times else None
         present = [h for h in (ha, hb) if h]

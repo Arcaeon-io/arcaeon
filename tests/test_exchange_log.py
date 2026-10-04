@@ -343,3 +343,130 @@ def test_cli_exit_codes(parties, capsys):
     p["la"].write_text(text.replace("ex-1", "ex-2"), encoding="utf-8")
     assert cli.main(["exchange", "pair", str(p["la"]), str(p["lb"])]) == V.EXIT_BAD
     assert cli.main(["exchange", "--help"]) == 0
+
+
+# --- D071: the arcaeon.io account id form, pair --strict, public helpers ------------------
+
+ACCT = "acct:dealer-7@arcaeon.io"
+
+
+@pytest.mark.parametrize("good", [ACCT, "acct:a@arcaeon.io", "acct:bot-1.owner@arcaeon.io"])
+def test_account_id_form_is_accepted(good):
+    assert X.is_account_id(good) and X.is_counterparty_id(good)
+    assert not X.is_did(good)
+
+
+@pytest.mark.parametrize("bad", ["dealer-7@arcaeon.io", "acct:Dealer@arcaeon.io",
+                                 "acct:dealer@arcaeon.com", "acct:@arcaeon.io",
+                                 "acct:-x@arcaeon.io", "acct:a..b@arcaeon.io",
+                                 "acct:" + "a" * 65 + "@arcaeon.io", "https://arcaeon.io/x",
+                                 "acct:x@arcaeon.io\n", "did:key:zNOPE", 7, None])
+def test_malformed_ids_are_not_counterparties(bad):
+    assert not X.is_counterparty_id(bad)
+
+
+def test_react_stores_the_account_id_as_given(parties):
+    out = _react(parties, "a", counterparty=ACCT)
+    assert out["row"]["counterparty"] == ACCT
+    assert X.check_row(out["row"]) is None
+    rows = [r for r in Ledger(parties["la"]) if r.get("kind") == X.KIND]
+    assert rows[0]["counterparty"] == ACCT
+
+
+def test_react_refuses_a_malformed_counterparty_with_a_clear_error(parties):
+    with pytest.raises(X.ExchangeError) as e:
+        _react(parties, "a", counterparty="acct:Dealer 7@arcaeon.io")
+    msg = str(e.value)
+    assert "--counterparty" in msg and "did:key" in msg and "acct:NAME@arcaeon.io" in msg
+    assert not parties["la"].exists()
+
+
+def test_cli_react_malformed_counterparty_exit_2(parties, capsys):
+    p = parties
+    rc = cli.main(["exchange", "react", "--exchange", "x", "--counterparty", "dealer@arcaeon",
+                   "--file", str(p["file"]), "--reaction", "VERIFIED",
+                   "--key", str(p["ka"]), "--log", str(p["la"])])
+    assert rc == V.EXIT_USAGE
+    assert "acct:NAME@arcaeon.io" in capsys.readouterr().err
+    assert not p["la"].exists()
+
+
+def test_did_key_counterparty_unchanged(parties):
+    out = _react(parties, "a")
+    assert out["row"]["counterparty"] == parties["db"] and X.is_did(parties["db"])
+    _react(parties, "b")
+    assert _only(X.pair(parties["la"], parties["lb"]))["status"] == "clean"
+
+
+def test_pair_treats_account_and_did_as_distinct(parties):
+    _react(parties, "a", counterparty=ACCT)
+    _react(parties, "b")
+    r = X.pair(parties["la"], parties["lb"])
+    assert r["verdict"] == V.VERIFIED, r["reason"]
+    ex = _only(r)
+    assert ex["status"] == "mismatch" and ex["differs"] == ["counterparty"]
+    assert any(ACCT in f and "not checked here" in f for f in ex["findings"])
+
+
+def test_pair_strict_exits_1_on_mismatch_and_missing(parties, capsys):
+    p = parties
+    _react(p, "a", ex="ex-1")
+    _react(p, "b", V.BROKEN, ex="ex-1")
+    args = ["exchange", "pair", str(p["la"]), str(p["lb"])]
+    assert cli.main(args) == V.EXIT_GOOD
+    assert cli.main(args + ["--strict"]) == V.EXIT_BAD
+    assert "--strict" in capsys.readouterr().err
+
+
+def test_pair_strict_missing_and_clean(parties, capsys):
+    p = parties
+    _react(p, "a", ex="ex-1")
+    _react(p, "b", ex="ex-1")
+    args = ["exchange", "pair", str(p["la"]), str(p["lb"]), "--strict"]
+    assert cli.main(args) == V.EXIT_GOOD
+    assert cli.main(args[:-1]) == V.EXIT_GOOD
+    _react(p, "a", ex="ex-2")
+    assert cli.main(args[:-1]) == V.EXIT_GOOD
+    assert cli.main(args) == V.EXIT_BAD
+    assert cli.main(args + ["--json"]) == V.EXIT_BAD
+    capsys.readouterr()
+
+
+def test_pair_strict_keeps_could_not_look_and_broken_codes(parties, capsys):
+    p = parties
+    args = ["exchange", "pair", str(p["la"]), str(p["lb"]), "--strict"]
+    assert cli.main(args) == V.EXIT_COULD_NOT_LOOK
+    _react(p, "a")
+    _react(p, "b")
+    text = p["la"].read_text(encoding="utf-8")
+    p["la"].write_text(text.replace("ex-1", "ex-2"), encoding="utf-8")
+    assert cli.main(args) == V.EXIT_BAD
+    capsys.readouterr()
+
+
+def test_tally_modules_import_no_private_names_from_exchange_log():
+    import ast
+    import arcaeon.prove.tally as T
+    import arcaeon.prove.tally_chain as TC
+    for mod in (T, TC):
+        tree = ast.parse(Path(mod.__file__).read_text(encoding="utf-8"))
+        aliases = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and node.module == "arcaeon.prove.exchange_log":
+                bad = [a.name for a in node.names if a.name.startswith("_")]
+                assert not bad, (mod.__name__, bad)
+            if isinstance(node, ast.ImportFrom) and node.module == "arcaeon.prove":
+                aliases |= {a.asname or a.name for a in node.names if a.name == "exchange_log"}
+            if isinstance(node, ast.Import):
+                aliases |= {a.asname or a.name for a in node.names
+                            if a.name == "arcaeon.prove.exchange_log"}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name) \
+                    and node.value.id in aliases:
+                assert not node.attr.startswith("_"), (mod.__name__, node.attr)
+
+
+def test_promoted_helpers_are_public():
+    for name in ("is_did", "is_account_id", "is_counterparty_id", "text_ok", "read_side",
+                 "latest_heads", "pair_exchange"):
+        assert callable(getattr(X, name)) and name in X.__all__

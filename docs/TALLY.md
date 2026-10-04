@@ -271,3 +271,8 @@ on its own; only a pin of its tip held outside your control closes that gap.
   among the inputs is not counted, and a truncated or re-minted chain still
   verifies (see EXCHANGE.md).
 - **A key is not a person.** An ID is a `did:key`.
+- **An account id is a distinct ID.** A row whose counterparty is an arcaeon.io
+  account id (`acct:NAME@arcaeon.io`, EXCHANGE.md) is counted as said, but it
+  never matches any chain's `did:key`, so such an exchange never pairs
+  `clean`. Which key an account binds is checked on the account
+  side, not here (COULD NOT LOOK here).

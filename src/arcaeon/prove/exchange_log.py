@@ -1,11 +1,12 @@
 # SPDX-License-Identifier: MIT
 """arcaeon.prove.exchange_log: signed reactions after an exchange, and the pair reader (TE-42).
 
-    arcaeon exchange react --exchange ID --counterparty DID --file F
+    arcaeon exchange react --exchange ID --counterparty ID --file F
                            --reaction {VERIFIED,BROKEN,"COULD NOT LOOK"}
                            [--disputed REASON] [--supersedes ROWDIGEST]
                            --key SEEDFILE [--log PATH]
     arcaeon exchange pair A.jsonl B.jsonl [--owner-a DID] [--owner-b DID] [--json]
+                          [--strict]
 
 After an exchange each party writes ONE row under its own account key into its
 own hash-chained log (arcaeon.record.ledger.Ledger.append, the same writer the
@@ -14,7 +15,9 @@ deal and gate rows use). The pair reader reads both logs and lines the rows up.
 THE ROW (kind "exchange.reaction", v 1). Every field below is signed:
 
   {"kind": "exchange.reaction", "v": 1,
-   "exchange_id": TEXT, "counterparty": did:key (the other party's account key),
+   "exchange_id": TEXT,
+   "counterparty": did:key (the other party's account key) or an arcaeon.io
+                   account id, acct:NAME@arcaeon.io (ACCOUNT_ID_RE, stored as given),
    "file_sha256": 64 hex, "reaction": "VERIFIED" | "BROKEN" | "COULD NOT LOOK",
    "disputed": bool, "reason": TEXT or null (present exactly when disputed),
    "supersedes": "sha256:json-c14n:v1:<hex>" or null, "at": UTC time,
@@ -39,6 +42,17 @@ Rows are append-only. A change is a new row whose `supersedes` names the old
 row's digest; the pair reader reads the latest non-superseded row per party.
 Editing a row in place breaks the chain (and, for a signed field, the signature).
 
+THE COUNTERPARTY ID (TE-41: the ID is the arcaeon.io account; the account binds
+the did:key). Two forms are accepted, and this module is the one place the
+account form is defined: an Ed25519 did:key, or acct:NAME@arcaeon.io (the
+RFC 7565 acct: URI under the arcaeon.io host; NAME is 1 to 64 characters of
+dot-separated labels, each lower-case a-z, 0-9 and "-", not starting or ending
+with "-"). Nothing here resolves an account over the network. A row that
+names an account is compared as text: the pair reader and the tally treat
+acct:... and did:key:... as two distinct IDs, because no row records which
+key an account binds. That binding is checked elsewhere (the account side,
+TE-41); here it is COULD NOT LOOK, and the pair finding says so.
+
 Never raises from pair(): an unreadable or hostile log is COULD NOT LOOK.
 The spec and its limits: docs/EXCHANGE.md.
 """
@@ -57,8 +71,10 @@ from arcaeon import verdict as V
 from arcaeon.record.row import canon_json, digest_json, file_pin, loads_strict
 
 __all__ = ["KIND", "ROW_VERSION", "SIG_PAYLOAD_TYPE", "REACTIONS", "SIGNED_FIELDS",
-           "PAIR_KIND", "ExchangeError", "signed_fields", "signing_bytes", "row_digest",
-           "build_row", "react", "check_row", "pair", "main"]
+           "PAIR_KIND", "STATUSES", "ACCOUNT_ID_RE", "ACCOUNT_ID_FORM", "ExchangeError",
+           "text_ok", "is_did", "is_account_id", "is_counterparty_id", "signed_fields",
+           "signing_bytes", "row_digest", "build_row", "react", "check_row", "read_side",
+           "latest_heads", "pair_exchange", "pair", "main"]
 
 KIND = "exchange.reaction"
 ROW_VERSION = 1
@@ -83,6 +99,13 @@ DOES_NOT_PROVE = ("that the file is true or safe (two clean rows mean both parti
                   "a key belongs to who it claims, or that a log was not truncated (pin "
                   "its head outside your control)")
 
+#: The arcaeon.io account id form (TE-41), the one definition. See the module doc.
+ACCOUNT_ID_FORM = "acct:NAME@arcaeon.io"
+_LABEL = r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?"
+ACCOUNT_ID_RE = re.compile(rf"acct:(?P<name>{_LABEL}(?:\.{_LABEL})*)@arcaeon\.io")
+ACCOUNT_NAME_MAX = 64
+_COUNTERPARTY_FORMS = f"an Ed25519 did:key or an arcaeon.io account id ({ACCOUNT_ID_FORM})"
+
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 _DIGEST = re.compile(r"sha256:json-c14n:v1:[0-9a-f]{64}")
 _TS_FMT = "%Y-%m-%dT%H:%M:%SZ"
@@ -95,12 +118,26 @@ class ExchangeError(ValueError):
 
 # --- the row ------------------------------------------------------------------------
 
-def _text_ok(v: Any, limit: int = 256) -> bool:
+def text_ok(v: Any, limit: int = 256) -> bool:
     return (isinstance(v, str) and 0 < len(v.strip()) and len(v) <= limit
             and not any(ord(c) < 0x20 or ord(c) == 0x7f for c in v))
 
 
-def _is_did(v: Any) -> bool:
+def is_account_id(v: Any) -> bool:
+    """True for an arcaeon.io account id, acct:NAME@arcaeon.io (ACCOUNT_ID_RE).
+    Text only: nothing is resolved, nothing is fetched."""
+    if not isinstance(v, str):
+        return False
+    m = ACCOUNT_ID_RE.fullmatch(v)
+    return bool(m) and len(m.group("name")) <= ACCOUNT_NAME_MAX
+
+
+def is_counterparty_id(v: Any) -> bool:
+    """True for either accepted counterparty form: did:key or account id."""
+    return is_did(v) or is_account_id(v)
+
+
+def is_did(v: Any) -> bool:
     from arcaeon.prove.envelope import _pubkey_from_did
     try:
         _pubkey_from_did(v)
@@ -146,17 +183,17 @@ def _shape_problem(row: dict) -> str | None:
         return f"fields outside the signature: {', '.join(extra)}"
     if row["v"] != ROW_VERSION or isinstance(row["v"], bool):
         return f"unknown row version {row['v']!r}"
-    if not _text_ok(row["exchange_id"]):
+    if not text_ok(row["exchange_id"]):
         return "exchange_id is not one line of text (at most 256 characters)"
-    if not _is_did(row["counterparty"]):
-        return "counterparty is not an Ed25519 did:key"
+    if not is_counterparty_id(row["counterparty"]):
+        return f"counterparty is not {_COUNTERPARTY_FORMS}"
     if not (isinstance(row["file_sha256"], str) and _HEX64.fullmatch(row["file_sha256"])):
         return "file_sha256 is not 64 lower-case hex"
     if row["reaction"] not in REACTIONS:
         return f"reaction {row['reaction']!r} is not VERIFIED, BROKEN or COULD NOT LOOK"
     if not isinstance(row["disputed"], bool):
         return "disputed is not true or false"
-    if row["disputed"] and not _text_ok(row["reason"], 1024):
+    if row["disputed"] and not text_ok(row["reason"], 1024):
         return "a disputed row carries no reason (one line, at most 1024 characters)"
     if not row["disputed"] and row["reason"] is not None:
         return "reason given on a row that is not disputed"
@@ -165,7 +202,7 @@ def _shape_problem(row: dict) -> str | None:
         return "supersedes is not sha256:json-c14n:v1:<64 hex>"
     if not _parse_at(row["at"]):
         return "at is not a UTC time (YYYY-MM-DDTHH:MM:SSZ)"
-    if not _is_did(row["signer"]):
+    if not is_did(row["signer"]):
         return "signer is not an Ed25519 did:key"
     if not isinstance(row["sig"], str):
         return "sig is not a base64 string"
@@ -201,17 +238,18 @@ def build_row(*, seed: bytes, exchange_id: str, counterparty: str, file_sha256: 
               reaction: str, disputed: str | None = None, supersedes: str | None = None,
               at: datetime | None = None) -> dict:
     """A signed exchange.reaction row (not yet chained). ExchangeError on a bad field."""
-    if not _text_ok(exchange_id):
+    if not text_ok(exchange_id):
         raise ExchangeError("--exchange must be one line of text, at most 256 characters")
-    if not _is_did(counterparty):
-        raise ExchangeError("--counterparty must be the other party's Ed25519 did:key "
-                            "(the pair reader matches it against their log's key)")
+    if not is_counterparty_id(counterparty):
+        raise ExchangeError(f"--counterparty {counterparty!r} is not {_COUNTERPARTY_FORMS}: "
+                            f"give the other party's did:key (the pair reader matches it "
+                            f"against their log's key) or their account id")
     if reaction not in REACTIONS:
         raise ExchangeError(f"--reaction must be VERIFIED, BROKEN or COULD NOT LOOK, "
                             f"got {reaction!r}")
     if not (isinstance(file_sha256, str) and _HEX64.fullmatch(file_sha256)):
         raise ExchangeError("file_sha256 must be 64 lower-case hex")
-    if disputed is not None and not _text_ok(disputed, 1024):
+    if disputed is not None and not text_ok(disputed, 1024):
         raise ExchangeError("--disputed needs a reason: one line, at most 1024 characters")
     if supersedes is not None and not _DIGEST.fullmatch(str(supersedes)):
         raise ExchangeError("--supersedes must be a row digest, sha256:json-c14n:v1:<64 hex>")
@@ -286,7 +324,7 @@ def _cnl_log(side: dict, looked_for: str, where, word: str, reason: str) -> dict
     return side
 
 
-def _read_side(path: Path, owner: str | None, name: str) -> dict:
+def read_side(path: Path, owner: str | None, name: str) -> dict:
     """Read and check one log. The side dict carries verdict, chain, owner,
     rows (valid, in chain order, with line and digest) and broken_rows."""
     from arcaeon.record.ledger import verify_file
@@ -367,7 +405,7 @@ def _read_side(path: Path, owner: str | None, name: str) -> dict:
     return side
 
 
-def _heads(side: dict) -> dict[str, dict]:
+def latest_heads(side: dict) -> dict[str, dict]:
     """exchange_id -> the latest non-superseded row (with notes on forks)."""
     rows = side["_rows"]
     superseded = {r["supersedes"] for r in rows if r["supersedes"]}
@@ -386,6 +424,10 @@ def _heads(side: dict) -> dict[str, dict]:
     return out
 
 
+_ACCOUNT_NOTE = ("; an account id and a did:key are distinct IDs here: which key the "
+                 "account binds is not checked here (COULD NOT LOOK; the account side holds it)")
+
+
 def _summary(r: dict | None) -> dict | None:
     if r is None:
         return None
@@ -394,7 +436,7 @@ def _summary(r: dict | None) -> dict | None:
     return {k: r[k] for k in keep if k in r}
 
 
-def _pair_exchange(eid: str, a: dict | None, b: dict | None, own_a, own_b,
+def pair_exchange(eid: str, a: dict | None, b: dict | None, own_a, own_b,
                    broken_a: list, broken_b: list) -> dict:
     ex: dict[str, Any] = {"exchange_id": eid, "status": None, "differs": [],
                           "a": _summary(a), "b": _summary(b), "findings": []}
@@ -417,12 +459,11 @@ def _pair_exchange(eid: str, a: dict | None, b: dict | None, own_a, own_b,
                               f"b to {b['file_sha256']}")
     if a["counterparty"] != own_b or b["counterparty"] != own_a:
         ex["differs"].append("counterparty")
-        if a["counterparty"] != own_b:
-            ex["findings"].append(f"counterparty: a names {a['counterparty']}, "
-                                  f"log b is owned by {own_b}")
-        if b["counterparty"] != own_a:
-            ex["findings"].append(f"counterparty: b names {b['counterparty']}, "
-                                  f"log a is owned by {own_a}")
+        for nm, row, other, own in (("a", a, "b", own_b), ("b", b, "a", own_a)):
+            if row["counterparty"] != own:
+                ex["findings"].append(f"counterparty: {nm} names {row['counterparty']}, "
+                                      f"log {other} is owned by {own}"
+                                      + _ACCOUNT_NOTE * is_account_id(row["counterparty"]))
     if ex["differs"]:
         ex["status"] = "mismatch"
     elif a["reaction"] != V.VERIFIED:
@@ -465,7 +506,7 @@ def pair(log_a: str | Path, log_b: str | Path, *, owner_a: str | None = None,
 
 def _pair(r: dict, pa: Path, pb: Path, owner_a, owner_b) -> dict:
     for nm, own in (("a", owner_a), ("b", owner_b)):
-        if own is not None and not _is_did(own):
+        if own is not None and not is_did(own):
             r.update({"verdict": V.COULD_NOT_LOOK,
                       **V.could_not_look(f"the owner key of log {nm}", f"--owner-{nm}",
                                          "unreadable", f"--owner-{nm} is not an Ed25519 did:key")})
@@ -478,8 +519,8 @@ def _pair(r: dict, pa: Path, pb: Path, owner_a, owner_b) -> dict:
         r.update({"verdict": V.COULD_NOT_LOOK,
                   **V.could_not_look("an Ed25519 backend", "this install", "missing", reason)})
         return r
-    sa = _read_side(pa, owner_a, "a")
-    sb = _read_side(pb, owner_b, "b")
+    sa = read_side(pa, owner_a, "a")
+    sb = read_side(pb, owner_b, "b")
     r["logs"] = {"a": sa, "b": sb}
     broken = [f"log {nm}: {s['reason']}" for nm, s in (("a", sa), ("b", sb))
               if s["verdict"] == V.BROKEN]
@@ -489,7 +530,7 @@ def _pair(r: dict, pa: Path, pb: Path, owner_a, owner_b) -> dict:
         broken.append(f"both logs are owned by one key ({sa['owner']}): a pair needs two "
                       f"parties")
     if not cnl:
-        ha, hb = _heads(sa), _heads(sb)
+        ha, hb = latest_heads(sa), latest_heads(sb)
         ba: dict[str, list] = {}
         bb: dict[str, list] = {}
         for src, dst in ((sa["broken_rows"], ba), (sb["broken_rows"], bb)):
@@ -498,7 +539,7 @@ def _pair(r: dict, pa: Path, pb: Path, owner_a, owner_b) -> dict:
                     dst.setdefault(br["exchange_id"], []).append(br)
         ids = sorted(set(ha) | set(hb) | set(ba) | set(bb))
         for eid in ids:
-            ex = _pair_exchange(eid, ha.get(eid), hb.get(eid), sa["owner"], sb["owner"],
+            ex = pair_exchange(eid, ha.get(eid), hb.get(eid), sa["owner"], sb["owner"],
                                 ba.get(eid, []), bb.get(eid, []))
             r["exchanges"].append(ex)
             r["counts"][ex["status"]] += 1
@@ -535,18 +576,19 @@ def _pair(r: dict, pa: Path, pb: Path, owner_a, owner_b) -> dict:
 
 # --- CLI --------------------------------------------------------------------------------
 
-USAGE = """usage: arcaeon exchange react --exchange ID --counterparty DID --file PATH
+USAGE = """usage: arcaeon exchange react --exchange ID --counterparty ID --file PATH
                               --reaction {VERIFIED,BROKEN,"COULD NOT LOOK"}
                               --key SEEDFILE [--disputed REASON]
                               [--supersedes ROWDIGEST] [--log PATH]
        arcaeon exchange pair A.jsonl B.jsonl [--owner-a DID] [--owner-b DID]
-                              [--json]"""
+                              [--json] [--strict]"""
 
 HELP = USAGE + """
 
 react appends one signed row (kind exchange.reaction) to your own hash-chained
-log (--log, default exchange.jsonl): the exchange id, the other party's
-did:key, the file's sha256, your reaction in the verifier's three words, the
+log (--log, default exchange.jsonl): the exchange id, the other party's ID
+(their did:key, or their arcaeon.io account id acct:NAME@arcaeon.io, stored
+as given and never looked up), the file's sha256, your reaction in the verifier's three words, the
 UTC time and your did:key, signed with Ed25519 by --key (a 32-byte seed,
 base64, one line; needs arcaeon[sign]). --disputed REASON adds a signed
 DISPUTED claim with a reason; it is a claim, never a verdict. A change is a
@@ -558,10 +600,14 @@ latest non-superseded row per party per exchange and reports each exchange:
 clean (both VERIFIED, same sha256, each names the other), mismatch (names the
 field), not_verified (both said the same other word), missing (one side
 absent), broken (a row for it is BROKEN). DISPUTED claims are listed apart.
+An account id and a did:key are distinct IDs here: a row naming an account
+reads mismatch on counterparty, and which key the account binds is not
+checked here (COULD NOT LOOK; the account side holds the binding).
 
 Exit codes: react 0 written, 2 refused or bad usage, 3 the file is not there.
 pair 0 VERIFIED (both logs check; read the statuses), 1 BROKEN, 3 COULD NOT
-LOOK, 2 bad usage. Spec and limits: docs/EXCHANGE.md."""
+LOOK, 2 bad usage. pair --strict: also 1 when both logs check but any
+exchange is mismatch or missing (not_verified stays 0; 3 and 2 unchanged). Spec and limits: docs/EXCHANGE.md."""
 
 
 class _Usage(Exception):
@@ -571,7 +617,8 @@ class _Usage(Exception):
 _REACT_SPEC = {"--exchange": "value", "--counterparty": "value", "--file": "value",
                "--reaction": "value", "--disputed": "value", "--supersedes": "value",
                "--key": "value", "--log": "value"}
-_PAIR_SPEC = {"--owner-a": "value", "--owner-b": "value", "--json": "bool"}
+_PAIR_SPEC = {"--owner-a": "value", "--owner-b": "value", "--json": "bool",
+              "--strict": "bool"}
 
 
 def _react_cli(argv: list[str]) -> int:
@@ -633,14 +680,20 @@ def _pair_cli(argv: list[str]) -> int:
     if len(pos) != 2:
         raise _Usage("pair takes two logs: A.jsonl B.jsonl")
     for flag in ("--owner-a", "--owner-b"):
-        if flag in o and not _is_did(o[flag]):
+        if flag in o and not is_did(o[flag]):
             raise _Usage(f"{flag} must be an Ed25519 did:key")
     r = pair(pos[0], pos[1], owner_a=o.get("--owner-a"), owner_b=o.get("--owner-b"))
     if o.get("--json"):
         print(json.dumps(r, indent=1, ensure_ascii=False))
     else:
         print(_render(r))
-    return V.exit_for(r["verdict"])
+    code = V.exit_for(r["verdict"])
+    marks = r["counts"]["mismatch"] + r["counts"]["missing"]
+    if o.get("--strict") and code == V.EXIT_GOOD and marks:
+        print(f"arcaeon exchange pair --strict: {r['counts']['mismatch']} mismatch, "
+              f"{r['counts']['missing']} missing; exit {V.EXIT_BAD}", file=sys.stderr)
+        return V.EXIT_BAD
+    return code
 
 
 def main(argv: list[str] | None = None) -> int:
