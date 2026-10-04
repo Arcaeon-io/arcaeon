@@ -606,7 +606,9 @@ USAGE = """usage: arcaeon envelope seal <file> --label TEXT --audience ID --deal
                                [--witness-ref REF] [--flag NAME ...] [--force]
        arcaeon envelope verify <file> [--audience ID] [--signer DID ...]
                                [--deal ID] [--purpose TEXT] [--envelope PATH]
-                               [--require-witness]"""
+                               [--require-witness]
+       arcaeon envelope export-ocsf <report.json | -> [--include-verified]
+                               [--now WHEN] [--out FILE]"""
 
 HELP = USAGE + """
 
@@ -625,7 +627,16 @@ did:key:...) and your own id (--audience). Pin and witness refs are recorded
 and shape-checked, never resolved (that needs the network).
 
 Exit codes: 0 VERIFIED (seal: written), 1 BROKEN, 2 bad usage or a refused
-seal, 3 COULD NOT LOOK. Spec and limits: docs/ENVELOPE.md."""
+seal, 3 COULD NOT LOOK. Spec and limits: docs/ENVELOPE.md.
+
+export-ocsf turns one `envelope verify` report, `gate decide --json`
+decision or gate evidence.json into one OCSF 1.9.0 Detection Finding
+(class_uid 2004) for a SIEM: BROKEN is severity High, COULD NOT LOOK is Low
+and names what was not checked, VERIFIED is emitted (Informational) only with
+--include-verified. File names only, never directories. --now fixes the
+event time (UTC, e.g. 2026-10-04T12:00:00Z). Exit 0 exported (or VERIFIED
+skipped), 3 the input is not a readable arcaeon verdict, 2 bad usage.
+Mapping: docs/OCSF.md."""
 
 
 class _Usage(Exception):
@@ -726,7 +737,10 @@ def main(argv: list[str] | None = None) -> int:
             return _seal_cli(rest)
         if sub == "verify":
             return _verify_cli(rest)
-        raise _Usage(f"unknown subcommand {sub!r} (seal or verify)")
+        if sub == "export-ocsf":
+            from arcaeon.prove import ocsf
+            return ocsf.export_cli(rest, _parse, _Usage)
+        raise _Usage(f"unknown subcommand {sub!r} (seal, verify or export-ocsf)")
     except _Usage as e:
         print(f"arcaeon envelope: {e}\n{USAGE}", file=sys.stderr)
         return V.EXIT_USAGE
