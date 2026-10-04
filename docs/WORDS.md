@@ -76,19 +76,24 @@ deal words above, and it is in the row. Mock rail only: no money is held,
 released or refunded by any of them.
 
 **HELD.** A hold row is on the ledger and nothing has settled it. Either
-nobody has looked at the counterpart's receipt yet, or every look so far was a
-COULD NOT LOOK and the timeout recorded at hold time has not passed.
+nobody has looked at the counterpart's receipt yet, or no look so far was
+MATCHED and the timeout recorded at hold time has not passed. A look that
+found the receipt ALTERED or MISSING keeps the hold HELD and opens a dispute:
+tamper evidence is a hold, never a refund.
 
 **RELEASED.** The counterpart's call receipt was looked at and was MATCHED:
 it recomputes, its row is on the counterpart's verified ledger, and it is the
 call the frozen criteria named. It shows the call happened as recorded, not
 that its answer was right.
 
-**REFUNDED.** The look found the receipt ALTERED or MISSING, or nothing could
-be looked at until the declared timeout passed. The row's `cause` says which.
+**REFUNDED.** A recorded dispute outcome decided a refund (cause
+`dispute_outcome`, naming the look that opened the dispute, who decided and
+their reference), or no look was MATCHED by the declared timeout (cause
+`timeout`). A look alone never refunds.
 
-The rows: `hold`, `look` (a COULD NOT LOOK that left the hold where it was),
-`release` and `refund`.
+The rows: `hold`, `look` (a look that left the hold where it was; one that
+found ALTERED or MISSING also names its dispute evidence file), `release` and
+`refund`.
 
 Recourse tiers, recorded on the mandate before any work. Each records what the
 buyer asked for, never a promise that anything will be paid back:

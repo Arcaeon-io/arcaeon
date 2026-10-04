@@ -1,9 +1,11 @@
 """The escrow release rule (arcaeon.record.escrow, N01) and the recourse tier
 on the mandate (N05). Mock rail only: these tests check rows, never money.
 
-Covers: the happy path both sides, each refund path (ALTERED, MISSING), the
-COULD NOT LOOK hold, the timeout refund, a one-byte tamper on the receipt that
-flips release to refund, that no code path releases without a verified
+Covers: the happy path both sides, each tamper path (ALTERED, MISSING) that
+holds with dispute evidence and never refunds directly (D079: tamper evidence
+is a hold), the refund on a recorded dispute outcome, the COULD NOT LOOK hold,
+the timeout refund, a one-byte tamper on the receipt that flips release to a
+dispute hold, that no code path releases without a verified
 receipt, the recourse rules in hold() and dispute(), dispute() over escrow
 rows, pack() carrying them, and the CLI.
 """
@@ -92,18 +94,18 @@ def test_happy_path_releases_on_both_sides_and_dispute_matches(tmp_path):
     assert "| buyer | hold #1 |" in (out / "timeline.md").read_text(encoding="utf-8")
 
 
-# refund paths ---------------------------------------------------------------------
+# tamper paths: held for dispute, never refunded by the look ------------------------------
 
-def test_altered_refunds_when_the_call_is_not_the_one_the_criteria_named(tmp_path):
+def test_altered_holds_when_the_call_is_not_the_one_the_criteria_named(tmp_path):
     b, _ = _deal(tmp_path, seller_hold=False)
     rcp, led = _receipt(tmp_path, status=500)
     st = E.settle(b, "buyer", "d-e1", receipt=rcp, receipt_ledger=led, criteria=CRIT, now=BEFORE)
-    assert st.state == E.REFUNDED and st.look.verdict == V.ALTERED
-    assert st.row["kind"] == "deal.refund" and st.row["shared"]["cause"] == V.ALTERED
+    assert st.state == E.HELD and st.look.verdict == V.ALTERED
+    assert st.row["kind"] == "deal.look" and st.row["shared"]["verdict"] == V.ALTERED
     assert "response_status" in st.look.reason
 
 
-def test_missing_refunds_when_the_receipt_row_is_not_on_the_counterpart_ledger(tmp_path):
+def test_missing_holds_when_the_receipt_row_is_not_on_the_counterpart_ledger(tmp_path):
     b, _ = _deal(tmp_path, seller_hold=False)
     rcp, _led = _receipt(tmp_path)
     other = tmp_path / "other.jsonl"
@@ -112,15 +114,138 @@ def test_missing_refunds_when_the_receipt_row_is_not_on_the_counterpart_ledger(t
     assert _receipt_other
     st = E.settle(b, "buyer", "d-e1", receipt=rcp, receipt_ledger=other, criteria=CRIT,
                   now=BEFORE)
-    assert st.state == E.REFUNDED and st.look.verdict == V.MISSING
-    assert st.row["shared"]["cause"] == V.MISSING
+    assert st.state == E.HELD and st.look.verdict == V.MISSING
+    assert st.row["kind"] == "deal.look" and st.evidence
 
 
-def test_missing_refunds_when_the_call_produced_nothing(tmp_path):
+def test_missing_holds_when_the_call_produced_nothing(tmp_path):
     b, _ = _deal(tmp_path, seller_hold=False)
     rcp, led = _receipt(tmp_path, error="upstream unreachable")
     st = E.settle(b, "buyer", "d-e1", receipt=rcp, receipt_ledger=led, criteria=CRIT, now=BEFORE)
-    assert st.state == E.REFUNDED and st.look.verdict == V.MISSING
+    assert st.state == E.HELD and st.look.verdict == V.MISSING
+    assert not any(r["kind"] == "deal.refund" for r in deal_rows(b, "d-e1"))
+
+
+# D079: tamper evidence is a HOLD plus dispute evidence, never a direct refund -------------
+
+def _missing_receipt(tmp):
+    rcp, _led = _receipt(tmp)
+    other = tmp / "other.jsonl"
+    call_receipt({"method": "GET", "url": "u"}, {"status": 200, "body": "z"},
+                 ledger_path=other, witness=False, anchor=False)
+    return rcp, other
+
+
+def _assert_held_for_dispute(st, ledger, word):
+    assert st.state == E.HELD and st.look.verdict == word, st.to_dict()
+    rows = deal_rows(ledger, "d-e1")
+    assert not any(r["kind"] in ("deal.refund", "deal.release") for r in rows), \
+        "no refund event on the mock rail"
+    assert E.state(ledger, "d-e1") == E.HELD
+    assert st.row["kind"] == "deal.look" and st.row["shared"]["verdict"] == word
+    ev = Path(st.evidence)
+    assert ev.is_file(), "dispute evidence is written"
+    rec = json.loads(ev.read_text(encoding="utf-8"))
+    assert rec["verdict"] == word and rec["state"] == E.HELD and rec["deal"] == "d-e1"
+    assert rec["findings"] and rec["what"] == st.look.reason
+    assert rec["hold_digest"] == st.row["shared"]["hold_digest"]
+    assert st.row["dispute_evidence_digest"] == digest_json(rec)
+    return rec
+
+
+def test_altered_never_refunds_directly_it_holds_with_dispute_evidence(tmp_path):
+    now = BEFORE
+    b, _ = _deal(tmp_path, seller_hold=False)
+    rcp, led = _receipt(tmp_path, status=500)
+    st = E.settle(b, "buyer", "d-e1", receipt=rcp, receipt_ledger=led, criteria=CRIT, now=now)
+    rec = _assert_held_for_dispute(st, b, V.ALTERED)
+    assert any("response_status" in f for f in rec["findings"])
+    # settling again before the timeout still writes no refund
+    again = E.settle(b, "buyer", "d-e1", receipt=rcp, receipt_ledger=led, criteria=CRIT,
+                     now=BEFORE)
+    assert again.state == E.HELD
+    assert not any(r["kind"] == "deal.refund" for r in deal_rows(b, "d-e1"))
+
+
+def test_missing_never_refunds_directly_it_holds_with_dispute_evidence(tmp_path):
+    b, _ = _deal(tmp_path, seller_hold=False)
+    rcp, other = _missing_receipt(tmp_path)
+    st = E.settle(b, "buyer", "d-e1", receipt=rcp, receipt_ledger=other, criteria=CRIT,
+                  now=BEFORE)
+    _assert_held_for_dispute(st, b, V.MISSING)
+
+
+def test_a_disputed_hold_refunds_only_on_a_recorded_dispute_outcome(tmp_path):
+    b, s = _deal(tmp_path)
+    rcp, led = _receipt(tmp_path, status=500)
+    # no dispute open yet: an outcome is refused
+    with pytest.raises(ValueError, match="dispute"):
+        E.record_outcome(b, "buyer", "d-e1", decision="refund", decided_by="arbiter-1",
+                         reference="case-7", now=BEFORE)
+    for led_, party in ((b, "buyer"), (s, "seller")):
+        held = E.settle(led_, party, "d-e1", receipt=rcp, receipt_ledger=led, criteria=CRIT,
+                        now=BEFORE)
+        assert held.state == E.HELD
+        out = E.record_outcome(led_, party, "d-e1", decision="refund", decided_by="arbiter-1",
+                               reference="case-7", now=BEFORE)
+        assert out.state == E.REFUNDED and out.row["kind"] == "deal.refund"
+        assert out.row["shared"]["cause"] == E.DISPUTE_OUTCOME
+        assert out.row["shared"]["verdict"] == V.ALTERED
+        assert out.row["shared"]["outcome"] == {"decision": "refund", "decided_by": "arbiter-1",
+                                                "reference": "case-7"}
+        assert out.row["dispute_look_digest"] == held.row["step_digest"]
+        assert E.state(led_, "d-e1") == E.REFUNDED
+    r = dispute("d-e1", b, s)
+    assert r.verdict == V.MATCHED, r.to_dict()
+    # a settled hold takes no second outcome
+    with pytest.raises(ValueError, match="already"):
+        E.record_outcome(b, "buyer", "d-e1", decision="refund", decided_by="x", reference="y")
+
+
+def test_a_disputed_hold_still_releases_on_a_later_matched_look(tmp_path):
+    b, _ = _deal(tmp_path, seller_hold=False)
+    rcp, led = _receipt(tmp_path)
+    bad = json.loads(Path(rcp).read_text(encoding="utf-8"))
+    bad["checks"][0]["response_status"] = 201
+    st = E.settle(b, "buyer", "d-e1", receipt=bad, receipt_ledger=led, criteria=CRIT, now=BEFORE)
+    assert st.state == E.HELD and st.look.verdict == V.ALTERED
+    ok = E.settle(b, "buyer", "d-e1", receipt=rcp, receipt_ledger=led, criteria=CRIT, now=BEFORE)
+    assert ok.state == E.RELEASED
+
+
+def test_a_disputed_hold_with_no_outcome_refunds_at_the_declared_timeout(tmp_path):
+    b, _ = _deal(tmp_path, seller_hold=False)
+    rcp, led = _receipt(tmp_path, status=500)
+    assert E.settle(b, "buyer", "d-e1", receipt=rcp, receipt_ledger=led, criteria=CRIT,
+                    now=BEFORE).state == E.HELD
+    st = E.settle(b, "buyer", "d-e1", receipt=rcp, receipt_ledger=led, criteria=CRIT, now=AFTER)
+    assert st.state == E.REFUNDED and st.row["shared"]["cause"] == "timeout"
+    assert st.evidence and Path(st.evidence).is_file()
+
+
+def test_dispute_flags_a_refund_written_straight_from_a_tamper_look(tmp_path):
+    b, s = _deal(tmp_path)
+    d = Deal(s, "seller", "d-e1")
+    h = next(r for r in d.rows() if r["kind"] == "deal.hold")
+    d._write("refund", {"hold_digest": h["step_digest"], "verdict": V.ALTERED,
+                        "receipt_body_digest": None, "amount": "0.30", "currency": "USD",
+                        "rail": "mock", "cause": V.ALTERED}, ts=BEFORE)
+    r = dispute("d-e1", b, s)
+    assert r.verdict == V.ALTERED and any("dispute outcome" in f.reason for f in r.findings), \
+        r.to_dict()
+    # an outcome refund that names no dispute look on its tape is flagged too
+    b2 = tmp_path / "b2"
+    b2.mkdir()
+    bb, ss = _deal(b2)
+    d2 = Deal(bb, "buyer", "d-e1")
+    h2 = next(r for r in d2.rows() if r["kind"] == "deal.hold")
+    d2._write("refund", {"hold_digest": h2["step_digest"], "verdict": V.ALTERED,
+                         "receipt_body_digest": None, "amount": "0.30", "currency": "USD",
+                         "rail": "mock", "cause": E.DISPUTE_OUTCOME,
+                         "outcome": {"decision": "refund", "decided_by": "x", "reference": "y"}},
+              {"dispute_look_digest": "sha256:none"}, ts=BEFORE)
+    r = dispute("d-e1", bb, ss)
+    assert r.verdict == V.ALTERED and any("no look" in f.reason for f in r.findings), r.to_dict()
 
 
 # COULD NOT LOOK: held, then the timeout ------------------------------------------------
@@ -182,7 +307,7 @@ def test_matched_after_the_timeout_still_releases(tmp_path):
 
 # the planted one-byte tamper ---------------------------------------------------------
 
-def test_one_byte_tamper_on_the_receipt_flips_release_to_refund(tmp_path):
+def test_one_byte_tamper_on_the_receipt_flips_release_to_a_dispute_hold(tmp_path):
     rcp, led = _receipt(tmp_path)
     text = Path(rcp).read_text(encoding="utf-8")
     rd = json.loads(text)["checks"][0]["response_digest"]
@@ -204,11 +329,11 @@ def test_one_byte_tamper_on_the_receipt_flips_release_to_refund(tmp_path):
     bad = E.settle(bb, "buyer", "d-e1", receipt=tampered, receipt_ledger=led, criteria=CRIT,
                    now=BEFORE)
     assert ok.state == E.RELEASED
-    assert bad.state == E.REFUNDED and bad.look.verdict == V.ALTERED
+    assert bad.state == E.HELD and bad.look.verdict == V.ALTERED and bad.evidence
     assert "body_digest" in bad.look.reason
 
 
-def test_a_tampered_counterpart_ledger_refunds(tmp_path):
+def test_a_tampered_counterpart_ledger_holds(tmp_path):
     b, _ = _deal(tmp_path, seller_hold=False)
     rcp, led = _receipt(tmp_path)
     lines = led.read_text(encoding="utf-8").splitlines()
@@ -216,7 +341,7 @@ def test_a_tampered_counterpart_ledger_refunds(tmp_path):
     led.write_text("\n".join(lines) + "\n", encoding="utf-8")
     assert verify_file(led).ok is False
     st = E.settle(b, "buyer", "d-e1", receipt=rcp, receipt_ledger=led, criteria=CRIT, now=BEFORE)
-    assert st.state == E.REFUNDED and st.look.verdict == V.ALTERED
+    assert st.state == E.HELD and st.look.verdict == V.ALTERED
 
 
 # no code path releases without a verified receipt ---------------------------------------
@@ -454,6 +579,30 @@ def test_cli_hold_settle_state(tmp_path, capsys):
     assert "MOCK RAIL ONLY" in capsys.readouterr().out
 
 
+def test_cli_settle_altered_holds_then_outcome_refunds(tmp_path, capsys):
+    b, _ = _deal(tmp_path, seller_hold=False)
+    crit = tmp_path / "criteria.json"
+    crit.write_text(json.dumps(CRIT), encoding="utf-8")
+    rcp, led = _receipt(tmp_path, status=500)
+    out_args = ["escrow", "outcome", str(b), "--deal", "d-e1", "--party", "buyer",
+                "--decision", "refund", "--decided-by", "arbiter-1", "--reference", "case-7",
+                "--now", BEFORE]
+    assert cli.main(out_args) == 2, "no dispute open yet"
+    capsys.readouterr()
+    ev_dir = tmp_path / "evidence"
+    assert cli.main(["escrow", "settle", str(b), "--deal", "d-e1", "--party", "buyer",
+                     "--receipt", str(rcp), "--receipt-ledger", str(led), "--criteria", str(crit),
+                     "--now", BEFORE, "--evidence-dir", str(ev_dir)]) == 1
+    out = capsys.readouterr().out
+    assert out.startswith("HELD: ALTERED") and "held for dispute" in out
+    assert len(list(ev_dir.glob("buyer.escrow-dispute.*.json"))) == 1
+    assert cli.main(out_args) == 0
+    assert capsys.readouterr().out.startswith("REFUNDED")
+    assert E.state(b, "d-e1") == E.REFUNDED
+    assert cli.main(out_args) == 2, "already settled"
+    assert cli.main(out_args[:-4] + ["--reference", "x", "--decision", "release"]) == 2
+
+
 def test_module_says_mock_rail_and_never_holds_funds():
     doc = E.__doc__
     assert "MOCK RAIL ONLY" in doc and "never holds money" in doc and "never moves money" in doc
@@ -464,3 +613,7 @@ def test_transition_table_uses_only_the_four_words():
     assert set(E.TRANSITIONS.values()) <= set(E.STATES)
     assert E.TRANSITIONS[(E.HELD, V.COULD_NOT_LOOK, False)] == E.HELD
     assert E.TRANSITIONS[(E.HELD, V.COULD_NOT_LOOK, True)] == E.REFUNDED
+    # a look never refunds before the declared timeout: tamper evidence holds
+    for word in (V.ALTERED, V.MISSING):
+        assert E.TRANSITIONS[(E.HELD, word, False)] == E.HELD
+    assert not any(v == E.REFUNDED for (_, _, past), v in E.TRANSITIONS.items() if not past)

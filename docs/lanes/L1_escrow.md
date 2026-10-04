@@ -29,11 +29,15 @@ with no network and everything under a throwaway directory.
 3. Run 1, clean response: each side's settle finds the receipt matching and
    the hold is RELEASED (MATCHED) on both tapes.
 4. Run 2, the seller doctors the response after the receipt was issued: the
-   receipt no longer recomputes, and the hold is REFUNDED (ALTERED) on both
-   tapes.
+   receipt no longer recomputes, the look finds it ALTERED, and the hold stays
+   HELD on both tapes, with dispute evidence in the deal folder. Then a
+   dispute outcome (decision: refund) is recorded, and only that REFUNDS the
+   hold on both tapes.
 
 So: a release happens only on a receipt the rule itself verified, and a
-one-field edit after the fact flips it to a refund. Each step is a deal row
+one-field edit after the fact flips it to a hold under dispute. Doctored
+deliveries hold; they are refunded on a dispute outcome or at the declared
+timeout, never by the look itself. Each step is a deal row
 both sides can check, and `arcaeon deal dispute` compares the two tapes.
 
 What it does not prove: a receipt is delivery evidence, not quality evidence.

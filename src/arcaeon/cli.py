@@ -40,7 +40,7 @@ VERBS = {
     "proxy":     ("record", "wrap an MCP server and record every call at the seam"),
     "pin":       ("record", "record a ledger head with a witness (local file, or --remote)"),
     "deal":      ("record", "a witnessed transaction: mandate, commit, pay, ship, deliver, cancel, dispute, pack"),
-    "escrow":    ("record", "a release rule over deal rows, mock rail only: hold, settle, state"),
+    "escrow":    ("record", "a release rule over deal rows, mock rail only: hold, settle, outcome, state"),
     "mandate":   ("record", "check a call against a mandate, record-only (lint, explain, check)"),
     "reconcile": ("prove",  "two tapes and a counter: MATCHED / MISSING / ALTERED / COULD NOT LOOK"),
     "audit":     ("prove",  "verify a log or export a regulator-ready bundle"),

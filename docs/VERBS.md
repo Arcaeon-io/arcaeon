@@ -278,18 +278,23 @@ Answers: may this hold be released? A release rule over deal rows, mock rail
 only: no money is held, released or refunded, and every step is a deal row
 `deal pack` carries. `hold` records the amount, the digest of the criteria,
 the recourse tier and a timeout; `settle` looks at the counterpart's call
-receipt and writes the row the rule decides: MATCHED releases, ALTERED or
-MISSING refunds, COULD NOT LOOK stays held until the timeout recorded at hold
-time and then refunds. `state` prints HELD, RELEASED or REFUNDED.
+receipt and writes the row the rule decides: MATCHED releases. Tamper
+evidence is a hold, never a refund: ALTERED or MISSING leaves the hold HELD
+and writes a dispute evidence record in the deal folder naming what was
+altered or missing; COULD NOT LOOK also stays held. A held hold is refunded
+only by a recorded dispute outcome (`outcome --decision refund`) or at the
+timeout recorded at hold time; a later MATCHED look still releases it.
+`state` prints HELD, RELEASED or REFUNDED.
 
 **Usage**
 
 ```text
-usage: arcaeon escrow <hold|settle|state> ...
+usage: arcaeon escrow <hold|settle|outcome|state> ...
 ```
 
 **Exit codes:** `settle` exits with its look's word: 0 MATCHED, 1 ALTERED or
 MISSING, 3 COULD NOT LOOK; 0 for a hold already settled. `hold` 0 written.
+`outcome` 0 written, 2 refused (no open dispute, or the hold already settled).
 `state` 0, or 3 when the ledger holds no hold for the deal. 2 bad usage. New
 in this release, so `--legacy-exit` changes nothing here.
 

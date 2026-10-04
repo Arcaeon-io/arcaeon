@@ -12,7 +12,10 @@ receipt on its own ledger. Then each side runs the release rule.
          the criteria, so settle RELEASES the hold on both tapes.
   Run 2: the seller doctors the response AFTER the receipt was issued (swaps
          in a different answer's digest). The receipt no longer recomputes,
-         so settle REFUNDS the hold, cause ALTERED, on both tapes.
+         so settle finds it ALTERED and the hold stays HELD on both tapes,
+         with dispute evidence written in the deal folder. Tamper evidence
+         is a hold, never a refund. Then a dispute outcome is recorded
+         (decision: refund), and only that refunds the hold on both tapes.
 
 Every step is a deal row each side can check. Everything is written under a
 throwaway directory, and ARCAEON_HOME points there too, so the real home is
@@ -98,7 +101,8 @@ class SellerAgent:
 
 def run_once(workdir: Path, *, doctored: bool) -> dict:
     """One deal from mandate to settlement. Returns what each side's settle
-    decided: {"buyer": (state, verdict), "seller": (state, verdict)}."""
+    decided: {"buyer": (state, verdict), "seller": (state, verdict)}. A
+    doctored run also records the dispute outcome; see `decide_dispute`."""
     from arcaeon.record import escrow
     workdir.mkdir(parents=True, exist_ok=True)
     buyer, seller = BuyerAgent(workdir), SellerAgent(workdir)
@@ -111,6 +115,18 @@ def run_once(workdir: Path, *, doctored: bool) -> dict:
         s = escrow.settle(ledger, party, DEAL, receipt=receipt,
                           receipt_ledger=seller.call_ledger, criteria=CRITERIA, now=NOW)
         out[party] = (s.state, s.look.verdict)
+    return out
+
+
+def decide_dispute(workdir: Path) -> dict:
+    """After a doctored run: an outside decider rules for a refund, and each
+    side records that outcome. Returns {"buyer": state, "seller": state}."""
+    from arcaeon.record import escrow
+    out = {}
+    for party in ("buyer", "seller"):
+        s = escrow.record_outcome(workdir / f"{party}.jsonl", party, DEAL, decision="refund",
+                                  decided_by="demo-arbiter", reference="demo-case-1", now=NOW)
+        out[party] = s.state
     return out
 
 
@@ -128,6 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             clean = run_once(root / "run1-clean", doctored=False)
             bad = run_once(root / "run2-doctored", doctored=True)
+            decided = decide_dispute(root / "run2-doctored")
         finally:
             socket.socket.connect = old_connect
             if old_home is None:
@@ -138,9 +155,12 @@ def main(argv: list[str] | None = None) -> int:
         for party in ("buyer", "seller"):
             st, word = res[party]
             print(f"{label}: {party} settle -> {st} ({word})")
+    for party in ("buyer", "seller"):
+        print(f"run 2 (dispute outcome: refund): {party} -> {decided[party]}")
     print("mock rail: nothing is held or moved")
     ok = (all(v == ("RELEASED", "MATCHED") for v in clean.values())
-          and all(v == ("REFUNDED", "ALTERED") for v in bad.values()))
+          and all(v == ("HELD", "ALTERED") for v in bad.values())
+          and all(v == "REFUNDED" for v in decided.values()))
     return 0 if ok else 1
 
 

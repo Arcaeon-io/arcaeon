@@ -13,7 +13,10 @@
                 recourse="escrow_challenge_window", timeout_at="2026-10-03T00:00:00Z")
     s = escrow.settle("buyer.jsonl", "buyer", "d-demo1", receipt="call.receipt.json",
                       receipt_ledger="seller-calls.jsonl", criteria=crit)
-    s.state   # "RELEASED", "REFUNDED" or "HELD"
+    s.state   # "RELEASED", or "HELD" (s.evidence names the dispute evidence
+              # when the look found the receipt ALTERED or MISSING)
+    escrow.record_outcome("buyer.jsonl", "buyer", "d-demo1", decision="refund",
+                          decided_by="arbiter-1", reference="case-7")   # -> REFUNDED
 
 WHAT THIS IS NOT
 ----------------
@@ -28,13 +31,21 @@ THE RULE, as a state machine over one hold per deal on one ledger:
 
     (no hold)  hold(...)                         -> HELD      writes deal.hold
     HELD       look MATCHED                      -> RELEASED  writes deal.release
-    HELD       look ALTERED                      -> REFUNDED  writes deal.refund (cause ALTERED)
-    HELD       look MISSING                      -> REFUNDED  writes deal.refund (cause MISSING)
+    HELD       look ALTERED or MISSING, before timeout_at
+                                                 -> HELD      writes deal.look + dispute evidence
     HELD       look COULD NOT LOOK, before timeout_at
                                                  -> HELD      writes deal.look
-    HELD       look COULD NOT LOOK, at or after timeout_at
+    HELD       any look but MATCHED, at or after timeout_at
                                                  -> REFUNDED  writes deal.refund (cause timeout)
+    HELD       record_outcome(decision="refund"), once a look found ALTERED or MISSING
+                                                 -> REFUNDED  writes deal.refund (cause dispute_outcome)
     RELEASED / REFUNDED   anything               -> unchanged, writes nothing
+
+The rule, once: tamper evidence on delivery is a HOLD, never a refund. A look
+that finds the receipt ALTERED or MISSING leaves the hold HELD (the funds stay
+put) and writes a dispute evidence record naming what was altered or missing.
+A refund comes only from a recorded dispute outcome (`record_outcome`) or the
+timeout declared at hold time. A later MATCHED look still releases.
 
 `timeout_at` is declared at hold time and is in the hold row's shared body, so
 neither side can move it afterwards without the hold's digest changing.
@@ -69,7 +80,8 @@ both tapes. A tier records what was asked for; it is never a promise.
 WHAT A RELEASE DOES NOT PROVE: the receipt is delivery evidence, not quality
 evidence (receipt/call.py's own scope). The side that runs `settle` chooses
 which receipt and criteria to present; both sides can run it, and `dispute()`
-names it ALTERED when one tape releases a hold the other refunds.
+names it ALTERED when one tape releases a hold the other refunds, or refunds
+straight from a look instead of from a dispute outcome or the timeout.
 
 Stdlib only. `look()` never raises: that is an answer too.
 """
@@ -89,7 +101,8 @@ from arcaeon.record.row import digest_json
 
 __all__ = ["HELD", "RELEASED", "REFUNDED", "STATES", "ESCROW_RECOURSE", "CRITERIA_KEYS",
            "RAIL", "TRANSITIONS", "Look", "Settlement", "criteria_digest", "hold", "look",
-           "settle", "state", "check_rows", "LIMITS", "main"]
+           "settle", "record_outcome", "DISPUTE_OUTCOME", "DECISIONS", "state", "check_rows",
+           "LIMITS", "main"]
 
 #: State names, not verdict words: where a hold stands.
 HELD, RELEASED, REFUNDED = "HELD", "RELEASED", "REFUNDED"
@@ -98,17 +111,26 @@ STATES = (HELD, RELEASED, REFUNDED)
 ESCROW_RECOURSE = tuple(t for t in RECOURSE if t != "no_recourse")
 RAIL = "mock"
 TIMEOUT = "timeout"
+#: The refund cause for a refund decided by a recorded dispute outcome.
+DISPUTE_OUTCOME = "dispute_outcome"
+#: What a recorded outcome may decide. Only a refund: the seller's way out of a
+#: disputed hold is a later look that is MATCHED, which releases through the
+#: one release writer.
+DECISIONS = ("refund",)
+#: Look verdicts that open a dispute: tamper evidence on delivery.
+_DISPUTE_WORDS = (_v.ALTERED, _v.MISSING)
 #: Criteria keys a call receipt can answer: subject fields, then check fields.
 _SUBJECT_KEYS = ("seller", "endpoint")
 _CHECK_KEYS = ("method", "url", "response_status", "response_digest", "request_digest")
 CRITERIA_KEYS = _SUBJECT_KEYS + _CHECK_KEYS
 _CALL_KIND = "receipted-call"
 
-#: (state, look verdict, past timeout_at) -> next state. The one table.
+#: (state, look verdict, past timeout_at) -> next state. The one table. A look
+#: never refunds by itself: every REFUNDED here is the declared timeout.
 TRANSITIONS = {
     (HELD, _v.MATCHED, False): RELEASED, (HELD, _v.MATCHED, True): RELEASED,
-    (HELD, _v.ALTERED, False): REFUNDED, (HELD, _v.ALTERED, True): REFUNDED,
-    (HELD, _v.MISSING, False): REFUNDED, (HELD, _v.MISSING, True): REFUNDED,
+    (HELD, _v.ALTERED, False): HELD, (HELD, _v.ALTERED, True): REFUNDED,
+    (HELD, _v.MISSING, False): HELD, (HELD, _v.MISSING, True): REFUNDED,
     (HELD, _v.COULD_NOT_LOOK, False): HELD, (HELD, _v.COULD_NOT_LOOK, True): REFUNDED,
 }
 
@@ -121,6 +143,8 @@ LIMITS = [
     "the two sides settle one hold differently, dispute() says so.",
     "A recourse tier records what the buyer asked for before work began; it is not "
     "a promise that anything will be paid back.",
+    "A dispute outcome row records who decided and their reference; the rule does "
+    "not judge the dispute, it only refuses to refund without one (or the timeout).",
 ]
 
 
@@ -382,10 +406,12 @@ class Settlement:
     look: Look | None = None
     row: dict | None = None
     note: str = ""
+    evidence: str | None = None        # the dispute evidence file, when a look opened one
 
     def to_dict(self) -> dict:
         return {"state": self.state, "look": self.look.to_dict() if self.look else None,
-                "row": self.row, "note": self.note, "limits": list(LIMITS)}
+                "row": self.row, "note": self.note, "evidence": self.evidence,
+                "limits": list(LIMITS)}
 
 
 def _outcome_shared(h: dict, lk: Look) -> dict:
@@ -406,21 +432,55 @@ def _release(d: Deal, h: dict, lk: Look, ts: str | None) -> dict:
                      "rail_note": "mock rail: nothing was released", "reason": lk.reason}, ts)
 
 
-def _refund(d: Deal, h: dict, lk: Look, cause: str, ts: str | None) -> dict:
-    shared = _outcome_shared(h, lk)
-    shared["cause"] = cause
+def _refund(d: Deal, h: dict, shared: dict, private: dict, ts: str | None) -> dict:
+    """The one writer of a refund row. Its cause is the declared timeout or a
+    recorded dispute outcome; a look alone never refunds (check_rows says so
+    for any tape that does)."""
+    if shared.get("cause") not in (TIMEOUT, DISPUTE_OUTCOME):
+        raise ValueError("a refund needs the declared timeout or a recorded dispute outcome")
     return d._write("refund", shared,
                     {"mock_reference": _mock_reference("refund", h["step_digest"]),
-                     "rail_note": "mock rail: nothing was refunded", "reason": lk.reason}, ts)
+                     "rail_note": "mock rail: nothing was refunded", **private}, ts)
+
+
+def _write_evidence(ledger, party: str, deal_id: str, h: dict, lk: Look, *, receipt,
+                    receipt_ledger, when: str, evidence_dir) -> tuple[Path, dict]:
+    """The dispute evidence a tamper look leaves: one JSON record in the deal
+    folder (DEAL-<deal> beside the ledger unless `evidence_dir` is given),
+    naming what was altered or missing. Facts only; no ruling."""
+    hs = h["shared"]
+    rec = {"kind": "arcaeon.escrow.dispute_evidence", "deal": deal_id, "party": party,
+           "state": HELD, "verdict": lk.verdict, "what": lk.reason,
+           "findings": list(lk.findings), "could_not_look": list(lk.could_not_look),
+           "receipt": receipt if isinstance(receipt, dict) else
+           (str(receipt) if receipt is not None else None),
+           "receipt_ledger": str(receipt_ledger) if receipt_ledger is not None else None,
+           "receipt_body_digest": lk.receipt_body_digest, "hold_digest": h["step_digest"],
+           "amount": hs.get("amount"), "currency": hs.get("currency"),
+           "criteria_digest": hs.get("criteria_digest"), "timeout_at": hs.get("timeout_at"),
+           "looked_at": when, "rail": RAIL,
+           "next": "the hold stays HELD: it is refunded only on a recorded dispute outcome "
+                   "(arcaeon escrow outcome) or at the timeout_at declared at hold time; a "
+                   "later MATCHED look still releases it",
+           "limits": list(LIMITS)}
+    out = Path(evidence_dir) if evidence_dir is not None else \
+        Path(ledger).parent / f"DEAL-{deal_id}"
+    out.mkdir(parents=True, exist_ok=True)
+    dg = digest_json(rec)
+    p = out / f"{party}.escrow-dispute.{dg.rsplit(':', 1)[-1][:12]}.json"
+    p.write_text(json.dumps(rec, indent=1, ensure_ascii=False), encoding="utf-8")
+    return p, rec
 
 
 def settle(ledger, party: str, deal_id: str, *, receipt=None, receipt_ledger=None,
            criteria: dict | None = None, now: str | None = None,
-           ts: str | None = None) -> Settlement:
+           ts: str | None = None, evidence_dir=None) -> Settlement:
     """Run the rule once for the hold on this ledger and write the row it
     decides (see TRANSITIONS). `now` is the time the timeout is judged at
     (default: this machine's clock); it also becomes the row's ts unless `ts`
-    is given. A settled hold writes nothing."""
+    is given. A settled hold writes nothing. A look that finds the receipt
+    ALTERED or MISSING writes dispute evidence (see `_write_evidence`) and
+    leaves the hold HELD; it never refunds."""
     d = Deal(ledger, party, deal_id)
     by = _escrow_rows(d.ledger, deal_id)
     st = _state_of(by)
@@ -440,14 +500,70 @@ def settle(ledger, party: str, deal_id: str, *, receipt=None, receipt_ledger=Non
     ts = ts or when
     if nxt == RELEASED:
         return Settlement(RELEASED, lk, _release(d, h, lk, ts))
+    ev = rec = None
+    if lk.verdict in _DISPUTE_WORDS:
+        ev, rec = _write_evidence(d.ledger.path, party, deal_id, h, lk, receipt=receipt,
+                                  receipt_ledger=receipt_ledger, when=when,
+                                  evidence_dir=evidence_dir)
     if nxt == REFUNDED:
-        cause = lk.verdict if lk.verdict in (_v.ALTERED, _v.MISSING) else TIMEOUT
-        return Settlement(REFUNDED, lk, _refund(d, h, lk, cause, ts))
+        shared = _outcome_shared(h, lk)
+        shared["cause"] = TIMEOUT
+        return Settlement(REFUNDED, lk, _refund(d, h, shared, {"reason": lk.reason}, ts),
+                          evidence=str(ev) if ev else None)
+    private = {"reason": lk.reason, "reason_word": lk.reason_word,
+               "timeout_at": h["shared"].get("timeout_at")}
+    note = f"still held until {h['shared'].get('timeout_at')}"
+    if rec is not None:
+        private.update(findings=list(lk.findings), dispute_evidence=str(ev),
+                       dispute_evidence_digest=digest_json(rec))
+        note = (f"held for dispute: {lk.verdict}; refunded only on a recorded dispute "
+                f"outcome or at {h['shared'].get('timeout_at')}; evidence {ev}")
     row = d._write("look", {"hold_digest": h["step_digest"], "verdict": lk.verdict,
-                            "receipt_body_digest": lk.receipt_body_digest},
-                   {"reason": lk.reason, "reason_word": lk.reason_word,
-                    "timeout_at": h["shared"].get("timeout_at")}, ts)
-    return Settlement(HELD, lk, row, note=f"still held until {h['shared'].get('timeout_at')}")
+                            "receipt_body_digest": lk.receipt_body_digest}, private, ts)
+    return Settlement(HELD, lk, row, note=note, evidence=str(ev) if ev else None)
+
+
+def record_outcome(ledger, party: str, deal_id: str, *, decision: str, decided_by: str,
+                   reference: str, now: str | None = None,
+                   ts: str | None = None) -> Settlement:
+    """Record a dispute outcome for a hold a look found ALTERED or MISSING, and
+    write the refund it decides (cause dispute_outcome). Refuses when the hold
+    is settled, or when no look on this tape opened a dispute. `decided_by` and
+    `reference` say who decided and where; the rule records them, it does not
+    judge them."""
+    if decision not in DECISIONS:
+        raise ValueError(f"decision must be one of {DECISIONS}, got {decision!r}")
+    for name, v in (("decided_by", decided_by), ("reference", reference)):
+        if not isinstance(v, str) or not v.strip():
+            raise ValueError(f"{name} is required: a dispute outcome names who decided and where")
+    d = Deal(ledger, party, deal_id)
+    by = _escrow_rows(d.ledger, deal_id)
+    st = _state_of(by)
+    if st is None:
+        raise ValueError(f"no hold row for deal {deal_id} on this ledger")
+    if st != HELD:
+        raise ValueError(f"the hold is already {st}; an outcome settles only a held hold")
+    h = by["hold"][0]
+    opened = [r for r in by["look"] if r["shared"].get("hold_digest") == h["step_digest"]
+              and r["shared"].get("verdict") in _DISPUTE_WORDS]
+    if not opened:
+        raise ValueError("no look on this tape found the receipt ALTERED or MISSING, so no "
+                         "dispute is open; settle first")
+    lr = opened[-1]
+    when = now or _now_iso()
+    if _parse_time(when) is None:
+        raise ValueError(f"now must be a readable time, got {now!r}")
+    hs = h["shared"]
+    shared = {"hold_digest": h["step_digest"], "verdict": lr["shared"].get("verdict"),
+              "receipt_body_digest": lr["shared"].get("receipt_body_digest"),
+              "amount": hs.get("amount"), "currency": hs.get("currency"), "rail": RAIL,
+              "cause": DISPUTE_OUTCOME,
+              "outcome": {"decision": decision, "decided_by": decided_by, "reference": reference}}
+    row = _refund(d, h, shared, {"dispute_look_digest": lr["step_digest"],
+                                 "dispute_evidence": lr.get("dispute_evidence")}, ts or when)
+    return Settlement(REFUNDED, None, row, note=f"refunded on the dispute outcome {reference} "
+                                                f"decided by {decided_by}",
+                      evidence=lr.get("dispute_evidence"))
 
 
 # -- what dispute() checks on escrow rows --------------------------------------------
@@ -456,9 +572,11 @@ def check_rows(by: dict, findings: list) -> None:
     """Called by deal.dispute() when escrow rows are on either tape. `by` is
     party -> step -> [(row number, row)], rows already self-consistent.
     Release and refund rows must name a hold on their own tape and its amount;
-    a release must carry MATCHED; a refund ALTERED, MISSING or a timeout at or
-    after the hold's timeout_at; one tape settles a hold one way; and the two
-    tapes must not settle it opposite ways."""
+    a release must carry MATCHED; a refund must be a timeout at or after the
+    hold's timeout_at, or a dispute outcome that names a look on its own tape
+    which found the receipt ALTERED or MISSING (a refund straight from a look
+    is ALTERED: tamper evidence holds); one tape settles a hold one way; and
+    the two tapes must not settle it opposite ways."""
     for p in PARTIES:
         holds = {r.get("step_digest"): r for _, r in by[p]["hold"]}
         for step in ("release", "refund"):
@@ -491,11 +609,32 @@ def check_rows(by: dict, findings: list) -> None:
                                                     f"written at {r.get('ts')}, before the hold's "
                                                     f"timeout_at {h['shared'].get('timeout_at')}",
                                                     index_side=p))
-                    elif cause not in (_v.ALTERED, _v.MISSING) or sh.get("verdict") != cause:
+                    elif cause == DISPUTE_OUTCOME:
+                        lk = next((lr for _, lr in by[p].get("look", [])
+                                   if lr.get("step_digest") == r.get("dispute_look_digest")
+                                   and lr["shared"].get("hold_digest") == sh.get("hold_digest")),
+                                  None)
+                        oc = sh.get("outcome") if isinstance(sh.get("outcome"), dict) else {}
+                        if lk is None or lk["shared"].get("verdict") not in _DISPUTE_WORDS \
+                                or sh.get("verdict") != lk["shared"].get("verdict"):
+                            findings.append(Finding(_v.ALTERED, at, p,
+                                                    f"{p} tape row {n}: a refund on a dispute "
+                                                    f"outcome names no look on this tape that "
+                                                    f"found the receipt ALTERED or MISSING",
+                                                    index_side=p))
+                        elif oc.get("decision") not in DECISIONS or not oc.get("decided_by") \
+                                or not oc.get("reference"):
+                            findings.append(Finding(_v.ALTERED, at, p,
+                                                    f"{p} tape row {n}: a refund on a dispute "
+                                                    f"outcome that records no decision, decider "
+                                                    f"or reference", index_side=p))
+                    else:
                         findings.append(Finding(_v.ALTERED, at, p,
                                                 f"{p} tape row {n}: a refund with cause "
-                                                f"{cause!r} and verdict {sh.get('verdict')!r}",
-                                                index_side=p))
+                                                f"{cause!r} and verdict {sh.get('verdict')!r}; "
+                                                f"a look never refunds: tamper evidence holds, "
+                                                f"and only a recorded dispute outcome or the "
+                                                f"declared timeout refunds", index_side=p))
         if by[p]["release"] and by[p]["refund"]:
             findings.append(Finding(_v.ALTERED, "refund#1", p,
                                     f"the {p} tape both releases and refunds the hold",
@@ -511,7 +650,7 @@ def check_rows(by: dict, findings: list) -> None:
 
 # -- the CLI ----------------------------------------------------------------------
 
-USAGE = """usage: arcaeon escrow <hold|settle|state> ...
+USAGE = """usage: arcaeon escrow <hold|settle|outcome|state> ...
 
 A release rule over deal rows, MOCK RAIL ONLY: no money is held, released or
 refunded; each step is a deal row stating what the rule decided.
@@ -519,13 +658,17 @@ refunded; each step is a deal row stating what the rule decided.
           (--criteria FILE | --criteria-digest D)
           --recourse escrow_challenge_window|high --timeout-at T
   settle  <ledger> --deal ID --party buyer|seller --receipt FILE
-          --receipt-ledger FILE --criteria FILE [--now T] [--json]
+          --receipt-ledger FILE --criteria FILE [--now T] [--evidence-dir DIR] [--json]
+  outcome <ledger> --deal ID --party buyer|seller --decision refund
+          --decided-by WHO --reference REF [--now T] [--json]
   state   <ledger> --deal ID
 
-settle: MATCHED releases; ALTERED or MISSING refunds; COULD NOT LOOK stays
-held until the timeout recorded at hold time, then refunds.
+settle: MATCHED releases. ALTERED or MISSING holds (no refund) and writes
+dispute evidence; COULD NOT LOOK holds. A held hold is refunded only by a
+recorded dispute outcome (outcome) or at the timeout recorded at hold time.
 settle exits with its look's word: 0 MATCHED, 1 ALTERED or MISSING,
 3 COULD NOT LOOK; 0 for a hold already settled; 2 bad usage.
+outcome exits 0 written, 2 refused (no open dispute, already settled).
 state exits 0, or 3 when the ledger holds no hold for the deal."""
 
 
@@ -534,8 +677,14 @@ def _parser(cmd: str):
     ap = argparse.ArgumentParser(prog=f"arcaeon escrow {cmd}")
     ap.add_argument("ledger")
     ap.add_argument("--deal", required=True)
-    if cmd in ("hold", "settle"):
+    if cmd in ("hold", "settle", "outcome"):
         ap.add_argument("--party", required=True, choices=PARTIES)
+    if cmd == "outcome":
+        ap.add_argument("--decision", required=True, choices=DECISIONS)
+        ap.add_argument("--decided-by", required=True)
+        ap.add_argument("--reference", required=True)
+        ap.add_argument("--now")
+        ap.add_argument("--json", action="store_true")
     if cmd == "hold":
         ap.add_argument("--amount", required=True)
         ap.add_argument("--currency", required=True)
@@ -549,6 +698,7 @@ def _parser(cmd: str):
         ap.add_argument("--receipt-ledger", required=True)
         ap.add_argument("--criteria", required=True)
         ap.add_argument("--now")
+        ap.add_argument("--evidence-dir")
         ap.add_argument("--json", action="store_true")
     return ap
 
@@ -563,7 +713,7 @@ def main(argv: list[str]) -> int:
         print(USAGE)
         return _v.EXIT_GOOD if argv else _v.EXIT_USAGE
     cmd, rest = argv[0], argv[1:]
-    if cmd not in ("hold", "settle", "state"):
+    if cmd not in ("hold", "settle", "outcome", "state"):
         print(f"arcaeon escrow: unknown step {cmd!r}\n\n{USAGE}")
         return _v.EXIT_USAGE
     try:
@@ -587,12 +737,17 @@ def main(argv: list[str]) -> int:
                 return _v.EXIT_COULD_NOT_LOOK
             print(st)
             return _v.EXIT_GOOD
-        try:
-            crit = _load_json(a.criteria)
-        except (OSError, ValueError):
-            crit = None                            # the look says COULD NOT LOOK
-        s = settle(a.ledger, a.party, a.deal, receipt=a.receipt,
-                   receipt_ledger=a.receipt_ledger, criteria=crit, now=a.now)
+        if cmd == "outcome":
+            s = record_outcome(a.ledger, a.party, a.deal, decision=a.decision,
+                               decided_by=a.decided_by, reference=a.reference, now=a.now)
+        else:
+            try:
+                crit = _load_json(a.criteria)
+            except (OSError, ValueError):
+                crit = None                        # the look says COULD NOT LOOK
+            s = settle(a.ledger, a.party, a.deal, receipt=a.receipt,
+                       receipt_ledger=a.receipt_ledger, criteria=crit, now=a.now,
+                       evidence_dir=a.evidence_dir)
     except (ValueError, OSError) as e:
         print(f"arcaeon escrow {cmd}: {e}")
         return _v.EXIT_USAGE
