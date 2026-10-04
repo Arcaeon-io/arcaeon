@@ -686,6 +686,18 @@ Allow means the bytes are unchanged since the key you named sealed them and
 are labeled for you and in date; it does not say the content is true or safe.
 The library function is `arcaeon.prove.gate.decide`.
 
+`gate packet` renders a refusal as one page a marketplace's dispute process
+can take, in markdown and JSON (kind `arcaeon.dispute.packet/v1`): what was
+handed (file name, sha256, size), by whom (the signer the envelope names and
+whether the signature checked), for whom, when (sealed at, checked at), what
+failed, what was not checked, the verdict and the decision, and ENVELOPE.md's
+"What VERIFIED does not prove" list word for word. `--evidence DIR` reads an
+evidence pack (BROKEN with a deal id); `--decision FILE.json` reads the
+`decide --json` output, so a COULD NOT LOOK refusal, which writes no pack,
+can be rendered too. Only file names reach the packet, never the directories.
+A decision that allowed the action has nothing to dispute (exit 2). The
+library is `arcaeon.prove.dispute_packet`.
+
 **Usage**
 
 ```text
@@ -693,16 +705,25 @@ usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
                            --action {read,act,pay,irreversible} [--deal ID]
                            [--purpose TEXT] [--file PATH] [--record-dir DIR]
                            [--json]
+       arcaeon gate packet (--evidence DIR | --decision FILE.json)
+                           [--out DIR] [--json]
 ```
 
 **Exit codes:** 0 allow, 1 refuse (BROKEN), 3 refuse (COULD NOT LOOK), 2 bad
 usage (a missing `--envelope`, `--audience`, `--signer` or `--action`, or an
-action that is not one of the four). New in 0.10.x, so `--legacy-exit`
-changes nothing here.
+action that is not one of the four). `packet`: 0 written, 2 bad usage or
+nothing to dispute, 3 the input is not a readable gate record. New in 0.10.x,
+so `--legacy-exit` changes nothing here.
 
 ```console
 $ arcaeon gate decide --envelope grades.csv.envelope.json --audience instructor-1 --signer did:key:z6Mk... --action pay --deal d-7f3a
 allow pay: VERIFIED. The bytes are unchanged since the key you named sealed them, ...
+```
+
+```console
+$ arcaeon gate packet --evidence DEAL-d-7f3a/gate/20261004T152828Z-0123456789ab --out dispute
+dispute/dispute-packet.md
+dispute/dispute-packet.json
 ```
 
 ## `distill`

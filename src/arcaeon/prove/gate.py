@@ -39,6 +39,10 @@ and its envelope into the deal's record and writes evidence.json beside them:
 gate's packs sit beside the deal's own pack. The sha256 is of the bytes as
 copied (hashed while copying). Without a deal id no pack is written.
 
+THE DISPUTE PACKET. `arcaeon gate packet` (arcaeon.prove.dispute_packet)
+renders a refusal, from an evidence pack or from a decision's to_dict(), as
+one page in markdown and JSON for a marketplace's dispute process.
+
 Stdlib only (verify loads the [sign] backend itself). `decide` raises only on
 an unknown action; anything else is an answer.
 """
@@ -97,6 +101,9 @@ class GateDecision:
     envelope: str = ""
     audience: str | None = None
     deal: str | None = None
+    purpose: str | None = None
+    signers: list = field(default_factory=list)
+    at: str | None = None
     evidence: str | None = None
     evidence_error: str | None = None
     report: dict = field(default_factory=dict)
@@ -121,7 +128,8 @@ class GateDecision:
                 "reason": self.reason, "reasons": list(self.reasons),
                 "could_not_check": dict(self.could_not_check) if self.could_not_check else None,
                 "file": self.file, "envelope": self.envelope, "audience": self.audience,
-                "deal": self.deal, "evidence": self.evidence,
+                "deal": self.deal, "purpose": self.purpose, "signers": list(self.signers),
+                "at": self.at, "evidence": self.evidence,
                 "evidence_error": self.evidence_error, "exit_code": self.exit_code,
                 "limits": list(self.limits), "report": self.report}
 
@@ -199,7 +207,7 @@ def _write_evidence(d: GateDecision, file: Path, env_path: Path, signers: list,
     ev = {"kind": EVIDENCE_KIND, "deal": d.deal, "action": d.action, "decision": d.decision,
           "verdict": d.verdict, "reason": d.reason, "reasons": list(d.reasons),
           "at": _utc(now), "file": parts["file"], "envelope": parts["envelope"],
-          "audience": d.audience, "signers": list(signers), "limits": list(d.limits),
+          "audience": d.audience, "purpose": d.purpose, "signers": list(signers), "limits": list(d.limits),
           "report": d.report}
     (out / "evidence.json").write_text(json.dumps(ev, indent=1, ensure_ascii=False) + "\n",
                                        encoding="utf-8")
@@ -258,7 +266,8 @@ def decide(file: str | Path, *, action: str, audience: str | None,
     d = GateDecision(decision=ALLOW if allowed else REFUSE, action=action, verdict=verdict,
                      reason=_reason(action, verdict, r, audience, deal), reasons=reasons,
                      could_not_check=cnc, file=str(file), envelope=str(env_path),
-                     audience=audience, deal=deal, report=r)
+                     audience=audience, deal=deal, purpose=purpose, signers=list(signers),
+                     at=_utc(now), report=r)
     if verdict == V.BROKEN and deal is not None:
         try:
             out = _write_evidence(d, file, env_path, signers,
@@ -278,7 +287,9 @@ def decide(file: str | Path, *, action: str, audience: str | None,
 USAGE = """usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
                            --action {read,act,pay,irreversible} [--deal ID]
                            [--purpose TEXT] [--file PATH] [--record-dir DIR]
-                           [--json]"""
+                           [--json]
+       arcaeon gate packet (--evidence DIR | --decision FILE.json)
+                           [--out DIR] [--json]"""
 
 HELP = USAGE + """
 
@@ -304,7 +315,19 @@ are labeled for you and in date. It does not say the content is true or safe.
 Prints one line, `allow <action>: ...` or `refuse <action>: ...` (--json:
 the whole decision).
 Exit codes: 0 allow, 1 refuse (BROKEN), 3 refuse (COULD NOT LOOK), 2 bad
-usage. Spec and limits: docs/ENVELOPE.md."""
+usage. Spec and limits: docs/ENVELOPE.md.
+
+packet renders a refusal as one page a dispute process can take: what was
+handed (name, sha256, size), by whom, for whom, when, what failed, what was
+not checked, the verdict and decision, and the envelope spec's "does not
+prove" list word for word. --evidence is an evidence pack directory (BROKEN
+with a deal id); --decision is the `decide --json` output (so a COULD NOT
+LOOK refusal, which writes no pack, can be rendered too). File names only,
+never the directories. Prints markdown (--json: the JSON form, kind
+arcaeon.dispute.packet/v1); --out DIR writes dispute-packet.md and
+dispute-packet.json there instead.
+Exit codes: 0 written, 2 bad usage or nothing to dispute (the gate allowed
+the action), 3 the input could not be read as a gate record."""
 
 _SPEC = {"--envelope": "value", "--audience": "value", "--signer": "list",
          "--action": "value", "--deal": "value", "--purpose": "value", "--file": "value",
@@ -331,6 +354,37 @@ def _decide_cli(argv: list[str]) -> int:
     return d.exit_code
 
 
+_PACKET_SPEC = {"--evidence": "value", "--decision": "value", "--out": "value", "--json": "bool"}
+
+
+def _packet_cli(argv: list[str]) -> int:
+    from arcaeon.prove import dispute_packet as P
+    pos, o = E._parse(argv, _PACKET_SPEC)
+    if pos:
+        raise E._Usage(f"unexpected argument {pos[0]!r}")
+    if bool(o.get("--evidence")) == bool(o.get("--decision")):
+        raise E._Usage("packet needs exactly one of --evidence DIR or --decision FILE.json")
+    try:
+        p = (P.from_evidence(o["--evidence"]) if o.get("--evidence")
+             else P.from_decision_file(o["--decision"]))
+    except P.NothingToDispute as e:
+        print(f"arcaeon gate packet: {e}", file=sys.stderr)
+        return V.EXIT_USAGE
+    except P.PacketError as e:
+        print(f"arcaeon gate packet: COULD NOT LOOK: {e}", file=sys.stderr)
+        return V.EXIT_COULD_NOT_LOOK
+    md, js = P.render_markdown(p), P.render_json(p)
+    if o.get("--out"):
+        out = Path(o["--out"])
+        out.mkdir(parents=True, exist_ok=True)
+        for name, text in (("dispute-packet.md", md), ("dispute-packet.json", js)):
+            (out / name).write_text(text, encoding="utf-8", newline="\n")
+            print(out / name)
+    else:
+        sys.stdout.write(js if o.get("--json") else md)
+    return V.EXIT_GOOD
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if not argv or argv[0] in ("-h", "--help", "help") or any(a in ("-h", "--help") for a in argv):
@@ -340,7 +394,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if sub == "decide":
             return _decide_cli(rest)
-        raise E._Usage(f"unknown subcommand {sub!r} (decide)")
+        if sub == "packet":
+            return _packet_cli(rest)
+        raise E._Usage(f"unknown subcommand {sub!r} (decide, packet)")
     except E._Usage as e:
         print(f"arcaeon gate: {e}\n{USAGE}", file=sys.stderr)
         return V.EXIT_USAGE
