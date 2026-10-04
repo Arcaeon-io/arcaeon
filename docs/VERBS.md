@@ -738,6 +738,16 @@ envelope's own word reads `envelope`. A decision that allowed the action,
 VERIFIED or not, has nothing to dispute (exit 2). The
 library is `arcaeon.prove.dispute_packet`.
 
+`gate a2a` is `decide` for a file handed over the Agent2Agent protocol: the
+envelope rides in the Artifact's (or Message's) `metadata` under the witness
+extension URI `https://arcaeon.io/a2a/witness/v1`, and the command finds it
+and runs the same gate (on BROKEN with `--deal`, the evidence pack also keeps
+the A2A message as `bundle/a2a-message.json`). `--message` is the A2A
+JSON; `--file` the artifact's file (default: its one inline `raw` part; a
+`url` part is never fetched). No envelope there, or no file bytes, is COULD
+NOT LOOK (`read` only). The extension and its limits are [A2A.md](A2A.md); the
+library is `arcaeon.prove.a2a_receiver`.
+
 **Usage**
 
 ```text
@@ -748,13 +758,18 @@ usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
                            [--record-dir DIR] [--json]
        arcaeon gate packet (--evidence DIR | --decision FILE.json)
                            [--out DIR] [--json]
+       arcaeon gate a2a --message FILE.json --audience ID --signer DID
+                        --action {read,act,pay,irreversible} [--file PATH]
+                        [--artifact ID] [--deal ID] [--purpose TEXT]
+                        [--activated URIS] [--record-dir DIR] [--json]
 ```
 
 **Exit codes:** 0 allow, 1 refuse (BROKEN, or `checker-broken`), 3 refuse
 (COULD NOT LOOK, or `checks-unreadable`), 2 bad
 usage (a missing `--envelope`, `--audience`, `--signer` or `--action`, an
 action that is not one of the four, or `--deal` without `--ledger`). `packet`: 0 written, 2 bad usage or
-nothing to dispute, 3 the input is not a readable gate record. New in 0.10.x,
+nothing to dispute, 3 the input is not a readable gate record. `a2a`: as
+`decide`. New in 0.10.x,
 so `--legacy-exit` changes nothing here.
 
 ```console
