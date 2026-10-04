@@ -119,6 +119,46 @@ def test_no_absolute_paths_in_sealed_rows(w):
     assert TC._absolute_strings(t) == []
 
 
+@pytest.mark.parametrize("text", ["see /var/log/x/ for the run", "see C:\\x for the run",
+                                  "see \\\\host\\share for the run"])
+def test_participant_text_that_looks_like_a_path_does_not_wedge_seal(w, text):
+    # F3: a DISPUTED reason (or an exchange id) is the participant's own words; a
+    # path-looking string there is their claim, not a local path leak, so seal goes on.
+    X.react(w["a"].log, key_file=w["a"].key, exchange_id=f"ex-3 {text}",
+            counterparty=w["b"].did, file=w["file"], reaction=V.BROKEN, disputed=text,
+            at=NOW - timedelta(hours=1))
+    assert cli.main(["tally", "seal", str(w["a"].log), str(w["b"].log), "--log", str(w["log"]),
+                     "--now", NOW_S, "--out", str(w["tmp"] / "t.json")]) == 0
+    t = json.loads((w["tmp"] / "t.json").read_text(encoding="utf-8"))
+    claims = [c for i in t["ids"] for c in i["claims"]]
+    assert claims and all(c["reason"] == text for c in claims)
+    assert TC._absolute_strings(t) == []
+    assert TC.verify(w["log"], inputs=inputs(w))["verdict"] == V.VERIFIED
+
+
+@pytest.mark.parametrize("where", ["log", "where", "looked_for"])
+def test_an_absolute_path_in_a_path_field_still_refuses_seal(w, monkeypatch, capsys, where):
+    real = TC._build
+
+    def leaky(paths, opts, groups, aliases):
+        t = real(paths, opts, groups, aliases)
+        t["chains"][0][where] = str(Path(paths[0]).resolve())
+        return t
+    monkeypatch.setattr(TC, "_build", leaky)
+    monkeypatch.setattr(TC, "relativize", lambda obj, paths: obj)
+    assert cli.main(["tally", "seal", str(w["a"].log), str(w["b"].log), "--log", str(w["log"]),
+                     "--now", NOW_S]) == 2
+    assert "absolute path survived" in capsys.readouterr().err
+    assert not w["log"].exists()
+
+
+def test_absolute_path_guard_reads_path_fields_only():
+    t = {"where": "/home/u/groups.json", "chains": [{"log": "a.jsonl", "reason": "/var/log/x/"}],
+         "ids": [{"chains": ["C:\\logs\\a.jsonl"], "claims": [{"reason": "/var/log/x/"}]}]}
+    assert TC._absolute_strings(t) == ["/home/u/groups.json", "C:\\logs\\a.jsonl"]
+    assert TC._absolute_strings({"reason": "/etc/x/", "findings": ["C:\\x"]}) == []
+
+
 def test_could_not_look_tally_seals_names_not_paths(w):
     odd = w["tmp"] / "logs" / "notes.jsonl"
     odd.write_text("hello\n", encoding="utf-8")

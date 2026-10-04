@@ -194,23 +194,29 @@ def relativize(obj: Any, paths) -> Any:
     return walk(obj)
 
 
-def _absolute_strings(obj: Any) -> list[str]:
-    """Strings in `obj` that look like an absolute local path."""
-    hits: list[str] = []
+#: The tally fields that carry a local path (the tool writes them from a file it
+#: was handed). Every other string -- a DISPUTED reason, an exchange id, a
+#: signer -- is participant-authored or built from file names only, and is
+#: never read for paths: a reason of "see /var/log/x/" is the participant's
+#: words, and must not stop the seal (review F3).
+PATH_FIELDS = ("log", "where", "looked_for")
 
-    def walk(o: Any) -> None:
-        if isinstance(o, str):
-            if _ABS.search(o):
-                hits.append(o)
-        elif isinstance(o, dict):
-            for k, v in o.items():
-                walk(k)
-                walk(v)
-        elif isinstance(o, list):
-            for v in o:
-                walk(v)
-    walk(obj)
-    return hits
+
+def _absolute_strings(t: Any) -> list[str]:
+    """Strings in a tally's path-carrying fields that look like an absolute
+    local path (POSIX, drive letter or UNC): top-level `where`/`looked_for`,
+    each chains[] entry's `log`/`where`/`looked_for`, and each ids[] entry's
+    chains[] (copies of chains[].log). Nothing else is read."""
+    if not isinstance(t, dict):
+        return []
+    cands: list[Any] = [t.get(k) for k in PATH_FIELDS]
+    for c in t.get("chains") or []:
+        if isinstance(c, dict):
+            cands += [c.get(k) for k in PATH_FIELDS]
+    for i in t.get("ids") or []:
+        if isinstance(i, dict) and isinstance(i.get("chains"), list):
+            cands += i["chains"]
+    return [s for s in cands if isinstance(s, str) and _ABS.search(s)]
 
 
 # --- seal ----------------------------------------------------------------------------------
