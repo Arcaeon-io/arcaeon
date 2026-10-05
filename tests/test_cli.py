@@ -25,11 +25,12 @@ COUNCIL_VERBS = ["log", "verify", "reconcile", "pin", "seal", "stamp", "vet", "b
 #: Verbs added after the council's list, each with its authority.
 #: deal: DEAL_LANE_DESIGN_2026-09-24.md (the witnessed-transaction lane).
 #: status: Daniel's HUD slice 1 (batch lane B, B015), reads the activity journal.
+#: escrow: IDEAS_REVIEW_2026-10-02.md N01 + N05 (the release rule, mock rail only).
 #: envelope: the labeled-exchange envelope, truth-economy connector phase 1 (D010).
 #: gate: the rule as code over the envelope verdict, truth-economy phase 2 (D050 / TE-21).
 #: exchange: signed reactions and the pair reader, truth-economy TE-42 (D057).
 #: tally: the tally as facts, no score, truth-economy TE-43 + TE-44 (D058).
-ADDED_VERBS = ["deal", "status", "envelope", "gate", "exchange", "tally"]
+ADDED_VERBS = ["deal", "escrow", "status", "envelope", "gate", "exchange", "tally"]
 #: Registered up front by the 9/27 plug-in batch (BATCH_OPUS_2026-09-27_PLUGIN.md,
 #: K001), each dispatched lazily to a module a later item builds.
 PLUGIN_VERBS = ["serve", "connect", "schema", "second-read", "evidence-pack", "export",

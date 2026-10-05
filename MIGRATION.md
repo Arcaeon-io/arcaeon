@@ -10,6 +10,8 @@
 
 - **x402 COULD NOT LOOK with a deal id has a dispute packet (A16).** `X402Check.to_dict()["dispute"]` was `null` on every COULD NOT LOOK check; with a deal id it is now the packet dict (`kind` `arcaeon.dispute.packet/v1`, `verdict` `COULD NOT LOOK`, `failed` `[]`), and the evidence pack gains `dispute-packet.json` and `dispute-packet.md` (written before the `gate.evidence` row, so `pack_digest` covers them). `MockEscrowRail` holds gain `dispute` and its log a `dispute` event (with `verdict`) on such a check. A script that read a non-null `dispute` as BROKEN must read `dispute["verdict"]` or `verdict`. Unchanged: no deal id, or an exception that escapes the gate, still gives `dispute: null`; `escrow` is still HOLD; nothing refunds.
 
+- **Escrow and recourse.** New verb `arcaeon escrow` (`hold`, `settle`, `state`) and four deal row kinds `deal.hold`, `deal.look`, `deal.release`, `deal.refund` (shared fields `amount`, `currency`, `criteria_digest`, `recourse`, `timeout_at`, `rail`, `hold_digest`, `verdict`, `receipt_body_digest`, `cause`; beside them `mock_reference`); a mandate row may carry `recourse` (`no_recourse`, `escrow_challenge_window`, `high`), absent writes no key so older mandate digests are unchanged, and `deal dispute` now reads tapes holding these rows instead of answering COULD NOT LOOK on an unknown step.
+
 Everything on stack-2026-10-04c since 0.10.0, newest first. The first items
 are changes to verbs that are themselves new since 0.10.0; a script written
 against an earlier commit of this stack must act on them. Each says before

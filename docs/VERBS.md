@@ -20,7 +20,7 @@ file nobody could read is not a pass and not a break, and a percentage would
 make it look like one or the other.
 
 Contents: Record (`log`, `verify`, `receipt`, `once`, `proxy`, `pin`, `deal`,
-`mandate`), Prove (`reconcile`, `audit`, `vet`, `badge`, `seal`, `baseline`,
+`escrow`, `mandate`), Prove (`reconcile`, `audit`, `vet`, `badge`, `seal`, `baseline`,
 `compact`, `second-read`, `evidence-pack`, `export`, `envelope`, `gate`, `exchange`, `tally`), Save (`distill`, `dedup`,
 `meter`), Hosted (`stamp`, `credits`, `buy`), Serve (`mcp`, `serve`, `connect`,
 `schema`, `open`), This install (`status`, `selftest`, `version`, `doctor`,
@@ -271,6 +271,38 @@ MATCHED 2 of 2 compared steps
 
 (The commands that build those two ledgers are in DEAL.md, and the test suite
 runs them.)
+
+## `escrow`
+
+Answers: may this hold be released? A release rule over deal rows, mock rail
+only: no money is held, released or refunded, and every step is a deal row
+`deal pack` carries. `hold` records the amount, the digest of the criteria,
+the recourse tier and a timeout; `settle` looks at the counterpart's call
+receipt and writes the row the rule decides: MATCHED releases. Tamper
+evidence is a hold, never a refund: ALTERED or MISSING leaves the hold HELD
+and writes a dispute evidence record in the deal folder naming what was
+altered or missing; COULD NOT LOOK also stays held. A held hold is refunded
+only by a recorded dispute outcome (`outcome --decision refund`) or at the
+timeout recorded at hold time; a later MATCHED look still releases it.
+`state` prints HELD, RELEASED or REFUNDED.
+
+**Usage**
+
+```text
+usage: arcaeon escrow <hold|settle|outcome|state> ...
+```
+
+**Exit codes:** `settle` exits with its look's word: 0 MATCHED, 1 ALTERED or
+MISSING, 3 COULD NOT LOOK; 0 for a hold already settled. `hold` 0 written.
+`outcome` 0 written, 2 refused (no open dispute, or the hold already settled).
+`state` 0, or 3 when the ledger holds no hold for the deal. 2 bad usage. New
+in this release, so `--legacy-exit` changes nothing here.
+
+```console
+$ arcaeon escrow settle buyer.jsonl --deal d-demo1 --party buyer --receipt call.receipt.json --receipt-ledger seller-calls.jsonl --criteria criteria.json
+RELEASED: MATCHED: the receipt recomputes, its row is on the counterpart's verified ledger, and every criteria field equals what it records
+  mock rail: no money moved
+```
 
 ## `mandate`
 
