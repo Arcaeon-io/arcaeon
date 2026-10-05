@@ -318,7 +318,8 @@ def seal(file: str | Path, *, key_file: str | Path | None = None, force: bool = 
 # --- verify ---------------------------------------------------------------------
 
 def _report(file, env_path) -> dict:
-    return {"verdict": None, "reason": None, "file": str(file), "envelope": str(env_path),
+    return {"verdict": None, "reason": None, "file": str(file), "file_sha256": None,
+            "envelope": str(env_path),
             "steps": {"envelope": None, "signature": None, "file": None, "binding": None,
                       "witness": None},
             "sealed": None, "signers": [], "findings": [], "not_checked": [],
@@ -468,6 +469,7 @@ def _check_predicate(r: dict, stmt: dict, file: Path, audience, deal, purpose,
         find.append("the statement does not name exactly one subject with a sha256 digest")
     else:
         pin = file_pin(file)
+        r["file_sha256"] = pin.get("sha256")             # the bytes this check compared
         if "sha256" not in pin:
             st["file"] = V.COULD_NOT_LOOK
             rw = pin.get("reason_word", "unreadable")
@@ -568,12 +570,26 @@ def verify(file: str | Path, envelope: str | Path | None = None, *, audience: st
     env_path = Path(envelope) if envelope is not None else envelope_path(file)
     r = _report(file, env_path)
     try:
-        return _verify(r, file, env_path, audience, deal, purpose, tuple(signers or ()),
-                       require_witness, (now or datetime.now(timezone.utc)))
+        out = _verify(r, file, env_path, audience, deal, purpose, tuple(signers or ()),
+                      require_witness, (now or datetime.now(timezone.utc)))
     except Exception as e:  # noqa: BLE001  never a traceback, never a green
         r.pop("_cnl", None)
-        return _could_not_look(r, "envelope", "a finished check", env_path, "unreadable",
-                               f"the check could not finish ({type(e).__name__})")
+        out = _could_not_look(r, "envelope", "a finished check", env_path, "unreadable",
+                              f"the check could not finish ({type(e).__name__})")
+    return _with_file_sha256(out, file)
+
+
+def _with_file_sha256(r: dict, file: Path) -> dict:
+    """The handed file's sha256 on every word, so a report carries it even
+    when the check stopped before the file step (no sidecar, unreadable
+    payload). The file step's own hash wins when it ran; a file that cannot
+    be read stays null. Never raises: the verdict stands either way."""
+    if r.get("file_sha256") is None:
+        try:
+            r["file_sha256"] = file_pin(file).get("sha256")
+        except Exception:  # noqa: BLE001
+            r["file_sha256"] = None
+    return r
 
 
 def _verify(r, file, env_path, audience, deal, purpose, signers, require_witness, now) -> dict:

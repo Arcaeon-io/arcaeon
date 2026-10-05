@@ -446,3 +446,33 @@ def test_cli_round_trip_and_exit_codes(tmp_path, capsys):
     assert capsys.readouterr().err.startswith("BROKEN: ")
     assert cli.main(["envelope", "frob"]) == V.EXIT_USAGE
     assert cli.main(["envelope", "verify", str(f), "--nope"]) == V.EXIT_USAGE
+
+
+# --- the file sha256 in the report (D054 gap: the OCSF export reads it) -------------
+
+def _sha(p: Path) -> str:
+    return __import__("hashlib").sha256(p.read_bytes()).hexdigest()
+
+
+def test_verify_json_carries_the_file_sha256_on_every_word(tmp_path, capsys):
+    f, did = _sealed(tmp_path)
+    assert cli.main(["envelope", "verify", str(f), "--audience", "instructor-1",
+                     "--signer", did]) == 0
+    assert json.loads(capsys.readouterr().out)["file_sha256"] == _sha(f)
+    r = E.verify(f, audience="instructor-1")                    # COULD NOT LOOK, no --signer
+    assert r["verdict"] == V.COULD_NOT_LOOK and r["file_sha256"] == _sha(f)
+    f.write_bytes(b"name,grade\nunit-a,FAIL\n")                 # BROKEN: the bytes handed now
+    r = _ok(f, did)
+    assert r["verdict"] == V.BROKEN and r["file_sha256"] == _sha(f)
+    side = tmp_path / "grades.csv.envelope.json"
+    side.unlink()                                                # COULD NOT LOOK, no sidecar
+    r = _ok(f, did)
+    assert r["verdict"] == V.COULD_NOT_LOOK and r["file_sha256"] == _sha(f)
+
+
+def test_verify_json_file_sha256_is_null_when_the_file_cannot_be_read(tmp_path):
+    f, did = _sealed(tmp_path)
+    f.unlink()
+    r = _ok(f, did)
+    assert r["verdict"] == V.COULD_NOT_LOOK
+    assert "file_sha256" in r and r["file_sha256"] is None
