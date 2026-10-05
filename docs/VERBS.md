@@ -955,7 +955,9 @@ reports `clean`, `mismatch` (naming the field), `not_verified`, `missing` or
 are distinct IDs to `pair` and `tally`: a row naming an account reads
 `mismatch` on counterparty, because which key an account binds is checked
 on the account side, not here (COULD NOT LOOK here). `--strict` makes a
-`mismatch` or `missing` exchange exit 1. Two clean rows mean both said
+`mismatch` or `missing` exchange exit 1. `pair --pin FILE` also writes a v2
+pin statement over the pair result (a dry run: nothing is sent, no witness
+is contacted). Two clean rows mean both said
 VERIFIED about the same bytes, not that the file is true, and two colluding
 parties write two clean rows. The row, the signature encoding and the limits
 are [EXCHANGE.md](EXCHANGE.md); the library is `arcaeon.prove.exchange_log`.
@@ -975,6 +977,8 @@ usage: arcaeon exchange react --exchange ID --counterparty ID --file PATH
                               [--json] [--strict]
                               [--accounts FILE --account-key DID...]
                               [--late-after SECONDS]
+                              [--pin FILE [--stated-at T]
+                              [--prev-pin-sha256 HEX]]
        arcaeon exchange packet A.jsonl B.jsonl --exchange ID
                               [--owner-a DID] [--owner-b DID]
                               [--late-after SECONDS] [--json] [--out DIR]

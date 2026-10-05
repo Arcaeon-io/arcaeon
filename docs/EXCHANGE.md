@@ -316,6 +316,47 @@ and when, by its own clock; it cannot prove why, that the withdrawn reaction
 was wrong, or that the other party agreed. The withdrawn row is still
 readable and still says what it said.
 
+## Pinning a pair result
+
+```console
+$ arcaeon exchange pair a.jsonl b.jsonl --pin pair.statement.json --stated-at 2026-10-05T10:00:00Z
+```
+
+`--pin FILE` is a dry run. It reads the two logs as `pair` always does,
+prints the usual output, and writes one more file: a v2 pin statement over
+the pair result, built by the same builder as `arcaeon tally pin --dry-run`
+(`tally_chain.statement_v2`, see docs/TALLY.md):
+
+- `chain` is `arcaeon-exchange-pair`; `rows` is 1.
+- The pinned bytes are the pair result (the JSON `pair --json` prints) in
+  json-c14n v1, with every spelling of the two log paths replaced by the
+  file's name. `tip` is the sha256 of those bytes, `chain_values_sha256` is
+  the sha256 of `tip` and one LF, and `file_sha256` is the sha256 of those
+  bytes and one LF (`file_sha256_of` is `lf`).
+- `stated_at` is `--stated-at` (UTC, `Z` or `+00:00`), else now: the same
+  pair result with the same `--stated-at` gives the same statement digest,
+  from any folder that holds the same two logs. `--prev-pin-sha256 HEX`
+  chains it to an earlier statement; else `null`.
+
+On stderr it prints the statement, its sha256 and the pair result's sha256.
+stdout is unchanged, so `--json` output still parses. The file is never
+overwritten (exit 2 if it exists). A pair that reads COULD NOT LOOK gets no
+statement (exit 3); a BROKEN pair gets one (the result it commits to says
+BROKEN) and keeps exit 1. `--stated-at` and `--prev-pin-sha256` need
+`--pin`.
+
+**Nothing is pinned.** No witness is contacted, nothing is sent, no
+`witness_pins` file is read or written, and no network connection is
+opened. Pinning the statement outside your control is the operator's own
+step, as with the tally chain.
+
+**What a pair pin cannot prove.** Once pinned, it shows this pair result
+existed by the witness's time. It cannot prove the two logs were complete
+when read (pin each log's head too), that the result is right about the
+exchange, or anything the pair result itself cannot prove (below). Until it
+is pinned somewhere you do not control, the statement file proves nothing
+by itself.
+
 ## What it proves
 
 Each row was written by the key that owns its log, in the order the chain

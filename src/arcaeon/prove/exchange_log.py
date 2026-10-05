@@ -9,6 +9,7 @@
     arcaeon exchange withdraw --row ROWDIGEST --key SEEDFILE [--reason TEXT] [--log PATH]
     arcaeon exchange pair A.jsonl B.jsonl [--owner-a DID] [--owner-b DID] [--json]
                           [--strict] [--late-after SECONDS]
+                          [--pin FILE [--stated-at T] [--prev-pin-sha256 HEX]]
     arcaeon exchange packet A.jsonl B.jsonl --exchange ID [--json] [--out DIR]
 
 After an exchange each party writes ONE row under its own account key into its
@@ -97,6 +98,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import re
 import sys
@@ -115,7 +117,8 @@ __all__ = ["KIND", "ROW_VERSION", "SIG_PAYLOAD_TYPE", "REACTIONS", "SIGNED_FIELD
            "DOES_NOT_PROVE_ITEMS", "classify", "ACCOUNT_ID_RE", "ACCOUNT_ID_FORM", "ExchangeError",
            "text_ok", "is_did", "is_account_id", "is_counterparty_id", "signed_fields",
            "signing_bytes", "row_digest", "build_row", "react", "check_row", "read_side",
-           "latest_heads", "pair_exchange", "pair", "main"]
+           "latest_heads", "pair_exchange", "pair", "PAIR_PIN_CHAIN", "pair_snapshot",
+           "pair_pin_statement", "main"]
 
 KIND = "exchange.reaction"
 ROW_VERSION = 1
@@ -1160,6 +1163,99 @@ def _pair(r: dict, pa: Path, pb: Path, owner_a, owner_b, svc=None,
     return r
 
 
+# --- the pair pin statement (dry run only) ---------------------------------------------
+
+#: The `chain` of a pair result's pin statement.
+PAIR_PIN_CHAIN = "arcaeon-exchange-pair"
+_STATED_AT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:Z|\+00:00)")
+
+
+def _stated_at(v: Any) -> str | None:
+    """None, or a UTC time in the statement's +00:00 form; ExchangeError otherwise."""
+    if v is None:
+        return None
+    if not isinstance(v, str) or not _STATED_AT.fullmatch(v):
+        raise ExchangeError(f"--stated-at must be a UTC time, YYYY-MM-DDTHH:MM:SSZ or "
+                            f"+00:00 (got {v!r})")
+    try:
+        datetime.strptime(v[:19], "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        raise ExchangeError(f"--stated-at {v!r} is not a real time") from None
+    return v[:19] + "+00:00"
+
+
+def _prev_pin(v: Any) -> str | None:
+    if v is not None and not (isinstance(v, str) and _HEX64.fullmatch(v)):
+        raise ExchangeError("--prev-pin-sha256 must be 64 lower-case hex")
+    return v
+
+
+def pair_snapshot(r: dict, log_a: str | Path, log_b: str | Path) -> bytes:
+    """The bytes a pair pin commits to: the json-c14n v1 bytes of pair()'s result
+    with every spelling of the two log paths replaced by the file's name
+    (tally_chain.relativize), so the same logs read from another folder give
+    the same bytes. ExchangeError when the result cannot be canonicalized."""
+    from arcaeon.prove.tally_chain import relativize
+    try:
+        return canon_json(relativize(r, [Path(log_a), Path(log_b)]))
+    except (ValueError, TypeError) as e:
+        raise ExchangeError(f"the pair result cannot be canonicalized ({type(e).__name__}); "
+                            f"no statement over it") from None
+
+
+def pair_pin_statement(r: dict, log_a: str | Path, log_b: str | Path, *,
+                       prev_pin_sha256: str | None = None,
+                       stated_at: str | None = None) -> dict:
+    """The v2 pin statement over one pair result, built by the tally chain's
+    builder (tally_chain.statement_v2): chain PAIR_PIN_CHAIN, one row whose
+    chain value is sha256(pair_snapshot), file_sha256 over pair_snapshot plus
+    one LF. Returns {statement, statement_sha256, pair_sha256}. Builds only:
+    nothing is written, sent or pinned. ExchangeError when the pair is COULD
+    NOT LOOK (nothing was read to commit to) or an option is malformed."""
+    from arcaeon.prove import tally_chain as TC
+    prev_pin_sha256, stated_at = _prev_pin(prev_pin_sha256), _stated_at(stated_at)
+    if r.get("verdict") not in (V.VERIFIED, V.BROKEN):
+        raise ExchangeError(f"the pair reads {r.get('verdict')}: nothing was read to commit "
+                            f"to; no statement over it")
+    body = pair_snapshot(r, log_a, log_b)
+    tip = hashlib.sha256(body).hexdigest()
+    st = TC.statement_v2(PAIR_PIN_CHAIN, [tip], body + b"\n",
+                         prev_pin_sha256=prev_pin_sha256, stated_at=stated_at)
+    return {"statement": st, "statement_sha256": TC.statement_sha256(st), "pair_sha256": tip}
+
+
+def _write_pin(r: dict, pa: str, pb: str, o: dict) -> int | None:
+    """--pin: write the statement file (never overwritten) and say what would be
+    pinned, on stderr (stdout stays the pair output). None when written; else
+    the exit code to return."""
+    from arcaeon.prove.tally_chain import statement_canonical
+    try:
+        pin = pair_pin_statement(r, pa, pb, prev_pin_sha256=o.get("--prev-pin-sha256"),
+                                 stated_at=o.get("--stated-at"))
+    except ExchangeError as e:
+        print(f"arcaeon exchange pair --pin: {e}; no statement written", file=sys.stderr)
+        return V.exit_for(r["verdict"]) if r.get("verdict") == V.COULD_NOT_LOOK \
+            else V.EXIT_USAGE
+    text = statement_canonical(pin["statement"])
+    name = Path(o["--pin"]).name
+    try:
+        with open(o["--pin"], "xb") as fh:
+            fh.write(text.encode("utf-8"))
+    except FileExistsError:
+        print(f"arcaeon exchange pair --pin: {name} exists; a statement file is never "
+              f"overwritten", file=sys.stderr)
+        return V.EXIT_USAGE
+    except OSError as e:
+        print(f"arcaeon exchange pair --pin: cannot write {name} ({type(e).__name__})",
+              file=sys.stderr)
+        return V.EXIT_USAGE
+    print(f"dry run: wrote the pin statement {name}, sha256 {pin['statement_sha256']}, over "
+          f"the pair result (pair_sha256 {pin['pair_sha256']}, chain {PAIR_PIN_CHAIN}); "
+          f"nothing was pinned and no witness was contacted. Would pin: {text}",
+          file=sys.stderr)
+    return None
+
+
 # --- CLI --------------------------------------------------------------------------------
 
 USAGE = """usage: arcaeon exchange react --exchange ID --counterparty ID --file PATH
@@ -1174,6 +1270,8 @@ USAGE = """usage: arcaeon exchange react --exchange ID --counterparty ID --file 
                               [--json] [--strict]
                               [--accounts FILE --account-key DID...]
                               [--late-after SECONDS]
+                              [--pin FILE [--stated-at T]
+                              [--prev-pin-sha256 HEX]]
        arcaeon exchange packet A.jsonl B.jsonl --exchange ID
                               [--owner-a DID] [--owner-b DID]
                               [--late-after SECONDS] [--json] [--out DIR]"""
@@ -1215,6 +1313,14 @@ current row), retracted (a side superseded an earlier BROKEN for it), late (both
 `at` trails the other's by more than --late-after SECONDS, default 86400: one
 day). An agreeing exchange carries none; a broken one carries none (its record
 does not check). The counts are under `disagreements` and on the first line.
+
+pair --pin FILE writes a v2 pin statement over the pair result (the tally
+chain's statement builder; chain arcaeon-exchange-pair, one row: the sha256
+of the result's json-c14n bytes with log paths replaced by file names) to
+FILE, never overwriting one, and prints what would be pinned on stderr. A
+dry run only: no witness is contacted, nothing is sent. --stated-at T fixes
+the statement's time (default now), --prev-pin-sha256 HEX chains it to an
+earlier one. A pair that is COULD NOT LOOK gets no statement.
 
 packet reads both logs (the same reader as pair) and writes one exchange's
 dispute packet: both sides' rows, the status, the class word and the field
@@ -1258,7 +1364,8 @@ _BIND_SPEC = {"--account": "value", "--key": "value", "--log": "value"}
 _WITHDRAW_SPEC = {"--row": "value", "--key": "value", "--reason": "value", "--log": "value"}
 _PAIR_SPEC = {"--owner-a": "value", "--owner-b": "value", "--json": "bool",
               "--strict": "bool", "--accounts": "value", "--account-key": "list",
-              "--late-after": "value"}
+              "--late-after": "value", "--pin": "value", "--stated-at": "value",
+              "--prev-pin-sha256": "value"}
 _PACKET_SPEC = {"--exchange": "value", "--owner-a": "value", "--owner-b": "value",
                 "--late-after": "value", "--json": "bool", "--out": "value"}
 
@@ -1392,6 +1499,14 @@ def _pair_cli(argv: list[str]) -> int:
     if ("--accounts" in o) != ("--account-key" in o):
         raise _Usage("--accounts and --account-key go together")
     late_after = _late_flag(o)
+    for flag in ("--stated-at", "--prev-pin-sha256"):
+        if flag in o and "--pin" not in o:
+            raise _Usage(f"{flag} goes with --pin FILE")
+    try:
+        _stated_at(o.get("--stated-at"))
+        _prev_pin(o.get("--prev-pin-sha256"))
+    except ExchangeError as e:
+        raise _Usage(str(e)) from None
     r = pair(pos[0], pos[1], owner_a=o.get("--owner-a"), owner_b=o.get("--owner-b"),
              accounts=o.get("--accounts"), account_keys=o.get("--account-key", ()),
              late_after=late_after)
@@ -1400,6 +1515,10 @@ def _pair_cli(argv: list[str]) -> int:
     else:
         print(_render(r).encode("utf-8", "backslashreplace").decode("utf-8"))
     code = V.exit_for(r["verdict"])
+    if "--pin" in o:
+        refused = _write_pin(r, pos[0], pos[1], o)
+        if refused is not None:
+            return refused
     marks = r["counts"]["mismatch"] + r["counts"]["missing"]
     if o.get("--strict") and code == V.EXIT_GOOD and marks:
         print(f"arcaeon exchange pair --strict: {r['counts']['mismatch']} mismatch, "
