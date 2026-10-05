@@ -39,10 +39,10 @@ returns the key" convenience path is not offered; see the open questions.)
 
 | caller | may |
 |---|---|
-| owner session (the site login) | issue, list, rotate, revoke, attach |
-| owner API key (made by the owner on the site) | issue, list, rotate, revoke, attach |
+| owner session (the site login) | issue, list, rotate, revoke, attach, read full receipts |
+| owner API key (made by the owner on the site) | issue, list, rotate, revoke, attach, read full receipts |
 | agent key | nothing on this API: 403. An agent never self-issues |
-| anyone, no auth | fetch the public binding statement for a did:key |
+| anyone, no auth | fetch the public binding statement for a did:key (no IdP `sub`) |
 
 The stub takes the caller as already authenticated by the site's auth layer
 (`{"kind": "owner_session" | "owner_api_key", "owner": ...}`); checking
@@ -108,7 +108,9 @@ bound once.
 
 Request `{"reason": "key lost"}` (optional, one line). Response `200`
 `{"binding": {... "event": "revoke", "key": the revoked did:key, "reason": ...}}`.
-409 if the account has no active key. The account and its history stay.
+409 if the account has no active key, or if the request time is before
+the account's last row (see "Row times never go backwards" below). The
+account and its history stay.
 
 ### Rotate: `POST /v1/agents/{account}/rotate` (owner)
 
@@ -120,6 +122,13 @@ how an owner recovers an account whose key was lost or stolen. **The new key
 inherits the record** (TE-44d): the tally keys on the account, and the
 account's history is one hash-linked list that cannot be reset. Re-issuing a
 revoked account's name is 409.
+
+**Row times never go backwards.** Rotate, revoke and attach are refused with
+409, and nothing is written, when their time is before the account's last
+row. The verifier calls a history BROKEN when row i is dated before row
+i-1, and the history cannot be reset, so one backdated row would read every
+pairing on the account BROKEN at every time. An equal time (the same second)
+is allowed, as the verifier allows it.
 
 ### Fetch the public binding statement: `GET /v1/keys/{did}/binding` (anyone)
 
@@ -135,6 +144,22 @@ revoked account's name is 409.
 reader sees rotations and revocations. 404 for a key never bound. The
 top-level `account` and `owner` are a convenience; the verifier reads the
 rows and calls a disagreement BROKEN.
+
+**No IdP `sub` in the public view.** An external row carries the receipt's
+`iss` and `sub_sha256`, never `sub` (an Okta `sub` can be an email address).
+`sub_sha256` is `sha256(salt || sub)` with a fresh 16-byte random salt per
+receipt that stays owner-only. Salted, not plain, because a plain sha256 of
+an email is undone by guessing addresses, and the same `sub` on two
+accounts would publish the link between them. The hash is inside the signed
+row, so the public statement verifies as it is; the owner can open it by
+showing `sub` and the salt.
+
+### Read the full receipts: `GET /v1/agents/{account}/binding` (owner)
+
+The same signed history as the public statement, plus `receipts`: one
+`{"row": INDEX, "receipt": {... "sub": ...}, "sub_salt": "32 hex"}` per
+external row, where `sha256(bytes.fromhex(sub_salt) + sub)` is that row's
+`sub_sha256`. 401 no owner, 403 agent key, 404 not this owner's account.
 
 ### Attach an external identity: `POST /v1/agents/{account}/external` (owner)
 
@@ -161,7 +186,9 @@ DPoP `cnf.jkt`, Entra mTLS-PoP `cnf`), `idp-tag` (an STS tag carries it) or
 active key (`jwk_thumbprint(did)`), and it must match. Any field outside this
 shape (`id_token`, `access_token`, `jwt`, `token`) is refused with 400, so a
 live bearer token cannot be written by mistake. Response `201` with an
-`event: "external"` row. Public Sigstore Fulcio takes no Entra or Okta token
+`event: "external"` row whose `external` holds the receipt with `sub`
+replaced by `sub_sha256` (see the public statement above) (409 if the account has no active key or the time
+is before its last row). Public Sigstore Fulcio takes no Entra or Okta token
 today (R10), so `sigstore` here means a Sigstore identity the agent already
 holds, bound the same way.
 
@@ -180,7 +207,7 @@ Kind `account.binding`, v `1`. Every field is signed; unused ones are null.
 | `at` | UTC, `YYYY-MM-DDTHH:MM:SSZ` |
 | `signer` | the server binding key |
 | `agent_proof` | issue/rotate: the agent's `exchange.binding` row, verbatim |
-| `external` | external: the receipt |
+| `external` | external: the receipt with `sub` replaced by `sub_sha256` (salted; the full receipt is owner-only) |
 | `reason` | revoke: optional text |
 | `sig` | base64 Ed25519 over `PAE("application/vnd.arcaeon.account.binding.v1+json", C)`, `C` the json-c14n v1 bytes of the signed fields |
 
@@ -228,6 +255,17 @@ pairing. A row that is the agent's possession proof wrapped by an issue or
 rotate row is read at that row's time (the proof is signed minutes before
 the issue). Without `--accounts`, nothing changes and the pair report says
 "account service not consulted". Tables: docs/EXCHANGE.md, docs/TALLY.md.
+
+**Freshness: a statement is as fresh as its fetch; a revocation after
+`fetched_at` is not seen.** A FILE is a replay of what the service said
+when it was fetched, so the report's `account_service` block carries
+`fetched_at` and its reason says "as of <time>". `fetched_at` is a top-level
+`"fetched_at": "YYYY-MM-DDTHH:MM:SSZ"` in FILE if the fetcher wrote one, else
+FILE's modification time; when both are there the older one is used (a
+statement is never claimed fresher than either says). A `fetched_at` that is
+not a UTC time refuses the file. A live in-memory store is read at load time;
+in-memory statements with no time say "as of an unknown time". Fetch again
+before relying on a pairing near or after a key's possible revocation.
 
 ## Rate and Sybil notes
 

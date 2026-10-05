@@ -12,6 +12,7 @@ endpoints, the auth model and the limits, is docs/ACCOUNT_ID_API.md.
     attach_external(store, caller, ACCOUNT, receipt=DICT, server_seed=SEED)
     list_agents(store, caller)                                     -> [summary]
     binding_statement(store, DID)                                  -> statement | None
+    owner_binding(store, caller, ACCOUNT)                          -> statement + receipts
     verify_binding(statement, DID, server_keys=[DID], at=, now=)   -> report
     load_service(STORE|STATEMENTS|PATH, server_keys=[DID])         -> (service, why)
     consult_binding(service, DID, ACCOUNT, [exchange.binding rows]) -> report
@@ -80,7 +81,7 @@ __all__ = ["BIND_KIND", "PAYLOAD_TYPE", "STATEMENT_TYPE", "ROW_VERSION", "SIGNED
            "MAX_AGENTS_PER_OWNER", "PROOF_MAX_AGE", "AccountError", "new_store",
            "load_store", "save_store", "agent_account", "possession_proof", "jwk_thumbprint",
            "row_digest", "issue", "rotate", "revoke", "attach_external", "list_agents",
-           "binding_statement", "control_cluster", "verify_binding", "handle",
+           "binding_statement", "owner_binding", "PUBLIC_RECEIPT_FIELDS", "control_cluster", "verify_binding", "handle",
            "NOT_CONSULTED", "load_service", "consult_binding", "log_binding_rows",
            "consult_pairings", "service_report"]
 
@@ -100,6 +101,12 @@ ISSUER_FAMILIES = ("entra", "okta", "aws-sts", "spiffe", "sigstore")
 BINDING_STRENGTHS = ("idp-cnf", "idp-tag", "possession-sig")
 RECEIPT_FIELDS = ("issuer_family", "iss", "sub", "facets", "key_jkt", "jwt_sha256",
                   "jwk_sha256", "binding_strength", "checked_at")
+#: What a signed external row (and so the public binding statement) carries:
+#: the receipt with `sub` replaced by sub_sha256 = sha256(salt || sub), the salt
+#: 16 random bytes per receipt kept owner-only. An IdP `sub` can be an email; a
+#: plain sha256 of an email is reversed by guessing, and one sub on two accounts
+#: would link them. The full receipt and the salt are in owner_binding only.
+PUBLIC_RECEIPT_FIELDS = tuple(k for k in RECEIPT_FIELDS if k != "sub") + ("sub_sha256",)
 #: Accounts one owner may hold, revoked ones included (a revoke does not free a
 #: slot, or churn would reset the count). A stub default, not a price.
 MAX_AGENTS_PER_OWNER = 100
@@ -327,6 +334,18 @@ def _row(event: str, account: str, owner: str, key: str | None, prev: str | None
     return row
 
 
+def _not_before_last(rec: dict, now: datetime) -> None:
+    """Refuse (409) a row dated before the account's last row. verify_binding
+    calls a history BROKEN when row i is dated before row i-1 (an equal time is
+    allowed there, so it is allowed here), and the history cannot be reset
+    (TE-44d): a backdated row would break every pairing on the account forever."""
+    last = _parse(rec["rows"][-1]["at"]) if rec.get("rows") else None
+    if last is not None and now < last:
+        raise AccountError(409, f"the time {_utc(now)} is before the account's last row "
+                                f"({rec['rows'][-1]['at']}); a row is never dated before "
+                                f"the one it follows")
+
+
 # --- the operations --------------------------------------------------------------------
 
 def issue(store: dict, caller: Any, *, agent: str, proof: Any, server_seed: bytes,
@@ -369,6 +388,7 @@ def rotate(store: dict, caller: Any, account: str, *, proof: Any, server_seed: b
     owner = _caller_owner(caller)
     rec = _owned(store, owner, account)
     now = _when(at)
+    _not_before_last(rec, now)
     did = _check_proof(proof, account, now)
     if did in store["keys"]:
         raise AccountError(409, "this key is already bound to an account; a key is bound once")
@@ -383,13 +403,15 @@ def revoke(store: dict, caller: Any, account: str, *, server_seed: bytes,
     history stay; envelopes the key sealed after this time read BROKEN."""
     owner = _caller_owner(caller)
     rec = _owned(store, owner, account)
+    now = _when(at)
+    _not_before_last(rec, now)
     key = _active_key(rec)
     if key is None:
         raise AccountError(409, f"{account} has no active key to revoke")
     if reason is not None and not _env._text_ok(reason, 256):
         raise AccountError(400, "reason is not one line of text (at most 256 chars)")
     row = _sign_row(_row("revoke", account, owner, key, row_digest(rec["rows"][-1]),
-                         _when(at), reason=reason), server_seed)
+                         now, reason=reason), server_seed)
     return _append(store, account, owner, row)
 
 
@@ -433,18 +455,28 @@ def attach_external(store: dict, caller: Any, account: str, *, receipt: Any,
                     server_seed: bytes, at: datetime | None = None) -> dict:
     """Record an outside identity (Entra / Okta / AWS STS / SPIFFE / Sigstore)
     as a BOUND receipt on the account, never a rival ID. The IdP token was
-    checked upstream; only its hash and the checked claims arrive here."""
+    checked upstream; only its hash and the checked claims arrive here. The
+    signed row carries the receipt with `sub` as a salted sha256
+    (PUBLIC_RECEIPT_FIELDS); the full receipt and its salt stay owner-only."""
     owner = _caller_owner(caller)
     rec = _owned(store, owner, account)
+    now = _when(at)
+    _not_before_last(rec, now)
     clean = _check_receipt(receipt)
     key = _active_key(rec)
     if key is None:
         raise AccountError(409, f"{account} has no active key to bind an identity to")
     if clean["key_jkt"] is not None and clean["key_jkt"] != jwk_thumbprint(key):
         raise AccountError(400, "key_jkt is not the thumbprint of the account's active key")
+    salt = os.urandom(16)
+    public = {k: clean[k] for k in RECEIPT_FIELDS if k != "sub"}
+    public["sub_sha256"] = hashlib.sha256(salt + clean["sub"].encode("utf-8")).hexdigest()
     row = _sign_row(_row("external", account, owner, key, row_digest(rec["rows"][-1]),
-                         _when(at), external=clean), server_seed)
-    return _append(store, account, owner, row)
+                         now, external=public), server_seed)
+    out = _append(store, account, owner, row)
+    rec.setdefault("receipts", {})[row_digest(row)] = {"receipt": clean,
+                                                       "sub_salt": salt.hex()}
+    return out
 
 
 def list_agents(store: dict, caller: Any) -> list:
@@ -463,7 +495,8 @@ def list_agents(store: dict, caller: Any) -> list:
 
 
 def binding_statement(store: dict, did: Any) -> dict | None:
-    """PUBLIC: the account history that binds `did`, or None. Anyone may fetch it."""
+    """PUBLIC: the account history that binds `did`, or None. Anyone may fetch it.
+    External rows carry iss and a salted sub_sha256, never the IdP `sub`."""
     if not _did_shape_ok(did):
         return None
     account = store["keys"].get(did)
@@ -472,6 +505,23 @@ def binding_statement(store: dict, did: Any) -> dict | None:
         return None
     return {"type": STATEMENT_TYPE, "did": did, "account": account, "owner": rec["owner"],
             "rows": copy.deepcopy(rec["rows"])}
+
+
+def owner_binding(store: dict, caller: Any, account: Any) -> dict:
+    """OWNER ONLY: the account's history (the same signed rows the public
+    statement carries) plus each external row's full receipt and sub salt:
+    receipts = [{"row": INDEX, "receipt": {... "sub" ...}, "sub_salt": HEX}].
+    sha256(bytes.fromhex(sub_salt) + sub) is the row's sub_sha256."""
+    owner = _caller_owner(caller)
+    rec = _owned(store, owner, account)
+    held = rec.get("receipts") or {}
+    receipts = []
+    for i, r in enumerate(rec["rows"]):
+        full = held.get(row_digest(r)) if r.get("event") == "external" else None
+        if full is not None:
+            receipts.append({"row": i, **copy.deepcopy(full)})
+    return {"type": STATEMENT_TYPE, "did": _active_key(rec), "account": account,
+            "owner": owner, "rows": copy.deepcopy(rec["rows"]), "receipts": receipts}
 
 
 def control_cluster(store: dict, ident: Any) -> str | None:
@@ -621,8 +671,15 @@ def load_service(src: Any, server_keys: Any = ()) -> tuple[dict | None, str | No
     save_store shape), {"statements": [binding statement, ...]} (what GET
     /v1/keys/{did}/binding answers), a list of statements, or a path to one
     as JSON. `server_keys` are the binding keys the reader trusts; they are
-    never taken from the file. Never raises."""
+    never taken from the file. Never raises.
+
+    FRESHNESS. service["fetched_at"] is when the statements were fetched: a
+    top-level "fetched_at" (UTC) in the data, the file's mtime when read from
+    a file (the older of the two when both are there), the load time for a
+    live in-memory store, else None (unknown). A statement is as fresh as its
+    fetch; a revocation after fetched_at is not seen."""
     name = "the account service"
+    mtime = None
     try:
         if isinstance(src, (dict, list)):
             data = src
@@ -634,6 +691,7 @@ def load_service(src: Any, server_keys: Any = ()) -> tuple[dict | None, str | No
                 return None, f"{name} is not there"
             if p.stat().st_size > MAX_STORE_BYTES:
                 return None, f"{name} is over {MAX_STORE_BYTES} bytes; not read"
+            mtime = datetime.fromtimestamp(p.stat().st_mtime, timezone.utc).replace(microsecond=0)
             data = loads_strict(p.read_bytes().decode("utf-8"))
     except (OSError, UnicodeDecodeError, ValueError, TypeError) as e:
         return None, f"{name} is not JSON ({type(e).__name__})"
@@ -641,8 +699,19 @@ def load_service(src: Any, server_keys: Any = ()) -> tuple[dict | None, str | No
     if any(_pub(k) is None for k in keys):
         return None, ("an --account-key is not an Ed25519 did:key (the length is checked "
                       "before any decode)")
-    if isinstance(data, dict) and isinstance(data.get("accounts"), dict) \
-            and isinstance(data.get("keys"), dict):
+    stamped = None
+    if isinstance(data, dict) and "fetched_at" in data:
+        stamped = _parse(data["fetched_at"])
+        if stamped is None:
+            return None, f"{name} fetched_at is not a UTC time (YYYY-MM-DDTHH:MM:SSZ)"
+    times = [t for t in (stamped, mtime) if t is not None]
+    live = (isinstance(data, dict) and isinstance(data.get("accounts"), dict)
+            and isinstance(data.get("keys"), dict))
+    if times:
+        fetched_at = _utc(min(times))
+    else:
+        fetched_at = _utc(_when(None)) if live else None
+    if live:
         def lookup(did, store=data):
             return binding_statement(store, did)
     else:
@@ -657,7 +726,8 @@ def load_service(src: Any, server_keys: Any = ()) -> tuple[dict | None, str | No
 
         def lookup(did, index=index):
             return index.get(did) if _did_shape_ok(did) else None
-    return {"source": name, "lookup": lookup, "server_keys": sorted(set(keys))}, None
+    return {"source": name, "lookup": lookup, "server_keys": sorted(set(keys)),
+            "fetched_at": fetched_at}, None
 
 
 def _other_account(claimed: str, rep: dict) -> str:
@@ -762,10 +832,14 @@ def service_report(service: dict | None, results: Any = ()) -> dict:
     """The `account_service` block a report carries."""
     if service is None:
         return {"consulted": False, "reason": NOT_CONSULTED, "bindings": []}
+    fetched = service.get("fetched_at")
+    as_of = f"as of {fetched}" if fetched else "as of an unknown time"
     return {"consulted": True, "source": service["source"],
-            "server_keys": list(service["server_keys"]), "bindings": list(results),
+            "server_keys": list(service["server_keys"]), "fetched_at": fetched,
+            "bindings": list(results),
             "reason": (f"each binding row was held to {service['source']}, read with the "
-                       f"binding key(s) named")}
+                       f"binding key(s) named, {as_of} (a statement is as fresh as its "
+                       f"fetch; a revocation after then is not seen)")}
 
 
 # --- the thin handler ------------------------------------------------------------------
@@ -798,9 +872,13 @@ def handle(store: dict, caller: Any, method: str, path: str, body: Any, *,
                 return (201 if after > before else 200), {"binding": row}
             raise AccountError(405, "GET or POST only")
         if parts[:2] == ["v1", "agents"] and len(parts) == 4:
+            acct, op = parts[2], parts[3]
+            if op == "binding":
+                if method != "GET":
+                    raise AccountError(405, "GET only")
+                return 200, owner_binding(store, caller, acct)
             if method != "POST":
                 raise AccountError(405, "POST only")
-            acct, op = parts[2], parts[3]
             if op == "revoke":
                 return 200, {"binding": revoke(store, caller, acct, server_seed=server_seed,
                                                at=now, reason=body.get("reason"))}
