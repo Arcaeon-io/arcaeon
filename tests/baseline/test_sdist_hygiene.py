@@ -32,7 +32,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]      # the arcaeon repo root
 BANNED = (".hypothesis/", ".pytest_cache/", "__pycache__/", ".git/", "dist/", ".venv/",
           "/tests/")
-MAX_MEMBERS = 250  # the whole merged package is ~140 members; a cache blows past this
+MAX_MEMBERS = 320  # 254 members at stack-2026-10-05c (ten connector adapters); a cache blows past this
 
 # Top-level entries one level below the "arcaeon-X.Y.Z/" prefix.
 ALLOWED_TOP_LEVEL_DIRS = {"src", "policies"}  # policies/: the D053 Rego policy
