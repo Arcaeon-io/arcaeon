@@ -930,7 +930,8 @@ usage: arcaeon tally build CHAIN.jsonl... [--json] [--settled-only]
 
 **Exit codes:** `build`: 0 VERIFIED (every chain reads; read the columns), 1
 BROKEN (a chain, a row or an alias signature), 3 COULD NOT LOOK (a chain, the
-groups file or the aliases file could not be read, no chain given, or no
+groups file or the aliases file could not be read, an alias entry is
+malformed, no chain given, or no
 Ed25519 backend), 2 bad usage (a window or time that does not parse).
 `alias`: 0 printed, 2 refused. `seal`: 0 written, 3 an input cannot be read,
 2 refused (two inputs with one file name). `pin`: 0 printed, 1 the tally

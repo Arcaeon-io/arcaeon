@@ -372,6 +372,34 @@ def test_alias_needs_both_signatures(w):
     r = tally(a, aliases=p)
     assert r["aliases"][0]["applied"] is False
     assert r["aliases"][0]["finding"].startswith(V.COULD_NOT_LOOK)
+    assert r["verdict"] == V.COULD_NOT_LOOK
+
+
+@pytest.mark.parametrize("bad", ["not an entry", 7, {"kind": "x"}, "drop_sig", "bad_at"])
+def test_malformed_alias_lowers_the_verdict_to_could_not_look(w, bad):
+    a, n = w["a"], w["n"]
+    both(w, a, w["b"], "ex-1")
+    p = _alias_file(w, a, n)
+    e = json.loads(p.read_text())["aliases"][0]
+    if bad == "drop_sig":
+        del e["sig_old"]
+    elif bad == "bad_at":
+        e["at"] = "yesterday"
+    else:
+        e = bad
+    p.write_text(json.dumps({"aliases": [e]}))
+    r = tally(a, w["b"], aliases=p)
+    assert r["verdict"] == V.COULD_NOT_LOOK
+    assert "alias 1" in r["reason"] and r["ids"]
+    assert any(f.startswith("alias 1") for f in r["findings"])
+    assert r["aliases"][0]["applied"] is False
+
+
+def test_good_alias_keeps_the_verdict_verified(w):
+    a, n = w["a"], w["n"]
+    both(w, a, w["b"], "ex-1")
+    r = tally(a, w["b"], aliases=_alias_file(w, a, n))
+    assert r["verdict"] == V.VERIFIED and r["aliases"][0]["applied"] is True
 
 
 def test_alias_cli_prints_a_signed_entry(w, capsys):

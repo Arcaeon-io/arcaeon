@@ -165,8 +165,9 @@ dropped is counted in `filtered_out`.
 The tally's own `verdict` is about the record, never about an ID: BROKEN if a
 chain does not verify, holds a BROKEN row, or an alias signature fails; else
 COULD NOT LOOK if a chain, the groups file or the aliases file could not be
-read, or no chain was given (an unreadable groups or aliases file prints no
-IDs: counts that miss the exclusions you asked for would be wrong); else
+read, an alias entry is malformed (not applied; the IDs still print), or no
+chain was given (an unreadable groups or aliases file prints no IDs: counts
+that miss the exclusions you asked for would be wrong); else
 VERIFIED. Exit 0 VERIFIED, 1 BROKEN, 3 COULD NOT LOOK, 2 bad usage.
 
 ## The tally chain (TE-47)

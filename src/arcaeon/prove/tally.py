@@ -261,7 +261,8 @@ def build(paths, *, window: str = DEFAULT_WINDOW, settled_only: bool = False,
 
     verdict: BROKEN if a chain does not verify or holds a BROKEN row, or an
     alias entry's signature fails; else COULD NOT LOOK if a chain, the groups
-    file or the aliases file could not be read, or no chain was given; else
+    file, the aliases file or an alias entry (malformed) could not be read, or
+    no chain was given; else
     VERIFIED. The verdict is about the record, never about an ID. Raises
     TallyError only for a bad window or now."""
     span = parse_window(window)
@@ -313,9 +314,12 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
                         "aliases file holds no list of aliases")
     broken_top: list[str] = []
     alias: dict[str, str] = {}
+    cnl_aliases: list[str] = []
     for n, e in enumerate(entries, 1):
         word, why = check_alias(e)
-        old = e.get("old") if isinstance(e, dict) else None
+        if word == V.COULD_NOT_LOOK:    # malformed: unreadable, like a bad aliases file
+            cnl_aliases.append(f"alias {n}: {why}")
+        old =e.get("old") if isinstance(e, dict) else None
         new = e.get("new") if isinstance(e, dict) else None
         rec = {"old": old, "new": new, "applied": False, "how": "signed by the old and new keys",
                "finding": None}
@@ -587,16 +591,18 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
 
     if broken_top:
         r["verdict"], r["reason"] = V.BROKEN, "; ".join(broken_top)
-    elif cnl_chains:
+    elif cnl_chains or cnl_aliases:
+        looked = "every chain given" if cnl_chains else "every alias entry given"
+        where = "the chains given" if cnl_chains else (
+            str(aliases_src) if isinstance(aliases_src, (str, Path)) else "the aliases given")
         r.update({k: v for k, v in V.could_not_look(
-            "every chain given", "the chains given", "unreadable",
-            "; ".join(cnl_chains)).items()})
+            looked, where, "unreadable", "; ".join(cnl_chains + cnl_aliases)).items()})
         r["verdict"] = V.COULD_NOT_LOOK
     else:
         r["verdict"] = V.VERIFIED
         r["reason"] = (f"{len(r['chains'])} chain(s) verify and every reaction row checks "
                        f"under its chain's key; {len(out)} ID(s)")
-    r["findings"] = broken_top + cnl_chains
+    r["findings"] = broken_top + cnl_chains + cnl_aliases
     return r
 
 
