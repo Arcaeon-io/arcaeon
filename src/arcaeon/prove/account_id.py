@@ -82,7 +82,8 @@ __all__ = ["BIND_KIND", "PAYLOAD_TYPE", "STATEMENT_TYPE", "ROW_VERSION", "SIGNED
            "OWNER_CALLERS", "ISSUER_FAMILIES", "BINDING_STRENGTHS", "RECEIPT_FIELDS",
            "MAX_AGENTS_PER_OWNER", "PROOF_MAX_AGE", "AccountError", "new_store",
            "load_store", "save_store", "agent_account", "possession_proof", "jwk_thumbprint",
-           "row_digest", "issue", "rotate", "revoke", "attach_external", "list_agents",
+           "row_digest", "fields_digest", "fields_signing_bytes", "sign_fields",
+           "verify_fields", "issue", "rotate", "revoke", "attach_external", "list_agents",
            "binding_statement", "owner_binding", "PUBLIC_RECEIPT_FIELDS", "control_cluster", "verify_binding", "handle",
            "NOT_CONSULTED", "load_service", "consult_binding", "log_binding_rows",
            "log_reaction_rows", "consult_pairings", "service_report"]
@@ -188,23 +189,57 @@ def jwk_thumbprint(did: str) -> str | None:
     return base64.urlsafe_b64encode(hashlib.sha256(jwk).digest()).rstrip(b"=").decode("ascii")
 
 
+# The row scheme, shared with other signed row kinds (arcaeon.prove.register):
+# every field but `sig` is signed, as PAE(payload_type, json-c14n(signed fields)),
+# Ed25519 by the did:key in `signer`, `sig` base64; a row's digest (what the next
+# row's `prev` names) is digest_json of the signed fields plus sig. A distinct
+# payload_type per row kind keeps one kind's signature from passing as another's.
+
+def fields_digest(row: dict, signed: tuple) -> str:
+    """digest_json of the `signed` fields plus sig: what the next row's prev names."""
+    return digest_json({k: row.get(k) for k in tuple(signed) + ("sig",)})
+
+
+def fields_signing_bytes(row: dict, signed: tuple, payload_type: str) -> bytes:
+    return _env.pae(payload_type, canon_json({k: row[k] for k in signed}))
+
+
+def sign_fields(row: dict, seed: bytes, signed: tuple, payload_type: str) -> dict:
+    """Set row["signer"] to the seed's did:key and row["sig"] over the signed fields."""
+    R = _receipts()
+    row["signer"] = R.did_key(R.public_key_from_seed(bytes(seed)))
+    row["sig"] = base64.b64encode(R._sign_bytes(
+        bytes(seed), fields_signing_bytes(row, signed, payload_type))).decode("ascii")
+    return row
+
+
+def verify_fields(row: Any, signed: tuple, payload_type: str) -> bool:
+    """True when row["sig"] is the row signer's Ed25519 signature over the signed
+    fields. False for anything else (no signer, a hostile key length, bad base64)."""
+    try:
+        pub = _pub(row.get("signer"))
+        if pub is None or not isinstance(row.get("sig"), str):
+            return False
+        sig = base64.b64decode(row["sig"], validate=True)
+        return bool(_receipts()._verify_bytes(
+            pub, fields_signing_bytes(row, signed, payload_type), sig))
+    except (binascii.Error, ValueError, KeyError, TypeError, AttributeError):
+        return False
+
+
 def row_digest(row: dict) -> str:
     """What the next row's `prev` names: digest_json of the signed fields plus sig."""
-    return digest_json({k: row.get(k) for k in SIGNED + ("sig",)})
+    return fields_digest(row, SIGNED)
 
 
 def _signing_bytes(row: dict) -> bytes:
-    return _env.pae(PAYLOAD_TYPE, canon_json({k: row[k] for k in SIGNED}))
+    return fields_signing_bytes(row, SIGNED, PAYLOAD_TYPE)
 
 
 def _sign_row(row: dict, server_seed: bytes) -> dict:
     if not isinstance(server_seed, (bytes, bytearray)) or len(server_seed) != 32:
         raise AccountError(500, "the server binding key is not a 32-byte Ed25519 seed")
-    R = _receipts()
-    row["signer"] = R.did_key(R.public_key_from_seed(bytes(server_seed)))
-    row["sig"] = base64.b64encode(R._sign_bytes(bytes(server_seed),
-                                                _signing_bytes(row))).decode("ascii")
-    return row
+    return sign_fields(row, server_seed, SIGNED, PAYLOAD_TYPE)
 
 
 # --- the store (in memory, optionally a JSON file) ----------------------------------------
