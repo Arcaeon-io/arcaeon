@@ -139,6 +139,25 @@ def _never_the_real_home(monkeypatch):
         monkeypatch.setenv("MCP_VET_AUDIT_LEDGER", SESSION_VET_LEDGER)
 
 
+HOME_VARS = ("HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH")
+
+
+@pytest.fixture(autouse=True)
+def _temp_home(tmp_path_factory, monkeypatch):
+    """Every test runs with the home itself under tmp (A11): HOME, USERPROFILE
+    and HOMEDRIVE/HOMEPATH name a fresh folder, so Path.home() and
+    os.path.expanduser("~") never reach the real one, in-process or in a
+    subprocess that inherits the environment. That covers code with no env
+    override of its own and tests that unset ARCAEON_HOME. Proof:
+    tests/test_temp_home.py."""
+    home = tmp_path_factory.mktemp("home")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("HOMEDRIVE", home.drive)
+    monkeypatch.setenv("HOMEPATH", str(home)[len(home.drive):])
+    return home
+
+
 @pytest.fixture
 def real_home_guard():
     """The guard's parts, for tests/test_real_home_guard.py."""

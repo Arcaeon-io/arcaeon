@@ -76,15 +76,24 @@ PIN_WARN_FRACTION = 0.80
 _PIN_EPS = 1e-9  # float sums of 5,000 half-cent pins land a hair either side of $25
 
 PIN_LEDGER_ENV = "ARCAEON_BALLOT_PIN_LEDGER"
-#: Per-user default. Never a machine-specific path: this ships in the public wheel.
-DEFAULT_PIN_LEDGER = Path.home() / ".arcaeon" / "ballot_pin_ledger.jsonl"
+#: Per-user default, relative to the home. Never a machine-specific path: this
+#: ships in the public wheel. Resolved at call time, not import time, so a
+#: changed HOME (a test's tmp home) is followed.
+DEFAULT_PIN_LEDGER_REL = Path(".arcaeon") / "ballot_pin_ledger.jsonl"
+
+
+def __getattr__(name):
+    # The old public name, kept for importers; now resolved on each access.
+    if name == "DEFAULT_PIN_LEDGER":
+        return Path.home() / DEFAULT_PIN_LEDGER_REL
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def pin_ledger_path() -> Path:
     """Where the pin rows land. Env-overridable so tests never touch the real
     monthly count (and so a second machine can point at its own file)."""
     override = os.environ.get(PIN_LEDGER_ENV, "").strip()
-    return Path(override) if override else DEFAULT_PIN_LEDGER
+    return Path(override) if override else Path.home() / DEFAULT_PIN_LEDGER_REL
 
 
 def pin_cost_usd(pin_kind: str) -> float:
