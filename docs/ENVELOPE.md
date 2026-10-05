@@ -174,7 +174,19 @@ envelope's word: COULD NOT LOOK allows only `read`, BROKEN allows nothing.
 
 `verify` does not judge carried rows: its word is about the bytes, the
 signature and the binding. It shows them under `sealed.checks` and adds a
-`not_checked` line. A carried row is signed by the sealer, so it is the
+`not_checked` line. So that a BROKEN row is never hidden behind a VERIFIED
+seal, it also counts them: on a VERIFIED or COULD NOT LOOK envelope whose
+`checks[]` is a list of 1 to 64 JSON objects, `findings` gets one line, also
+printed as a `finding:` line under the verdict on stderr, such as "the
+envelope carries 3 check rows, 1 says BROKEN (mcp-scan), 1 says COULD NOT
+LOOK: the sender's report of a checker's word, ... run `gate decide` on the
+file". Zero BROKEN rows still gets the line ("0 say BROKEN"); at most 8
+BROKEN checker names (`vendor.name`) are listed, then "and N more". The
+verdict and exit code do not change: the seal holds, and `gate decide` is
+where a carried BROKEN bites. On a BROKEN envelope the line is left out,
+since there `findings` are the reasons it is BROKEN (the gate and the OCSF
+export read them so). A `checks[]` of any other shape gets no count line;
+the gate refuses on it as unreadable. A carried row is signed by the sealer, so it is the
 sender's report of what a checker said, not the checker's own signed word.
 `gate decide` reads it like a `--checks` row: on a VERIFIED envelope a
 carried BROKEN for this file vetoes `act`, `pay` and `irreversible` as

@@ -733,6 +733,46 @@ def resolve_pin(pins: str | Path, pin_ref: str, witness_ref: str | None = None) 
                       f"{got[0][1]}, the pin_ref sealed {want}: the pin is not the one sealed"}
 
 
+#: At most this many BROKEN checker names in the carried-rows finding.
+_CARRIED_NAMES = 8
+
+
+def _plural(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
+
+
+def _carried_finding(value: Any) -> str | None:
+    """The finding that counts a version 2 predicate's carried check rows (F-R9),
+    or None when checks[] is not a list of 1..MAX_CARRIED_CHECKS JSON objects
+    (`gate decide` refuses on that shape; this line only counts a readable one).
+    It names the checkers of the BROKEN rows, at most _CARRIED_NAMES of them."""
+    if not (isinstance(value, list) and 0 < len(value) <= MAX_CARRIED_CHECKS
+            and all(isinstance(x, dict) for x in value)):
+        return None
+    broken = [x for x in value if x.get("relayed_verdict") == V.BROKEN]
+    cnl = sum(1 for x in value if x.get("relayed_verdict") == V.COULD_NOT_LOOK)
+    names: list[str] = []
+    for x in broken:
+        v = x.get("vendor")
+        n = v.get("name") if isinstance(v, dict) else None
+        n = "".join(c for c in n if c.isprintable())[:64] if isinstance(n, str) else ""
+        n = n.strip() or "an unnamed checker"
+        if n not in names:
+            names.append(n)
+    out = (f"the envelope carries {_plural(len(value), 'check row', 'check rows')}, "
+           f"{_plural(len(broken), 'says', 'say')} BROKEN")
+    if names:
+        shown = ", ".join(names[:_CARRIED_NAMES])
+        more = len(names) - _CARRIED_NAMES
+        out += f" ({shown}{f' and {more} more' if more > 0 else ''})"
+    if cnl:
+        out += f", {_plural(cnl, 'says', 'say')} COULD NOT LOOK"
+    return (out + ": the sender's report of a checker's word, signed with the seal but not "
+            "re-judged here and not part of this verdict; run `gate decide` on the file, "
+            "which reads them like --checks rows (a carried BROKEN vetoes act, pay and "
+            "irreversible)")
+
+
 def _check_predicate(r: dict, stmt: dict, file: Path, audience, deal, purpose,
                      now: datetime, pins=None) -> None:
     st, find = r["steps"], r["findings"]
@@ -805,6 +845,8 @@ def _check_predicate(r: dict, stmt: dict, file: Path, audience, deal, purpose,
                     f"(an envelope that carries rows is version {PREDICATE_VERSION_CHECKS}), "
                     f"so the signed statement contradicts itself")
         return
+    if CHECKS_KEY in pred:                       # F-R9: counted, added once the verdict stands
+        r["_carried"] = _carried_finding(pred[CHECKS_KEY])
     if not _text_ok(pred.get("label")):
         st["binding"] = V.BROKEN
         find.append("the predicate has no label")
@@ -903,6 +945,7 @@ def verify(file: str | Path, envelope: str | Path | None = None, *, audience: st
     except Exception as e:  # noqa: BLE001  never a traceback, never a green
         r.pop("_cnl", None)
         r.pop("_pin_cnl", None)
+        r.pop("_carried", None)
         out = _could_not_look(r, "envelope", "a finished check", env_path, "unreadable",
                               f"the check could not finish ({type(e).__name__})")
     return _with_file_sha256(out, file)
@@ -938,12 +981,17 @@ def _verify(r, file, env_path, audience, deal, purpose, signers, require_witness
                          pins)
     cnl = r.pop("_cnl")
     pin_cnl = r.pop("_pin_cnl", None)
+    carried = r.pop("_carried", None)
     steps = r["steps"]
     if V.BROKEN in steps.values():
         broken = [k for k, v in steps.items() if v == V.BROKEN]
         r["verdict"] = V.BROKEN
         r["reason"] = "; ".join(r["findings"]) or f"step(s) {', '.join(broken)} failed"
         return r
+    # F-R9: on a seal that holds, say what the carried rows say. Not on a BROKEN
+    # one: there findings are the reasons it is BROKEN (gate and OCSF read them so).
+    if carried is not None:
+        r["findings"].append(carried)
     if require_witness and pin_cnl is not None:
         cnl.append(pin_cnl)
     elif require_witness and steps["witness"] in (V.COULD_NOT_LOOK, NOT_CLAIMED):
@@ -993,7 +1041,9 @@ Every row must name this file's sha256 as subject.sha256; any other row, or
 a FILE that cannot be read, refuses the seal (exit 2) naming it. At most 64
 rows, 16 KiB each, 256 KiB together. A carried row is the sender's report:
 `gate decide` reads it like a --checks row (a BROKEN vetoes act, pay and
-irreversible), and it never makes anything VERIFIED. With --checks the
+irreversible), and it never makes anything VERIFIED. verify counts the
+carried rows in one finding ("carries N check rows, M say BROKEN", naming
+the BROKEN checkers) and keeps its own word and exit code. With --checks the
 predicate version is 2; without, it is 1 and the envelope is exactly what it
 was before checks[] existed. verify reads versions 1 and 2 only: any other
 is COULD NOT LOOK, and a version 1 predicate holding checks is BROKEN.
@@ -1111,6 +1161,9 @@ def _verify_cli(argv: list[str]) -> int:
                require_witness=bool(o.get("--require-witness")), pins=o.get("--pins"))
     print(json.dumps(r, indent=1, ensure_ascii=False))
     print(f"{r['verdict']}: {r['reason']}", file=sys.stderr)
+    if r["verdict"] != V.BROKEN:                 # a BROKEN reason already holds its findings
+        for s in r.get("findings") or ():
+            print(f"  finding: {s}", file=sys.stderr)
     return V.exit_for(r["verdict"])
 
 
