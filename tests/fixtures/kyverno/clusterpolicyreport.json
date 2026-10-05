@@ -1,0 +1,38 @@
+{
+  "apiVersion": "wgpolicyk8s.io/v1alpha2",
+  "kind": "ClusterPolicyReport",
+  "metadata": {
+    "name": "cpolr-demo",
+    "uid": "00000000-0000-4000-8000-000000000002",
+    "resourceVersion": "2002"
+  },
+  "results": [
+    {
+      "policy": "require-ns-owner",
+      "rule": "check-owner-label",
+      "result": "pass",
+      "source": "kyverno",
+      "scored": true,
+      "severity": "medium",
+      "timestamp": {"seconds": 1759665700, "nanos": 500},
+      "resources": [
+        {"apiVersion": "v1", "kind": "Namespace", "name": "demo",
+         "uid": "00000000-0000-4000-8000-0000000000c1"}
+      ]
+    },
+    {
+      "policy": "require-ns-owner",
+      "rule": "check-owner-label",
+      "result": "fail",
+      "source": "kyverno",
+      "scored": true,
+      "severity": "medium",
+      "timestamp": {"seconds": 1759665700, "nanos": 500},
+      "resources": [
+        {"apiVersion": "v1", "kind": "Namespace", "name": "scratch",
+         "uid": "00000000-0000-4000-8000-0000000000c2"}
+      ]
+    }
+  ],
+  "summary": {"pass": 1, "fail": 1}
+}

@@ -472,6 +472,57 @@ relayed BROKEN stays BROKEN whatever else the row claims.
 - **Privacy of the scan.** Prisma AIRS receives the prompts and responses it
   scans. This adapter sends nothing; it reads responses you already hold.
 
+## Kyverno
+
+`arcaeon.connector.kyverno.ingest(body)` reads a Kyverno `PolicyReport` or
+`ClusterPolicyReport` (`wgpolicyk8s.io/v1alpha2`; also `reports.x-k8s.io/v1beta2`
+and `openreports.io/v1alpha1`), or a Kubernetes `List` of them, into one row per
+entry in `results[]`. `vendor_id` is the report's `metadata.uid`; `subject` is
+`kyverno:<namespace>/<kind>/<name>` when the result names exactly one resource.
+One adapter key `kyverno` holds the report identity (name, namespace, uid,
+resourceVersion), policy, rule, source, scored, severity, category, message,
+timestamp, up to 32 resources, a digest of `properties` and `summary_check`.
+The kyverno CLI's text or table output is not read: it is one COULD NOT LOOK row.
+
+| Kyverno `result` | `relayed_verdict` | why |
+|---|---|---|
+| `pass` | VERIFIED | the rule passed, as Kyverno says |
+| `fail` | BROKEN | the rule failed, as Kyverno says |
+| `warn` | COULD NOT LOOK | advisory, neither pass nor fail |
+| `error` | COULD NOT LOOK | Kyverno could not evaluate the rule |
+| `skip` | COULD NOT LOOK | the rule was not applied |
+| any other word, or not a string | COULD NOT LOOK | not in the table |
+| any word, when the report's `summary` disagrees with its `results[]` | COULD NOT LOOK | the report contradicts itself |
+
+Every row carries `signed_by_vendor: false`, `standing: "reported_by_sender"`
+and `input_sha256` (hex SHA-256 of the exact bytes given to `ingest`), written
+by one final step over every row; `ingest` takes no argument that changes them,
+and a field in the report that looks like a signature is not read. After that
+step only a `pass` can relay as VERIFIED. `rollup(rows)` gives one word over a
+set of rows and is never VERIFIED: BROKEN if any row is a relayed `fail`,
+otherwise COULD NOT LOOK. Each row's `policy_ref` names the policy and rule,
+with `version: null` and `join: COULD NOT LOOK`.
+
+An empty body, one over 8 MiB (digested, not read), not UTF-8, not JSON, with a
+duplicate key, nested past 64, or not a report is one COULD NOT LOOK row. More
+than 10000 results stop with one `bounded` row. `recheck` says COULD NOT LOOK for
+these rows; re-run `ingest`.
+
+### What this cannot prove
+
+- **That Kyverno said it.** Reports are not signed. The row proves which bytes
+  arrived, not who wrote them; anyone who can write a PolicyReport object can
+  write a `pass`.
+- **Which policy text judged the resource.** A report names a policy and rule
+  only: no policy version, resourceVersion or digest. `policy_ref` cannot be
+  joined to a sealed policy, so it says COULD NOT LOOK. Pinning the
+  ClusterPolicy spec seen at the time is a separate row, not built here.
+- **That the report is complete.** Reports are merged from admission and
+  background scans on Kyverno's schedule; a missing result is not a pass.
+- **That the shape matches a live cluster.** The fixtures were written from
+  Kyverno's and the wg-policy API documentation, not captured; see
+  `tests/fixtures/kyverno/README.md` for what is unverified.
+
 ## The sha256:jcs:v1 digest
 
 This is the one place the scheme is defined. `arcaeon.connector.core.jcs_digest`
