@@ -748,8 +748,10 @@ the same sha256 that says `BROKEN` vetoes. The amount is the larger of
 (`DIR/DEAL-<deal>/buyer.deal.jsonl` and `seller.deal.jsonl`, with `--deal`),
 so neither source can lower it below the other. With no amount at all, those
 three actions are refused, exit 3, naming the missing amount; a deal-record
-line that is not valid JSON could hide an amount, so it refuses them too,
-exit 3, naming the file and line number (it is never skipped). A missing,
+line that is not valid JSON or not a JSON object, an amount that is not one,
+or a deal file over the size cap, not UTF-8 or not readable could hide an
+amount, so each refuses them too, exit 3, naming the file and line number
+(none is skipped). A missing,
 unreadable or hostile check file is refused with its reason, never a
 traceback. `read`, any verdict that already refuses, and any amount at or
 under AMOUNT follow the table above unchanged; without the option nothing

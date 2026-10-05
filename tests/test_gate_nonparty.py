@@ -464,3 +464,66 @@ def test_unreadable_record_amount_refuses_could_not_look(tmp_path, bad):
     assert d.decision == "refuse" and d.exit_code == 3
     assert d.nonparty_check["applies"] is None
     assert any("not a readable amount" in n for n in d.nonparty_check["amount_notes"])
+
+
+# --- fold: every part of the deal record the rule cannot read refuses (fail closed on money)
+
+def _record_bytes(tmp_path, data: bytes, name: str = "seller.deal.jsonl"):
+    rec = tmp_path / "rec" / f"DEAL-{DEAL}"
+    rec.mkdir(parents=True, exist_ok=True)
+    good = json.dumps({"kind": "deal.commit", "deal": DEAL,
+                       "shared": {"terms": {"total": "50"}}}).encode()
+    (rec / "buyer.deal.jsonl").write_bytes(good + b"\n")
+    (rec / name).write_bytes(data)
+
+
+def _refuses_naming(tmp_path, f, did, *words):
+    d = _decide(f, did, "act", require_nonparty_check_above="1000", amount="10",
+                deal=DEAL, record_dir=tmp_path / "rec")
+    assert d.verdict == V.VERIFIED and d.decision == "refuse" and d.exit_code == 3
+    assert d.nonparty_check["applies"] is None
+    assert d.nonparty_check["veto"] == G.NONPARTY_VETO
+    assert d.could_not_check["reason_word"] == "unreadable"
+    for w in words:
+        assert w in d.reason
+    return d
+
+
+@pytest.mark.parametrize("bad", ["[1, 2]", "null", '"999999"', "7"],
+                         ids=["list", "null", "string", "number"])
+def test_deal_record_line_json_not_an_object_refuses_could_not_look(tmp_path, bad):
+    """A deal-record line that is valid JSON but not an object is not a row the
+    rule can read; it could stand where an amount over the cap was, so it
+    refuses with the line number like a line that is not JSON."""
+    f, did, _ = _handed(tmp_path)
+    good = json.dumps({"kind": "deal.commit", "deal": DEAL, "shared": {"terms": {"total": "50"}}})
+    _record_bytes(tmp_path, f"{good}\n{bad}\n".encode())
+    _refuses_naming(tmp_path, f, did, "seller.deal.jsonl line 2")
+
+
+def test_deal_record_file_over_the_size_cap_refuses_could_not_look(tmp_path):
+    """A deal file too large to read is not skipped as a note: the amounts in it
+    are unread, so whether the cap applies cannot be checked."""
+    f, did, _ = _handed(tmp_path)
+    _record_bytes(tmp_path, b" " * (16 * G.MAX_CHECK_BYTES + 1))
+    _refuses_naming(tmp_path, f, did, "seller.deal.jsonl", "bytes")
+
+
+def test_deal_record_file_not_utf8_refuses_could_not_look(tmp_path):
+    """A deal file that is not UTF-8 is not skipped as a note: its amounts are
+    unread, so the rule refuses."""
+    f, did, _ = _handed(tmp_path)
+    _record_bytes(tmp_path, b'{"kind": "deal.pay", "shared": {"amount": "\xff999999"}}\n')
+    _refuses_naming(tmp_path, f, did, "seller.deal.jsonl", "UTF-8")
+
+
+def test_deal_record_other_deal_rows_and_blank_lines_still_allow(tmp_path):
+    """The new refusals are only for what cannot be read: an object row for
+    another deal, a non-amount row, and blank lines stay fine under the cap."""
+    f, did, _ = _handed(tmp_path)
+    rows = [{"kind": "deal.pay", "deal": "d-other", "shared": {"amount": "999999"}},
+            {"kind": "deal.offer", "deal": DEAL}]
+    _record_bytes(tmp_path, ("\n".join(json.dumps(r) for r in rows) + "\n\n").encode())
+    d = _decide(f, did, "act", require_nonparty_check_above="1000", amount="10",
+                deal=DEAL, record_dir=tmp_path / "rec")
+    assert d.decision == "allow" and d.nonparty_check["applies"] is False

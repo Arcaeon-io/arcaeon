@@ -130,9 +130,10 @@ gate.evidence row; its reason and exit 3 stand when a --checks file would
 also veto (that answer is kept under `checks.would_veto`). The amount is the LARGER of
 `amount` and every commit total / pay amount in the deal record
 (record_dir/DEAL-<deal>/{buyer,seller}.deal.jsonl), so neither source can
-lower it below the other. A deal-record line that is not valid JSON could
-hide an amount, so it refuses those three actions as could-not-look too,
-naming the line; it is never skipped. Limit: this raises the cost of collusion between
+lower it below the other. A deal-record line that is not valid JSON or not
+a JSON object, an amount that is not one, and a deal file over the size cap,
+not UTF-8 or not readable could each hide an amount, so each refuses those
+three actions as could-not-look too, naming the file and line; none is skipped. Limit: this raises the cost of collusion between
 the two parties; it does not prove the checker is independent of them.
 
 Stdlib only (verify loads the [sign] backend itself). `decide` raises only on
@@ -698,8 +699,10 @@ def _deal_amounts(record_dir: Path, deal: str) -> tuple[list, str, list, list]:
     """Every readable commit total and pay amount for `deal` in its record
     (DEAL-<deal>/{buyer,seller}.deal.jsonl). Returns (amounts, where, notes,
     unreadable): `unreadable` names, by file and line, each line that is not
-    valid JSON and each matching row whose amount is not one; either could
-    hide an amount over the cap, so the rule refuses on it (R3), never skips it."""
+    valid JSON or not a JSON object and each matching row whose amount is not
+    one, and by file each file over the size cap, not UTF-8 or not readable;
+    any of them could hide an amount over the cap, so the rule refuses on it
+    (R3, fail closed on money), never skips it."""
     base = record_dir / _deal_dir_name(deal)
     amounts, notes, unreadable = [], [], []
     for name in ("buyer.deal.jsonl", "seller.deal.jsonl"):
@@ -707,12 +710,15 @@ def _deal_amounts(record_dir: Path, deal: str) -> tuple[list, str, list, list]:
         try:
             if not p.is_file():
                 continue
-            if p.stat().st_size > 16 * MAX_CHECK_BYTES:
-                notes.append(f"{name}: over {16 * MAX_CHECK_BYTES} bytes, not read")
+            if p.stat().st_size > 16 * MAX_CHECK_BYTES:     # fail closed: its amounts are unread
+                unreadable.append(f"{name}: over {16 * MAX_CHECK_BYTES} bytes, not read")
                 continue
             lines = p.read_bytes().decode("utf-8").splitlines()
-        except (OSError, UnicodeDecodeError) as e:
-            notes.append(f"{name}: not read ({type(e).__name__})")
+        except UnicodeDecodeError:
+            unreadable.append(f"{name}: not UTF-8, not read")
+            continue
+        except OSError as e:
+            unreadable.append(f"{name}: not read ({type(e).__name__})")
             continue
         for n, line in enumerate(lines, 1):
             if not line.strip():
@@ -722,7 +728,10 @@ def _deal_amounts(record_dir: Path, deal: str) -> tuple[list, str, list, list]:
             except ValueError:
                 unreadable.append(f"{name} line {n}: not valid JSON")
                 continue
-            if not isinstance(row, dict) or row.get("deal", deal) != deal:
+            if not isinstance(row, dict):                 # not a row: could stand for one
+                unreadable.append(f"{name} line {n}: JSON but not an object")
+                continue
+            if row.get("deal", deal) != deal:
                 continue
             shared = row.get("shared") if isinstance(row.get("shared"), dict) else {}
             if row.get("kind") == "deal.commit" and isinstance(shared.get("terms"), dict):
@@ -843,11 +852,11 @@ def _nonparty_rule(*, cap: Decimal, amount, checks, checkers, file: Path, r: dic
         info["amount_notes"].extend(notes + unreadable)
         if unreadable:
             info["could_not_check"] = V.could_not_look(
-                "every line of the deal record (an amount could be on any)", where,
+                "every file and line of the deal record (an amount could be in any)", where,
                 "unreadable",
                 f"{'; '.join(unreadable[:5])}{' and more' if len(unreadable) > 5 else ''}: "
-                f"a line or amount the rule cannot read could hide an amount over the cap, "
-                f"so whether the cap applies cannot be checked")
+                f"a part of the deal record the rule cannot read could hide an amount "
+                f"over the cap, so whether the cap applies cannot be checked")
             return info
         if found:
             sources.append(("deal record", max(found)))
