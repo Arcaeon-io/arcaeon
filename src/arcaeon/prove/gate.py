@@ -674,8 +674,9 @@ def _reason(action: str, verdict: str, r: dict, audience, deal) -> str:
 # --- the non-party check rule (TE-35) ---------------------------------------------
 
 def _decimal(v: Any) -> Decimal | None:
-    """A finite, non-negative amount, or None."""
-    if isinstance(v, bool) or not isinstance(v, (str, int, Decimal)):
+    """A finite, non-negative amount, or None. A JSON number (float) counts:
+    a record row written as 1000000.5 is an amount, never a skip (R3-3)."""
+    if isinstance(v, bool) or not isinstance(v, (str, int, float, Decimal)):
         return None
     try:
         d = Decimal(str(v).strip())
@@ -684,11 +685,12 @@ def _decimal(v: Any) -> Decimal | None:
     return d if d.is_finite() and d >= 0 else None
 
 
-def _deal_amounts(record_dir: Path, deal: str) -> tuple[list, str, list]:
+def _deal_amounts(record_dir: Path, deal: str) -> tuple[list, str, list, list]:
     """Every readable commit total and pay amount for `deal` in its record
-    (DEAL-<deal>/{buyer,seller}.deal.jsonl). Returns (amounts, where, notes)."""
+    (DEAL-<deal>/{buyer,seller}.deal.jsonl). Returns (amounts, where, notes,
+    unreadable): unreadable names each matching row whose amount is not one."""
     base = record_dir / _deal_dir_name(deal)
-    amounts, notes = [], []
+    amounts, notes, unreadable = [], [], []
     for name in ("buyer.deal.jsonl", "seller.deal.jsonl"):
         p = base / name
         try:
@@ -713,14 +715,18 @@ def _deal_amounts(record_dir: Path, deal: str) -> tuple[list, str, list]:
                 continue
             shared = row.get("shared") if isinstance(row.get("shared"), dict) else {}
             if row.get("kind") == "deal.commit" and isinstance(shared.get("terms"), dict):
-                a = _decimal(shared["terms"].get("total"))
+                raw = shared["terms"].get("total")
             elif row.get("kind") == "deal.pay":
-                a = _decimal(shared.get("amount"))
+                raw = shared.get("amount")
             else:
                 continue
+            a = _decimal(raw)
             if a is not None:
                 amounts.append(a)
-    return amounts, str(base), notes
+            else:                                # R3-3: a skipped amount could be the large one
+                unreadable.append(f"{name} line {n}: {row.get('kind')} amount "
+                                  f"{str(raw)[:40]!r} is not a readable amount")
+    return amounts, str(base), notes, unreadable
 
 
 def _read_check_rows(path: Path) -> tuple[list | None, str]:
@@ -822,8 +828,14 @@ def _nonparty_rule(*, cap: Decimal, amount, checks, checkers, file: Path, r: dic
         info["amount_notes"].append(f"--amount {str(amount)[:40]!r} is not a readable amount")
     where = None
     if deal is not None:
-        found, where, notes = _deal_amounts(record_dir, deal)
-        info["amount_notes"].extend(notes)
+        found, where, notes, unreadable = _deal_amounts(record_dir, deal)
+        info["amount_notes"].extend(notes + unreadable)
+        if unreadable:
+            info["could_not_check"] = V.could_not_look(
+                "every commit total and pay amount in the deal record", where, "unreadable",
+                f"{len(unreadable)} amount(s) in the deal record cannot be read "
+                f"({unreadable[0]}), so whether the cap applies cannot be checked")
+            return info
         if found:
             sources.append(("deal record", max(found)))
     if not sources:

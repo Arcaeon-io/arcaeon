@@ -403,3 +403,34 @@ def test_checks_keyword_is_an_alias_of_check_files(tmp_path):
     a = _decide(f, did, "act", checks=[c], **kw)
     b = _decide(f, did, "act", check_files=[c], **kw)
     assert a.decision == b.decision == "allow" and a.checks["files"] == b.checks["files"]
+
+
+# --- R3-3: a record amount the rule cannot read is never skipped -------------------
+
+def _record(tmp_path, *rows):
+    rec = tmp_path / "rec" / f"DEAL-{DEAL}"
+    rec.mkdir(parents=True, exist_ok=True)
+    (rec / "buyer.deal.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows),
+                                          encoding="utf-8")
+
+
+def test_record_amount_as_a_json_number_counts(tmp_path):
+    """Outside red team round 3 (R3-3, Gemini #1): a JSON number amount was not a
+    str/int/Decimal, so the record's 1000000.5 was skipped with no note and
+    --amount 10 put the deal under the cap: pay allowed, no non-party check."""
+    f, did, _ = _handed(tmp_path)
+    _record(tmp_path, {"kind": "deal.pay", "deal": DEAL, "shared": {"amount": 1000000.5}})
+    d = _decide(f, did, require_nonparty_check_above="100", amount="10")
+    assert d.decision == "refuse"
+    assert d.nonparty_check["amount"] == "1000000.5"
+    assert d.nonparty_check["amount_source"] == "deal record"
+
+
+@pytest.mark.parametrize("bad", ["lots", -5, True, None, {"v": 1}, "NaN"])
+def test_unreadable_record_amount_refuses_could_not_look(tmp_path, bad):
+    f, did, _ = _handed(tmp_path)
+    _record(tmp_path, {"kind": "deal.commit", "deal": DEAL, "shared": {"terms": {"total": bad}}})
+    d = _decide(f, did, require_nonparty_check_above="100", amount="10")
+    assert d.decision == "refuse" and d.exit_code == 3
+    assert d.nonparty_check["applies"] is None
+    assert any("not a readable amount" in n for n in d.nonparty_check["amount_notes"])
