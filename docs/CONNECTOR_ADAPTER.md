@@ -151,8 +151,11 @@ vendor (`arcaeon.connector.mockscan`), the mcp-scan tool-hash adapter
 (`arcaeon.prove.mcp_scan`, see [MCP_SCAN.md](MCP_SCAN.md)), the OPA
 decision-log adapter (`arcaeon.connector.opa`, below), the Snyk agent-scan
 adapter (`arcaeon.connector.snyk_agent_scan`, below), the Lakera Guard
-adapter (`arcaeon.connector.lakera_guard`, below) and the Prisma AIRS adapter
-(`arcaeon.connector.prisma_airs`, below). The base owns what they share:
+adapter (`arcaeon.connector.lakera_guard`, below), the Prisma AIRS adapter
+(`arcaeon.connector.prisma_airs`, below), the Kyverno PolicyReport adapter
+(`arcaeon.connector.kyverno`, below), the Cedar / Verified Permissions adapter
+(`arcaeon.connector.cedar`, below) and the generic reported-by-sender adapter
+(`arcaeon.connector.reported`, below). The base owns what they share:
 
 - the row skeleton (`base_row`), relayed, `checked_by_us: false`, attestation
   `NONE` unless the payload claims a signature, and COULD NOT LOOK until a
