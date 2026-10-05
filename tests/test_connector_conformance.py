@@ -129,6 +129,15 @@ TABLE = {
     "reported": dict(
         module="arcaeon.connector.reported", ingest="ingest", kwargs={}, rollup="rollup",
         extra=("signed_by_vendor", "standing"), rules=("digest_mismatch",)),
+    "hiddenlayer": dict(
+        module="arcaeon.connector.hiddenlayer", ingest="ingest", kwargs={},
+        rollup="standing_verdict", extra=_STD + ("vendor_request_id", "at", "alert")),
+    "sentinelone": dict(
+        module="arcaeon.connector.sentinelone", ingest="ingest", kwargs={},
+        rollup="standing_verdict", extra=_STD + ("vendor_request_id", "at", "detection")),
+    "e2b": dict(
+        module="arcaeon.connector.e2b", ingest="ingest", kwargs={},
+        rollup="standing_verdict", extra=_STD + ("run",)),
 }
 
 #: The keys docs/CONNECTOR_ADAPTER.md ("What a relayed row says") puts on every
