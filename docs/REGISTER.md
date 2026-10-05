@@ -52,7 +52,10 @@ $ arcaeon register page register.jsonl --operator-key did:key:z6Mk... --pin-log 
 `--pin-log MEMBER=FILE` (repeatable) names the log a member's pin task
 writes: JSONL, one row per pin, with its time in the first of `at`,
 `pinned_at`, `ts`, `timestamp`, `time` (RFC 3339 with a zone, `Z` or an
-offset). A bare `FILE` is read only when the register names one member.
+offset). A pin task logs every run, so a row with an `outcome` counts only
+when it is `pinned` (a `nothing-new` run pinned nothing), and a row with a
+non-zero `exit_code` never counts. Rows with neither field count as pins.
+A bare `FILE` is read only when the register names one member.
 From the newest 10 dated rows the member's line says, for example,
 "publishing cadence: observed every ~6 hours (last 10 pins) in the pin log
 witness_pin_log.jsonl, latest pin 2026-10-05T18:00:00Z". N is the median gap

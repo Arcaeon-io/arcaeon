@@ -93,6 +93,36 @@ def test_other_time_field_names_and_offsets_are_read(op, tmp_path):
     assert "observed every ~3 hours (last 3 pins)" in line, line
 
 
+def _task_row(t, outcome, exit_code=0):
+    return json.dumps({"ts": t.strftime("%Y-%m-%dT%H:%M:%S+00:00"), "outcome": outcome,
+                       "pin": t.strftime("%Y-%m-%dT%H%MZ"), "exit_code": exit_code})
+
+
+def test_only_pinned_runs_count_not_nothing_new_or_failed(op, tmp_path):
+    """The pin task's log: a row per run, {"ts", "outcome": "pinned" |
+    "nothing-new", "pin", "exit_code"}. A run that pinned nothing, or exited
+    non-zero, is not a pin and does not shrink the interval."""
+    lines = []
+    for k in range(5):                                       # pinned every 6 hours
+        lines.append(_task_row(T0 + timedelta(hours=6 * k), "pinned"))
+        if k < 4:
+            lines.append(_task_row(T0 + timedelta(hours=6 * k + 3), "nothing-new"))
+    lines.append(_task_row(T0 + timedelta(hours=25), "pinned", exit_code=1))
+    log = tmp_path / "witness_pin_log.jsonl"
+    log.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    line = _line(P.render_page(_reg(op), operator_keys=[op[1]], pin_logs=[str(log)]))
+    assert "observed every ~6 hours (last 5 pins)" in line, line
+    assert "latest pin 2026-10-06T12:00:00Z" in line, line
+
+
+def test_only_nothing_new_runs_is_not_stated(op, tmp_path):
+    log = tmp_path / "pins.jsonl"
+    log.write_text("\n".join(_task_row(T0 + timedelta(hours=k), "nothing-new")
+                             for k in range(4)) + "\n", encoding="utf-8")
+    line = _line(P.render_page(_reg(op), operator_keys=[op[1]], pin_logs=[str(log)]))
+    assert NOT_STATED in line and "observed" not in line, line
+
+
 @pytest.mark.parametrize("case", ["missing", "not utf-8", "no json", "one pin", "naive time",
                                   "no time field"])
 def test_absent_or_unreadable_stays_not_stated(op, tmp_path, case):

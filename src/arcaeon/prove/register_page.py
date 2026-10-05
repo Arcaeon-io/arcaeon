@@ -29,7 +29,9 @@ PUBLISHING CADENCE (L3-07). The register's rows carry no cadence, so each
 member's line reads "not stated" unless a pin task's log is given:
 --pin-log MEMBER=FILE (or a bare FILE when the register names one member).
 The log is JSONL, one row per pin, its time in the first of at, pinned_at,
-ts, timestamp, time (RFC 3339 with a zone). From the last PIN_RECENT dated
+ts, timestamp, time (RFC 3339 with a zone). A row with an `outcome` counts
+only when it is "pinned", and a row with a non-zero `exit_code` never counts
+(a pin task logs every run, including runs with nothing new to pin). From the last PIN_RECENT dated
 rows the line says "observed every ~N hours (last K pins)": the median gap,
 what was observed, not a promise. A log that is missing, unreadable, over
 the cap, or with fewer than two dated rows keeps "not stated"; nothing is
@@ -152,6 +154,11 @@ def pin_cadence(path: Any) -> dict | None:
         except ValueError:
             continue
         if not isinstance(row, dict):
+            continue
+        # a pin task logs every run: only a run that pinned is a pin
+        if "outcome" in row and row["outcome"] != "pinned":
+            continue
+        if "exit_code" in row and row["exit_code"] != 0:
             continue
         val = next((row[k] for k in PIN_TIME_FIELDS if k in row), None)
         t = _parse_time(val) if isinstance(val, str) else None
