@@ -353,7 +353,8 @@ def test_rollup_ignores_rows_that_are_not_ours():
     forged["vendor"] = {"name": "opa", "adapter_version": "1"}
     out = R.rollup([forged, "x", None])
     assert out["relayed_verdict"] == COULD_NOT_LOOK
-    assert out["counts"][COULD_NOT_LOOK] == 3
+    assert out["counts"] == {VERIFIED: 0, BROKEN: 0, COULD_NOT_LOOK: 0}  # not ours: not counted
+    assert out["not_ours"] == 3 and out["rows"] == 0
     assert R.rollup("not a list")["relayed_verdict"] == COULD_NOT_LOOK
 
 

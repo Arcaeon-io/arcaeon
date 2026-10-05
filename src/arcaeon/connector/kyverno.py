@@ -70,8 +70,8 @@ from typing import Any
 from arcaeon.record.row import loads_strict
 from arcaeon.verdict import BROKEN, COULD_NOT_LOOK, VERIFIED, could_not_look
 
-from .core import (ATTESTATION_NONE, ROW_KIND, AdapterError, Extracted, VendorAdapter,
-                   _now_iso, _safe_str, _too_deep, map_word, register)
+from .core import (ATTESTATION_NONE, AdapterError, Extracted, VendorAdapter,
+                   _now_iso, _safe_str, _too_deep, map_word, register, rollup_rows)
 
 __all__ = ["VENDOR", "ADAPTER_VERSION", "TABLE", "API_VERSIONS", "REPORT_KINDS",
            "MAX_PAYLOAD_BYTES", "MAX_DEPTH", "MAX_ROWS", "MAX_RESOURCES", "STANDING",
@@ -355,28 +355,11 @@ def ingest(raw: Any, *, received_at: str | None = None) -> list:
 
 
 def rollup(rows: Any) -> dict:
-    """One word over a list of this adapter's rows. Never VERIFIED: a set of relayed,
-    unsigned passes is Kyverno's word, not ours (COULD NOT LOOK). BROKEN when at
-    least one row is a relayed Kyverno fail. Anything that is not a kyverno row
-    counts as COULD NOT LOOK. No bare `verdict` key, as on the rows."""
-    counts = {VERIFIED: 0, BROKEN: 0, COULD_NOT_LOOK: 0}
-    out = {"relayed_verdict": COULD_NOT_LOOK, "standing": STANDING, "signed_by_vendor": False,
-           "counts": counts}
-    failed = False
-    for r in rows if isinstance(rows, list) else ():
-        ok = (isinstance(r, dict) and r.get("kind") == ROW_KIND
-              and isinstance(r.get("vendor"), dict) and r["vendor"].get("name") == VENDOR)
-        v = r.get("relayed_verdict") if ok else COULD_NOT_LOOK
-        v = v if v in counts else COULD_NOT_LOOK
-        counts[v] += 1
-        w = r.get("vendor_word") if ok else None
-        if v == BROKEN and isinstance(w, str) and w.strip().casefold() == "fail":
-            failed = True
-    if failed:
-        out["relayed_verdict"] = BROKEN
-        out["reason"] = "Kyverno reported at least one fail (relayed, unsigned)"
-        return out
-    out["reason"] = ("no relayed fail; passes here are Kyverno's unsigned word, and a rollup "
-                     "of relayed rows is never VERIFIED by itself")
-    out.update(could_not_look("a check of our own", "rows", "missing", out["reason"]))
-    return out
+    """The one rollup (core.rollup_rows, docs/CONNECTOR_ADAPTER.md "The rollup"):
+    BROKEN when any of this adapter's rows relays BROKEN with the vendor word 'fail';
+    otherwise COULD NOT LOOK, with the per-word counts. Never VERIFIED: unsigned
+    rows reported by the sender cannot make a VERIFIED by themselves. No bare
+    `verdict` key. Rows not from this adapter are not counted. Never raises."""
+    return rollup_rows(rows, VENDOR, label='Kyverno policy report', standing=STANDING,
+                       broken_words=('fail',),
+                       broken_reason='Kyverno reported at least one fail (relayed, unsigned)')

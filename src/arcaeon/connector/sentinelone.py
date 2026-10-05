@@ -82,10 +82,10 @@ import json
 from typing import Any
 
 from arcaeon.record.row import loads_strict
-from arcaeon.verdict import BROKEN, COULD_NOT_LOOK, could_not_look
+from arcaeon.verdict import BROKEN, COULD_NOT_LOOK
 
 from .core import (ATTESTATION_NONE, AdapterError, Extracted, VendorAdapter, _now_iso,
-                   _safe_str, _too_deep, register)
+                   _safe_str, _too_deep, register, rollup_rows)
 
 __all__ = ["VENDOR", "ADAPTER_VERSION", "TABLE", "MAX_PAYLOAD_BYTES", "MAX_DEPTH", "MAX_ROWS",
            "STANDING", "SOURCE_URLS", "TRUE_POSITIVE", "FALSE_POSITIVE", "STATUSES",
@@ -326,26 +326,13 @@ def ingest(raw: Any, *, vendor_request_id: Any = None, received_at: str | None =
 
 
 def standing_verdict(rows: Any) -> dict:
-    """What these rows can say on their own. BROKEN when any of this adapter's rows
-    relays BROKEN; otherwise COULD NOT LOOK. Never VERIFIED: unsigned rows reported
-    by the sender cannot make a VERIFIED, and nothing in an alert export says a
-    check ran clean. Never raises."""
-    ours = []
-    if isinstance(rows, (list, tuple)):
-        ours = [r for r in rows if isinstance(r, dict) and isinstance(r.get("vendor"), dict)
-                and r["vendor"].get("name") == VENDOR]
-    broken = any(r.get("relayed_verdict") == BROKEN for r in ours)
-    out = {"relayed_verdict": BROKEN if broken else COULD_NOT_LOOK, "rows": len(ours),
-           "signed_by_vendor": False, "standing": STANDING}
-    if broken:
-        out["reason"] = "SentinelOne relayed at least one true-positive alert (unsigned)"
-    else:
-        out.update(could_not_look(
-            "a check of our own or a signed vendor verdict", "rows",
-            "missing" if ours else "empty",
-            "SentinelOne alert rows are unsigned and reported by the sender; they cannot "
-            "make a VERIFIED" if ours else "no SentinelOne rows were given"))
-    return out
+    """The one rollup (core.rollup_rows, docs/CONNECTOR_ADAPTER.md "The rollup"):
+    BROKEN when any of this adapter's rows relays BROKEN;
+    otherwise COULD NOT LOOK, with the per-word counts. Never VERIFIED: unsigned
+    rows reported by the sender cannot make a VERIFIED by themselves. No bare
+    `verdict` key. Rows not from this adapter are not counted. Never raises."""
+    return rollup_rows(rows, VENDOR, label='SentinelOne alert', standing=STANDING,
+                       broken_reason='SentinelOne relayed at least one true-positive alert (unsigned)')
 
 
 #: The same function under the name the reported adapter uses.

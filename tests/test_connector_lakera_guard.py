@@ -197,7 +197,7 @@ def test_a_signature_looking_field_still_yields_false():
         assert rows and all(r["signed_by_vendor"] is False for r in rows)
         assert all(r["standing"] == "reported_by_sender" for r in rows)
         assert all(r["attestation"]["status"] == "NONE" for r in rows)
-        assert L.standing_verdict(rows)["verdict"] != VERIFIED
+        assert L.standing_verdict(rows)["relayed_verdict"] != VERIFIED
 
 
 def test_no_parameter_can_set_signed_by_vendor_or_standing():
@@ -215,17 +215,18 @@ def test_unsigned_rows_alone_never_make_verified():
     rows = _rows(CLEAN, policy_mode="enforce")
     assert all(r["relayed_verdict"] == VERIFIED for r in rows)
     got = L.standing_verdict(rows)
-    assert got["verdict"] == COULD_NOT_LOOK
-    assert got["relayed_verdict"] == VERIFIED and got["signed_by_vendor"] is False
+    assert got["relayed_verdict"] == COULD_NOT_LOOK
+    assert "verdict" not in got and got["signed_by_vendor"] is False
+    assert got["counts"][VERIFIED] == len(rows) and got["rows"] == len(rows)
     assert got["standing"] == "reported_by_sender"
 
 
 def test_a_relayed_broken_is_broken_never_verified():
     rows = _rows(FLAGGED)
     got = L.standing_verdict(rows)
-    assert got["verdict"] == BROKEN and got["relayed_verdict"] == BROKEN
+    assert got["relayed_verdict"] == BROKEN and "verdict" not in got
     mixed = rows[:1] + _rows(CLEAN, policy_mode="enforce")
-    assert L.standing_verdict(mixed)["verdict"] == BROKEN
+    assert L.standing_verdict(mixed)["relayed_verdict"] == BROKEN
 
 
 def test_a_relayed_broken_row_edited_to_say_signed_is_still_broken():
@@ -233,13 +234,13 @@ def test_a_relayed_broken_row_edited_to_say_signed_is_still_broken():
     row["signed_by_vendor"] = True
     row["standing"] = "verified_by_vendor"
     row["attestation"] = {"status": "VERIFIED", "checked_by_us": True, "claimed": {}}
-    assert L.standing_verdict([row])["verdict"] == BROKEN
+    assert L.standing_verdict([row])["relayed_verdict"] == BROKEN
 
 
 def test_standing_verdict_on_nothing_or_other_vendors_is_could_not_look():
     for rows in ([], None, "rows", [{"kind": "x"}],
                  [{"vendor": {"name": "snyk-agent-scan"}, "relayed_verdict": VERIFIED}]):
-        assert L.standing_verdict(rows)["verdict"] == COULD_NOT_LOOK
+        assert L.standing_verdict(rows)["relayed_verdict"] == COULD_NOT_LOOK
 
 
 # ------------------------------------------------------------------ digests and ids

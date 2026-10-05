@@ -323,7 +323,7 @@ def test_recheck_says_could_not_look():
 
 def test_standing_verdict_never_verified_even_all_clean():
     sv = H.standing_verdict(_ing(CLEAN))
-    assert sv["verdict"] == COULD_NOT_LOOK and sv["relayed_verdict"] == COULD_NOT_LOOK
+    assert sv["relayed_verdict"] == COULD_NOT_LOOK and "verdict" not in sv
     assert sv["signed_by_vendor"] is False and sv["standing"] == "reported_by_sender"
     assert H.rollup is H.standing_verdict
 
@@ -331,14 +331,14 @@ def test_standing_verdict_never_verified_even_all_clean():
 def test_standing_verdict_broken_wins():
     rows = _ing(b"[" + b",".join([CLEAN, CONV]) + b"]")
     sv = H.standing_verdict(rows)
-    assert sv["verdict"] == BROKEN and sv["relayed_verdict"] == BROKEN
+    assert sv["relayed_verdict"] == BROKEN and "verdict" not in sv
     assert sv["counts"] == {VERIFIED: 1, BROKEN: 1, COULD_NOT_LOOK: 0}
 
 
 @pytest.mark.parametrize("rows", [None, [], "x", [1, None], [{"relayed_verdict": "BROKEN"}]])
 def test_standing_verdict_ignores_foreign_rows(rows):
     sv = H.standing_verdict(rows)
-    assert sv["verdict"] == COULD_NOT_LOOK and sv["relayed_verdict"] == COULD_NOT_LOOK
+    assert sv["relayed_verdict"] == COULD_NOT_LOOK and "verdict" not in sv
 
 
 def test_doc_section_exists_with_what_this_cannot_prove():

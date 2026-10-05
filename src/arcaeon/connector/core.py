@@ -32,6 +32,10 @@ and, when it applies:
 
 There is deliberately NO bare `verdict` key. A script that greps rows for
 `verdict == "VERIFIED"` must not mistake a vendor's pass for our own check.
+The same holds for a rollup over many rows: every adapter's `rollup` /
+`standing_verdict` returns `rollup_rows`, whose `relayed_verdict` is BROKEN or
+COULD NOT LOOK, never VERIFIED, with per-word `counts` and no bare `verdict`.
+(`recheck` is not a rollup: its `verdict` is our own re-check of one row.)
 
 ONE BASE CLASS. Every adapter subclasses VendorAdapter: the mock vendor here
 (arcaeon.connector.mockscan, one row per payload, read by import_verdict) and the
@@ -71,7 +75,7 @@ __all__ = ["ROW_KIND", "OUR_WORDS", "MAX_PAYLOAD_BYTES", "MAX_DEPTH", "MAX_STR",
            "ATTESTATION_CLAIMED", "ATTESTATION_NONE", "JCS_DIGEST_SCHEME", "JCS_DIGEST_PREFIX",
            "AdapterError", "Extracted", "VendorAdapter", "jcs_digest", "relayed_row",
            "mark_could_not_look", "register", "adapter_for", "map_word", "import_verdict",
-           "recheck"]
+           "recheck", "ROLLUP_KEYS", "rollup_rows"]
 
 ROW_KIND = "check.verdict.relayed"
 #: The only words a relayed verdict can land on.
@@ -380,6 +384,67 @@ def import_verdict(adapter: VendorAdapter, raw: Any, *, received_at: str | None 
             f"vendor word {row['vendor_word']!r} is not in the {adapter.name} table" if rule == "unknown_word"
             else "the vendor verdict is not a word")
     return row
+
+
+#: Every key a rollup carries (docs/CONNECTOR_ADAPTER.md, "The rollup").
+ROLLUP_KEYS = ("relayed_verdict", "counts", "rows", "not_ours", "signed_by_vendor",
+               "standing", "reason")
+
+
+def rollup_rows(rows: Any, vendor: str, *, label: str, standing: str = "reported_by_sender",
+                broken_words: tuple | None = None, broken_reason: str | None = None) -> dict:
+    """The ONE rollup every adapter's `rollup` / `standing_verdict` returns: what a
+    list of one adapter's relayed rows can say on their own. Never raises.
+
+        relayed_verdict  BROKEN when any of this vendor's rows relays BROKEN (with
+                         `broken_words`, only when that row's vendor_word is one of
+                         them); otherwise COULD NOT LOOK. NEVER VERIFIED: unsigned
+                         rows reported by the sender cannot make a VERIFIED by
+                         themselves, however many of them relay VERIFIED.
+        counts           {VERIFIED, BROKEN, COULD NOT LOOK}: this vendor's rows by
+                         relayed word (a word outside our three counts as COULD
+                         NOT LOOK), so an all-clean relay shows its clean count
+        rows             how many of the given rows are this vendor's
+        not_ours         how many given entries were not this vendor's rows (not counted)
+        signed_by_vendor False. standing: the adapter's standing word.
+        reason           the sentence; a COULD NOT LOOK also carries looked_for,
+                         where and reason_word ("missing", or "empty" for no rows)
+
+    There is no bare `verdict` key, as on the rows.
+    """
+    counts = {VERIFIED: 0, BROKEN: 0, COULD_NOT_LOOK: 0}
+    not_ours = 0
+    broken = False
+    folded = tuple(w.casefold() for w in broken_words) if broken_words else None
+    for r in rows if isinstance(rows, (list, tuple)) else ():
+        if not (isinstance(r, dict) and r.get("kind") == ROW_KIND
+                and isinstance(r.get("vendor"), dict) and r["vendor"].get("name") == vendor):
+            not_ours += 1
+            continue
+        v = r.get("relayed_verdict")
+        v = v if v in counts else COULD_NOT_LOOK
+        counts[v] += 1
+        if v == BROKEN:
+            w = r.get("vendor_word")
+            if folded is None or (isinstance(w, str) and w.strip().casefold() in folded):
+                broken = True
+    n = sum(counts.values())
+    out = {"relayed_verdict": COULD_NOT_LOOK, "counts": counts, "rows": n, "not_ours": not_ours,
+           "signed_by_vendor": False, "standing": standing}
+    if broken:
+        out["relayed_verdict"] = BROKEN
+        out["reason"] = broken_reason or f"{label} relayed BROKEN for at least one row (unsigned)"
+        return out
+    if not n:
+        out.update(could_not_look("a check of our own or a signed vendor verdict", "rows", "empty",
+                                  f"no {label} rows were given"))
+        return out
+    out.update(could_not_look(
+        "a check of our own or a signed vendor verdict", "rows", "missing",
+        f"{label} rows are unsigned and reported by the sender ({counts[VERIFIED]} VERIFIED, "
+        f"{counts[BROKEN]} BROKEN, {counts[COULD_NOT_LOOK]} COULD NOT LOOK, relayed); they "
+        f"cannot make a VERIFIED by themselves"))
+    return out
 
 
 def _result(verdict: str, summary: str, row: Any = None, **extra) -> dict:

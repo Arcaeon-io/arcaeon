@@ -297,10 +297,39 @@ def test_rollup_is_never_verified(name):
         forged.append(f)
     for got in (fn(rows), fn(forged), fn([]), fn(None), fn([{"junk": 1}])):
         assert isinstance(got, dict)
-        assert got.get("verdict", COULD_NOT_LOOK) != VERIFIED
-        if e["rollup"] == "rollup":  # kyverno/cedar/reported: one word, never VERIFIED
-            assert got["relayed_verdict"] != VERIFIED
+        assert got["relayed_verdict"] in (BROKEN, COULD_NOT_LOOK)
         assert got.get("signed_by_vendor") is False
+
+
+#: The one rollup shape (core.rollup_rows; docs/CONNECTOR_ADAPTER.md "The rollup").
+ROLLUP_KEYS = {"relayed_verdict", "counts", "rows", "not_ours", "signed_by_vendor",
+               "standing", "reason"}
+
+
+@pytest.mark.parametrize("name", NAMES)
+def test_rollup_has_one_shape_and_no_bare_verdict(name):
+    """Every adapter's rollup is the same shape, built by core.rollup_rows: no bare
+    `verdict` key (core.py: "There is deliberately NO bare `verdict` key"), and an
+    all-clean relay reads COULD NOT LOOK with the clean count visible."""
+    e = _entry(name)
+    if not e["rollup"]:
+        pytest.skip(f"{name} documents no rollup")
+    fn = getattr(importlib.import_module(e["module"]), e["rollup"])
+    rows = [r for _, b in _fixtures(name) for r in _rows(name, b)]
+    clean = [r for r in rows if r["relayed_verdict"] == VERIFIED]
+    for got in (fn(rows), fn(clean), fn([]), fn(None), fn([{"junk": 1}])):
+        assert "verdict" not in got
+        assert ROLLUP_KEYS <= set(got), sorted(ROLLUP_KEYS - set(got))
+        assert set(got["counts"]) == set(OUR_WORDS)
+        assert got["rows"] == sum(got["counts"].values())
+        assert got["standing"] == "reported_by_sender"
+    if clean:
+        got = fn(clean)
+        assert got["relayed_verdict"] == COULD_NOT_LOOK
+        assert got["counts"] == {VERIFIED: len(clean), BROKEN: 0, COULD_NOT_LOOK: 0}
+        assert got["reason_word"] == "missing"
+    assert fn([])["reason_word"] == "empty"
+    assert fn([{"junk": 1}])["not_ours"] == 1
 
 
 @pytest.mark.parametrize("name,case", [(n, c) for n in NAMES for c in HOSTILE])

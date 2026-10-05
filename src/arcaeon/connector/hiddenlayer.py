@@ -90,8 +90,8 @@ from typing import Any
 from arcaeon.record.row import loads_strict
 from arcaeon.verdict import BROKEN, COULD_NOT_LOOK, VERIFIED, could_not_look
 
-from .core import (ATTESTATION_NONE, ROW_KIND, AdapterError, Extracted, VendorAdapter, _now_iso,
-                   _safe_str, _too_deep, register)
+from .core import (ATTESTATION_NONE, AdapterError, Extracted, VendorAdapter, _now_iso,
+                   _safe_str, _too_deep, register, rollup_rows)
 
 __all__ = ["VENDOR", "ADAPTER_VERSION", "TABLE", "MAX_PAYLOAD_BYTES", "MAX_DEPTH", "MAX_ROWS",
            "STANDING", "SEVERITIES", "THREAT_LEVELS", "POLICY_SCHEMA", "HiddenLayerAdapter",
@@ -388,29 +388,13 @@ def ingest(raw: Any, *, received_at: str | None = None) -> list:
 
 
 def standing_verdict(rows: Any) -> dict:
-    """What these rows can say on their own. BROKEN when any of them relays BROKEN;
-    otherwise COULD NOT LOOK, because unsigned rows reported by the sender cannot
-    make a VERIFIED by themselves. Never VERIFIED (neither `verdict` nor
-    `relayed_verdict`). Rows not from this adapter are not counted. Never raises."""
-    counts = {VERIFIED: 0, BROKEN: 0, COULD_NOT_LOOK: 0}
-    for r in rows if isinstance(rows, (list, tuple)) else ():
-        if (isinstance(r, dict) and r.get("kind") == ROW_KIND and isinstance(r.get("vendor"), dict)
-                and r["vendor"].get("name") == VENDOR):
-            v = r.get("relayed_verdict")
-            counts[v if v in counts else COULD_NOT_LOOK] += 1
-    out = {"verdict": COULD_NOT_LOOK, "relayed_verdict": COULD_NOT_LOOK,
-           "rows": sum(counts.values()), "counts": counts, "signed_by_vendor": False,
-           "standing": STANDING}
-    if counts[BROKEN]:
-        out["verdict"] = out["relayed_verdict"] = BROKEN
-        out["reason"] = "HiddenLayer relayed at least one detection (unsigned, reported by sender)"
-        return out
-    ours = out["rows"] > 0
-    out.update(could_not_look(
-        "a check of our own or a signed vendor verdict", "rows", "missing" if ours else "empty",
-        "HiddenLayer rows are unsigned and reported by the sender; they cannot make a VERIFIED "
-        "by themselves" if ours else "no HiddenLayer rows were given"))
-    return out
+    """The one rollup (core.rollup_rows, docs/CONNECTOR_ADAPTER.md "The rollup"):
+    BROKEN when any of this adapter's rows relays BROKEN;
+    otherwise COULD NOT LOOK, with the per-word counts. Never VERIFIED: unsigned
+    rows reported by the sender cannot make a VERIFIED by themselves. No bare
+    `verdict` key. Rows not from this adapter are not counted. Never raises."""
+    return rollup_rows(rows, VENDOR, label='HiddenLayer', standing=STANDING,
+                       broken_reason='HiddenLayer relayed at least one detection (unsigned, reported by sender)')
 
 
 rollup = standing_verdict

@@ -243,19 +243,20 @@ def test_standing_verdict_is_never_verified():
     ok = _ing(CMD_OK) + _ing(EXE_OK)
     assert all(r["relayed_verdict"] == VERIFIED for r in ok)
     s = E.standing_verdict(ok)
-    assert s["verdict"] == COULD_NOT_LOOK and s["signed_by_vendor"] is False
+    assert s["relayed_verdict"] == COULD_NOT_LOOK and s["signed_by_vendor"] is False
+    assert "verdict" not in s and s["counts"][VERIFIED] == len(ok)
     assert s["standing"] == "reported_by_sender"
     s = E.standing_verdict(ok + _ing(CMD_FAIL))
-    assert s["verdict"] == BROKEN
-    assert E.standing_verdict([])["verdict"] == COULD_NOT_LOOK
-    assert E.standing_verdict("junk")["verdict"] == COULD_NOT_LOOK
-    assert E.rollup(ok)["verdict"] == COULD_NOT_LOOK
+    assert s["relayed_verdict"] == BROKEN
+    assert E.standing_verdict([])["relayed_verdict"] == COULD_NOT_LOOK
+    assert E.standing_verdict("junk")["relayed_verdict"] == COULD_NOT_LOOK
+    assert E.rollup(ok)["relayed_verdict"] == COULD_NOT_LOOK
 
 
 def test_standing_verdict_ignores_other_vendors_rows():
     fake = dict(_one(CMD_FAIL))
     fake["vendor"] = {"name": "reported", "adapter_version": "1"}
-    assert E.standing_verdict([fake])["verdict"] == COULD_NOT_LOOK
+    assert E.standing_verdict([fake])["relayed_verdict"] == COULD_NOT_LOOK
 
 
 # --- hostile input never raises ---------------------------------------------------
