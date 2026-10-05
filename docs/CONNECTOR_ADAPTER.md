@@ -516,6 +516,7 @@ flags and category so that an allow which names a threat is not taken as a pass:
 | `detection_unreadable` | COULD NOT LOOK | action allow, a detection map or flag that is not true or false |
 | `unknown_action` | COULD NOT LOOK | action missing, not a string, or not allow or block |
 | `pending` | COULD NOT LOOK | an async acknowledgement, or a results item with no result yet |
+| `status_not_complete` | COULD NOT LOOK | a scan results item that would read `allow`, but whose `status` is missing or not `complete`; the reason names the status. `complete` is the one success value the fixtures show (R15 leaves the rest unverified). A `block` stays BROKEN whatever the status |
 
 A response that is empty, not UTF-8 JSON, carries a duplicate key, nests deeper
 than 64, is over 8 MiB, or has none of the four shapes is one COULD NOT LOOK
