@@ -132,7 +132,13 @@ unchanged); without it the exit codes are as above.
 
 A log's owner is the key you name (`--owner-a`, `--owner-b`), else the signer
 of its first row that verifies (trust on first use: say which key you expect
-when you know it).
+when you know it). Naming the owner closes trust on first use: if the log's
+first row that verifies is signed by another key, the whole log is refused,
+BROKEN (exit 1), with `owner_refused: {"named", "first_row"}` on that log and
+no exchange lined up from either log. It is BROKEN, not COULD NOT LOOK,
+because the log was read and checked: it is a well-signed log of a key other
+than the one you named. Without a named owner, `owner_refused` is null and
+nothing changes.
 
 Per exchange, `status` is:
 
