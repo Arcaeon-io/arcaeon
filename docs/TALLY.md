@@ -300,4 +300,17 @@ on its own; only a pin of its tip held outside your control closes that gap.
   (the tally is BROKEN) and never resolves; two chains binding one account
   resolve to neither. Each account is listed under `bindings` with
   `applied` and a finding. A binding is the key holder's claim: arcaeon.io's
-  own record is not consulted here.
+  own record is not consulted here, unless you give it.
+- **Holding a binding to the account service (L3-02, opt-in).** `build
+  --accounts FILE --account-key DID` (library: `accounts=`, `account_keys=`)
+  holds each applied binding to the account service at the binding row's
+  time, as `arcaeon exchange pair` does (EXCHANGE.md, the same table).
+  Confirmed: the binding stays applied, with `account_service` VERIFIED on
+  its entry. BROKEN (revoked or rotated out by then, another owner or
+  account, a service row that does not verify): not applied, the tally is
+  BROKEN and the key carries the finding under `record_broken`. COULD NOT
+  LOOK (no record, no trusted key): not applied, the row is `said_unpaired`,
+  the tally verdict is unchanged. A top-level `account_service` block lists
+  each answer. Without `--accounts` the tally is byte-for-byte what it was, so
+  a sealed snapshot still rebuilds; `seal` and `verify` do not take
+  `--accounts` (a snapshot is of the chains, not of the account service).

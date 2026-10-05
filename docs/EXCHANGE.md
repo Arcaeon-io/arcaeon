@@ -92,7 +92,26 @@ The rules:
 key said "I am `acct:X`", not that arcaeon.io agrees. Two keys claiming one
 account among your inputs are caught (neither resolves); one key claiming an
 account it does not hold, with no rival among the inputs, is not. The
-arcaeon.io account record is not consulted here.
+arcaeon.io account record is not consulted here unless you give one.
+
+**Holding a binding to the account service (L3-02, opt-in).** `pair
+--accounts FILE --account-key DID` (both, or neither; `--account-key`
+repeats) reads FILE as an account store or a list of binding statements
+(docs/ACCOUNT_ID_API.md) and trusts only the binding key(s) named on the
+command line, never a key named in the file. Each account a log binds is
+held to it at the binding row's `at` (a row the service wraps as the
+agent's possession proof is read at the issue time):
+
+| account service says | word | the pairing |
+|---|---|---|
+| the key held that account under that owner at the row's time | VERIFIED | stands |
+| revoked or rotated out at or before the row's time; bound to another owner or another account; a service row whose signature fails or is by a key you did not name | BROKEN (the pair reads BROKEN, the reason named) | dropped |
+| no record for the key; no trusted key named; a key that is not an Ed25519 `did:key` (length checked before any decode) | COULD NOT LOOK | dropped |
+
+A FILE that is missing, over the size cap or not JSON makes the pair COULD
+NOT LOOK. Each binding's answer is listed under `account_service.bindings`.
+Without `--accounts`, nothing changes: `account_service.consulted` is false
+and the report says "account service not consulted".
 
 **The row digest** is `sha256:json-c14n:v1:` + sha256(`C`). `react` prints
 it; `--supersedes` takes it.

@@ -867,6 +867,7 @@ usage: arcaeon exchange react --exchange ID --counterparty ID --file PATH
                               [--log PATH]
        arcaeon exchange pair A.jsonl B.jsonl [--owner-a DID] [--owner-b DID]
                               [--json] [--strict]
+                              [--accounts FILE --account-key DID...]
 ```
 
 **Exit codes:** `react`: 0 written, 2 refused or bad usage (a missing flag, a
@@ -918,6 +919,7 @@ the tally chain and the limits are [TALLY.md](TALLY.md); the libraries are
 usage: arcaeon tally build CHAIN.jsonl... [--json] [--settled-only]
                            [--checked-only] [--window 30d] [--groups FILE]
                            [--aliases FILE] [--now T]
+                           [--accounts FILE --account-key DID...]
        arcaeon tally alias --old-key SEEDFILE --new-key SEEDFILE [--at T]
        arcaeon tally seal CHAIN.jsonl... --log TALLY_CHAIN.jsonl [--out FILE]
                           [--json] [build options]

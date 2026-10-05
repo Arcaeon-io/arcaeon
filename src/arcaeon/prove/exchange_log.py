@@ -62,7 +62,8 @@ with a field changed, is a BROKEN row. With a valid binding, a row naming the
 account is read as naming that log's key; without one (or when both logs bind
 the same account) that side is COULD NOT LOOK, and the pair finding says so.
 The binding is the key holder's own claim: whether arcaeon.io agrees that the
-account is theirs is not checked here.
+account is theirs is not checked here, unless pair() is given an account
+service (accounts=, L3-02: arcaeon.prove.account_id.consult_binding).
 
 A row that said BROKEN and was later superseded by a row with another word is
 RETRACTED: the current row is read, and the retraction stays visible as a mark
@@ -606,8 +607,22 @@ def pair_exchange(eid: str, a: dict | None, b: dict | None, own_a, own_b,
     return ex
 
 
+def _hold_to_accounts(r: dict, svc: dict, sa: dict, sb: dict, acc_a: set, acc_b: set,
+                      broken: list) -> tuple[set, set]:
+    """L3-02: an account a log binds pairs only if the account service confirms it."""
+    from arcaeon.prove import account_id as A
+    res = A.consult_pairings(svc, [(acct, s["owner"], [s["log"]])
+                                   for s, accs in ((sa, acc_a), (sb, acc_b)) for acct in sorted(accs)])
+    r["account_service"] = A.service_report(svc, res)
+    keep = {(x["account"], x["key"]) for x in res if x["verdict"] == V.VERIFIED}
+    broken += [f"binding {x['account']} -> {x['key']}: {x['reason']}" for x in res
+               if x["verdict"] == V.BROKEN]
+    return ({a for a in acc_a if (a, sa["owner"]) in keep},
+            {a for a in acc_b if (a, sb["owner"]) in keep})
+
+
 def pair(log_a: str | Path, log_b: str | Path, *, owner_a: str | None = None,
-         owner_b: str | None = None) -> dict:
+         owner_b: str | None = None, accounts: Any = None, account_keys: Any = ()) -> dict:
     """Read two parties' reaction logs and line their rows up by exchange_id.
 
     verdict: BROKEN if either chain fails, any reaction row is BROKEN (bad
@@ -617,13 +632,24 @@ def pair(log_a: str | Path, log_b: str | Path, *, owner_a: str | None = None,
     signatures cannot be checked; else VERIFIED. The verdict is about the
     record. Per exchange, `status` is clean / mismatch / not_verified /
     missing / broken; DISPUTED rows are listed under `claims`, never as a
-    status. Never raises."""
+    status. accounts / account_keys: hold each account binding to the account
+    service (account_id.load_service); without them `account_service` says it
+    was not consulted. Never raises."""
     r: dict[str, Any] = {"kind": PAIR_KIND, "verdict": None, "reason": None,
                          "logs": {}, "exchanges": [], "claims": [], "retracted": 0,
                          "counts": {s: 0 for s in STATUSES}, "findings": [],
                          "proves": PROVES, "does_not_prove": DOES_NOT_PROVE}
     try:
-        return _pair(r, Path(log_a), Path(log_b), owner_a, owner_b)
+        from arcaeon.prove import account_id as A
+        r["account_service"] = A.service_report(None)
+        svc = None
+        if accounts is not None:
+            svc, why = A.load_service(accounts, account_keys)
+            if why:
+                r.update({"verdict": V.COULD_NOT_LOOK, "reason": why,
+                          **V.could_not_look("the accounts file", str(accounts), "unreadable", why)})
+                return r
+        return _pair(r, Path(log_a), Path(log_b), owner_a, owner_b, svc)
     except Exception as e:  # noqa: BLE001  never a traceback, never a green
         r.update({"verdict": V.COULD_NOT_LOOK, "exchanges": [], "claims": [], "retracted": 0,
                   "counts": {s: 0 for s in STATUSES},
@@ -636,7 +662,7 @@ def pair(log_a: str | Path, log_b: str | Path, *, owner_a: str | None = None,
         return r
 
 
-def _pair(r: dict, pa: Path, pb: Path, owner_a, owner_b) -> dict:
+def _pair(r: dict, pa: Path, pb: Path, owner_a, owner_b, svc=None) -> dict:
     for nm, own in (("a", owner_a), ("b", owner_b)):
         if own is not None and not is_did(own):
             r.update({"verdict": V.COULD_NOT_LOOK,
@@ -671,6 +697,8 @@ def _pair(r: dict, pa: Path, pb: Path, owner_a, owner_b) -> dict:
                     dst.setdefault(br["exchange_id"], []).append(br)
         acc_a, acc_b = set(sa["accounts"]), set(sb["accounts"])
         shared = acc_a & acc_b
+        if svc is not None:
+            acc_a, acc_b = _hold_to_accounts(r, svc, sa, sb, acc_a - shared, acc_b - shared, broken)
         ids_a, ids_b = {sa["owner"]} | (acc_a - shared), {sb["owner"]} | (acc_b - shared)
         ids = sorted(set(ha) | set(hb) | set(ba) | set(bb))
         for eid in ids:
@@ -719,7 +747,8 @@ USAGE = """usage: arcaeon exchange react --exchange ID --counterparty ID --file 
        arcaeon exchange bind --account acct:NAME@arcaeon.io --key SEEDFILE
                               [--log PATH]
        arcaeon exchange pair A.jsonl B.jsonl [--owner-a DID] [--owner-b DID]
-                              [--json] [--strict]"""
+                              [--json] [--strict]
+                              [--accounts FILE --account-key DID...]"""
 
 HELP = USAGE + """
 
@@ -747,7 +776,11 @@ ONLY through such a row in the other party's log, signed by that log's key; a
 binding signed by any other key is a BROKEN row. Without one (or when both
 logs bind the same account) a row naming the account reads mismatch on
 counterparty, and which key it binds is COULD NOT LOOK here. The binding is
-the key holder's claim; arcaeon.io's own record is not consulted.
+the key holder's claim; arcaeon.io's own record is not consulted unless pair
+gets --accounts FILE (an account store or binding statements) and
+--account-key DID (the binding key you trust; repeatable): then each binding
+is held to the account service at the row's time. Confirmed pairs; revoked
+or another owner is BROKEN; no record is COULD NOT LOOK (both unpaired).
 
 Exit codes: react 0 written, 2 refused or bad usage, 3 the file is not there.
 bind 0 written, 2 refused or bad usage.
@@ -765,7 +798,7 @@ _REACT_SPEC = {"--exchange": "value", "--counterparty": "value", "--file": "valu
                "--key": "value", "--log": "value"}
 _BIND_SPEC = {"--account": "value", "--key": "value", "--log": "value"}
 _PAIR_SPEC = {"--owner-a": "value", "--owner-b": "value", "--json": "bool",
-              "--strict": "bool"}
+              "--strict": "bool", "--accounts": "value", "--account-key": "list"}
 
 
 def _react_cli(argv: list[str]) -> int:
@@ -836,6 +869,11 @@ def _render(r: dict) -> str:
     for c in r.get("claims", []):
         lines.append(f"claim DISPUTED by {c['side']} on {c['exchange_id']} at {c['at']}"
                      f"{'' if c['current'] else ' (superseded)'}: {c['reason']}")
+    svc = r.get("account_service") or {}
+    for b in svc.get("bindings", []):
+        lines.append(f"account service {b['verdict']} {b['account']} -> {b['key']}: {b['reason']}")
+    if svc and not svc.get("consulted") and any(s.get("accounts") for s in r.get("logs", {}).values()):
+        lines.append(svc["reason"])
     return "\n".join(lines)
 
 
@@ -850,7 +888,10 @@ def _pair_cli(argv: list[str]) -> int:
     for flag in ("--owner-a", "--owner-b"):
         if flag in o and not is_did(o[flag]):
             raise _Usage(f"{flag} must be an Ed25519 did:key")
-    r = pair(pos[0], pos[1], owner_a=o.get("--owner-a"), owner_b=o.get("--owner-b"))
+    if ("--accounts" in o) != ("--account-key" in o):
+        raise _Usage("--accounts and --account-key go together")
+    r = pair(pos[0], pos[1], owner_a=o.get("--owner-a"), owner_b=o.get("--owner-b"),
+             accounts=o.get("--accounts"), account_keys=o.get("--account-key", ()))
     if o.get("--json"):
         print(json.dumps(r, indent=1, ensure_ascii=True))     # F11: a lone surrogate prints
     else:

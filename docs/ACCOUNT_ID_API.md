@@ -1,7 +1,8 @@
 # Account as ID: agent keys under a human owner (design + stub)
 
 Status: a design and a reference stub (`arcaeon.prove.account_id`), not a
-service. No hosted endpoint runs today, no CLI verb, no network, no real keys.
+service. No hosted endpoint runs today, no CLI verb of its own (the exchange
+and tally verbs read its store with `--accounts`), no network, no real keys.
 
 The ID is the arcaeon.io account. A person signs up on the site (that step is
 the existing site signup and is out of scope here). That person, the
@@ -210,6 +211,23 @@ own clock.) Never raises.
 Revocation: revoked at T means envelopes sealed at or after T read BROKEN,
 and envelopes sealed before T stay as they were, VERIFIED, with the
 revocation shown beside them. A rotation retires the old key the same way.
+
+### The exchange pairing, held to the account service (L3-02)
+
+`arcaeon exchange pair` and `arcaeon tally build` take `--accounts FILE
+--account-key DID` (library: `accounts=`, `account_keys=`). FILE is a store
+in the stub's own shape or `{"statements": [...]}` of public binding
+statements; the trusted binding key comes only from `--account-key`. Each
+`exchange.binding` row that pairs an account id is checked with
+`consult_binding(service, did, account, rows)`, which calls
+`verify_binding` at the row's `at` and then requires the statement's
+account to be the one the row claims: VERIFIED stands, BROKEN (revoked or
+rotated out by then, another owner, another account, a forged or untrusted
+service row) and COULD NOT LOOK (no record, no trusted key) drop the
+pairing. A row that is the agent's possession proof wrapped by an issue or
+rotate row is read at that row's time (the proof is signed minutes before
+the issue). Without `--accounts`, nothing changes and the pair report says
+"account service not consulted". Tables: docs/EXCHANGE.md, docs/TALLY.md.
 
 ## Rate and Sybil notes
 
