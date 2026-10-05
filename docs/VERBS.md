@@ -654,13 +654,16 @@ usage: arcaeon envelope seal <file> --label TEXT --audience ID --deal ID
                                [--witness-ref REF] [--flag NAME ...] [--force]
        arcaeon envelope verify <file> [--audience ID] [--signer DID ...]
                                [--deal ID] [--purpose TEXT] [--envelope PATH]
-                               [--require-witness]
+                               [--require-witness] [--pins DIR]
 ```
 
 **Exit codes:** `verify`: 0 VERIFIED, 1 BROKEN (changed bytes, a bad or
 unexpected signature, an edited field, an unbound or expired envelope, another
-audience, deal or purpose), 3 COULD NOT LOOK (no or unreadable sidecar, an
-unsigned envelope, no `--signer` or `--audience` given, no Ed25519 backend).
+audience, deal or purpose; with `--pins DIR`, the pin the witness ref names
+is in that local clone with another statement digest), 3 COULD NOT LOOK (no
+or unreadable sidecar, an unsigned envelope, no `--signer` or `--audience`
+given, no Ed25519 backend; with `--require-witness`, a pin not resolved in
+the `--pins` clone). `--pins` is offline: nothing is fetched.
 `seal`: 0 written, 2 refused (a missing binding field, a past not-after, an
 existing envelope without `--force`), 3 the file to seal is not there. 2 bad
 usage. New in 0.10, so `--legacy-exit` changes nothing here.
