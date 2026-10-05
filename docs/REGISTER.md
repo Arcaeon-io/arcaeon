@@ -31,6 +31,7 @@ At the top, the verdict of checking the register itself (`check_register`):
   current or REVOKED (when, the reason and, for `key_compromise`, compromised
   since). Then the witness endpoints across operators and every revocation
   row. Publishing cadence reads "not stated": the register's rows carry none.
+  With `--pin-log MEMBER=FILE` (see below) it reads what a pin log shows.
 - **BROKEN**: the reason (which row, and why). No row is shown, not the rows
   past the break and not the rows before it as the register's word: a
   register that does not check as a whole names no one. No head is given.
@@ -41,6 +42,30 @@ The page is static: inline CSS, no script, no link, no image, no font,
 nothing fetched. Every value is HTML-escaped (the tally page's escaping). The
 same register and the same named keys give the same bytes; nothing on it
 depends on the clock or on where the file sits.
+
+## Publishing cadence from a pin log
+
+```console
+$ arcaeon register page register.jsonl --operator-key did:key:z6Mk... --pin-log acct:operator-a@arcaeon.io=witness_pin_log.jsonl --out page.html
+```
+
+`--pin-log MEMBER=FILE` (repeatable) names the log a member's pin task
+writes: JSONL, one row per pin, with its time in the first of `at`,
+`pinned_at`, `ts`, `timestamp`, `time` (RFC 3339 with a zone, `Z` or an
+offset). A pin task logs every run, so a row with an `outcome` counts only
+when it is `pinned` (a `nothing-new` run pinned nothing), and a row with a
+non-zero `exit_code` never counts. Rows with neither field count as pins.
+A bare `FILE` is read only when the register names one member.
+From the newest 10 dated rows the member's line says, for example,
+"publishing cadence: observed every ~6 hours (last 10 pins) in the pin log
+witness_pin_log.jsonl, latest pin 2026-10-05T18:00:00Z". N is the median gap
+between those pins, in whole hours from 2 hours up and to one decimal under
+that. It is what the log shows, not a promise, and the log is the pinner's
+own record. A log that is missing, not UTF-8, over 16 MiB, or with fewer than
+two rows with a zoned time keeps "not stated", and a bare log with more than
+one member is not given to any of them. Nothing is guessed. The page names
+the log by its file name only, so the same register and the same log give the
+same bytes.
 
 Exit codes: 0 VERIFIED, 1 BROKEN, 3 COULD NOT LOOK (the page is written in
 all three; a file that is missing or not JSON writes nothing and is 3), 2

@@ -1151,7 +1151,9 @@ static HTML page with the verdict on top. VERIFIED: each operator with its
 keys (did:key and register digest), chains and witness endpoints, when each
 was added, every revocation (what, when, reason, compromised since), the head
 digest and the row count; publishing cadence reads "not stated" because the
-rows carry none. BROKEN or COULD NOT LOOK: the reason and no rows, not even
+rows carry none, unless `--pin-log MEMBER=FILE` names a pin task's JSONL log:
+then that member's line says "observed every ~N hours (last K pins)", and an
+absent or unreadable log keeps "not stated". BROKEN or COULD NOT LOOK: the reason and no rows, not even
 the rows before the break. Inline CSS, no script, nothing fetched, every value
 escaped, the same register gives the same bytes. The page and its limits are
 [REGISTER.md](REGISTER.md); the row design is
@@ -1160,7 +1162,7 @@ escaped, the same register gives the same bytes. The page and its limits are
 **Usage**
 
 ```text
-usage: arcaeon register page REGISTER.jsonl [--operator-key DID...] [--out FILE]
+usage: arcaeon register page REGISTER.jsonl [--operator-key DID...] [--pin-log [MEMBER=]FILE...] [--out FILE]
 ```
 
 **Exit codes:** `page`: 0 VERIFIED (page written), 1 BROKEN (page written,

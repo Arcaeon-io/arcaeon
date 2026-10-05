@@ -2,7 +2,9 @@
 
 Status: a design and a reference stub (`arcaeon.prove.account_id`), not a
 service. No hosted endpoint runs today, no CLI verb of its own (the exchange
-and tally verbs read its store with `--accounts`), no network, no real keys.
+and tally verbs read its store with `--accounts`), no real keys. A reference
+server (`python -m arcaeon.prove.account_server`) serves the stub over HTTP
+on 127.0.0.1 only, for trying it end to end: see "Run it end to end" below.
 
 The ID is the arcaeon.io account. A person signs up on the site (that step is
 the existing site signup and is out of scope here). That person, the
@@ -285,6 +287,83 @@ statement is never claimed fresher than either says). A `fetched_at` that is
 not a UTC time refuses the file. A live in-memory store is read at load time;
 in-memory statements with no time say "as of an unknown time". Fetch again
 before relying on a pairing near or after a key's possible revocation.
+
+## Run it end to end
+
+The reference server runs the stub above over real HTTP, on 127.0.0.1 only.
+It also holds a register of named operators (docs/REGISTER.md), so one
+server gives both the binding statements and the register page's rows. It
+is for trying the design, not the hosted service.
+
+1. Write an auth file. Each owner token is an owner API key; the operator
+   token may write the register. Tokens stay in this file, never on the
+   command line.
+
+   ```json
+   {"owners": {"OWNER-TOKEN-16-CHARS-OR-MORE": "acct:owner-a@arcaeon.io"},
+    "register_operator": "OPERATOR-TOKEN-16-CHARS-OR-MORE"}
+   ```
+
+2. Start the server. `--port 0` picks a free port. It prints one line with
+   the URL and the two keys it signs with. Without `--binding-key` and
+   `--register-key` (seed files) the keys are throwaway, made in memory, and
+   gone when it stops; `--store FILE` and `--register FILE` keep the data.
+
+   ```console
+   $ python -m arcaeon.prove.account_server serve --port 0 --auth auth.json
+   {"url": "http://127.0.0.1:53817", "binding_key": "did:key:z6Mk...", "register_key": "did:key:z6Mk...", "throwaway_keys": true}
+   ```
+
+3. The agent makes its own key and its possession proof (its own
+   `exchange.binding` row, in its own log):
+
+   ```console
+   $ arcaeon exchange bind --account acct:bot1.owner-a@arcaeon.io --key bot1.key --log bot1.jsonl
+   ```
+
+4. The owner issues the agent key: `POST /v1/agents` with
+   `Authorization: Bearer OWNER-TOKEN` and the body `{"agent": "bot1",
+   "proof": <that row>}`. The answer is the signed `account.binding` row
+   (201). The register operator may name the key in the register: `POST
+   /v1/register/add` with `{"member": "acct:owner-a@arcaeon.io", "what":
+   "key", "value": "did:key:..."}`.
+
+5. The two parties react to an exchange (`arcaeon exchange react`, each in
+   its own log). Fetch the agent key's public binding statement over HTTP
+   into the file `--accounts` reads, then pair the two logs. The trusted
+   binding key is the one the server printed; it never comes from the file.
+
+   ```console
+   $ python -m arcaeon.prove.account_server fetch http://127.0.0.1:53817 --did did:key:z6Mk...agent --out accounts.json
+   $ arcaeon exchange pair bot1.jsonl other.jsonl --accounts accounts.json --account-key did:key:z6Mk...binding
+   ```
+
+   A confirmed binding is VERIFIED and the pairing stands.
+
+6. The owner revokes: `POST /v1/agents/acct%3Abot1.owner-a%40arcaeon.io/revoke`
+   with `{"reason": "key lost"}`. The register operator may revoke the key
+   in the register too: `POST /v1/register/revoke` with `{"member", "what":
+   "key", "digest", "reason": "key_compromise", "compromised_since"}`. Fetch
+   again (into a new file; `--out` is never overwritten) and pair again. A
+   reaction the key signed at or after the revoke reads BROKEN and the
+   pairing is dropped. Reactions signed before the revoke stay VERIFIED,
+   with "revoked later" shown. The old file still says VERIFIED: a statement
+   is as fresh as its fetch.
+
+7. Build the register page from the same server's rows:
+
+   ```console
+   $ python -m arcaeon.prove.account_server fetch-register http://127.0.0.1:53817 --out register.jsonl
+   $ arcaeon register page register.jsonl --operator-key did:key:z6Mk...register --out page.html
+   ```
+
+   The revoked key shows as REVOKED, with the reason and the time it was
+   compromised since, and in the revocations table.
+
+The fetch commands take an https URL or an http URL on loopback only, follow
+no redirect, and never overwrite `--out`. `fetched_at` is taken before the
+first request. The whole run, with these steps and real HTTP, is the test
+`tests/test_account_server_e2e.py`.
 
 ## Rate and Sybil notes
 

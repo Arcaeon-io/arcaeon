@@ -11,6 +11,12 @@ values as the text render) and the last cell of every row is the sentence.
 No score, no rank, no grade, no colour for good or bad, no sorting. Every
 value is HTML-escaped. The page is a view of the JSON, not a check of it:
 `tally verify` checks; this only shows.
+
+WITHDRAWN (L3-07). When a signed withdraw row was among the tally's inputs
+(the blocks carry `withdrawn`), the page adds the text render's two rows as
+columns, "withdrawn said" and "withdrawn received", before the sentence, and
+names WITHDRAWN as its own word in the per-ID notes (before any retraction:
+withdrawn outranks retracted). A tally without one renders as before.
 """
 from __future__ import annotations
 
@@ -85,8 +91,46 @@ def _fact(fn, block: Any) -> str:
         return "?"
 
 
-def _row(i: dict, name: str) -> list[tuple[str, str]]:
-    """(css class, escaped text) per COLUMNS entry."""
+def _withdrawals(r: dict) -> bool:
+    """True when the tally's blocks carry `withdrawn` (a withdraw row was among
+    the inputs; tally.build adds the block to every ID then). A tally without
+    one renders the page it always did, byte for byte."""
+    return any(isinstance(b, dict) and "withdrawn" in b
+               for i in r["ids"] for b in i["windows"].values())
+
+
+def _columns(r: dict) -> tuple:
+    if not _withdrawals(r):
+        return COLUMNS
+    return COLUMNS[:-1] + tuple(label for label, _ in T._WITHDRAWN_ROWS) + COLUMNS[-1:]
+
+
+def _withdrawn_note(i: dict) -> str | None:
+    """WITHDRAWN, as its own word, for one ID over the `all` window. A
+    withdrawal is named before a retraction: a reaction taken back entirely
+    outranks one that only superseded an earlier BROKEN (the pair report's
+    precedence, withdrawn over retracted)."""
+    b = i["windows"].get("all")
+    if not isinstance(b, dict) or not isinstance(b.get("withdrawn"), dict):
+        return None
+    w = b["withdrawn"]
+    if not (w.get("said") or w.get("received")):
+        return None
+    parts = []
+    if w.get("said"):
+        parts.append(f"{w['said']} reaction(s) this ID wrote were withdrawn")
+    if w.get("received"):
+        parts.append(f"{w['received']} reaction(s) about this ID were withdrawn")
+    rt = b.get("retracted") if isinstance(b.get("retracted"), dict) else {}
+    if rt.get("said") or rt.get("received"):
+        parts.append(f"apart from that, retracted BROKEN: {rt.get('said', 0)} said, "
+                     f"{rt.get('received', 0)} received")
+    return f"{i.get('id')}: WITHDRAWN: " + "; ".join(parts) + " (all window, by signed " \
+        "withdraw rows; not counted in said or received)"
+
+
+def _row(i: dict, name: str, withdrawals: bool = False) -> list[tuple[str, str]]:
+    """(css class, escaped text) per column (_columns)."""
     block = i["windows"].get(name)
     unrated = ("unrated: " + "; ".join(str(x) for x in i.get("unrated_because") or [])
                if i.get("unrated") else "no")
@@ -94,7 +138,7 @@ def _row(i: dict, name: str) -> list[tuple[str, str]]:
     cells = [("id", _e(i.get("id"))), ("", _e(name)), ("", _e(unrated)),
              ("id", _e(", ".join(str(k) for k in keys) if keys != [i.get("id")] else "-")),
              ("n", _e(i.get("first_row_at"))), ("n", _e(i.get("age_days")))]
-    for _, fn in T._ROWS:
+    for _, fn in T._ROWS + (T._WITHDRAWN_ROWS if withdrawals else ()):
         cells.append(("n", _e(_fact(fn, block) if isinstance(block, dict) else "?")))
     cells.append(("", _e(T.SENTENCE)))
     return cells
@@ -142,16 +186,20 @@ def render_html(r: dict) -> str:
                              + ("applied (signed by both keys)" if a.get("applied")
                                 else str(a.get("finding")))
                              for a in r.get("aliases") or [] if isinstance(a, dict)])
-    out += ["<table>", "<thead><tr>"] + [f"<th>{_e(c)}</th>" for c in COLUMNS] \
+    wd = _withdrawals(r)
+    out += ["<table>", "<thead><tr>"] + [f"<th>{_e(c)}</th>" for c in _columns(r)] \
         + ["</tr></thead>", "<tbody>"]
     for i in r["ids"]:
         for name in names:
             cells = "".join(f'<td class="{k}">{v}</td>' if k else f"<td>{v}</td>"
-                            for k, v in _row(i, name))
+                            for k, v in _row(i, name, wd))
             out.append(f"<tr>{cells}</tr>")
     out += ["</tbody>", "</table>"]
     notes = []
     for i in r["ids"]:
+        note = _withdrawn_note(i) if wd else None
+        if note:
+            notes.append(note)
         for x in i.get("record_broken") or []:
             notes.append(f"{i.get('id')}: BROKEN record: {x}")
         for c in i.get("claims") or []:
