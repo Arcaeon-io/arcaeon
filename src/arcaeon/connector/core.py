@@ -187,6 +187,7 @@ def adapter_for(name: str) -> VendorAdapter | None:
         return None
     if name not in _ADAPTERS:
         from . import lakera_guard, mockscan, opa, snyk_agent_scan  # noqa: F401  (register themselves)
+        from . import prisma_airs  # noqa: F401  (registers itself)
         from arcaeon.prove import mcp_scan  # noqa: F401  (registers itself)
     return _ADAPTERS.get(name)
 

@@ -1,0 +1,7 @@
+[
+  {"report_id": "R00000000-0000-4000-8000-000000000008", "scan_id": "00000000-0000-4000-8000-000000000008", "detection_results": [
+    {"data_type": "prompt", "detection_service": "dlp", "verdict": "benign", "action": "allow", "result_detail": {"note": "synthetic detail text"}},
+    {"data_type": "prompt", "detection_service": "pi", "verdict": "malicious", "action": "block", "result_detail": {"note": "synthetic detail text"}},
+    {"data_type": "response", "detection_service": "dlp", "verdict": "malicious", "action": "allow", "result_detail": {"note": "synthetic detail text"}}
+  ]}
+]

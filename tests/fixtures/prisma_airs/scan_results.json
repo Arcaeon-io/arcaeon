@@ -1,0 +1,5 @@
+[
+  {"req_id": 1, "status": "complete", "scan_id": "00000000-0000-4000-8000-000000000005", "result": {"action": "block", "category": "malicious", "profile_name": "synthetic-profile", "prompt_detected": {"dlp": true, "injection": false, "url_cats": false}, "response_detected": {"dlp": false, "url_cats": false}, "report_id": "R00000000-0000-4000-8000-000000000005", "scan_id": "00000000-0000-4000-8000-000000000005", "tr_id": "tr-synthetic-0005"}},
+  {"req_id": 2, "status": "complete", "scan_id": "00000000-0000-4000-8000-000000000006", "result": {"action": "allow", "category": "benign", "profile_name": "synthetic-profile", "prompt_detected": {"dlp": false, "injection": false, "url_cats": false}, "response_detected": {"dlp": false, "url_cats": false}, "report_id": "R00000000-0000-4000-8000-000000000006", "scan_id": "00000000-0000-4000-8000-000000000006", "tr_id": "tr-synthetic-0006"}},
+  {"req_id": 3, "status": "pending", "scan_id": "00000000-0000-4000-8000-000000000007"}
+]
