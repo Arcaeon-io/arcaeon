@@ -5,6 +5,7 @@
                         [--window 30d] [--groups FILE] [--aliases FILE] [--now T]
     arcaeon tally alias --old-key SEEDFILE --new-key SEEDFILE [--at T]
     arcaeon tally seal|pin|verify ...   (the tally chain: arcaeon.prove.tally_chain)
+    arcaeon tally html TALLY.json [--out FILE]   (the page: arcaeon.prove.tally_html)
 
 Reads exchange reaction chains (docs/EXCHANGE.md, one per account key) and
 prints, per ID, facts in columns for a recent window and for all time, side
@@ -743,7 +744,8 @@ USAGE = """usage: arcaeon tally build CHAIN.jsonl... [--json] [--settled-only]
                          [--chain-id ID] [--prev-pin-sha256 HEX]
        arcaeon tally verify --log TALLY_CHAIN.jsonl [--inputs CHAIN.jsonl...]
                             [--statement S.json] [--groups FILE]
-                            [--aliases FILE] [--json]"""
+                            [--aliases FILE] [--json]
+       arcaeon tally html TALLY.json [--out FILE]"""
 
 HELP = USAGE + """
 
@@ -770,13 +772,20 @@ with --inputs that every snapshot's logs still hold the sealed rows (rows
 appended since are fine), with --statement that it commits to this chain.
 Un-editable, not un-gameable: a wash trade is sealed as a wash trade.
 
+html reads a tally JSON (build --json, seal --out) and writes one static
+page: inline CSS, no script, nothing fetched. One row per ID per window in
+the tally's order, the same fact columns as build, the sentence on every
+row, the verdict and unrated as text. No score, rank or colour. --out never
+overwrites; without it the page goes to stdout.
+
 clean means unchanged and labeled, never true.
 
 Exit codes: build 0 VERIFIED (every chain reads), 1 BROKEN (a chain, a row
 or an alias signature), 3 COULD NOT LOOK, 2 bad usage; alias 0 printed, 2
 refused; seal 0 written, 3 an input cannot be read, 2 refused; pin 0
 printed, 1 the chain does not verify, 3 missing or empty, 2 refused (no
---dry-run); verify 0 VERIFIED, 1 BROKEN, 3 COULD NOT LOOK, 2 bad usage.
+--dry-run); verify 0 VERIFIED, 1 BROKEN, 3 COULD NOT LOOK, 2 bad usage;
+html 0 written, 3 the input is not a tally, 2 bad usage or --out exists.
 Spec and limits: docs/TALLY.md."""
 
 
@@ -844,13 +853,16 @@ def main(argv: list[str] | None = None) -> int:
             return _build_cli(rest)
         if sub == "alias":
             return _alias_cli(rest)
+        if sub == "html":
+            from arcaeon.prove import tally_html
+            return tally_html.html_cli(rest)
         if sub in ("seal", "pin", "verify"):
             from arcaeon.prove import tally_chain as TC
             try:
                 return {"seal": TC.seal_cli, "pin": TC.pin_cli, "verify": TC.verify_cli}[sub](rest)
             except TC.Usage as e:
                 raise _Usage(str(e)) from None
-        raise _Usage(f"unknown subcommand {sub!r} (build, alias, seal, pin or verify)")
+        raise _Usage(f"unknown subcommand {sub!r} (build, alias, seal, pin, verify or html)")
     except _Usage as e:
         print(f"arcaeon tally: {e}\n{USAGE}", file=sys.stderr)
         return V.EXIT_USAGE

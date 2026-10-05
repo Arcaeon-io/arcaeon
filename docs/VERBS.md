@@ -908,6 +908,9 @@ chain (a backdated or reordered row is BROKEN) and, with `--inputs`, that the
 logs still hold the sealed rows; `pin --dry-run` prints the pin statement for
 its tip (dry run is the only mode: the live pin is the operator's scheduled
 task). Un-editable, not un-gameable: a wash trade is sealed as a wash trade.
+`html` writes a tally JSON as one static page (inline CSS, no script, nothing
+fetched): the same fact columns, one row per ID per window in the tally's
+order, the sentence on every row, no score.
 clean means unchanged and labeled, never true. The columns, the gaming rules,
 the tally chain and the limits are [TALLY.md](TALLY.md); the libraries are
 `arcaeon.prove.tally.build` and `arcaeon.prove.tally_chain`.
@@ -926,6 +929,7 @@ usage: arcaeon tally build CHAIN.jsonl... [--json] [--settled-only]
        arcaeon tally verify --log TALLY_CHAIN.jsonl [--inputs CHAIN.jsonl...]
                             [--statement S.json] [--groups FILE]
                             [--aliases FILE] [--json]
+       arcaeon tally html TALLY.json [--out FILE]
 ```
 
 **Exit codes:** `build`: 0 VERIFIED (every chain reads; read the columns), 1
@@ -936,7 +940,8 @@ Ed25519 backend), 2 bad usage (a window or time that does not parse).
 2 refused (two inputs with one file name). `pin`: 0 printed, 1 the tally
 chain does not verify, 3 missing or empty, 2 refused (no `--dry-run`).
 `verify`: 0 VERIFIED, 1 BROKEN, 3 COULD NOT LOOK (an input not given or
-unreadable, a chain missing or empty), 2 bad usage. New in 0.10.x, so
+unreadable, a chain missing or empty), 2 bad usage. `html`: 0 written, 3
+the input is not a tally, 2 bad usage or `--out` exists. New in 0.10.x, so
 `--legacy-exit` changes nothing here.
 
 ```console
@@ -947,6 +952,9 @@ $ arcaeon tally alias --old-key old.key --new-key new.key > aliases.json
 $ arcaeon tally seal a.jsonl b.jsonl --log TALLY_CHAIN.jsonl
 $ arcaeon tally verify --log TALLY_CHAIN.jsonl --inputs a.jsonl b.jsonl
 $ arcaeon tally pin --log TALLY_CHAIN.jsonl --dry-run --out S.json
+$ arcaeon tally build a.jsonl b.jsonl --json > tally.json
+$ arcaeon tally html tally.json --out tally.html
+wrote tally.html
 ```
 
 ## `distill`
