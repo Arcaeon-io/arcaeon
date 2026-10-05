@@ -16,6 +16,22 @@
 
 - **L2-CONF (21e109f, branch b200-l2conf-adapter-conformance).** import_verdict rows gain signed_by_vendor (always false); Lakera/Prisma/Snyk refusal rows gain finding: null.
 
+- **F-R1 (fe9d574, branch b200-t4a-ocsf-refuse).** a SIEM fed gate decisions now receives findings for vetoed refusals, with status_code BROKEN or COULD NOT LOOK while unmapped.arcaeon.verdict stays VERIFIED; verify-report exports are unchanged.
+
+- **F-R6 (7023143, branch b200-t4a-ocsf-refuse).** SIEM rules keyed on severity_id 2 for gate COULD NOT LOOK refusals now see severity_id 3 (Medium) and is_alert true.
+
+- **F-R2 (d9f74ad, branch b200-t4b1-pairing).** with --accounts, a pairing whose key reacted after its revoke or rotation now reads BROKEN (was VERIFIED); each account_service answer gains `through`; consult_binding takes an optional reactions argument. Without --accounts, none.
+
+- **F-R3 (fdd55b1, branch b200-t4b1-pairing).** with --accounts, sibling-agent trades move from counts to `excluded` and account_service answers gain `owner`. Without --accounts, none.
+
+- **F-R10 (70d2c51, branch b200-t4b2-account-server).** external rows written by the stub before this carry a plain sub in their signed receipt and still verify; re-attach to get the salted form (the stub has no hosted data).
+
+- **F-R5 (2ea403b, branch b200-t4c-connector-rollups).** read a rollup's `relayed_verdict` (BROKEN / COULD NOT LOOK) instead of `verdict`; an all-clean e2b/lakera/prisma/snyk rollup is now COULD NOT LOOK with counts.VERIFIED, not VERIFIED; reported's counts no longer include foreign rows (see not_ours).
+
+- **F-R7 (4bf2bc4, branch b200-t4c-connector-rollups).** prisma-airs rows now carry adapter_version "2"; rows read under "1" recheck COULD NOT LOOK (re-run ingest), and a scan-results allow without status "complete" is no longer VERIFIED.
+
+- **F-R8 (d79cdf6, branch b200-t4c-connector-rollups).** e2b rows now carry adapter_version "2"; an Execution whose error is the string "null" now relays VERIFIED (execution_no_error) instead of BROKEN.
+
 - **Exchange pair: a named owner closes trust on first use (A08).** Each log in `exchange pair --json` (and `read_side()`) adds `owner_refused`: null, or `{"named": DID, "first_row": DID}` when `--owner-a` / `--owner-b` names a key and the log's first row that verifies is signed by another. Such a log is refused whole: its verdict is BROKEN, its reason starts `refused:`, no row of it is read, and `exchanges` is empty with all `counts` 0 (exit 1, as before for a wrong owner). Without a named owner nothing changes.
 
 - **Envelope pins resolved offline (`envelope verify --pins DIR`, A10).** New option `--pins DIR` and library parameter `verify(pins=)`, plus `resolve_pin(pins, pin_ref, witness_ref)`; without `--pins` nothing changes, the report included. With it the report adds one key, `pin`: `folder`, `statement_sha256`, `pin_ref` when the pin resolved, else null; the `witness` step reads VERIFIED, BROKEN or COULD NOT LOOK from the clone (docs/ENVELOPE.md). A BROKEN pin makes the verdict BROKEN with or without `--require-witness`; a pin that could not be looked at decides the verdict only under `--require-witness`, with reason words `missing`, `empty`, `unreadable` or `bounded` instead of `network`.
