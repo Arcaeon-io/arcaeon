@@ -4,7 +4,8 @@
 `exchange bind` writes the key holder's own claim; with an account service
 given (`accounts=` / `--accounts FILE` plus the server key it trusts), the
 tally and `exchange pair` ask the L3-01 stub whether that key held that
-account at the binding row's time. Without one, nothing changes.
+account at the binding row's time and at its newest reaction row (R2). Without
+one, nothing changes.
 
 Every key here is a throwaway seed made in the test; no network."""
 from __future__ import annotations
@@ -159,14 +160,68 @@ def test_revoked_before_the_row_is_broken(w):
     assert p["counts"]["mismatch"] == 1
 
 
-def test_revoked_after_the_row_stays_verified_with_the_revocation_shown(w):
+def test_revoked_after_the_newest_reaction_stays_verified_with_the_revocation_shown(w):
     _issue(w, w["a"], NOW - timedelta(days=5))
-    A.revoke(w["store"], SESSION, ACCT, server_seed=w["srv"].seed, at=NOW - timedelta(days=2))
+    A.revoke(w["store"], SESSION, ACCT, server_seed=w["srv"].seed, at=NOW - timedelta(hours=12))
     _exchange(w)
     r = _tally(w, accounts=w["store"])
     b = r["bindings"][0]
     assert b["applied"] is True and b["account_service"]["verdict"] == V.VERIFIED
     assert "revoked later" in b["account_service"]["reason"]
+    assert b["account_service"]["at"] == "2026-10-01T12:00:00Z"
+    assert b["account_service"]["through"] == "2026-10-03T12:00:00Z"
+    assert _pair(w, accounts=w["store"])["counts"]["clean"] == 1
+
+
+# --- R2: the key's own reaction rows are held to the service too (the stolen key) ---
+
+def test_reaction_after_the_revoke_unpairs_and_names_the_reaction(w):
+    """Issue, bind, revoke, then the key reacts AFTER the revoke: the binding
+    row alone checks, the reaction does not; the pairing is dropped, BROKEN."""
+    _issue(w, w["a"], NOW - timedelta(days=5))
+    A.revoke(w["store"], SESSION, ACCT, server_seed=w["srv"].seed, at=NOW - timedelta(days=2))
+    _exchange(w)
+    r = _tally(w, accounts=w["store"])
+    assert r["verdict"] == V.BROKEN
+    (b,) = r["bindings"]
+    svc = b["account_service"]
+    assert b["applied"] is False and svc["verdict"] == V.BROKEN
+    assert b["finding"].startswith(f"{V.BROKEN}: account service: ")
+    assert "reaction row" in svc["reason"] and "ex-1" in svc["reason"]
+    assert "2026-10-03T12:00:00Z" in svc["reason"] and "revoked" in svc["reason"]
+    assert svc["at"] == "2026-10-03T12:00:00Z"
+    assert _ib(r, w["b"].did)["said_unpaired"]["total"] == 1
+    p = _pair(w, accounts=w["store"])
+    assert p["verdict"] == V.BROKEN and "reaction row" in p["reason"]
+    assert p["counts"]["mismatch"] == 1
+    note = _cp_note(p)
+    assert f"account service {V.BROKEN}: " in note and "reaction row" in note, note
+
+
+def test_reaction_after_a_rotation_unpairs_the_old_key(w):
+    _issue(w, w["a"], NOW - timedelta(days=5))
+    new = Party(w["tmp"], "c")
+    A.rotate(w["store"], SESSION, ACCT, proof=A.possession_proof(new.seed, ACCT,
+                                                                 at=NOW - timedelta(days=2)),
+             server_seed=w["srv"].seed, at=NOW - timedelta(days=2))
+    _exchange(w)
+    b = _tally(w, accounts=w["store"])["bindings"][0]
+    assert b["applied"] is False and b["account_service"]["verdict"] == V.BROKEN
+    assert "rotated out" in b["account_service"]["reason"]
+    assert "reaction row" in b["account_service"]["reason"]
+
+
+def test_consult_binding_takes_the_reaction_rows(w):
+    _issue(w, w["a"], NOW - timedelta(days=5))
+    A.revoke(w["store"], SESSION, ACCT, server_seed=w["srv"].seed, at=NOW - timedelta(days=2))
+    _exchange(w)
+    svc, _ = A.load_service(w["store"], [w["srv"].did])
+    binds = A.log_binding_rows(w["a"].log, w["a"].did)[ACCT]
+    reacts = A.log_reaction_rows(w["a"].log, w["a"].did)
+    assert [x["exchange_id"] for x in reacts] == ["ex-1"]
+    assert A.consult_binding(svc, w["a"].did, ACCT, binds)["verdict"] == V.VERIFIED
+    res = A.consult_binding(svc, w["a"].did, ACCT, binds, reacts)
+    assert res["verdict"] == V.BROKEN and res["at"] == "2026-10-03T12:00:00Z"
 
 
 def test_key_bound_under_a_different_owner_is_broken(w):

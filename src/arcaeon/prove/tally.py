@@ -308,7 +308,7 @@ def _hold_to_accounts(r: dict, svc: dict, acct_key: dict, record_broken: dict,
         x = by.get(b["account"]) if b["applied"] else None
         if x is None:
             continue
-        b["account_service"] = {k: x[k] for k in ("verdict", "reason", "at")}
+        b["account_service"] = {k: x[k] for k in ("verdict", "reason", "at", "through")}
         if x["verdict"] != V.VERIFIED:
             b["applied"], b["finding"] = False, f"{x['verdict']}: account service: {x['reason']}"
             acct_key.pop(b["account"], None)
@@ -810,8 +810,9 @@ BROKEN first; under 10 exchanges or 14 days it is unrated. Self-trades (one
 key, one ID by alias, one --groups group) are listed and not counted.
 --accounts FILE (an account store or binding statements, docs/ACCOUNT_ID_API.md)
 with --account-key DID (the binding key you trust; repeatable) holds each
-account binding to the account service at the binding row's time: confirmed
-pairs, revoked or another owner is BROKEN, no record is COULD NOT LOOK (both
+account binding to the account service at the binding row's time and at the
+newest reaction row the key signed: confirmed pairs, revoked or rotated out by
+either time, or another owner, is BROKEN, no record is COULD NOT LOOK (both
 unpaired). Without it the binding is the key holder's claim, not consulted.
 
 alias prints an alias entry for --aliases: the new key inherits the old key's

@@ -19,8 +19,10 @@ endpoints, the auth model and the limits, is docs/ACCOUNT_ID_API.md.
 THE EXCHANGE PAIRING (L3-02, D077). `arcaeon exchange pair` and `arcaeon
 tally build` pair an account id only through the key's own exchange.binding
 row. Given an account service (--accounts FILE, --account-key DID), each such
-pairing is held to it at the binding row's time: confirmed is VERIFIED (the
-pairing stands); revoked or rotated out by then, bound to another owner or
+pairing is held to it at the binding row's time AND at the newest reaction
+row the key signed in the logs read (R2): confirmed at both is VERIFIED (the
+pairing stands, for every reaction row from the binding row's time through
+that newest one); revoked or rotated out by either time, bound to another owner or
 account, or a service row that does not verify is BROKEN (the pairing is
 dropped, the report reads BROKEN); no record, or no trusted key, is COULD NOT
 LOOK (the pairing is dropped). Without one, nothing changes.
@@ -82,7 +84,7 @@ __all__ = ["BIND_KIND", "PAYLOAD_TYPE", "STATEMENT_TYPE", "ROW_VERSION", "SIGNED
            "row_digest", "issue", "rotate", "revoke", "attach_external", "list_agents",
            "binding_statement", "control_cluster", "verify_binding", "handle",
            "NOT_CONSULTED", "load_service", "consult_binding", "log_binding_rows",
-           "consult_pairings", "service_report"]
+           "log_reaction_rows", "consult_pairings", "service_report"]
 
 BIND_KIND = "account.binding"
 PAYLOAD_TYPE = "application/vnd.arcaeon.account.binding.v1+json"
@@ -671,15 +673,29 @@ def _other_account(claimed: str, rep: dict) -> str:
             f"different account")
 
 
-def consult_binding(service: dict, did: Any, account: Any, rows: Any) -> dict:
+def _newest_reaction(reactions: Any) -> tuple[datetime | None, Any]:
+    newest, eid = None, None
+    for row in reactions or ():
+        t = _parse(row.get("at")) if isinstance(row, dict) else None
+        if t is not None and (newest is None or t > newest):
+            newest, eid = t, row.get("exchange_id")
+    return newest, eid
+
+
+def consult_binding(service: dict, did: Any, account: Any, rows: Any,
+                    reactions: Any = ()) -> dict:
     """Does the account service confirm that `did` held `account` at each
-    exchange.binding row's time? {verdict, reason, account, key, at}. BROKEN
-    when any row is not confirmed for a BROKEN reason (revoked or rotated out
-    by then, another owner or account, a service row that does not verify);
-    COULD NOT LOOK when the service has no record or cannot be trusted. A row
-    the service wraps as its agent_proof is read at the issue time. Never raises."""
+    exchange.binding row's time, and still held it at the newest reaction row
+    the key signed (`reactions`, R2)? {verdict, reason, account, key, at,
+    through}. BROKEN when a binding row is not confirmed for a BROKEN reason
+    (revoked or rotated out by then, another owner or account, a service row
+    that does not verify), or the key was revoked or rotated out at or before
+    its newest reaction row; COULD NOT LOOK when the service has no record or
+    cannot be trusted. A row the service wraps as its agent_proof is read at
+    the issue time. `through` (on VERIFIED) is the latest time the pairing was
+    held at: the newest binding row or reaction row. Never raises."""
     out = {"verdict": None, "reason": None, "account": account,
-           "key": did if _did_shape_ok(did) else None, "at": None}
+           "key": did if _did_shape_ok(did) else None, "at": None, "through": None}
 
     def done(word, why, at=None):
         out.update(verdict=word, reason=why, at=at)
@@ -714,47 +730,86 @@ def consult_binding(service: dict, did: Any, account: Any, rows: Any) -> dict:
             seen.append((word, why, _utc(t)))
         if not seen:
             return done(V.COULD_NOT_LOOK, "no dated binding row to hold to the account service")
-        for word in (V.BROKEN, V.COULD_NOT_LOOK, V.VERIFIED):
+        for word in (V.BROKEN, V.COULD_NOT_LOOK):
             hits = [s for s in seen if s[0] == word]
             if hits:
                 return done(*hits[0])
+        # R2: every binding row checks; the key must also still hold the
+        # account at the newest reaction row it signed (a revoked or rotated
+        # out key that goes on reacting is not the account's).
+        newest, eid = _newest_reaction(reactions)
+        if newest is not None and newest > max(_parse(s[2]) for s in seen):
+            rep = verify_binding(st, did, server_keys=service["server_keys"], at=newest)
+            if rep["verdict"] != V.VERIFIED:
+                return done(rep["verdict"], f"the reaction row the key signed at "
+                                            f"{_utc(newest)} (exchange {eid}) is not "
+                                            f"confirmed: {rep['reason']}", _utc(newest))
+        last = max(_parse(s[2]) for s in seen)
+        out["through"] = _utc(max(newest, last) if newest is not None else last)
+        return done(*seen[0])
     except Exception as e:  # noqa: BLE001  hostile input is an answer, not a crash
         return done(V.COULD_NOT_LOOK, f"the account service record could not be read "
                                       f"({type(e).__name__})")
     return done(V.COULD_NOT_LOOK, "nothing to check")
 
 
-def log_binding_rows(path: Any, owner: Any) -> dict:
-    """{account: [exchange.binding row, ...]}: the rows in one exchange log that
-    check under their signature and are signed by the log's owner. {} when the
-    log cannot be read (the log reader has already said so)."""
+def _log_objects(path: Any, kind: str, owner: Any) -> list:
+    """The rows of `kind` in one exchange log signed by `owner`; [] when the log
+    cannot be read (the log reader has already said so). Signatures are the
+    caller's check."""
     from arcaeon.record.row import loads_strict
-    out: dict = {}
     try:
         p = Path(path)
         if p.stat().st_size > X.MAX_LOG_BYTES:
-            return out
+            return []
         text = p.read_bytes().decode("utf-8")
     except (OSError, UnicodeDecodeError, TypeError, ValueError):
-        return out
+        return []
+    out = []
     for raw in text.splitlines():
         try:
             o = loads_strict(raw) if raw.strip() else None
         except ValueError:
             continue
-        if isinstance(o, dict) and o.get("kind") == X.BIND_KIND and o.get("signer") == owner \
-                and X.check_binding(o) is None:
+        if isinstance(o, dict) and o.get("kind") == kind and o.get("signer") == owner:
+            out.append(o)
+    return out
+
+
+def log_binding_rows(path: Any, owner: Any) -> dict:
+    """{account: [exchange.binding row, ...]}: the rows in one exchange log that
+    check under their signature and are signed by the log's owner. {} when the
+    log cannot be read (the log reader has already said so)."""
+    out: dict = {}
+    for o in _log_objects(path, X.BIND_KIND, owner):
+        if X.check_binding(o) is None:
             out.setdefault(o["account"], []).append(o)
+    return out
+
+
+def log_reaction_rows(path: Any, owner: Any) -> list:
+    """[exchange.reaction row, ...]: the reaction rows in one exchange log that
+    check under their signature and are signed by the log's owner (R2: what the
+    key went on signing after its binding row). [] when the log cannot be read."""
+    out = []
+    for o in _log_objects(path, X.KIND, owner):
+        try:
+            if X.check_row(o) is None:
+                out.append(o)
+        except Exception:  # noqa: BLE001  no backend: the consult says COULD NOT LOOK
+            continue
     return out
 
 
 def consult_pairings(service: dict, pairs: Any) -> list:
     """For each (account, key, [log paths]) an exchange reader paired through a
-    binding row: consult_binding over that key's binding rows for the account."""
+    binding row: consult_binding over that key's binding rows for the account
+    and the reaction rows the key signed in those logs."""
     res = []
     for account, key, logs in pairs:
         rows = [r for lg in logs for r in log_binding_rows(lg, key).get(account, [])]
-        res.append(consult_binding(service, key, account, rows))
+        reacts = [r for lg in logs for r in log_reaction_rows(lg, key)]
+        res.append(consult_binding(service, key, account, rows, reacts))
     return res
 
 

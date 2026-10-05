@@ -805,8 +805,9 @@ counterparty, and which key it binds is COULD NOT LOOK here. The binding is
 the key holder's claim; arcaeon.io's own record is not consulted unless pair
 gets --accounts FILE (an account store or binding statements) and
 --account-key DID (the binding key you trust; repeatable): then each binding
-is held to the account service at the row's time. Confirmed pairs; revoked
-or another owner is BROKEN; no record is COULD NOT LOOK (both unpaired).
+is held to the account service at the row's time and at the newest reaction
+row the key signed. Confirmed pairs; revoked or rotated out by either time, or
+another owner, is BROKEN; no record is COULD NOT LOOK (both unpaired).
 
 Exit codes: react 0 written, 2 refused or bad usage, 3 the file is not there.
 bind 0 written, 2 refused or bad usage.

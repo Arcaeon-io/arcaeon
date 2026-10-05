@@ -219,12 +219,29 @@ revocation shown beside them. A rotation retires the old key the same way.
 in the stub's own shape or `{"statements": [...]}` of public binding
 statements; the trusted binding key comes only from `--account-key`. Each
 `exchange.binding` row that pairs an account id is checked with
-`consult_binding(service, did, account, rows)`, which calls
-`verify_binding` at the row's `at` and then requires the statement's
-account to be the one the row claims: VERIFIED stands, BROKEN (revoked or
-rotated out by then, another owner, another account, a forged or untrusted
-service row) and COULD NOT LOOK (no record, no trusted key) drop the
-pairing. A row that is the agent's possession proof wrapped by an issue or
+`consult_binding(service, did, account, rows, reactions)`, which calls
+`verify_binding` at each binding row's `at` and then requires the
+statement's account to be the one the row claims; it then calls
+`verify_binding` once more at the newest `exchange.reaction` row the key
+signed in the logs read (`log_reaction_rows`; only rows whose signature
+checks). VERIFIED stands, BROKEN (revoked or rotated out by a binding row's
+time or by the newest reaction row's time, another owner, another account,
+a forged or untrusted service row) and COULD NOT LOOK (no record, no trusted
+key) drop the pairing. A key that reacts at or after its `retired_at` drops
+the whole pairing, and the reason names that reaction row's time and
+exchange id ("the reaction row the key signed at T (exchange E) is not
+confirmed: the key was revoked at R ..."); the result's `at` is that time.
+
+**What "the pairing stands" covers.** The key held the account, under the
+owner the row claims, at every binding row's time and at the newest reaction
+row it signed; a key is bound once, so it held the account at every time in
+between. The answer's `through` is the latest of those times. A reaction row
+dated before the earliest binding row is not held to the service on its own.
+`at` is the key holder's clock (signed, not witnessed): a key that backdates
+its reaction rows to before the revocation is not caught here; pin chain
+heads outside the key holder's control for that.
+
+A row that is the agent's possession proof wrapped by an issue or
 rotate row is read at that row's time (the proof is signed minutes before
 the issue). Without `--accounts`, nothing changes and the pair report says
 "account service not consulted". Tables: docs/EXCHANGE.md, docs/TALLY.md.

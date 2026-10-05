@@ -339,9 +339,11 @@ goes to stdout.
 - **Holding a binding to the account service (L3-02, opt-in).** `build
   --accounts FILE --account-key DID` (library: `accounts=`, `account_keys=`)
   holds each applied binding to the account service at the binding row's
-  time, as `arcaeon exchange pair` does (EXCHANGE.md, the same table).
-  Confirmed: the binding stays applied, with `account_service` VERIFIED on
-  its entry. BROKEN (revoked or rotated out by then, another owner or
+  time and at the newest reaction row the key signed, as `arcaeon exchange
+  pair` does (EXCHANGE.md, the same table; ACCOUNT_ID_API.md says what "the
+  pairing stands" covers). Confirmed: the binding stays applied, with
+  `account_service` VERIFIED on its entry and `through` the latest time held.
+  BROKEN (revoked or rotated out by either time, another owner or
   account, a service row that does not verify): not applied, the tally is
   BROKEN and the key carries the finding under `record_broken`. COULD NOT
   LOOK (no record, no trusted key): not applied, the row is `said_unpaired`,
