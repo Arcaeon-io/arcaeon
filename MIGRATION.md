@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **L4-03 (branch b200-t6d-gateways).** New subcommand `arcaeon gate mcp-after`; nothing else changes. `arcaeon gate --help` gains its usage lines. A Docker interceptor that does not pass `--tool` and whose input carries no request holds every result to `default_action` (default act).
+
 - **L4-02 (branch b200-t6d-gateways).** New, nothing to change for existing users. A tool server that wants its results to pass an arcaeon gateway puts its envelope under `_meta["dev.arcaeon/bundle"]` on each content block (or on the result when there is one block). Results that pass gain `_meta["dev.arcaeon/verdict"]`. Refused results are `isError: true` with one text block. A gateway config without `deal` and `purpose` refuses act/pay/irreversible even on a good seal (the gate's exchange rule), and an unlisted tool is held to `act`.
 
 - **L4-01 (branch b200-t6a-default-on).** `gate decide --json`, MCP `gate_decide` and `verify_bundle` with an `action` gain `enforce_mode` (`block` / `warn`), `enforce_source` (`flag` / `env` / `latest.json` / `default`), `enforce_detail`, `would_refuse`, `would_exit_code` (1, 3 or null) and `warning` (null unless warn let a refusal through; then `decision` is `allow` and `exit_code` 0); `verify_bundle` with an `action` also gains `action`, `decision`, `gate_reason` and `gate_exit_code`. New flag `--enforce {warn,block}`, new variable `ARCAEON_GATE_MODE`, library `decide(enforce=, record=)` and module `arcaeon.prove.gate_mode`. With nothing set and no signed latest.json cached the mode is block, which is what the gate already did: no decision changes unless you opt into warn or a signed `block_after` window says warn.

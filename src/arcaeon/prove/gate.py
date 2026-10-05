@@ -1202,7 +1202,10 @@ USAGE = """usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
                         --action {read,act,pay,irreversible} [--file PATH]
                         [--artifact ID] [--deal ID --ledger PATH]
                         [--purpose TEXT] [--activated URIS]
-                        [--record-dir DIR] [--json]"""
+                        [--record-dir DIR] [--json]
+       arcaeon gate mcp-after [--config FILE] [--tool NAME]
+                              [--action {read,act,pay,irreversible}]
+                              [--enforce {warn,block}]"""
 
 HELP = USAGE + """
 
@@ -1303,7 +1306,18 @@ one); --file is the artifact's file (default: its one inline raw part; a url
 part is never fetched). --artifact picks the artifact when several carry an
 envelope. --activated is the A2A-Extensions value the request carried; it is
 recorded and changes no verdict. No envelope there, or no file bytes, is
-COULD NOT LOOK (read only). Same exit codes as decide."""
+COULD NOT LOOK (read only). Same exit codes as decide.
+
+mcp-after is the Docker MCP Gateway after-interceptor (docs/GATEWAYS.md):
+`--interceptor 'after:exec:arcaeon gate mcp-after --config FILE'`. It reads
+the tool-call response JSON on stdin, verifies the envelope under
+_meta["dev.arcaeon/bundle"] by decide's rule, and prints the JSON back:
+passed with _meta["dev.arcaeon/verdict"], or replaced by an isError REFUSED
+result. --config is the gateway config (default: $ARCAEON_GATEWAY_CONFIG);
+--tool names the tool when the input does not; --action and --enforce
+override the config. Exit 0 for any stdin (malformed stdin is a refusal
+result); 2 bad arguments or an unreadable config, with a refusal result
+printed all the same."""
 
 _SPEC = {"--envelope": "value", "--audience": "value", "--signer": "list",
          "--action": "value", "--deal": "value", "--purpose": "value", "--file": "value",
@@ -1402,7 +1416,10 @@ def main(argv: list[str] | None = None) -> int:
         if sub == "a2a":
             from arcaeon.prove import a2a_receiver
             return a2a_receiver.cli(rest)
-        raise E._Usage(f"unknown subcommand {sub!r} (decide, packet, a2a)")
+        if sub == "mcp-after":
+            from arcaeon.connect import docker_after
+            return docker_after.main(rest)
+        raise E._Usage(f"unknown subcommand {sub!r} (decide, packet, a2a, mcp-after)")
     except E._Usage as e:
         print(f"arcaeon gate: {e}\n{USAGE}", file=sys.stderr)
         return V.EXIT_USAGE

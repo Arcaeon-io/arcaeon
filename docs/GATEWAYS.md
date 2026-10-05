@@ -109,6 +109,46 @@ whether it passes per-plugin config to `load`. The plugin was tested against
 fixture responses in the hook shapes Lasso's plugins README documents. It has
 not been run inside Lasso. Lasso's last release predates MCP 2026-07-28.
 
+## Docker MCP Gateway (L4-03)
+
+Docker MCP Gateway runs `after:` interceptors on every tool call. An `exec`
+interceptor gets the tool-call response JSON on stdin, and whatever it prints
+on stdout becomes the response:
+
+```
+docker mcp gateway run --interceptor 'after:exec:arcaeon gate mcp-after --config /cfg/arcaeon-gateway.json'
+```
+
+`arcaeon gate mcp-after` is the same command as `python -m
+arcaeon.connect.docker_after`. Options:
+
+- `--config FILE`: the config above. Default: `$ARCAEON_GATEWAY_CONFIG`, else an
+  empty config, which holds every result to `act` with no signer named.
+- `--tool NAME`: which tool's entry in `tools` applies.
+- `--action WORD` and `--enforce warn|block`: override the config.
+
+It accepts these on stdin:
+
+| stdin | what happens |
+|---|---|
+| a CallToolResult | checked, printed back (passed or replaced) |
+| a JSON-RPC response `{"jsonrpc", "id", "result"}` | its `result` checked and replaced in place; `jsonrpc` and `id` kept |
+| `{"request": ..., "response": ...}` | `response` checked; the tool name read from `request.params.name` |
+| a JSON-RPC error `{"jsonrpc", "id", "error"}` | passed through unchanged: there is no tool result to check |
+| empty, not UTF-8, not JSON, a duplicate key, not an object, over 32 MiB | a COULD NOT LOOK refusal result |
+
+The gateway always gets JSON back. For any stdin the exit code is 0. Bad
+arguments or an unreadable config still print a refusal result, but exit 2,
+with the reason on stderr. Each call writes one line to stderr naming the
+verdict, the decision, the action and the mode, for the gateway's log.
+
+The tool name comes from `--tool`, or from the input when it carries the
+request. If the gateway hands neither, every result is held to
+`default_action`. Not yet confirmed: the exact JSON Docker's gateway puts on
+stdin, whether it includes the tool name, and how it splits the `exec:`
+command line. This was tested with a subprocess against fixture JSON, not
+inside Docker.
+
 ## What this cannot tell you
 
 - It verifies only what the server sealed: these bytes, unchanged since a key
@@ -116,6 +156,8 @@ not been run inside Lasso. Lasso's last release predates MCP 2026-07-28.
   the content is true or safe. A server can seal a lie honestly.
 - A server that seals nothing always reads COULD NOT LOOK. This kit adds no
   seal of its own and cannot make an unsealed server's output VERIFIED.
+- A JSON-RPC error carries no tool result, so the Docker interceptor passes it
+  through unchanged. Its message text is the server's own and is not checked.
 - Only the key's word counts. A server's self-reported name (`serverInfo`)
   is not checked and does not count.
 - Some gateways may strip `_meta` keys they do not know. In that case the

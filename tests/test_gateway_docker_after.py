@@ -40,10 +40,13 @@ TEXT = '{"hits": ["unit-a"]}'
 SECRET = "unit-a"
 ROOT = Path(__file__).resolve().parents[1]
 
-# The child patches socket before arcaeon is imported, then runs the CLI.
+# The child patches socket before arcaeon is imported, then runs the CLI. It
+# patches connect and name lookup, not the class itself: modules imported
+# later (ssl, asyncio) subclass socket.socket.
 CHILD = ("import socket,sys\n"
          "def boom(*a,**k): raise AssertionError('network touched')\n"
-         "socket.socket=boom; socket.create_connection=boom\n"
+         "socket.socket.connect=boom; socket.socket.connect_ex=boom\n"
+         "socket.create_connection=boom; socket.getaddrinfo=boom\n"
          "from arcaeon.connect.docker_after import main\n"
          "sys.exit(main(sys.argv[1:]))\n")
 CHILD_GATE = CHILD.replace("from arcaeon.connect.docker_after import main",

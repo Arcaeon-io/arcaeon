@@ -948,6 +948,9 @@ usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
                         [--artifact ID] [--deal ID --ledger PATH]
                         [--purpose TEXT] [--activated URIS]
                         [--record-dir DIR] [--json]
+       arcaeon gate mcp-after [--config FILE] [--tool NAME]
+                              [--action {read,act,pay,irreversible}]
+                              [--enforce {warn,block}]
 ```
 
 **Exit codes:** 0 allow (and, in warn mode, a would-refuse let through), 1
@@ -961,7 +964,9 @@ cap), 2 bad usage (a missing `--envelope`, `--audience`, `--signer` or
 retired `--check`, which names `--checks` instead).
 `packet`: 0 written, 2 bad usage or
 nothing to dispute, 3 the input is not a readable gate record. `a2a`: as
-`decide`. New in 0.10.x,
+`decide`. `mcp-after` (the Docker MCP Gateway after-interceptor,
+docs/GATEWAYS.md): 0 for any stdin (a refusal is a rewritten result, not an
+exit code), 2 bad arguments or an unreadable config. New in 0.10.x,
 so `--legacy-exit` changes nothing here.
 
 ```console
