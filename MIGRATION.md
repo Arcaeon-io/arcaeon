@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **L2-01b (6917273, branch b200-l201b-signed-by-vendor-plain).** ingest rows gain one key, signed_by_vendor (always false). A seal made with an ES key on the wrong curve now says COULD NOT LOOK instead of BROKEN.
+
+- **L2-06b (17a824b, branch b200-l206b-cedar-deny-broken).** rows from connector.cedar that carried a Deny with errors, without an errors list, or from CloudTrail now read BROKEN (outcome "deny") instead of COULD NOT LOOK (outcome "errored" / "errors_not_reported" / "unreadable"); re-run ingest on held bytes to get the new reading. ADAPTER_VERSION stays "1".
+
+- **L3-02 (abde8ff, branch b200-l302-binding-vs-account).** nothing required; without --accounts the tally output is unchanged byte for byte, and the pair report gains an `account_service` block with consulted=false.
+
 - **Exchange pair: a named owner closes trust on first use (A08).** Each log in `exchange pair --json` (and `read_side()`) adds `owner_refused`: null, or `{"named": DID, "first_row": DID}` when `--owner-a` / `--owner-b` names a key and the log's first row that verifies is signed by another. Such a log is refused whole: its verdict is BROKEN, its reason starts `refused:`, no row of it is read, and `exchanges` is empty with all `counts` 0 (exit 1, as before for a wrong owner). Without a named owner nothing changes.
 
 - **Envelope pins resolved offline (`envelope verify --pins DIR`, A10).** New option `--pins DIR` and library parameter `verify(pins=)`, plus `resolve_pin(pins, pin_ref, witness_ref)`; without `--pins` nothing changes, the report included. With it the report adds one key, `pin`: `folder`, `statement_sha256`, `pin_ref` when the pin resolved, else null; the `witness` step reads VERIFIED, BROKEN or COULD NOT LOOK from the clone (docs/ENVELOPE.md). A BROKEN pin makes the verdict BROKEN with or without `--require-witness`; a pin that could not be looked at decides the verdict only under `--require-witness`, with reason words `missing`, `empty`, `unreadable` or `bounded` instead of `network`.
