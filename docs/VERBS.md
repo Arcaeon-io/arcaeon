@@ -682,13 +682,29 @@ SIEM: BROKEN is severity High, COULD NOT LOOK is Low and lists what was not
 checked, VERIFIED is emitted (Informational) only with `--include-verified`.
 File names only, never directories. The mapping is [OCSF.md](OCSF.md).
 
+`seal --checks FILE` (repeatable; library `checks=`, paths or row dicts)
+carries checker rows inside the signed Statement, as `predicate.checks`
+(`checks[]`): `check.verdict.relayed` rows from a connector adapter (one JSON
+object, a JSON list, or JSON lines). Editing a carried row breaks the
+signature. Only rows whose `subject.sha256` is the sealed file's sha256 ride;
+any other row (another sha256 or none, another kind, a `relayed_verdict`
+outside the three words, a row not marked relayed), a FILE that cannot be
+read or holds no rows, more than 64 rows, a row over 16 KiB or all of them
+over 256 KiB refuses the seal (exit 2, nothing written), naming the file and
+line or item of each. No row is dropped quietly. A carried row is the
+sender's report of a checker's word: `verify` lists it under `sealed.checks`
+and `not_checked` and its verdict does not change; `gate decide` reads it
+like a `--checks` row. Without `--checks` the envelope is byte-identical to
+one sealed before `checks[]` existed.
+
 **Usage**
 
 ```text
 usage: arcaeon envelope seal <file> --label TEXT --audience ID --deal ID
                                --purpose TEXT --not-after WHEN [--key SEEDFILE]
                                [--by NAME] [--chain ID] [--pin-ref REF]
-                               [--witness-ref REF] [--flag NAME ...] [--force]
+                               [--witness-ref REF] [--flag NAME ...]
+                               [--checks FILE ...] [--force]
        arcaeon envelope verify <file> [--audience ID] [--signer DID ...]
                                [--deal ID] [--purpose TEXT] [--envelope PATH]
                                [--require-witness] [--pins DIR]
@@ -776,6 +792,24 @@ cannot be ruled out. The veto is a refusal like any other: with `--deal` it
 writes the pack (its `evidence.json` carries `checks`) and a `gate.evidence`
 row with `verdict` VERIFIED and `veto` `checker-broken`. The library
 parameter is `check_files=`.
+
+**Rows carried in the envelope.** An envelope sealed with `envelope seal
+--checks` carries its rows in the signed `checks[]`. When the envelope reads
+VERIFIED, `decide` reads them exactly as it reads `--checks` rows, and the
+two sources combine: a carried row saying BROKEN for the handed file's
+sha256 refuses `act`, `pay` and `irreversible` as `checker-broken` (exit 1;
+the reason names the checker and `<file>.envelope.json checks[] item N`, and
+the `checks.broken` entry has `source` `envelope`, where a `--checks` row has
+`--checks`); a `checks[]` that is not a list, holds too many items, or an item
+that is not a JSON object or is over 16 KiB refuses them as
+`checks-unreadable` (exit 3); rows for another sha256 or of another kind are
+ignored. `--json` adds `checks.carried` (`where`, `rows`) whenever the
+envelope carries `checks[]`. On BROKEN or COULD NOT LOOK the carried rows are
+not read: a carried row never lifts a verdict. A carried row counts exactly
+like an unsigned `--checks` row: it can turn allow into refuse, never refuse
+into allow, and it never counts toward the non-party rule below, since the
+key that signed it is the envelope's own signer, a party. A vendor's own
+signature claim inside a row (`attestation`) is never checked.
 
 **A non-party check above a cap** (`--require-nonparty-check-above AMOUNT`,
 library `require_nonparty_check_above=`). The two parties to a deal can

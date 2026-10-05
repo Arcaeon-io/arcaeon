@@ -91,6 +91,30 @@ The statement is unsigned. Wrapping it in a DSSE envelope (payloadType
 `application/vnd.in-toto+json`) and signing it is the envelope's job, not this
 module's.
 
+## Rows travel in the envelope's checks[]
+
+A row can travel with the file it judged. `arcaeon envelope seal FILE
+--checks ROWS` (library `envelope.seal(..., checks=[...])`) carries every
+row in ROWS inside the signed envelope, as `predicate.checks`
+([ENVELOPE.md](ENVELOPE.md), "Carried check rows"). Every row must be one of
+these rows (kind `check.verdict.relayed`) and its `subject.sha256` must be
+FILE's sha256: the gate keys a row by the bytes it judged, which is
+`subject.sha256`, not `vendor_payload_digest` (that is the digest of the
+vendor's own reply). An adapter takes `subject.sha256` from what the vendor
+reports, or leaves `subject` null, so set it to the handed file's sha256 when
+the vendor did not; a row that names other bytes, or none, refuses the seal
+rather than riding or being dropped. On the receiving side `arcaeon gate
+decide` reads the carried rows on a VERIFIED envelope exactly as it reads
+`--checks FILE` rows: a BROKEN for the handed file's sha256 vetoes `act`,
+`pay` and `irreversible` as `checker-broken`, a COULD NOT LOOK or VERIFIED
+row changes nothing, and no carried row counts toward the non-party check
+rule (the envelope's signer, who carried it, is a party). Carrying a row
+makes it tamper-evident in transit; it does not make the vendor's verdict
+ours, and the vendor's own signature claim in `attestation` is still never
+checked. Every registered adapter is run through this path end to end by
+`tests/test_connector_checks_end_to_end.py`, which finds adapters from the
+registry and needs each one's fixtures in `tests/fixtures/<name>/`.
+
 ## Writing an adapter for a new vendor
 
 An adapter is a name, a version, a table and one method:

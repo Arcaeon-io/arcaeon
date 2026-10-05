@@ -98,6 +98,23 @@ writes the pack, evidence.json carries `checks`, and the gate.evidence row
 carries `"veto": "checker-broken"` with verdict VERIFIED. Exit code 1 on
 checker-broken (a checker said BROKEN), 3 on checks-unreadable.
 
+ROWS CARRIED IN THE ENVELOPE (TE-31). `envelope seal --checks` puts the same
+rows inside the signed Statement (predicate.checks, "checks[]"). On a
+VERIFIED envelope the gate reads them exactly as it reads --checks rows, and
+the two sources combine: a carried BROKEN for the handed file's sha256 vetoes
+as checker-broken (exit 1; its `checks.broken` entry has `source` "envelope",
+a --checks row "--checks"); a checks[] that is not a list, has too many items,
+an item that is not an object or is too big, vetoes as checks-unreadable;
+other kinds and other sha256s are ignored. `checks.carried` = {where, rows}
+appears whenever the envelope carries checks[]. On anything but VERIFIED the
+carried rows are not read: a carried row never lifts a verdict, and the
+verdict already refuses what a veto would. Counting: a carried row counts
+exactly as an UNSIGNED --checks row does. It can veto; it never allows; and it
+never counts toward the non-party rule below, because the key that signed it
+is the envelope's own signer, a party by definition. A vendor's own signature
+claim in its `attestation` is never checked, so no carried row is signed by
+the vendor as far as the gate can tell.
+
 THE DISPUTE PACKET. `arcaeon gate packet` (arcaeon.prove.dispute_packet)
 renders a refusal, from an evidence pack or from a decision's to_dict(), as
 one page in markdown and JSON for a marketplace's dispute process. A refusal
@@ -161,7 +178,8 @@ from arcaeon.record.row import file_pin, loads_strict
 __all__ = ["ACTIONS", "ALLOW", "REFUSE", "RULES", "NEEDS_EXCHANGE", "GateDecision", "decide", "resolve",
            "EVIDENCE_KIND", "CHAIN_KIND", "PACK_DIGEST_OF", "PACK_DIGEST_OF_V1",
            "pack_digest", "CHECK_ROW_KIND", "CHECKER_BROKEN", "CHECKS_UNREADABLE",
-           "VETOED", "NONPARTY_VETO", "read_check_rows",
+           "VETOED", "NONPARTY_VETO", "read_check_rows", "read_carried_rows",
+           "FILE_SOURCE", "CARRIED_SOURCE",
            "verify_evidence_pack", "GUARDED", "CHECK_KIND", "NONPARTY_RULE",
            "main"]
 
@@ -212,8 +230,9 @@ ALLOW_MEANS = ("allow means the bytes are unchanged since the key you named seal
                "true or safe")
 LIMITS = [
     ALLOW_MEANS,
-    "the gate decides from the envelope's verdict, plus any check rows given that say "
-    "BROKEN for the same sha256; checking the content is other tools' job",
+    "the gate decides from the envelope's verdict, plus any check rows given or carried "
+    "in the envelope that say BROKEN for the same sha256; checking the content is other "
+    "tools' job",
     "a third party who can edit the sidecar can turn allow into refuse, never into allow",
     "the evidence pack's copy is taken after the check; its sha256 is of the bytes copied",
 ]
@@ -566,22 +585,73 @@ def read_check_rows(paths) -> tuple[list[tuple[str, int, dict]], list[str]]:
 
 def _who(b: dict) -> str:
     s = f"{b['checker']!r}"
+    at = "item" if b.get("source") == CARRIED_SOURCE else "line"
     extra = [f"subject {b['subject']!r}" if b.get("subject") else None,
              f"vendor id {b['vendor_id']!r}" if b.get("vendor_id") else None,
-             f"{b['file']} line {b['line']}"]
+             f"{b['file']} {at} {b['line']}"]
     return s + " (" + ", ".join(x for x in extra if x) + ")"
 
 
-def _judge_checks(paths, file: Path) -> dict:
-    """The --checks answer for `file`: which rows say BROKEN for its sha256."""
+#: Where a check row came from: a --checks file, or the envelope's checks[] (TE-31).
+FILE_SOURCE, CARRIED_SOURCE = "--checks", "envelope"
+
+
+def read_carried_rows(r: dict, env_path) -> tuple[list[tuple[str, int, dict]] | None, list[str],
+                                                    str]:
+    """The check rows a VERIFIED envelope carries (TE-31): (rows, problems,
+    where), rows as read_check_rows gives them ((where, item number, row) for
+    each check.verdict.relayed row), or None when the envelope carries no
+    checks[] at all. `r` is envelope.verify's report; the rows were signed with
+    the payload, so this reads them only after verify said VERIFIED. A checks[]
+    that is not a list, holds more than envelope.MAX_CARRIED_CHECKS items, an
+    item that is not a JSON object or is over envelope.MAX_CARRIED_CHECK_BYTES
+    is a problem (it vetoes as checks-unreadable, as an unreadable --checks file
+    does); a row of another kind is skipped, as in a --checks file. Never raises."""
+    where = f"{Path(str(env_path)).name} checks[]"
+    sealed = r.get("sealed") if isinstance(r.get("sealed"), dict) else {}
+    if E.CHECKS_KEY not in sealed:
+        return None, [], where
+    value = sealed[E.CHECKS_KEY]
+    if not isinstance(value, list):
+        return [], [f"{where}: a {type(value).__name__}, not a list of check rows"], where
+    if len(value) > E.MAX_CARRIED_CHECKS:
+        return [], [f"{where}: {len(value)} items, over the {E.MAX_CARRIED_CHECKS} an "
+                    f"envelope carries; not read"], where
+    rows, problems = [], []
+    for n, row in enumerate(value, 1):
+        if not isinstance(row, dict):
+            problems.append(f"{where} item {n}: not a JSON object")
+            continue
+        try:
+            size = len(json.dumps(row, sort_keys=True, separators=(",", ":"),
+                                  ensure_ascii=False).encode("utf-8"))
+        except (TypeError, ValueError, RecursionError) as e:
+            problems.append(f"{where} item {n}: not plain JSON ({type(e).__name__})")
+            continue
+        if size > E.MAX_CARRIED_CHECK_BYTES:
+            problems.append(f"{where} item {n}: {size} bytes, over the "
+                            f"{E.MAX_CARRIED_CHECK_BYTES}-byte limit for a carried row")
+        elif row.get("kind") == CHECK_ROW_KIND:
+            rows.append((where, n, row))
+    return rows, problems, where
+
+
+def _judge_checks(paths, file: Path, carried=None) -> dict:
+    """The --checks answer for `file`: which rows say BROKEN for its sha256.
+    `carried` is read_carried_rows' answer: the envelope's own rows join the
+    --checks rows and are judged by the same rule."""
     from arcaeon.record.row import file_pin
-    rows, problems = read_check_rows(paths)
+    got, problems = read_check_rows(paths)
+    rows = [(name, n, row, FILE_SOURCE) for name, n, row in got]
+    if carried is not None and carried[0] is not None:
+        rows += [(name, n, row, CARRIED_SOURCE) for name, n, row in carried[0]]
+        problems.extend(carried[1])
     pin = file_pin(file)
     sha = pin.get("sha256")
     if not sha:
         problems.append(f"the handed file's sha256 could not be taken ({pin.get('error')})")
     broken = []
-    for name, n, row in rows:
+    for name, n, row, source in rows:
         subj = row.get("subject") if isinstance(row.get("subject"), dict) else {}
         if not sha or row.get("relayed_verdict") != V.BROKEN or _norm_sha(subj.get("sha256")) != sha:
             continue
@@ -593,9 +663,13 @@ def _judge_checks(paths, file: Path) -> dict:
                        "vendor_id": row.get("vendor_id"), "vendor_word": row.get("vendor_word"),
                        "subject": subj.get("name"), "sha256": sha,
                        "attestation": att.get("status") or "NONE",
-                       "reported_by": "sender", "file": name, "line": n, "row": keep})
-    return {"files": [Path(p).name for p in paths], "rows": len(rows), "file_sha256": sha,
+                       "reported_by": "sender", "source": source, "file": name, "line": n,
+                       "row": keep})
+    info = {"files": [Path(p).name for p in paths], "rows": len(rows), "file_sha256": sha,
             "broken": broken, "problems": problems, "veto": None}
+    if carried is not None and carried[0] is not None:
+        info["carried"] = {"where": carried[2], "rows": len(carried[0])}
+    return info
 
 
 def _broken_finding(b: dict) -> str:
@@ -637,10 +711,13 @@ def _apply_checks(d: GateDecision, info: dict) -> None:
         d.decision = REFUSE
         d.reasons = list(info["problems"])
         d.could_not_check = {"looked_for": "a check row that says BROKEN for these bytes",
-                             "where": ", ".join(info["files"]) or "--checks",
+                             "where": ", ".join(list(info["files"]) + (
+                                 [info["carried"]["where"]] if info.get("carried") else []))
+                             or "--checks",
                              "reason_word": "unreadable"}
         d.reason = (f"refuse {d.action}: {CHECKS_UNREADABLE}: the envelope reads VERIFIED, "
-                    f"but a check file could not be read ({'; '.join(info['problems'])}), "
+                    f"but a check file (or the envelope's checks[]) could not be read "
+                    f"({'; '.join(info['problems'])}), "
                     f"so a checker's BROKEN in it cannot be ruled out. Only read is "
                     f"allowed until it can be read.")
 
@@ -929,7 +1006,8 @@ def decide(file: str | Path, *, action: str, audience: str | None,
     `check_files` (paths of check.verdict.relayed rows, D067): on a
     VERIFIED envelope, a row saying BROKEN for the file's sha256 refuses act,
     pay and irreversible as CHECKER_BROKEN (an unreadable file: as
-    CHECKS_UNREADABLE); read stays allowed.
+    CHECKS_UNREADABLE); read stays allowed. Rows the envelope carries in its
+    signed checks[] (TE-31) join them on a VERIFIED envelope, by the same rule.
     `require_nonparty_check_above` (an amount, D061) adds the non-party check
     rule (module docstring): over it, a VERIFIED envelope allows act, pay and
     irreversible only with a counting check among the same `check_files`;
@@ -1013,9 +1091,13 @@ def decide(file: str | Path, *, action: str, audience: str | None,
                      could_not_check=cnc, file=str(file), envelope=str(env_path),
                      audience=audience, deal=deal, purpose=purpose, signers=list(signers),
                      at=_utc(now), report=r, nonparty_check=policy)
-    if check_files and verdict == V.VERIFIED:
+    # TE-31: a VERIFIED envelope's own checks[] rows join the --checks rows. Read
+    # only on VERIFIED: the rows were signed with the payload, and a carried row
+    # can only turn allow into refuse, so it is never needed to refuse.
+    carried = read_carried_rows(r, env_path) if verdict == V.VERIFIED else (None, [], "")
+    if (check_files or carried[0] is not None) and verdict == V.VERIFIED:
         try:
-            _apply_checks(d, _judge_checks(check_files, file))
+            _apply_checks(d, _judge_checks(check_files, file, carried))
         except Exception as e:  # noqa: BLE001  never a green on a crash
             _apply_checks(d, {"files": [Path(p).name for p in check_files], "rows": 0,
                               "file_sha256": None, "broken": [], "veto": None,
@@ -1107,7 +1189,10 @@ and irreversible as checker-broken, naming the checker (exit 1); the verdict
 stays VERIFIED. read stays allowed. Rows for another sha256, or saying
 VERIFIED or COULD NOT LOOK, are ignored. A FILE that cannot be read refuses
 those three actions as checks-unreadable (exit 3). An unsigned row counts: it
-can turn allow into refuse, never into allow.
+can turn allow into refuse, never into allow. Rows the envelope carries in
+its signed checks[] (`envelope seal --checks`) are read the same way on a
+VERIFIED envelope and combine with --checks; a carried row never counts
+toward the non-party rule (the envelope's signer is a party).
 
 Allow means the bytes are unchanged since the key you named sealed them and
 are labeled for you and in date. It does not say the content is true or safe.
