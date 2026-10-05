@@ -411,3 +411,45 @@ def test_handler_routes(store, server):
     assert st == 200 and out["binding"]["event"] == "revoke"
     st, _ = A.handle(store, SESSION, "DELETE", "/v1/agents", None, server_seed=server[0], now=T0)
     assert st == 405 or st == 404
+
+
+# --- R12: a possession proof must be an exchange.binding row ------------------------
+
+def _wrong_kind_proof(seed, acct, at=T0, kind="exchange.reaction"):
+    """A row signed exactly like an exchange.binding, but whose signed `kind`
+    is something else: the signature checks, the kind does not."""
+    import base64
+    from arcaeon.prove import exchange_log as X
+    row = A.possession_proof(seed, acct, at=at)
+    row["kind"] = kind
+    row["sig"] = base64.b64encode(R._sign_bytes(seed, X._bind_bytes(row))).decode("ascii")
+    return row
+
+
+@pytest.mark.parametrize("kind", ["exchange.reaction", "account.binding", "x"])
+def test_check_binding_requires_the_binding_kind(kind):
+    from arcaeon.prove import exchange_log as X
+    seed, _ = _key()
+    good = A.possession_proof(seed, "acct:bot1.owner-a@arcaeon.io", at=T0)
+    assert X.check_binding(good) is None
+    why = X.check_binding(_wrong_kind_proof(seed, "acct:bot1.owner-a@arcaeon.io", kind=kind))
+    assert why is not None and "kind" in why and X.BIND_KIND in why, why
+
+
+def test_issue_refuses_a_proof_of_another_kind(store, server):
+    seed, _ = _key()
+    acct = A.agent_account("bot1", OWNER)
+    with pytest.raises(A.AccountError) as e:
+        A.issue(store, SESSION, agent="bot1", proof=_wrong_kind_proof(seed, acct),
+                server_seed=server[0], at=T0)
+    assert e.value.status == 400 and "kind" in str(e.value)
+    assert store["accounts"] == {}
+
+
+def test_a_statement_wrapping_a_proof_of_another_kind_is_broken(store, server):
+    seed, did, acct, _ = _issue(store, server)
+    row = store["accounts"][acct]["rows"][0]
+    row["agent_proof"] = _wrong_kind_proof(seed, acct)
+    A._sign_row(row, server[0])                     # the server signs over it
+    rep = _verify(store, did, server, now=T0)
+    assert rep["verdict"] == V.BROKEN and "kind" in rep["reason"], rep

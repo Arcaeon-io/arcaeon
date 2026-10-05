@@ -30,8 +30,10 @@ proof names the account, and the account names the owner.
 
 **On the agent's side.** The agent generates its own Ed25519 seed and sends
 only a possession proof: an `exchange.binding` row (docs/EXCHANGE.md) that
-its key signs, naming its own agent account. The server checks that proof and
-signs a binding row over it. The server never sees or holds an agent private
+its key signs, naming its own agent account. The server checks that proof
+(its `kind` must be `exchange.binding`: a row of any other kind, even one
+whose signature checks, is refused 400 at issue or rotate and reads BROKEN
+inside a binding statement) and signs a binding row over it. The server never sees or holds an agent private
 key, so a server breach cannot sign as an agent. (A "server generates and
 returns the key" convenience path is not offered; see the open questions.)
 

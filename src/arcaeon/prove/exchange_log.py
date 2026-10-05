@@ -313,8 +313,10 @@ def build_binding(*, seed: bytes, account: str, at: datetime | None = None) -> d
 
 
 def check_binding(row: Any) -> str | None:
-    """None when a binding row is well formed and signed by its `signer`; else why
-    it is BROKEN. (Whether the signer owns the log is the reader's check.)"""
+    """None when a binding row is well formed (kind exchange.binding, v 1) and
+    signed by its `signer`; else why it is BROKEN. A row of another kind is
+    BROKEN here, before any signature work. (Whether the signer owns the log is
+    the reader's check.)"""
     if not isinstance(row, dict):
         return "not a JSON object"
     keys = set(row)
@@ -324,6 +326,8 @@ def check_binding(row: Any) -> str | None:
     extra = sorted(keys - set(BIND_SIGNED) - set(UNSIGNED_FIELDS))
     if extra:
         return f"binding row has fields outside the signature: {', '.join(extra)}"
+    if row["kind"] != BIND_KIND:        # R12: a row of any other kind is not a binding
+        return f"binding row kind is not {BIND_KIND}"
     if row["v"] != ROW_VERSION or isinstance(row["v"], bool):
         return f"unknown binding row version {row['v']!r}"
     if not is_account_id(row["account"]):
