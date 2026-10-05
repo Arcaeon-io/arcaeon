@@ -125,6 +125,7 @@ def test_the_house_env_inherits_nothing(tmp_path, monkeypatch):
     for name in ("HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME"):
         assert env[name] == str(house.home)
     assert house.home_files() == []
+    assert env["ARCAEON_NO_CHECKIN"] == "1"          # no version check-in from the house
     run = rc.Run(cli=["x"], house=house, fixture=house.work / "f", witness_url="http://127.0.0.1:9",
                  key=None, stubbed=True, stub=None, extra_env={"ARCAEON_KEY": "planted"})
     seen = {}

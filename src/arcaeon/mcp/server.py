@@ -515,23 +515,38 @@ def _server_class():
             "arcaeon needs the MCP Python SDK: pip install 'mcp>=1.0'") from e
 
 
+_BASE_INSTRUCTIONS = (
+    "Arcaeon's toolbox on one connector. ledger_* keeps a tamper-evident, "
+    "hash-chained record of what an agent did and judges another agent's "
+    "exported log. vet_* statically checks MCP-server source before you "
+    "connect to it. witness_* pins your ledger head with a party you "
+    "cannot advance (the only thing that catches truncation) and is the "
+    "one paid lane — it needs ARCAEON_KEY; everything else is free and "
+    "needs nothing. Call arcaeon_status for versions and the free/paid "
+    "split. None of these tools claim your records are TRUE: they prove "
+    "a record was not altered, which is a different and smaller thing."
+)
+
+
+def _instructions() -> str:
+    """The server instructions, plus the one check-in line for a person when
+    the cached, verified answer says this version is behind (arcaeon.checkin).
+    Read from the cache only; nothing is fetched here."""
+    try:
+        from arcaeon import checkin
+        line = checkin.human_line()
+    except Exception:  # noqa: BLE001
+        line = None
+    return _BASE_INSTRUCTIONS + (" " + line if line else "")
+
+
 def build_server():
     """Build the server. Separated from serve() so tests drive it with the
     SDK's in-process client instead of spawning a subprocess."""
     mcp = _server_class()(
         name=SERVER_NAME,
         version=__version__,
-        instructions=(
-            "Arcaeon's toolbox on one connector. ledger_* keeps a tamper-evident, "
-            "hash-chained record of what an agent did and judges another agent's "
-            "exported log. vet_* statically checks MCP-server source before you "
-            "connect to it. witness_* pins your ledger head with a party you "
-            "cannot advance (the only thing that catches truncation) and is the "
-            "one paid lane — it needs ARCAEON_KEY; everything else is free and "
-            "needs nothing. Call arcaeon_status for versions and the free/paid "
-            "split. None of these tools claim your records are TRUE: they prove "
-            "a record was not altered, which is a different and smaller thing."
-        ),
+        instructions=_instructions(),
     )
 
     # --- ledger, re-exported whole ---------------------------------------
@@ -854,6 +869,7 @@ def _status_payload() -> dict:
         "ns_dir": str(ns_dir()),
         "call_record_path": str(call_record_path()),
         "price_list": CATALOG_URL,
+        "checkin": _checkin_block(),
         "notes": [
             "Everything except witness_* is free forever and needs no key; "
             "the witness LIBRARY is self-hostable free too, the paid part is "
@@ -872,10 +888,41 @@ def _status_payload() -> dict:
     }
 
 
+def _checkin_block() -> dict:
+    """The version check-in's full detail for an agent (arcaeon.checkin.block):
+    installed, latest, minimum_supported, block_after, notice, upgrade_command,
+    signature (VERIFIED / BROKEN / COULD NOT LOOK / unsigned), source,
+    fetched_at, line, ignored_because. Read from the cache; never fetches."""
+    try:
+        from arcaeon import checkin
+        if not checkin.enabled():
+            return {"off": True, "why": f"{checkin.OFF_ENV} is set"}
+        b = checkin.block()
+    except Exception:  # noqa: BLE001
+        b = None
+    if b is None:
+        return {"off": False, "why": "no answer cached yet (one fetch a day at most)"}
+    return b
+
+
+def _checkin_in_background() -> None:
+    """At server start: the once-a-day fetch, on a daemon thread so the stdio
+    loop never waits on the network. Silent; never raises."""
+    try:
+        import threading
+        from arcaeon import checkin
+        if checkin.enabled():
+            threading.Thread(target=checkin.maybe_fetch, name="arcaeon-checkin",
+                             daemon=True).start()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def serve() -> None:
     """Run over stdio. Local pipe only — the tools read caller-named paths, so
     do not put this behind a network transport without auth in front (which is
     what vet_scan's own zero-auth check would tell you)."""
+    _checkin_in_background()
     build_server().run(transport="stdio")
 
 

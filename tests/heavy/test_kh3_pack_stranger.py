@@ -182,7 +182,7 @@ def _stranger_env(house: Path, venv: Path) -> dict:
            "XDG_CACHE_HOME": str(home), "TEMP": str(tmp), "TMP": str(tmp), "TMPDIR": str(tmp),
            "ARCAEON_HOME": str(house / "arcaeon-home"), "PIP_NO_INDEX": "1",
            "PIP_DISABLE_PIP_VERSION_CHECK": "1", "PYTHONIOENCODING": "utf-8",
-           "PYTHONNOUSERSITE": "1"}
+           "PYTHONNOUSERSITE": "1", "ARCAEON_NO_CHECKIN": "1"}
     if os.name == "nt":
         sysroot = os.environ.get("SYSTEMROOT", r"C:\Windows")
         env.update({"SYSTEMROOT": sysroot, "WINDIR": sysroot, "PATHEXT": ".COM;.EXE;.BAT;.CMD",
