@@ -98,6 +98,7 @@ reads neither.
 
 | field | what it is | required |
 |---|---|---|
+| `version` | the predicate version, a JSON integer: 1, or 2 when `checks` is present (table below) | yes, written by `seal` |
 | `label` | what the file is, in the sealer's words (`--label`) | yes |
 | `sealed_by.name` | who sealed it, in the sealer's words (`--by`); a claim, not checked | no |
 | `sealed_by.key` | the did:key that signed; must be the signature's key | set when signed |
@@ -145,9 +146,31 @@ names the file and the line or item of each row it refused, and drops none):
 
 Without `--checks` there is no `checks` key, and the envelope is
 byte-identical to one sealed before `checks[]` existed; such envelopes verify
-exactly as before. A verifier that predates `checks[]` ignores the key (the
-predicate version is still 1), so it neither reads a carried BROKEN nor is
-misled by one.
+exactly as before.
+
+### Predicate versions
+
+| `version` | written by | `checks` key | `verify` reads it as |
+|---|---|---|---|
+| 1 | `seal` without `--checks` | absent | the rules on this page |
+| 1 | nothing `seal` writes | present (any value, even `[]`) | BROKEN |
+| 2 | `seal --checks` | present, the carried rows | the rules on this page, plus `sealed.checks` |
+| 2 | nothing `seal` writes | absent | the rules on this page (no rows to carry) |
+| anything else | not this verifier | either | COULD NOT LOOK |
+
+An envelope that carries rows says so in its version: `seal --checks` writes
+version 2, and `seal` without rows writes version 1, as it always has. This
+verifier reads versions 1 and 2, each a JSON integer. Any other version (3,
+the string `"2"`, `true`, `2.0`, or no version at all) is a predicate it does
+not know, so `verify` answers COULD NOT LOOK and names the version it found
+(`unreadable`; `missing` when there is none): it reads neither that
+predicate's binding nor any rows it carries, rather than act as if carried
+rows were not there. A version 1 predicate that holds a `checks` key is
+BROKEN: the sealer signed a statement that contradicts its own version, and
+no reader can say whether the rows were meant to count. A verifier that
+predates version 2 refuses a version 2 envelope (it reads any version but 1
+as BROKEN), so no reader treats carried rows as absent. The gate follows the
+envelope's word: COULD NOT LOOK allows only `read`, BROKEN allows nothing.
 
 `verify` does not judge carried rows: its word is about the bytes, the
 signature and the binding. It shows them under `sealed.checks` and adds a
@@ -250,6 +273,7 @@ carries the same report under `report`.
 - a key sits outside the signed payload;
 - the Statement has no subject digest, no label, or no complete binding (an
   unbound envelope is refused);
+- the predicate is version 1 and holds a `checks` key (Predicate versions);
 - `not_after` has passed (expired), or is not a time with a zone;
 - `--audience`, `--deal` or `--purpose` was given and the envelope was sealed
   for another;
@@ -269,6 +293,9 @@ the answer could be checked):
   DSSE envelope with an in-toto payload (`unreadable`). Never a traceback;
 - a duplicate key inside the payload, or a payload that is not an in-toto
   Statement of this `predicateType` (`unreadable`);
+- the predicate version is not one this verifier reads (1 or 2): another
+  number, a string, a bool, a float (`unreadable`), or no version
+  (`missing`); the reason names the version found;
 - the file itself is not there or cannot be read;
 - the envelope is unsigned (`missing`);
 - it is signed, but you named no `--signer` (`bounded`): a valid signature
