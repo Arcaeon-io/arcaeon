@@ -182,6 +182,70 @@ LOOK. A gzip body that is truncated, has trailing bytes or inflates past 32 MiB
 is one COULD NOT LOOK row. Decision logs are unsigned: every row is reported by
 the sender. `recheck` says COULD NOT LOOK for these rows; re-run `ingest`.
 
+## Reported by sender (generic)
+
+For a checker that has no adapter of its own, `arcaeon.connector.reported.ingest(body)`
+reads a small row the sender writes, one JSON object or a JSON array of them (at
+most 1000; past that, one COULD NOT LOOK row says the rest were not read):
+
+```json
+{
+  "vendor": "acme-scan",
+  "verdict": "pass",
+  "input_sha256": "<64 hex characters>",
+  "input_b64": "<the judged bytes, standard base64>",
+  "vendor_request_id": "req-0001",
+  "at": "2026-10-05T10:00:00Z",
+  "detail": "no findings"
+}
+```
+
+| key | required | what is done with it |
+|---|---|---|
+| `vendor` | yes | free text, 1 to 64 characters after trimming; kept in `reported.vendor`. Never used to choose code: a row naming `opa` is still a generic row, read by this table. |
+| `verdict` | yes | the checker's word, kept verbatim in `vendor_word`, mapped below |
+| `input_sha256` | one of these two | 64 hex characters, the SHA-256 of the bytes the checker judged |
+| `input_b64` | one of these two | the judged bytes; we compute their SHA-256 ourselves |
+| `vendor_request_id` | no | the checker's own id; written to `vendor_id` |
+| `at` | no | when the sender says the check ran; kept in `at`, not checked |
+| `detail` | no | a short note, cut to 256 characters |
+
+Any other key, including `signed_by_vendor`, `standing`, `signature` and
+`attestation`, is not read; its name is listed in `reported.ignored_keys`.
+
+The word, after trimming and casefolding:
+
+| sender's word | relayed_verdict |
+|---|---|
+| `verified`, `pass`, `passed` | VERIFIED |
+| `broken`, `fail`, `failed` | BROKEN |
+| `could not look`, `could_not_look` | COULD NOT LOOK |
+| anything else (`ok`, `true`, `allow`, ...), or not a string | COULD NOT LOOK |
+
+`true` and `allow` are left out on purpose: a boolean or a policy word says
+nothing about which way is a pass (see OPA above). When both `input_b64` and
+`input_sha256` are given and they differ, the row is BROKEN whatever the word,
+with `reported.reason` "claimed digest does not match the bytes", and
+`input_sha256` is the digest of the bytes. A row with no input, a vendor name
+that is missing or too long, or a digest or base64 that does not read is
+COULD NOT LOOK. A body that is empty, not UTF-8 JSON, carries a duplicate key,
+nests too deep or is over 8 MiB is one COULD NOT LOOK row; `ingest` never raises.
+
+Every row carries `signed_by_vendor: false` and `standing: "reported_by_sender"`,
+written by one final step over every row; `ingest` takes no argument that can
+change them, and a row claiming a signature changes nothing. `rollup(rows)` is
+never VERIFIED: BROKEN when any row is a relayed BROKEN, else COULD NOT LOOK. A
+relayed BROKEN never becomes VERIFIED. These rows are unsigned, so the gate's
+non-party check rule never counts them.
+
+### What this cannot prove
+
+This proves only that the sender said it, when, about which bytes: the sender
+named a checker, gave its word, and pinned the input by digest at the time we
+received the row. It does not prove the checker exists, that it ran, that it
+said that word, or that the sender did not write the row alone. A VERIFIED here
+is the sender's report, never a check of ours.
+
 ## The sha256:jcs:v1 digest
 
 This is the one place the scheme is defined. `arcaeon.connector.core.jcs_digest`

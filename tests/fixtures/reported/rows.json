@@ -1,0 +1,8 @@
+[
+  {"vendor": "acme-scan", "verdict": "VERIFIED", "input_sha256": "b436d12b75064780d55b2407edaca0e04422496b269b5b028cd9834651afc119", "vendor_request_id": "req-0001", "at": "2026-10-05T10:00:00Z", "detail": "no findings"},
+  {"vendor": "acme-scan", "verdict": "fail", "input_b64": "c3ludGhldGljIGlucHV0IGJ5dGVzIGZvciB0aGUgcmVwb3J0ZWQgYWRhcHRlcgo="},
+  {"vendor": "acme-scan", "verdict": "pass", "input_b64": "c3ludGhldGljIGlucHV0IGJ5dGVzIGZvciB0aGUgcmVwb3J0ZWQgYWRhcHRlcgo=", "input_sha256": "79f305122dfdff8e2aa8803df8315b656bd51bbd58a11d01ae7189243909d8ef"},
+  {"vendor": "acme-scan", "verdict": "pass", "input_b64": "c3ludGhldGljIGlucHV0IGJ5dGVzIGZvciB0aGUgcmVwb3J0ZWQgYWRhcHRlcgo=", "input_sha256": "b436d12b75064780d55b2407edaca0e04422496b269b5b028cd9834651afc119"},
+  {"vendor": "acme-scan", "verdict": "looks fine", "input_sha256": "b436d12b75064780d55b2407edaca0e04422496b269b5b028cd9834651afc119"},
+  {"vendor": "acme-scan", "verdict": "COULD NOT LOOK", "input_sha256": "b436d12b75064780d55b2407edaca0e04422496b269b5b028cd9834651afc119"}
+]

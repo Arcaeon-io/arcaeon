@@ -1,0 +1,8 @@
+{
+  "vendor": "acme-scan",
+  "verdict": "VERIFIED",
+  "input_sha256": "b436d12b75064780d55b2407edaca0e04422496b269b5b028cd9834651afc119",
+  "vendor_request_id": "req-0001",
+  "at": "2026-10-05T10:00:00Z",
+  "detail": "no findings"
+}
