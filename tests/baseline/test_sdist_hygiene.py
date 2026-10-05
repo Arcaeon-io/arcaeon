@@ -22,6 +22,7 @@ over-includes, failing quiet: the 0.1.7 build silently dropped probes/, which
 sets ship as package data (arcaeon/prove/baseline/probes/), so a wheel install
 gets them too, which the old wheel never did.
 """
+import os
 import subprocess
 import sys
 import tarfile
@@ -47,9 +48,27 @@ def _file_allowed(name: str) -> bool:
     return name in ALLOWED_TOP_LEVEL_FILES
 
 
+def _no_isolation() -> list[str]:
+    """--no-isolation when the setuptools pyproject.toml asks for (>=77) is
+    already here: offline, and no pip runs at all."""
+    try:
+        import setuptools
+        if int(setuptools.__version__.split(".")[0]) >= 77:
+            return ["--no-isolation"]
+    except Exception:
+        pass
+    return []
+
+
 def _build_sdist(dest: Path) -> Path:
-    subprocess.run([sys.executable, "-m", "build", "--sdist", "--outdir", str(dest)],
-                   cwd=ROOT, check=True, capture_output=True)
+    # cwd and pip's cache both live under dest, never the repo: with the
+    # autouse fake home (USERPROFILE in tmp) pip's Windows cache dir resolves
+    # to the relative "pip/cache", which under cwd=ROOT left ROOT/pip/cache.
+    cache = dest / "pip-cache"
+    env = dict(os.environ, PIP_CACHE_DIR=str(cache), PIP_DISABLE_PIP_VERSION_CHECK="1")
+    subprocess.run([sys.executable, "-m", "build", "--sdist", *_no_isolation(),
+                    "--outdir", str(dest), str(ROOT)],
+                   cwd=dest, env=env, check=True, capture_output=True)
     tars = list(dest.glob("*.tar.gz"))
     assert tars, "no sdist produced"
     return max(tars, key=lambda p: p.stat().st_mtime)
@@ -100,6 +119,40 @@ def test_top_level_allowlist_is_exhaustive():
             f"sdist top level has entries not on the allowlist: {sorted(set(unexpected))} "
             f"(allowed dirs: {sorted(ALLOWED_TOP_LEVEL_DIRS)}, "
             f"allowed files: {sorted(ALLOWED_TOP_LEVEL_FILES)})")
+
+
+def test_sdist_build_keeps_pip_cache_out_of_the_repo(monkeypatch):
+    """2026-10-05: an untracked pip/cache/ (http-v2, a setuptools download)
+    appeared at the repo root after every suite run and blocked
+    `git worktree remove`. The source was _build_sdist: an isolated
+    `py -m build` runs pip with cwd=ROOT, and the autouse fake-home fixture
+    points USERPROFILE at a temp dir, which makes pip's Windows cache dir
+    resolve to the RELATIVE path pip/cache, i.e. ROOT/pip/cache. Offline
+    check: capture the build call, then ask pip itself (`pip cache dir`,
+    under the same env and cwd) where it would write. Neither the cwd nor
+    the cache may be inside the repo."""
+    calls, real_run = [], subprocess.run
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: calls.append((cmd, kw)))
+    with tempfile.TemporaryDirectory() as td:
+        try:
+            _build_sdist(Path(td))
+        except AssertionError:
+            pass                                   # no sdist: the fake run built nothing
+        assert len(calls) == 1, calls
+        cmd, kw = calls[0]
+        # not monkeypatch.undo(): that would also drop the autouse fake home,
+        # which is the very condition that sends pip's cache to a relative path
+        cwd = Path(kw.get("cwd") or Path.cwd()).resolve()
+        env = kw.get("env")
+        probe = real_run([sys.executable, "-m", "pip", "cache", "dir"], cwd=cwd,
+                               env=env, capture_output=True, text=True, timeout=120)
+        out = (probe.stdout or "").strip()
+        no_cache = (env or {}).get("PIP_NO_CACHE_DIR", "").lower() in ("1", "true", "yes", "on")
+        cache = None if no_cache or not out else (cwd / out).resolve()
+        assert cache is None or ROOT not in (cache, *cache.parents), (
+            f"pip would cache into the repo: {cache} (cwd {cwd})")
+        assert ROOT not in (cwd, *cwd.parents), f"the build runs inside the repo: cwd {cwd}"
+        assert str(ROOT) in [str(c) for c in cmd], f"the build must name ROOT as srcdir: {cmd}"
 
 
 def test_ships_documented_probe_sets():
