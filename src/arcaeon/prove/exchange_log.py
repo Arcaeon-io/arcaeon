@@ -313,8 +313,10 @@ def build_binding(*, seed: bytes, account: str, at: datetime | None = None) -> d
 
 
 def check_binding(row: Any) -> str | None:
-    """None when a binding row is well formed and signed by its `signer`; else why
-    it is BROKEN. (Whether the signer owns the log is the reader's check.)"""
+    """None when a binding row is well formed (kind exchange.binding, v 1) and
+    signed by its `signer`; else why it is BROKEN. A row of another kind is
+    BROKEN here, before any signature work. (Whether the signer owns the log is
+    the reader's check.)"""
     if not isinstance(row, dict):
         return "not a JSON object"
     keys = set(row)
@@ -324,6 +326,8 @@ def check_binding(row: Any) -> str | None:
     extra = sorted(keys - set(BIND_SIGNED) - set(UNSIGNED_FIELDS))
     if extra:
         return f"binding row has fields outside the signature: {', '.join(extra)}"
+    if row["kind"] != BIND_KIND:        # R12: a row of any other kind is not a binding
+        return f"binding row kind is not {BIND_KIND}"
     if row["v"] != ROW_VERSION or isinstance(row["v"], bool):
         return f"unknown binding row version {row['v']!r}"
     if not is_account_id(row["account"]):
@@ -805,8 +809,9 @@ counterparty, and which key it binds is COULD NOT LOOK here. The binding is
 the key holder's claim; arcaeon.io's own record is not consulted unless pair
 gets --accounts FILE (an account store or binding statements) and
 --account-key DID (the binding key you trust; repeatable): then each binding
-is held to the account service at the row's time. Confirmed pairs; revoked
-or another owner is BROKEN; no record is COULD NOT LOOK (both unpaired).
+is held to the account service at the row's time and at the newest reaction
+row the key signed. Confirmed pairs; revoked or rotated out by either time, or
+another owner, is BROKEN; no record is COULD NOT LOOK (both unpaired).
 
 Exit codes: react 0 written, 2 refused or bad usage, 3 the file is not there.
 bind 0 written, 2 refused or bad usage.

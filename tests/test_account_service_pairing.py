@@ -4,7 +4,8 @@
 `exchange bind` writes the key holder's own claim; with an account service
 given (`accounts=` / `--accounts FILE` plus the server key it trusts), the
 tally and `exchange pair` ask the L3-01 stub whether that key held that
-account at the binding row's time. Without one, nothing changes.
+account at the binding row's time and at its newest reaction row (R2). Without
+one, nothing changes.
 
 Every key here is a throwaway seed made in the test; no network."""
 from __future__ import annotations
@@ -159,14 +160,68 @@ def test_revoked_before_the_row_is_broken(w):
     assert p["counts"]["mismatch"] == 1
 
 
-def test_revoked_after_the_row_stays_verified_with_the_revocation_shown(w):
+def test_revoked_after_the_newest_reaction_stays_verified_with_the_revocation_shown(w):
     _issue(w, w["a"], NOW - timedelta(days=5))
-    A.revoke(w["store"], SESSION, ACCT, server_seed=w["srv"].seed, at=NOW - timedelta(days=2))
+    A.revoke(w["store"], SESSION, ACCT, server_seed=w["srv"].seed, at=NOW - timedelta(hours=12))
     _exchange(w)
     r = _tally(w, accounts=w["store"])
     b = r["bindings"][0]
     assert b["applied"] is True and b["account_service"]["verdict"] == V.VERIFIED
     assert "revoked later" in b["account_service"]["reason"]
+    assert b["account_service"]["at"] == "2026-10-01T12:00:00Z"
+    assert b["account_service"]["through"] == "2026-10-03T12:00:00Z"
+    assert _pair(w, accounts=w["store"])["counts"]["clean"] == 1
+
+
+# --- R2: the key's own reaction rows are held to the service too (the stolen key) ---
+
+def test_reaction_after_the_revoke_unpairs_and_names_the_reaction(w):
+    """Issue, bind, revoke, then the key reacts AFTER the revoke: the binding
+    row alone checks, the reaction does not; the pairing is dropped, BROKEN."""
+    _issue(w, w["a"], NOW - timedelta(days=5))
+    A.revoke(w["store"], SESSION, ACCT, server_seed=w["srv"].seed, at=NOW - timedelta(days=2))
+    _exchange(w)
+    r = _tally(w, accounts=w["store"])
+    assert r["verdict"] == V.BROKEN
+    (b,) = r["bindings"]
+    svc = b["account_service"]
+    assert b["applied"] is False and svc["verdict"] == V.BROKEN
+    assert b["finding"].startswith(f"{V.BROKEN}: account service: ")
+    assert "reaction row" in svc["reason"] and "ex-1" in svc["reason"]
+    assert "2026-10-03T12:00:00Z" in svc["reason"] and "revoked" in svc["reason"]
+    assert svc["at"] == "2026-10-03T12:00:00Z"
+    assert _ib(r, w["b"].did)["said_unpaired"]["total"] == 1
+    p = _pair(w, accounts=w["store"])
+    assert p["verdict"] == V.BROKEN and "reaction row" in p["reason"]
+    assert p["counts"]["mismatch"] == 1
+    note = _cp_note(p)
+    assert f"account service {V.BROKEN}: " in note and "reaction row" in note, note
+
+
+def test_reaction_after_a_rotation_unpairs_the_old_key(w):
+    _issue(w, w["a"], NOW - timedelta(days=5))
+    new = Party(w["tmp"], "c")
+    A.rotate(w["store"], SESSION, ACCT, proof=A.possession_proof(new.seed, ACCT,
+                                                                 at=NOW - timedelta(days=2)),
+             server_seed=w["srv"].seed, at=NOW - timedelta(days=2))
+    _exchange(w)
+    b = _tally(w, accounts=w["store"])["bindings"][0]
+    assert b["applied"] is False and b["account_service"]["verdict"] == V.BROKEN
+    assert "rotated out" in b["account_service"]["reason"]
+    assert "reaction row" in b["account_service"]["reason"]
+
+
+def test_consult_binding_takes_the_reaction_rows(w):
+    _issue(w, w["a"], NOW - timedelta(days=5))
+    A.revoke(w["store"], SESSION, ACCT, server_seed=w["srv"].seed, at=NOW - timedelta(days=2))
+    _exchange(w)
+    svc, _ = A.load_service(w["store"], [w["srv"].did])
+    binds = A.log_binding_rows(w["a"].log, w["a"].did)[ACCT]
+    reacts = A.log_reaction_rows(w["a"].log, w["a"].did)
+    assert [x["exchange_id"] for x in reacts] == ["ex-1"]
+    assert A.consult_binding(svc, w["a"].did, ACCT, binds)["verdict"] == V.VERIFIED
+    res = A.consult_binding(svc, w["a"].did, ACCT, binds, reacts)
+    assert res["verdict"] == V.BROKEN and res["at"] == "2026-10-03T12:00:00Z"
 
 
 def test_key_bound_under_a_different_owner_is_broken(w):
@@ -467,3 +522,62 @@ def test_without_service_the_exchange_notes_are_unchanged(w):
     assert f"log a holds no signed binding row for {ACCT}: which key it binds is not " \
            f"checked here ({V.COULD_NOT_LOOK})" in _cp_note(p)
     assert p["account_service"] == A.service_report(None)
+
+
+# --- R3: two agents of one owner trading are self-trades (TE-44a) ---------------------
+
+ACCT2 = "acct:bot2.owner-a@arcaeon.io"
+
+
+def _sibling_trade(w, owner_b=OWNER):
+    """owner-a's bot1 (key a) and bot2 (key b) bind and react to each other."""
+    a, b = w["a"], w["b"]
+    _issue(w, a, NOW - timedelta(days=5))
+    _issue(w, b, NOW - timedelta(days=5), owner=owner_b, agent="bot2")
+    acct_b = A.agent_account("bot2", owner_b)
+    X.bind(a.log, key_file=a.key, account=ACCT, at=NOW - timedelta(days=3))
+    X.bind(b.log, key_file=b.key, account=acct_b, at=NOW - timedelta(days=3))
+    X.react(a.log, key_file=a.key, exchange_id="ex-1", counterparty=acct_b, file=w["file"],
+            reaction=V.VERIFIED, at=NOW - timedelta(days=1))
+    X.react(b.log, key_file=b.key, exchange_id="ex-1", counterparty=ACCT, file=w["file"],
+            reaction=V.VERIFIED, at=NOW - timedelta(days=1))
+
+
+def test_consult_carries_the_owner(w):
+    _issue(w, w["a"], NOW - timedelta(days=5))
+    _exchange(w)
+    svc, _ = A.load_service(w["store"], [w["srv"].did])
+    res = A.consult_pairings(svc, [(ACCT, w["a"].did, [w["a"].log])])
+    assert res[0]["verdict"] == V.VERIFIED and res[0]["owner"] == OWNER
+
+
+def test_two_agents_of_one_owner_trading_are_self_trades(w):
+    _sibling_trade(w)
+    r = _tally(w, accounts=w["store"])
+    assert r["verdict"] == V.VERIFIED, r["reason"]
+    assert all(b["applied"] for b in r["bindings"])
+    for k in (w["a"].did, w["b"].did):
+        win = _ib(r, k)
+        assert win["excluded"] == 2, win          # said and received, as for any self-trade
+        assert win["paired"]["clean"] == 0 and win["exchanges"] == 0, win
+    ex = [i for i in r["ids"] if i["id"] == w["a"].did][0]["excluded"]
+    assert ex and all(OWNER in e["reason"] and "self-trade" in e["reason"] for e in ex), ex
+    assert "account service" in ex[0]["reason"]
+    assert any("agent accounts of one owner" in x for x in r["limits"])
+
+
+def test_agents_of_two_owners_still_count(w):
+    _sibling_trade(w, owner_b=OTHER)
+    r = _tally(w, accounts=w["store"])
+    assert _ib(r, w["a"].did)["excluded"] == 0
+    assert _ib(r, w["a"].did)["paired"]["clean"] == 1
+
+
+def test_sibling_trade_without_accounts_is_unchanged(w):
+    """No --accounts: the owner is never read; the tally is what it was."""
+    _sibling_trade(w)
+    r = T.build([w["a"].log, w["b"].log], now=NOW)
+    assert _ib(r, w["a"].did)["excluded"] == 0
+    assert _ib(r, w["a"].did)["paired"]["clean"] == 1
+    assert "account_service" not in r
+    assert not any("agent accounts of one owner" in x for x in r["limits"])

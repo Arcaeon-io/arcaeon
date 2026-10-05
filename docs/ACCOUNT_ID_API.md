@@ -30,8 +30,10 @@ proof names the account, and the account names the owner.
 
 **On the agent's side.** The agent generates its own Ed25519 seed and sends
 only a possession proof: an `exchange.binding` row (docs/EXCHANGE.md) that
-its key signs, naming its own agent account. The server checks that proof and
-signs a binding row over it. The server never sees or holds an agent private
+its key signs, naming its own agent account. The server checks that proof
+(its `kind` must be `exchange.binding`: a row of any other kind, even one
+whose signature checks, is refused 400 at issue or rotate and reads BROKEN
+inside a binding statement) and signs a binding row over it. The server never sees or holds an agent private
 key, so a server breach cannot sign as an agent. (A "server generates and
 returns the key" convenience path is not offered; see the open questions.)
 
@@ -246,12 +248,29 @@ revocation shown beside them. A rotation retires the old key the same way.
 in the stub's own shape or `{"statements": [...]}` of public binding
 statements; the trusted binding key comes only from `--account-key`. Each
 `exchange.binding` row that pairs an account id is checked with
-`consult_binding(service, did, account, rows)`, which calls
-`verify_binding` at the row's `at` and then requires the statement's
-account to be the one the row claims: VERIFIED stands, BROKEN (revoked or
-rotated out by then, another owner, another account, a forged or untrusted
-service row) and COULD NOT LOOK (no record, no trusted key) drop the
-pairing. A row that is the agent's possession proof wrapped by an issue or
+`consult_binding(service, did, account, rows, reactions)`, which calls
+`verify_binding` at each binding row's `at` and then requires the
+statement's account to be the one the row claims; it then calls
+`verify_binding` once more at the newest `exchange.reaction` row the key
+signed in the logs read (`log_reaction_rows`; only rows whose signature
+checks). VERIFIED stands, BROKEN (revoked or rotated out by a binding row's
+time or by the newest reaction row's time, another owner, another account,
+a forged or untrusted service row) and COULD NOT LOOK (no record, no trusted
+key) drop the pairing. A key that reacts at or after its `retired_at` drops
+the whole pairing, and the reason names that reaction row's time and
+exchange id ("the reaction row the key signed at T (exchange E) is not
+confirmed: the key was revoked at R ..."); the result's `at` is that time.
+
+**What "the pairing stands" covers.** The key held the account, under the
+owner the row claims, at every binding row's time and at the newest reaction
+row it signed; a key is bound once, so it held the account at every time in
+between. The answer's `through` is the latest of those times. A reaction row
+dated before the earliest binding row is not held to the service on its own.
+`at` is the key holder's clock (signed, not witnessed): a key that backdates
+its reaction rows to before the revocation is not caught here; pin chain
+heads outside the key holder's control for that.
+
+A row that is the agent's possession proof wrapped by an issue or
 rotate row is read at that row's time (the proof is signed minutes before
 the issue). Without `--accounts`, nothing changes and the pair report says
 "account service not consulted". Tables: docs/EXCHANGE.md, docs/TALLY.md.
@@ -272,9 +291,19 @@ before relying on a pairing near or after a key's possible revocation.
 - **Keys per owner.** At most `MAX_AGENTS_PER_OWNER` agent accounts per owner
   (100 in the stub; a placeholder, not a decision). Revoked accounts count,
   so churning accounts does not reset the cap. One active key per account.
-- **Control cluster.** `control_cluster()` returns the owner account. It is
-  the minimum cluster: the tally counts trades between two agents of one
-  owner as self-trades (TE-44a). R11 says a cluster should also merge shared
+- **Control cluster.** `control_cluster()` returns the owner account, and
+  `consult_binding` carries the same owner (`owner`, from the verified
+  statement) on a VERIFIED answer. It is the minimum cluster: `tally build
+  --accounts FILE --account-key DID` folds the keys whose bindings the
+  account service confirms under one owner into one group, so a trade
+  between two of them is a self-trade (TE-44a): left out of every count and
+  listed in `excluded` with the reason "self-trade: both keys are agents of
+  one owner, OWNER (account service)". It needs both keys' bindings to stand:
+  a key with no binding row, or one the service does not confirm, has no
+  owner here and its trades still count. Without `--accounts` the tally
+  does not know owners and two agents of one owner look like two parties.
+  `exchange pair` reads two logs and does not count, so it does not apply
+  the cluster. R11 says a cluster should also merge shared
   funding, shared billing and shared register entries; that wider merge needs
   billing data this stub does not have, and the tally should print the
   cluster-adjusted counts beside the raw ones, not silently.

@@ -100,12 +100,13 @@ repeats) reads FILE as an account store or a list of binding statements
 (docs/ACCOUNT_ID_API.md) and trusts only the binding key(s) named on the
 command line, never a key named in the file. Each account a log binds is
 held to it at the binding row's `at` (a row the service wraps as the
-agent's possession proof is read at the issue time):
+agent's possession proof is read at the issue time) and at the `at` of the
+newest reaction row that key signed in its log (one whose signature checks):
 
 | account service says | word | the pairing |
 |---|---|---|
-| the key held that account under that owner at the row's time | VERIFIED | stands |
-| revoked or rotated out at or before the row's time; bound to another owner or another account; a service row whose signature fails or is by a key you did not name | BROKEN (the pair reads BROKEN, the reason named) | dropped |
+| the key held that account under that owner at the binding row's time and at its newest reaction row's time | VERIFIED | stands |
+| revoked or rotated out at or before the binding row's time or the newest reaction row's time; bound to another owner or another account; a service row whose signature fails or is by a key you did not name | BROKEN (the pair reads BROKEN, the reason named; a late reaction is named by its time and exchange id) | dropped |
 | no record for the key; no trusted key named; a key that is not an Ed25519 `did:key` (length checked before any decode) | COULD NOT LOOK | dropped |
 
 A dropped pairing reads `mismatch` on counterparty, and its finding says the

@@ -993,7 +993,8 @@ disagreements, DISPUTED claims and account age. Every share is printed with
 its count ("9 of 10"). There is no score, no weight and no ranking: anything
 that counts more can be bought. BROKEN shows first; an ID under 10 exchanges
 or 14 days is unrated; self-trades (one key, one ID by a signed alias, one
-`--groups` group) are listed and not counted. `alias` prints an alias entry,
+`--groups` group, or with `--accounts` two agents of one owner) are listed
+and not counted. `alias` prints an alias entry,
 signed by both keys, that lets a new key inherit an old record; a fresh key
 with no alias is a new, unrated ID. `seal` appends the tally, paths replaced
 by file names, to a tally chain of its own as a `tally.snapshot` row that

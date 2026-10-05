@@ -107,8 +107,10 @@ past the threshold. Those pairs still show in `paired.missing`.
 ## Gaming rules
 
 **(a) Self-trades do not count.** A row is a self-trade when it names its own
-key as the counterparty, when both keys are one ID by a signed alias, or when
-both IDs are in one group of `--groups FILE`. It is left out of every count
+key as the counterparty, when both keys are one ID by a signed alias, when
+both IDs are in one group of `--groups FILE`, or, with `--accounts`, when both
+keys are bound (confirmed by the account service) to agent accounts of one
+owner (TE-44a, docs/ACCOUNT_ID_API.md). It is left out of every count
 and share, and listed in `excluded` with the reason, on both sides. The
 groups file is JSON, `{"groups": [{"name": "acme", "members": [DID, DID]}]}`
 (a bare list of DID lists also reads). It is declared by whoever hands it to
@@ -312,7 +314,8 @@ goes to stdout.
 - **Clean means unchanged and labeled, never true.** The tally counts what
   parties said, not whether any file was true.
 - **Self-trades are caught only when declared or shared.** Two keys run by one
-  owner who never says so look like two parties.
+  owner who never says so look like two parties, unless `--accounts` shows
+  both bound to agent accounts of that owner.
 - **A fresh key cannot be stopped,** only shown as new and unrated.
 - **`at` is the writer's clock,** signed, not witnessed. An owner can backdate
   rows to look older. Pin chain heads outside your control (`arcaeon pin`).
@@ -339,9 +342,11 @@ goes to stdout.
 - **Holding a binding to the account service (L3-02, opt-in).** `build
   --accounts FILE --account-key DID` (library: `accounts=`, `account_keys=`)
   holds each applied binding to the account service at the binding row's
-  time, as `arcaeon exchange pair` does (EXCHANGE.md, the same table).
-  Confirmed: the binding stays applied, with `account_service` VERIFIED on
-  its entry. BROKEN (revoked or rotated out by then, another owner or
+  time and at the newest reaction row the key signed, as `arcaeon exchange
+  pair` does (EXCHANGE.md, the same table; ACCOUNT_ID_API.md says what "the
+  pairing stands" covers). Confirmed: the binding stays applied, with
+  `account_service` VERIFIED on its entry and `through` the latest time held.
+  BROKEN (revoked or rotated out by either time, another owner or
   account, a service row that does not verify): not applied, the tally is
   BROKEN and the key carries the finding under `record_broken`. COULD NOT
   LOOK (no record, no trusted key): not applied, the row is `said_unpaired`,
