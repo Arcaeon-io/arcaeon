@@ -286,7 +286,7 @@ def test_replay_without_deal_is_could_not_look(tmp_path, action):
     d = G.decide(f, action=action, audience="instructor-1", signers=[did], purpose="preview")
     _assert_needs(d, action, NEED_DEAL)
     d = G.decide(f, action=action, audience="instructor-1", signers=[did])   # neither
-    _assert_needs(d, action, NEED_DEAL)
+    _assert_needs(d, action, NEED_BOTH)                          # A07: both named
     assert "No deal id was given" in d.reason
 
 
@@ -341,6 +341,24 @@ def test_act_without_deal_or_purpose_is_could_not_look(tmp_path, given):
     assert d.decision == "allow" and d.verdict == V.VERIFIED
 
 
+BOTH_LOOKED_FOR = "the deal and purpose this exchange is for (--deal and --purpose)"
+
+
+@pytest.mark.parametrize("action", ["act", "pay", "irreversible"])
+def test_every_missing_binding_in_one_reason_sentence(tmp_path, action):
+    """A07: with both deal and purpose missing, act, pay and irreversible give
+    the same one sentence naming both, deal first (pay used to name only deal)."""
+    f, did = _sealed_for(tmp_path)
+    d = G.decide(f, action=action, audience="instructor-1", signers=[did])
+    _assert_needs(d, action, NEED_BOTH)
+    assert d.reasons == [NEED_BOTH]
+    assert d.could_not_check["looked_for"] == BOTH_LOOKED_FOR
+    assert d.reason == (f"refuse {action}: {V.COULD_NOT_LOOK}: could not check "
+                        f"{BOTH_LOOKED_FOR} (missing): {NEED_BOTH}. Only read is allowed "
+                        f"until that can be checked. No deal id was given, so no "
+                        f"evidence pack was written.")
+
+
 def test_cli_act_without_deal_or_purpose_refuses_3(tmp_path, capsys):
     f, did = _sealed_for(tmp_path)
     assert _cli(f, did, "--action", "act") == 3
@@ -357,7 +375,7 @@ def test_cli_replay_without_deal_or_purpose_refuses_3(tmp_path, capsys, action):
     f, did = _sealed_for(tmp_path)
     assert _cli(f, did, "--action", action) == 3
     out = capsys.readouterr().out
-    assert out.startswith(f"refuse {action}: {V.COULD_NOT_LOOK}") and NEED_DEAL in out
+    assert out.startswith(f"refuse {action}: {V.COULD_NOT_LOOK}") and NEED_BOTH in out
     led = ("--ledger", str(tmp_path / "tape.jsonl"), "--record-dir", str(tmp_path / "rec"))
     assert _cli(f, did, "--action", action, "--deal", "d-1", "--json", *led) == 3
     j = json.loads(capsys.readouterr().out)

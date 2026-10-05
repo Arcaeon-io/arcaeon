@@ -682,7 +682,8 @@ is the only action an unbound check allows: `act`, `pay` and `irreversible`
 need `--deal` and `--purpose`, and without either the answer is COULD NOT
 LOOK, exit 3 ("pass --deal and --purpose so the envelope is held to this
 exchange" for `act`; "pass --deal ..." or "pass --purpose ..." for `pay` and
-`irreversible`), so an envelope sealed for one deal cannot be replayed into
+`irreversible`, and the one "pass --deal and --purpose ..." sentence when both
+are missing), so an envelope sealed for one deal cannot be replayed into
 another. On any
 refusal with `--deal` (BROKEN, or COULD NOT LOOK on `act`, `pay` or
 `irreversible`), it writes an evidence pack into the deal's record:

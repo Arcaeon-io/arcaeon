@@ -23,7 +23,8 @@ into allow or refuse:
 act, pay and irreversible need the exchange named: without `deal` (or without
 `purpose`) the verdict is COULD NOT LOOK before the table is read, with the
 reason "pass --deal so the envelope is held to this exchange" (or "pass
---purpose ...", and for act "pass --deal and --purpose ..."), so an envelope
+--purpose ...", and "pass --deal and --purpose ..." when both are missing, or
+for act when either is), one sentence naming every missing one, so an envelope
 sealed for one deal cannot be replayed into an act or a pay that names none. A
 BROKEN verdict stays BROKEN. read is the only action an unbound check allows.
 
@@ -648,10 +649,12 @@ def _unbound(action: str, deal, purpose) -> dict | None:
     """The could-not-look keys when `action` needs the exchange named and it
     is not: act, pay and irreversible need both `deal` and `purpose`, so an
     envelope sealed for one exchange cannot be replayed into another. read is
-    the only action an unbound check allows. None otherwise."""
+    the only action an unbound check allows. None otherwise. With both missing
+    the answer is one sentence naming both, deal first, for every action (A07);
+    act names both whenever either is missing."""
     if action not in NEEDS_EXCHANGE:
         return None
-    if action == "act" and not (deal and purpose):
+    if (action == "act" and not (deal and purpose)) or not (deal or purpose):
         return V.could_not_look("the deal and purpose this exchange is for "
                                 "(--deal and --purpose)", "the gate call", "missing", NEED_BOTH)
     if not deal:
