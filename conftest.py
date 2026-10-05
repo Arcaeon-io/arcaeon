@@ -21,6 +21,24 @@ _pp = os.environ.get("PYTHONPATH", "")
 if SRC not in _pp.split(os.pathsep):
     os.environ["PYTHONPATH"] = SRC + (os.pathsep + _pp if _pp else "")
 
+# 2b. The real user site-packages stays visible to subprocesses. The
+#     _temp_home fixture below swaps HOME/USERPROFILE for every test, and
+#     Python derives the user site from the home (POSIX: ~/.local; Windows
+#     when APPDATA is unset: ~\Python), so a spawned `python -m arcaeon mcp
+#     --help` lost packages installed with `pip install --user` (the MCP SDK)
+#     and tests/test_docs.py[mcp] failed under the temp home only. The user
+#     base is read here, before any swap, and pinned with PYTHONUSERBASE.
+#     Not PYTHONPATH: tools/sync_verbs_usage.py replaces PYTHONPATH for its
+#     child, and a PYTHONPATH entry would also leak user packages into venvs
+#     and past PYTHONNOUSERSITE=1, which PYTHONUSERBASE does not.
+import site as _site  # noqa: E402
+
+REAL_USER_BASE = _site.getuserbase() if _site.ENABLE_USER_SITE else None
+REAL_USER_SITE = _site.getusersitepackages() if _site.ENABLE_USER_SITE else None
+if (REAL_USER_SITE and os.path.isdir(REAL_USER_SITE)
+        and not os.environ.get("PYTHONUSERBASE")):
+    os.environ["PYTHONUSERBASE"] = REAL_USER_BASE
+
 OLD_NAMES = frozenset({
     "arcaeon_ledger", "arcaeon_adapter", "arcaeon_receipt", "arcaeon_once", "arcaeon_audit",
     "arcaeon_compact", "arcaeon_continuity", "arcaeon_baseline", "mcp_vet", "arcaeon_dedup",

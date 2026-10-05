@@ -61,6 +61,20 @@ def test_a_cli_run_with_no_arcaeon_home_lands_in_tmp_not_the_real_home(
     assert _listing(real) == before
 
 
+def test_a_subprocess_under_the_tmp_home_keeps_the_real_user_site():
+    """The home swap must not hide `pip install --user` packages from a child,
+    even one whose PYTHONPATH is replaced (as tools/sync_verbs_usage.py does)."""
+    import site
+    if not (site.ENABLE_USER_SITE and os.path.isdir(site.getusersitepackages())):
+        import pytest
+        pytest.skip("no user site-packages in this interpreter")
+    env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
+    p = subprocess.run([sys.executable, "-c", "import site; print(site.getusersitepackages())"],
+                       env=env, cwd=ROOT, capture_output=True, text=True, timeout=120)
+    assert p.returncode == 0, p.stderr
+    assert os.path.normcase(p.stdout.strip()) == os.path.normcase(site.getusersitepackages())
+
+
 def test_the_ballot_pin_ledger_default_follows_the_tmp_home(real_home_guard, monkeypatch):
     from arcaeon.record.receipt import ballot
     monkeypatch.delenv(ballot.PIN_LEDGER_ENV, raising=False)

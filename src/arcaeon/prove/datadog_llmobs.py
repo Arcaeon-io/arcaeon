@@ -30,6 +30,12 @@ word for a root span), meta.kind "task".
     VERIFIED         ok       arcaeon.verdict:VERIFIED          none
     BROKEN           error    arcaeon.verdict:BROKEN            type arcaeon.BROKEN
     COULD NOT LOOK   ok       arcaeon.verdict:COULD_NOT_LOOK    none
+      gate refused   error    arcaeon.verdict:COULD_NOT_LOOK    none
+
+Every span carries exactly one arcaeon.verdict tag, in the token form above
+(tags take no spaces; meta.metadata keeps the word with its spaces). A
+COULD NOT LOOK on a gate input whose decision is refuse is an error span:
+the action was stopped. Any other COULD NOT LOOK stays ok.
 
 All three are emitted (a trace of every check is the point). A gate refusal
 of a VERIFIED envelope is never VERIFIED: it reads BROKEN on checker-broken
@@ -74,7 +80,7 @@ from arcaeon import verdict as V
 from arcaeon.prove import ocsf as _ocsf
 
 __all__ = ["DOC_URL", "DOC_READ_ON", "INTAKE_PATH", "SPAN_KIND", "DEFAULT_ML_APP", "MAX_SPANS",
-           "VERDICT_TAG", "STATUS", "LIMITS_LINE", "ExportError", "to_llmobs", "dumps",
+           "VERDICT_TAG", "STATUS", "STATUS_REFUSED_COULD_NOT_LOOK", "LIMITS_LINE", "ExportError", "to_llmobs", "dumps",
            "export_cli", "main"]
 
 #: The page every field name was read from, and when.
@@ -93,6 +99,9 @@ EXPORT_TAG = "arcaeon.export:dd-llmobs-v1"
 #: verdict word -> tag value (tags take no spaces) and span status
 VERDICT_TAG = {V.VERIFIED: "VERIFIED", V.BROKEN: "BROKEN", V.COULD_NOT_LOOK: "COULD_NOT_LOOK"}
 STATUS = {V.VERIFIED: "ok", V.BROKEN: "error", V.COULD_NOT_LOOK: "ok"}
+#: COULD NOT LOOK on a gate input whose decision is refuse (the action was
+#: stopped) is an error span, as OCSF makes it an alert.
+STATUS_REFUSED_COULD_NOT_LOOK = "error"
 LIMITS_LINE = _ocsf.LIMITS_LINE
 
 ExportError = _ocsf.ExportError
@@ -201,9 +210,12 @@ def _span(obj: Any, start_ns: int, service: str | None) -> dict:
                             "output": {"value": "sha256:" + record_sha}, "metadata": meta_md}
     if word == V.BROKEN:
         meta["error"] = {"type": "arcaeon.BROKEN", "message": _BROKEN_MESSAGE}
+    status = STATUS[word]
+    if word == V.COULD_NOT_LOOK and rec.get("decision") == "refuse":
+        status = STATUS_REFUSED_COULD_NOT_LOOK
     span: dict[str, Any] = {"name": _NAME[rec["source"]], "span_id": span_id,
                             "trace_id": trace_id, "parent_id": ROOT_PARENT,
-                            "start_ns": start_ns, "duration": 0, "status": STATUS[word],
+                            "start_ns": start_ns, "duration": 0, "status": status,
                             "meta": meta, "metrics": metrics, "tags": tags}
     if service:
         span["service"] = service
