@@ -191,6 +191,7 @@ def adapter_for(name: str) -> VendorAdapter | None:
         from . import kyverno  # noqa: F401  (registers itself)
         from arcaeon.prove import mcp_scan  # noqa: F401  (registers itself)
         from . import cedar  # noqa: F401  (registers itself)
+        from . import reported  # noqa: F401  (registers itself)
     return _ADAPTERS.get(name)
 
 

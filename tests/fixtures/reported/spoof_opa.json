@@ -1,0 +1,1 @@
+{"vendor": "opa", "verdict": "allowed", "input_sha256": "b436d12b75064780d55b2407edaca0e04422496b269b5b028cd9834651afc119", "decision_id": "d-1", "path": "authz/allow", "result": true}
