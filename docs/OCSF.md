@@ -56,6 +56,24 @@ VERIFIED is skipped by default because a SIEM is a place for things to look
 at; a stream of "this was fine" findings buries the BROKEN ones. Turn it on
 when the SIEM is also the audit record.
 
+A gate refusal is never skipped and never reads as passed, whatever the
+envelope said. The gate can refuse a VERIFIED envelope: a checker row says
+BROKEN for the same bytes (`checker-broken`), a `--checks` file or the
+envelope's `checks[]` could not be read (`checks-unreadable`), or the
+non-party check rule was not met (`nonparty-check`). For a gate decision or
+evidence pack whose `decision` is `refuse` and whose verdict is VERIFIED, the
+event reports the word the gate's exit code means:
+
+| gate veto | `status_code`, severity, is_alert | gate exit |
+|---|---|---|
+| `checker-broken` | BROKEN, 4 (High), true | 1 |
+| `checks-unreadable`, `nonparty-check` (or any other refusal of a VERIFIED envelope) | COULD NOT LOOK, as the COULD NOT LOOK row above | 3 |
+
+`unmapped.arcaeon.verdict` still says VERIFIED (the envelope's own word), and
+`unmapped.arcaeon.veto` names the veto. The title names the refused action
+and the veto, e.g. `BROKEN: a checker says BROKEN for grades.csv; pay refused
+(checker-broken)`.
+
 Every event, whatever the verdict:
 
 | OCSF attribute | value | from |
@@ -64,11 +82,11 @@ Every event, whatever the verdict:
 | `category_uid`, `category_name` | 2, Findings | fixed |
 | `activity_id`, `activity_name` | 1, Create | fixed: each export is a new finding |
 | `type_uid`, `type_name` | 200401, Detection Finding: Create | `class_uid * 100 + activity_id` |
-| `severity_id`, `severity` | see the table above | the verdict |
+| `severity_id`, `severity` | see the tables above | the verdict, or the gate's veto on a refusal |
 | `status_id`, `status` | 1, New | fixed |
-| `status_code` | `VERIFIED`, `BROKEN` or `COULD NOT LOOK` | the three-word verdict, as "the source-specific status code" |
+| `status_code` | `VERIFIED`, `BROKEN` or `COULD NOT LOOK` | the three-word verdict, as "the source-specific status code"; never VERIFIED on a gate refusal |
 | `status_detail` | the verify reason | report `reason` |
-| `is_alert` | true on BROKEN only | the verdict |
+| `is_alert` | see the tables above | the verdict, or the gate's veto on a refusal |
 | `time` | integer milliseconds | the export time (`--now` fixes it) |
 | `timezone_offset` | 0 | `time` is UTC |
 | `message` | `<verdict>: <file name>` | |
@@ -94,7 +112,14 @@ OCSF attribute"): `verdict`, `source`, `reason`, `reasons`,
 receiver named, when the input records them), `audience_checked`,
 `deal_checked`, `purpose_checked`, `action`, `decision`, `gate_reason`,
 `checked_at`, `evidence` (the evidence pack's directory name), `note` and
-`limits`. No OCSF field name is invented: every attribute outside `unmapped`
+`limits`. A gate decision or evidence pack that carries the `--checks` answer
+or the non-party rule's answer adds `veto`, `checks` (`veto`, `files`,
+`rows`, `file_sha256`, `problems`, `broken_count`, and `broken`: each row
+that said BROKEN by `checker`, `vendor_id`, `vendor_word`, `subject`,
+`attestation`, `reported_by`, `source`, `file` and `line`, never the row's
+payload; at most 100 listed) and `nonparty_check` (`rule`, `cap`, `amount`,
+`applies`, `satisfied`, `veto`). A verify report has none of the three. No
+OCSF field name is invented: every attribute outside `unmapped`
 is one the 1.9.0 class, `finding_info`, `metadata`, `product`, `file` or
 `fingerprint` lists.
 

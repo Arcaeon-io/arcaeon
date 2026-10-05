@@ -680,7 +680,10 @@ the content is true. The spec and its limits are [ENVELOPE.md](ENVELOPE.md).
 `evidence.json` into one OCSF 1.9.0 Detection Finding (class_uid 2004) for a
 SIEM: BROKEN is severity High, COULD NOT LOOK is Low and lists what was not
 checked, VERIFIED is emitted (Informational) only with `--include-verified`.
-File names only, never directories. The mapping is [OCSF.md](OCSF.md).
+A gate refusal is never skipped: a VERIFIED envelope refused as
+`checker-broken` exports as BROKEN (High, an alert, the broken check rows in
+`unmapped.arcaeon.checks`), one refused as `checks-unreadable` or
+`nonparty-check` as COULD NOT LOOK. File names only, never directories. The mapping is [OCSF.md](OCSF.md).
 
 `seal --checks FILE` (repeatable; library `checks=`, paths or row dicts)
 carries checker rows inside the signed Statement, as `predicate.checks`
