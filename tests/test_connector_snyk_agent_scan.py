@@ -186,28 +186,29 @@ def test_unsigned_rows_alone_never_make_verified():
     rows = _rows(CLEAN)
     assert all(r["relayed_verdict"] == VERIFIED for r in rows)
     got = S.standing_verdict(rows)
-    assert got["verdict"] == COULD_NOT_LOOK
-    assert got["relayed_verdict"] == VERIFIED and got["signed_by_vendor"] is False
+    assert got["relayed_verdict"] == COULD_NOT_LOOK
+    assert "verdict" not in got and got["signed_by_vendor"] is False
+    assert got["counts"][VERIFIED] == len(rows) and got["rows"] == len(rows)
 
 
 def test_a_relayed_broken_is_broken_never_verified():
     rows = _rows(FINDINGS, broken_at_score=500)
     got = S.standing_verdict(rows)
-    assert got["verdict"] == BROKEN and got["relayed_verdict"] == BROKEN
+    assert got["relayed_verdict"] == BROKEN and "verdict" not in got
     one_broken = [r for r in rows if r["relayed_verdict"] == BROKEN][:1]
-    assert S.standing_verdict(one_broken + _rows(CLEAN))["verdict"] == BROKEN
+    assert S.standing_verdict(one_broken + _rows(CLEAN))["relayed_verdict"] == BROKEN
 
 
 def test_a_relayed_broken_row_edited_to_say_signed_is_still_broken():
     row = [r for r in _rows(V05) if r["relayed_verdict"] == BROKEN][0]
     row["signed_by_vendor"] = True
     row["attestation"] = {"status": "VERIFIED", "checked_by_us": True, "claimed": {}}
-    assert S.standing_verdict([row])["verdict"] == BROKEN
+    assert S.standing_verdict([row])["relayed_verdict"] == BROKEN
 
 
 def test_standing_verdict_on_nothing_is_could_not_look():
     for rows in ([], None, "rows", [{"kind": "x"}]):
-        assert S.standing_verdict(rows)["verdict"] == COULD_NOT_LOOK
+        assert S.standing_verdict(rows)["relayed_verdict"] == COULD_NOT_LOOK
 
 
 # ------------------------------------------------------------------ digests and ids

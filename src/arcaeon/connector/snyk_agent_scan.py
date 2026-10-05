@@ -78,7 +78,7 @@ from arcaeon.record.row import loads_strict
 from arcaeon.verdict import BROKEN, COULD_NOT_LOOK, VERIFIED, could_not_look
 
 from .core import (AdapterError, Extracted, VendorAdapter, _now_iso, _safe_str, _too_deep,
-                   register)
+                   register, rollup_rows)
 
 __all__ = ["VENDOR", "ADAPTER_VERSION", "TABLE", "MAX_PAYLOAD_BYTES", "MAX_DEPTH", "MAX_ROWS",
            "SCORE_MAX", "STANDING", "SnykAgentScanAdapter", "SNYK_AGENT_SCAN", "ingest",
@@ -421,30 +421,10 @@ def ingest(raw: Any, *, broken_at_score: Any = None, vendor_request_id: Any = No
 
 
 def standing_verdict(rows: Any) -> dict:
-    """What agent-scan rows can say on their own. BROKEN when any of them relays
-    BROKEN (a relayed BROKEN never becomes anything else, whatever else the row
-    claims); otherwise COULD NOT LOOK, because an unsigned row reported by sender
-    cannot make a VERIFIED by itself. Never VERIFIED. Never raises."""
-    ours = []
-    if isinstance(rows, (list, tuple)):
-        ours = [r for r in rows if isinstance(r, dict) and isinstance(r.get("vendor"), dict)
-                and r["vendor"].get("name") == VENDOR]
-    words = [r.get("relayed_verdict") for r in ours]
-    if BROKEN in words:
-        relayed = BROKEN
-    elif ours and all(w == VERIFIED for w in words):
-        relayed = VERIFIED
-    else:
-        relayed = COULD_NOT_LOOK if ours else None
-    out = {"verdict": BROKEN if relayed == BROKEN else COULD_NOT_LOOK,
-           "relayed_verdict": relayed, "rows": len(ours), "signed_by_vendor": False,
-           "standing": STANDING}
-    if relayed == BROKEN:
-        out["reason"] = "agent-scan relayed BROKEN for at least one target"
-    else:
-        out.update(could_not_look(
-            "a check of our own or a signed vendor verdict", "rows",
-            "missing" if ours else "empty",
-            "agent-scan rows are unsigned and reported by sender; they cannot make a "
-            "VERIFIED by themselves" if ours else "no agent-scan rows were given"))
-    return out
+    """The one rollup (core.rollup_rows, docs/CONNECTOR_ADAPTER.md "The rollup"):
+    BROKEN when any of this adapter's rows relays BROKEN;
+    otherwise COULD NOT LOOK, with the per-word counts. Never VERIFIED: unsigned
+    rows reported by the sender cannot make a VERIFIED by themselves. No bare
+    `verdict` key. Rows not from this adapter are not counted. Never raises."""
+    return rollup_rows(rows, VENDOR, label='agent-scan', standing=STANDING,
+                       broken_reason='agent-scan relayed BROKEN for at least one target (unsigned)')

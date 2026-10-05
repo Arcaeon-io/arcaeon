@@ -208,6 +208,38 @@ entry and through `import_verdict`, gives COULD NOT LOOK rows, never a
 traceback. Name the module here, register the adapter, and add its entry
 signature to the table in that file.
 
+## The rollup
+
+An adapter that offers one word over many of its rows (`standing_verdict(rows)`
+or `rollup(rows)`; some offer both names for the one function) returns the
+dict built by `arcaeon.connector.core.rollup_rows`, the same shape for every
+adapter:
+
+    relayed_verdict   BROKEN or COULD NOT LOOK. Never VERIFIED.
+    counts            {"VERIFIED": n, "BROKEN": n, "COULD NOT LOOK": n}: this
+                      adapter's rows by relayed word (a word outside our three
+                      counts as COULD NOT LOOK)
+    rows              how many of the given rows are this adapter's
+    not_ours          how many given entries are not this adapter's rows; not counted
+    signed_by_vendor  false
+    standing          "reported_by_sender"
+    reason            the sentence; a COULD NOT LOOK also carries looked_for,
+                      where and reason_word ("missing", or "empty" when there
+                      are no rows of this adapter)
+
+It is BROKEN when any of the adapter's rows relays BROKEN (Kyverno: a relayed
+`fail`; Cedar: a relayed Deny), and a relayed BROKEN stays BROKEN whatever else
+the row claims. Otherwise it is COULD NOT LOOK, even when every row relays
+VERIFIED: unsigned rows reported by the sender cannot make a VERIFIED by
+themselves, so an all-clean relay shows up as `counts.VERIFIED` and a reason
+that names the counts, never as a VERIFIED. As on the rows, there is no bare
+`verdict` key: a script grepping for `verdict == "VERIFIED"` must not mistake a
+vendor's pass for our own check.
+
+`recheck` is not a rollup. Its result is our own re-check of one row against
+the payload bytes, so it does carry `verdict` (ours) next to the row's
+`relayed_verdict` (theirs).
+
 ## OPA decision logs
 
 `arcaeon.connector.opa.ingest(body, allow_paths=..., deny_paths=...)` reads the
@@ -361,7 +393,8 @@ Output that is empty, not UTF-8 JSON, carries a duplicate key, nests deeper than
 
 `standing_verdict(rows)` says what these rows can say on their own: BROKEN when
 any row relays BROKEN, otherwise COULD NOT LOOK. It never says VERIFIED, and a
-relayed BROKEN stays BROKEN whatever else the row claims.
+relayed BROKEN stays BROKEN whatever else the row claims. Its shape is "The
+rollup" above: no bare `verdict` key, per-word `counts`.
 
 ### What this cannot prove
 
@@ -426,7 +459,8 @@ with its `input_sha256`. `ingest` never raises on the response.
 
 `standing_verdict(rows)` says what these rows can say on their own: BROKEN when
 any row relays BROKEN, otherwise COULD NOT LOOK. It never says VERIFIED, and a
-relayed BROKEN stays BROKEN whatever else the row claims.
+relayed BROKEN stays BROKEN whatever else the row claims. Its shape is "The
+rollup" above: no bare `verdict` key, per-word `counts`.
 
 ### What this cannot prove
 
@@ -482,6 +516,7 @@ flags and category so that an allow which names a threat is not taken as a pass:
 | `detection_unreadable` | COULD NOT LOOK | action allow, a detection map or flag that is not true or false |
 | `unknown_action` | COULD NOT LOOK | action missing, not a string, or not allow or block |
 | `pending` | COULD NOT LOOK | an async acknowledgement, or a results item with no result yet |
+| `status_not_complete` | COULD NOT LOOK | a scan results item that would read `allow`, but whose `status` is missing or not `complete`; the reason names the status. `complete` is the one success value the fixtures show (R15 leaves the rest unverified). A `block` stays BROKEN whatever the status |
 
 A response that is empty, not UTF-8 JSON, carries a duplicate key, nests deeper
 than 64, is over 8 MiB, or has none of the four shapes is one COULD NOT LOOK
@@ -497,7 +532,8 @@ a second report from the same vendor, not a signature.
 
 `standing_verdict(rows)` says what these rows can say on their own: BROKEN when
 any row relays BROKEN, otherwise COULD NOT LOOK. It never says VERIFIED, and a
-relayed BROKEN stays BROKEN whatever else the row claims.
+relayed BROKEN stays BROKEN whatever else the row claims. Its shape is "The
+rollup" above: no bare `verdict` key, per-word `counts`.
 
 ### What this cannot prove
 
@@ -541,7 +577,7 @@ Every row carries `signed_by_vendor: false`, `standing: "reported_by_sender"`
 and `input_sha256` (hex SHA-256 of the exact bytes given to `ingest`), written
 by one final step over every row; `ingest` takes no argument that changes them,
 and a field in the report that looks like a signature is not read. After that
-step only a `pass` can relay as VERIFIED. `rollup(rows)` gives one word over a
+step only a `pass` can relay as VERIFIED. `rollup(rows)` ("The rollup" above) gives one word over a
 set of rows and is never VERIFIED: BROKEN if any row is a relayed `fail`,
 otherwise COULD NOT LOOK. Each row's `policy_ref` names the policy and rule,
 with `version: null` and `join: COULD NOT LOOK`.
@@ -602,7 +638,8 @@ and `input_sha256` (hex SHA-256 of the exact bytes given to `ingest`), written
 by one final step over every row; `ingest` takes no argument that changes them,
 and a field in the body that looks like a signature is not read. After that step
 only an Allow with an empty errors list can relay as VERIFIED; a Deny never can.
-`rollup(rows)` is never VERIFIED: BROKEN if any row is a relayed Deny, otherwise
+`rollup(rows)` ("The rollup" above) is never VERIFIED: BROKEN if any row is a
+relayed Deny, otherwise
 COULD NOT LOOK. Each row's `policy_ref` records the policy store id (from the
 CloudTrail event, or the caller's `policy_store_id`, marked as such; the two
 disagreeing is COULD NOT LOOK) and the determining policy ids, with
@@ -681,7 +718,8 @@ nests too deep or is over 8 MiB is one COULD NOT LOOK row; `ingest` never raises
 
 Every row carries `signed_by_vendor: false` and `standing: "reported_by_sender"`,
 written by one final step over every row; `ingest` takes no argument that can
-change them, and a row claiming a signature changes nothing. `rollup(rows)` is
+change them, and a row claiming a signature changes nothing. `rollup(rows)` ("The
+rollup" above) is
 never VERIFIED: BROKEN when any row is a relayed BROKEN, else COULD NOT LOOK. A
 relayed BROKEN never becomes VERIFIED. These rows are unsigned, so the gate's
 non-party check rule never counts them.
@@ -738,7 +776,7 @@ is empty, not UTF-8 JSON, carries a duplicate key, nests too deep or is over
 The webhook page documents custom headers for the receiver's own auth and no
 payload signature, so every row carries `signed_by_vendor: false` and
 `standing: "reported_by_sender"`; no argument or payload field changes that.
-`standing_verdict(rows)` (also `rollup`) is BROKEN when any row is a relayed
+`standing_verdict(rows)` (also `rollup`; "The rollup" above) is BROKEN when any row is a relayed
 BROKEN, else COULD NOT LOOK, never VERIFIED. `recheck` says COULD NOT LOOK for
 these rows; re-run `ingest`.
 
@@ -787,7 +825,7 @@ verbatim. A body that is empty, not UTF-8 JSON, carries a duplicate key, nests
 deeper than 32, is over 8 MiB, or is not one of the shapes above is one COULD
 NOT LOOK row; `ingest` never raises. Every row carries `signed_by_vendor: false`
 and `standing: "reported_by_sender"`; a body claiming a signature changes
-nothing. `standing_verdict(rows)` (also `rollup`) is BROKEN when any row is,
+nothing. `standing_verdict(rows)` (also `rollup`; "The rollup" above) is BROKEN when any row is,
 else COULD NOT LOOK, never VERIFIED. `recheck` says COULD NOT LOOK; re-run
 `ingest`.
 
@@ -830,7 +868,7 @@ E2B writes no verdict word, so the adapter writes its own:
 | adapter word | relayed as | when |
 |---|---|---|
 | `command_exit_zero` | VERIFIED | `exit_code` 0 and `error` null or empty |
-| `execution_no_error` | VERIFIED | an Execution whose `error` key is null |
+| `execution_no_error` | VERIFIED | an Execution whose `error` key is null, or a string that decodes as JSON null (what `to_json` writes for no error) |
 | `command_exit_nonzero` | BROKEN | `exit_code` is an integer other than 0 |
 | `command_error` | BROKEN | `exit_code` 0 or missing, but a non-empty `error` string |
 | `execution_error` | BROKEN | an Execution with an error (object or string) |
@@ -856,7 +894,7 @@ of their UTF-8 bytes (an Execution's lines joined with nothing between them)
 with their lengths, never copied; error messages and tracebacks are kept by
 digest only. No signature on a run result was found in the sources read, so
 nothing here is signed; a row claiming one changes nothing.
-`standing_verdict(rows)` (also `rollup`) is BROKEN when any row is a relayed
+`standing_verdict(rows)` (also `rollup`; "The rollup" above) is BROKEN when any row is a relayed
 BROKEN, otherwise COULD NOT LOOK, never VERIFIED.
 
 ### What this cannot prove

@@ -70,10 +70,10 @@ import json
 from typing import Any
 
 from arcaeon.record.row import loads_strict
-from arcaeon.verdict import BROKEN, COULD_NOT_LOOK, VERIFIED, could_not_look
+from arcaeon.verdict import BROKEN, COULD_NOT_LOOK, VERIFIED
 
-from .core import (ATTESTATION_NONE, ROW_KIND, AdapterError, Extracted, VendorAdapter, _now_iso,
-                   _safe_str, _too_deep, map_word, register)
+from .core import (ATTESTATION_NONE, AdapterError, Extracted, VendorAdapter, _now_iso,
+                   _safe_str, _too_deep, map_word, register, rollup_rows)
 
 __all__ = ["VENDOR", "ADAPTER_VERSION", "TABLE", "MAX_PAYLOAD_BYTES", "MAX_DEPTH", "MAX_ROWS",
            "MAX_VENDOR_CHARS", "STANDING", "DIGEST_MISMATCH", "ReportedBySenderAdapter",
@@ -295,23 +295,10 @@ def ingest(raw: Any, *, received_at: str | None = None) -> list:
 
 
 def rollup(rows: Any) -> dict:
-    """One word over a list of this adapter's rows. Never VERIFIED: rows the sender
-    reported, unsigned, are not a check of our own (COULD NOT LOOK). BROKEN when at
-    least one row is a relayed BROKEN. A row that is not this adapter's counts as
-    COULD NOT LOOK. No bare `verdict` key, as on the rows."""
-    counts = {VERIFIED: 0, BROKEN: 0, COULD_NOT_LOOK: 0}
-    out = {"relayed_verdict": COULD_NOT_LOOK, "standing": STANDING, "signed_by_vendor": False,
-           "counts": counts}
-    for r in rows if isinstance(rows, list) else ():
-        ok = (isinstance(r, dict) and r.get("kind") == ROW_KIND
-              and isinstance(r.get("vendor"), dict) and r["vendor"].get("name") == VENDOR)
-        v = r.get("relayed_verdict") if ok else COULD_NOT_LOOK
-        counts[v if v in counts else COULD_NOT_LOOK] += 1
-    if counts[BROKEN]:
-        out["relayed_verdict"] = BROKEN
-        out["reason"] = "the sender reported at least one BROKEN (relayed, unsigned)"
-        return out
-    out["reason"] = ("no relayed BROKEN; VERIFIED rows here are the sender's unsigned report, "
-                     "and a rollup of reported rows is never VERIFIED by itself")
-    out.update(could_not_look("a check of our own", "rows", "missing", out["reason"]))
-    return out
+    """The one rollup (core.rollup_rows, docs/CONNECTOR_ADAPTER.md "The rollup"):
+    BROKEN when any of this adapter's rows relays BROKEN;
+    otherwise COULD NOT LOOK, with the per-word counts. Never VERIFIED: unsigned
+    rows reported by the sender cannot make a VERIFIED by themselves. No bare
+    `verdict` key. Rows not from this adapter are not counted. Never raises."""
+    return rollup_rows(rows, VENDOR, label='reported', standing=STANDING,
+                       broken_reason='the sender reported at least one BROKEN (relayed, unsigned)')

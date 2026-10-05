@@ -50,7 +50,7 @@ def test_adapter_is_on_the_one_base_and_registered():
     assert isinstance(P.PRISMA_AIRS, VendorAdapter)
     assert P.PRISMA_AIRS.one_row_per_payload is False
     assert adapter_for("prisma-airs") is P.PRISMA_AIRS
-    assert P.PRISMA_AIRS.version == "1"
+    assert P.PRISMA_AIRS.version == "2"
 
 
 def test_table_maps_only_into_our_three_words_and_nothing_unknown_is_verified():
@@ -67,7 +67,7 @@ def test_sync_block_is_broken():
     r = rows[0]
     assert r["kind"] == ROW_KIND and r["relayed"] is True and r["checked_by_us"] is False
     assert "verdict" not in r
-    assert r["vendor"] == {"name": "prisma-airs", "adapter_version": "1"}
+    assert r["vendor"] == {"name": "prisma-airs", "adapter_version": "2"}
     f = r["finding"]
     assert f["format"] == "sync-scan-response"
     assert f["action"] == "block" and f["category"] == "malicious"
@@ -145,6 +145,46 @@ def test_scan_results_give_one_row_per_item():
     assert all(r["finding"]["format"] == "scan-results" for r in rows)
 
 
+def _results_with_status(status, drop=False):
+    """The fixture's allow item (req_id 2) with its `status` changed (or dropped).
+    The success value is "complete": the one status tests/fixtures/prisma_airs/
+    scan_results.json gives an item that carries a result (R15 marks the full
+    set of status values unverified, so nothing else is read as success)."""
+    items = json.loads(RESULTS)
+    it = items[1]
+    assert it["status"] == "complete" and it["result"]["action"] == "allow"
+    if drop:
+        del it["status"]
+    else:
+        it["status"] = status
+    return json.dumps([it]).encode()
+
+
+@pytest.mark.parametrize("status", ["failed", "pending", "error", "", "COMPLETED", 7, None])
+def test_scan_results_allow_with_a_non_success_status_is_not_verified(status):
+    """Review F-R7: status "failed" + action allow read VERIFIED; `status` was
+    recorded in `finding` but never read."""
+    row, = _rows(_results_with_status(status))
+    assert row["relayed_verdict"] == COULD_NOT_LOOK
+    assert row["vendor_word"] == "status_not_complete"
+    assert row["could_not_look"]["reason_word"] == "name_not_found"
+    assert f"status {json.dumps(status)}" in row["could_not_look"]["reason"]
+
+
+def test_scan_results_allow_with_no_status_is_not_verified():
+    row, = _rows(_results_with_status(None, drop=True))
+    assert row["relayed_verdict"] == COULD_NOT_LOOK
+    assert row["vendor_word"] == "status_not_complete"
+    assert "no status" in row["could_not_look"]["reason"]
+
+
+def test_scan_results_complete_still_reads_and_block_stays_broken():
+    assert _rows(_results_with_status(" Complete "))[0]["relayed_verdict"] == VERIFIED
+    items = json.loads(RESULTS)
+    items[0]["status"] = "failed"  # a block is BROKEN whatever else the item says
+    assert _rows(json.dumps(items[:1]).encode())[0]["relayed_verdict"] == BROKEN
+
+
 def test_report_gives_one_row_per_detection_result():
     rows = _rows(REPORT)
     assert _summary(rows) == [("allow", VERIFIED), ("block", BROKEN),
@@ -217,17 +257,18 @@ def test_unsigned_rows_alone_never_make_verified():
     rows = _rows(ALLOW)
     assert rows[0]["relayed_verdict"] == VERIFIED
     got = P.standing_verdict(rows)
-    assert got["verdict"] == COULD_NOT_LOOK
-    assert got["relayed_verdict"] == VERIFIED and got["signed_by_vendor"] is False
+    assert got["relayed_verdict"] == COULD_NOT_LOOK
+    assert "verdict" not in got and got["signed_by_vendor"] is False
+    assert got["counts"][VERIFIED] == len(rows) and got["rows"] == len(rows)
     assert got["standing"] == "reported_by_sender"
 
 
 def test_a_relayed_broken_is_broken_never_verified():
-    assert P.standing_verdict(_rows(BLOCK))["verdict"] == BROKEN
+    assert P.standing_verdict(_rows(BLOCK))["relayed_verdict"] == BROKEN
     mixed = _rows(ALLOW) + _rows(BLOCK) + _rows(ALLOW)
     got = P.standing_verdict(mixed)
-    assert got["verdict"] == BROKEN and got["relayed_verdict"] == BROKEN
-    assert P.standing_verdict(_rows(RESULTS))["verdict"] == BROKEN
+    assert got["relayed_verdict"] == BROKEN and "verdict" not in got
+    assert P.standing_verdict(_rows(RESULTS))["relayed_verdict"] == BROKEN
 
 
 def test_a_relayed_broken_row_edited_to_say_signed_is_still_broken():
@@ -235,23 +276,23 @@ def test_a_relayed_broken_row_edited_to_say_signed_is_still_broken():
     row["signed_by_vendor"] = True
     row["standing"] = "verified_by_vendor"
     row["attestation"] = {"status": "VERIFIED", "checked_by_us": True, "claimed": {}}
-    assert P.standing_verdict([row])["verdict"] == BROKEN
+    assert P.standing_verdict([row])["relayed_verdict"] == BROKEN
 
 
 def test_an_allow_row_edited_to_say_signed_is_still_not_verified():
     row = _rows(ALLOW)[0]
     row["signed_by_vendor"] = True
-    assert P.standing_verdict([row])["verdict"] == COULD_NOT_LOOK
+    assert P.standing_verdict([row])["relayed_verdict"] == COULD_NOT_LOOK
 
 
 def test_standing_verdict_on_nothing_is_could_not_look():
     for rows in ([], None, "rows", [{"kind": "x"}], _rows(BLOCK) and [{"vendor": 1}]):
-        assert P.standing_verdict(rows)["verdict"] == COULD_NOT_LOOK
+        assert P.standing_verdict(rows)["relayed_verdict"] == COULD_NOT_LOOK
 
 
 def test_other_vendors_rows_do_not_count():
     other = dict(_rows(BLOCK)[0], vendor={"name": "someone-else", "adapter_version": "1"})
-    assert P.standing_verdict([other])["verdict"] == COULD_NOT_LOOK
+    assert P.standing_verdict([other])["relayed_verdict"] == COULD_NOT_LOOK
 
 
 # ------------------------------------------------------------------ digests and ids

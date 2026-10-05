@@ -37,6 +37,10 @@ a threat is not taken as a pass:
                           an object of true/false                          -> COULD NOT LOOK
     unknown_action        action missing, not a string, or not allow/block -> COULD NOT LOOK
     pending               an async ack, or a results item with no result   -> COULD NOT LOOK
+    status_not_complete   a scan-results item that would read allow, but its
+                          `status` is missing or not "complete" (the one
+                          success value the fixtures show; R15 leaves the
+                          rest unverified)                                 -> COULD NOT LOOK
 
 THE ROW. The check.verdict.relayed row of arcaeon.connector.core, plus:
 
@@ -81,14 +85,14 @@ from arcaeon.record.row import loads_strict
 from arcaeon.verdict import BROKEN, COULD_NOT_LOOK, VERIFIED, could_not_look
 
 from .core import (AdapterError, Extracted, VendorAdapter, _now_iso, _safe_str, _too_deep,
-                   register)
+                   register, rollup_rows)
 
 __all__ = ["VENDOR", "ADAPTER_VERSION", "TABLE", "MAX_PAYLOAD_BYTES", "MAX_DEPTH", "MAX_ROWS",
            "STANDING", "REFETCH_NOTE", "PrismaAirsAdapter", "PRISMA_AIRS", "ingest",
-           "refetch_request", "standing_verdict"]
+           "refetch_request", "standing_verdict", "STATUS_COMPLETE"]
 
 VENDOR = "prisma-airs"
-ADAPTER_VERSION = "1"
+ADAPTER_VERSION = "2"  # 2: scan-results status read (status_not_complete)
 #: A response over this is digested, never read.
 MAX_PAYLOAD_BYTES = 8 << 20
 MAX_DEPTH = 64
@@ -105,7 +109,14 @@ TABLE = {
     "detection_unreadable": COULD_NOT_LOOK,
     "unknown_action": COULD_NOT_LOOK,
     "pending": COULD_NOT_LOOK,
+    "status_not_complete": COULD_NOT_LOOK,
 }
+
+#: The one scan-results `status` read as a finished scan: the value the repo's
+#: fixture (tests/fixtures/prisma_airs/scan_results.json) gives an item with a
+#: result. R15 leaves the full set unverified, so any other value, or none, is
+#: COULD NOT LOOK for an allow (a block stays BROKEN whatever the status).
+STATUS_COMPLETE = "complete"
 
 FORMAT_SYNC = "sync-scan-response"
 FORMAT_ACK = "async-scan-ack"
@@ -123,6 +134,7 @@ _WHY = {
     "detection_unreadable": ("unreadable", "a detection map or flag is not true/false"),
     "unknown_action": ("name_not_found", "the action is not allow or block"),
     "pending": ("missing", "Prisma has not returned a result for this scan yet"),
+    "status_not_complete": ("name_not_found", "the scan-results status is not 'complete'"),
 }
 
 
@@ -237,7 +249,7 @@ def _word(action: Any, detected: bool, readable: bool, malicious: bool) -> str:
 
 
 def _row(base: dict, word: str, *, fmt: str, index: int | None, where: str,
-         ids: dict, **extra) -> dict:
+         ids: dict, why: str | None = None, **extra) -> dict:
     row = _copy(base)
     f = {"format": fmt, "index": index, "status": None, "action": None, "category": None,
          "profile_name": None, "prompt_detected": None, "response_detected": None,
@@ -256,8 +268,10 @@ def _row(base: dict, word: str, *, fmt: str, index: int | None, where: str,
     row["mapping"] = {"rule": "table"}
     row["relayed_verdict"] = TABLE[word]
     if TABLE[word] == COULD_NOT_LOOK:
+        reason_word, reason = _WHY[word]
         row["could_not_look"] = could_not_look("a Prisma AIRS result this adapter can read "
-                                               "as pass or fail", where, *_WHY[word])
+                                               "as pass or fail", where, reason_word,
+                                               why or reason)
     return _seal(row)
 
 
@@ -272,13 +286,29 @@ def _ids(*docs: dict, req_id: Any = None) -> dict:
 
 
 def _scan_row(base: dict, res: dict, *, fmt: str, index: int | None, where: str,
-              ids: dict, status: Any = None) -> dict:
+              ids: dict, status: Any = None, has_status: bool = False) -> dict:
+    """One scan result. A scan-results item (`has_status`) whose `status` is not
+    STATUS_COMPLETE cannot relay an allow as VERIFIED: the scan may not have
+    finished, so its allow is read as status_not_complete (COULD NOT LOOK)."""
     pd, pok = _flags(res.get("prompt_detected"))
     rd, rok = _flags(res.get("response_detected"))
     cat = res.get("category")
     malicious = isinstance(cat, str) and cat.strip().casefold() == "malicious"
     word = _word(res.get("action"), bool(pd or rd), pok and rok, malicious)
-    return _row(base, word, fmt=fmt, index=index, where=where, ids=ids,
+    why = None
+    if (fmt == FORMAT_RESULTS and word == "allow"
+            and not (isinstance(status, str) and status.strip().casefold() == STATUS_COMPLETE)):
+        word = "status_not_complete"
+        if not has_status:
+            why = "the scan-results item carries no status, so the scan is not known complete"
+        else:
+            try:
+                shown = json.dumps(status)[:64]
+            except (TypeError, ValueError):
+                shown = type(status).__name__
+            why = (f"the scan-results item has status {shown}, not \"{STATUS_COMPLETE}\"; "
+                   f"its allow is not read as a pass")
+    return _row(base, word, fmt=fmt, index=index, where=where, ids=ids, why=why,
                 status=_safe_str(status), action=_safe_str(res.get("action")),
                 category=_safe_str(cat), profile_name=_safe_str(res.get("profile_name")),
                 prompt_detected=pd, response_detected=rd)
@@ -336,7 +366,7 @@ def _item(out: _Out, it: Any, i: int) -> None:
         if isinstance(res, dict):
             ids = _ids(it, res, req_id=it.get("req_id"))
             out.add(_scan_row(out.base, res, fmt=FORMAT_RESULTS, index=i, where=where,
-                              ids=ids, status=it.get("status")))
+                              ids=ids, status=it.get("status"), has_status="status" in it))
         else:
             out.add(_row(out.base, "pending", fmt=FORMAT_RESULTS, index=i, where=where,
                          ids=_ids(it, req_id=it.get("req_id")),
@@ -407,31 +437,10 @@ def ingest(raw: Any, *, received_at: str | None = None) -> list:
 
 
 def standing_verdict(rows: Any) -> dict:
-    """What Prisma AIRS rows can say on their own. BROKEN when any of them relays
-    BROKEN (a relayed BROKEN never becomes anything else, whatever else the row
-    claims); otherwise COULD NOT LOOK, because an unsigned row reported by sender
-    cannot make a VERIFIED by itself, and a re-fetch would only be a second
-    report from the same vendor. Never VERIFIED. Never raises."""
-    ours = []
-    if isinstance(rows, (list, tuple)):
-        ours = [r for r in rows if isinstance(r, dict) and isinstance(r.get("vendor"), dict)
-                and r["vendor"].get("name") == VENDOR]
-    words = [r.get("relayed_verdict") for r in ours]
-    if BROKEN in words:
-        relayed = BROKEN
-    elif ours and all(w == VERIFIED for w in words):
-        relayed = VERIFIED
-    else:
-        relayed = COULD_NOT_LOOK if ours else None
-    out = {"verdict": BROKEN if relayed == BROKEN else COULD_NOT_LOOK,
-           "relayed_verdict": relayed, "rows": len(ours), "signed_by_vendor": False,
-           "standing": STANDING}
-    if relayed == BROKEN:
-        out["reason"] = "Prisma AIRS relayed BROKEN (block) for at least one scan"
-    else:
-        out.update(could_not_look(
-            "a check of our own or a signed vendor verdict", "rows",
-            "missing" if ours else "empty",
-            "Prisma AIRS rows are unsigned and reported by sender; they cannot make a "
-            "VERIFIED by themselves" if ours else "no Prisma AIRS rows were given"))
-    return out
+    """The one rollup (core.rollup_rows, docs/CONNECTOR_ADAPTER.md "The rollup"):
+    BROKEN when any of this adapter's rows relays BROKEN;
+    otherwise COULD NOT LOOK, with the per-word counts. Never VERIFIED: unsigned
+    rows reported by the sender cannot make a VERIFIED by themselves. No bare
+    `verdict` key. Rows not from this adapter are not counted. Never raises."""
+    return rollup_rows(rows, VENDOR, label='Prisma AIRS', standing=STANDING,
+                       broken_reason='Prisma AIRS relayed BROKEN (block) for at least one scan (unsigned)')
