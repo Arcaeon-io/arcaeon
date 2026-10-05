@@ -63,6 +63,10 @@ Not copied: requested_by, request_context (client addresses and headers), metric
 nd_builtin_cache, the input and result themselves (kept by digest only).
 vendor_payload_digest is over the body exactly as received (gzipped or not).
 
+WHICH POLICY. `join_bundles(rows, seals)` joins each row's bundle revisions to
+bundles sealed by arcaeon.connector.opa_bundle.seal_bundle (VERIFIED, BROKEN or
+COULD NOT LOOK in `policy_join`); see that function and docs/CONNECTOR_ADAPTER.md.
+
 `recheck` says COULD NOT LOOK for these rows (one payload, many rows); re-run
 `ingest` with the same body and path lists to compare. Never raises on what OPA
 sends. Stdlib only. No network: this reads a body you already hold.
@@ -79,8 +83,11 @@ from .core import (JCS_DIGEST_PREFIX, AdapterError, Extracted, VendorAdapter, _n
                    _safe_str, _too_deep, register)
 from arcaeon.record.row import loads_strict
 
+from .core import ROW_KIND
+from .opa_bundle import SEAL_KIND, parse_ts
+
 __all__ = ["VENDOR", "ADAPTER_VERSION", "TABLE", "MAX_PAYLOAD_BYTES", "MAX_BODY_BYTES",
-           "MAX_DEPTH", "MAX_ROWS", "OpaDecisionLogAdapter", "OPA", "ingest"]
+           "MAX_DEPTH", "MAX_ROWS", "OpaDecisionLogAdapter", "OPA", "ingest", "join_bundles"]
 
 VENDOR = "opa"
 ADAPTER_VERSION = "1"
@@ -240,6 +247,141 @@ def _event_row(base: dict, i: int, ev: Any, allow: set, deny: set, enc: str) -> 
         row["could_not_look"] = could_not_look("an OPA decision this adapter can read as "
                                                "pass or fail", f"{_WHERE}[{i}]", *_WHY[word])
     return row
+
+
+_JOIN_RANK = {VERIFIED: 0, COULD_NOT_LOOK: 1, BROKEN: 2}
+
+
+def _usable_seal(s: Any) -> bool:
+    return (isinstance(s, dict) and s.get("kind") == SEAL_KIND and s.get("seal") == VERIFIED
+            and isinstance(s.get("bundle_name"), str) and isinstance(s.get("revision"), str)
+            and bool(s.get("revision")) and isinstance(s.get("bundle_sha256"), str))
+
+
+def _window(s: dict) -> tuple:
+    return parse_ts(s.get("active_from")), parse_ts(s.get("active_until"))
+
+
+def _covers(s: dict, ts) -> bool:
+    lo, hi = _window(s)
+    return (lo is None or ts >= lo) and (hi is None or ts < hi)
+
+
+def _join_one(name: str, rev: Any, ts, seals: list) -> dict:
+    """One (bundle name, revision) of one decision against the seals."""
+    out = {"revision": rev, "join": COULD_NOT_LOOK, "bundle_sha256": None,
+           "opa_signature_verified": None, "reason": None}
+
+    def cnl(word, reason):
+        out["reason"] = reason
+        out["could_not_look"] = could_not_look("a sealed OPA bundle for this revision",
+                                               f"sealed bundles named {name!r}", word, reason)
+        return out
+
+    if not isinstance(rev, str) or not rev:
+        return cnl("missing", "the decision names no revision for this bundle")
+    same = [s for s in seals if _safe_str(s["bundle_name"]) == name]
+    in_force = [s for s in same if any(_window(s)) and ts is not None and _covers(s, ts)]
+    if in_force:
+        hit = [s for s in in_force if _safe_str(s["revision"]) == rev]
+        if not hit:
+            other = sorted({_safe_str(s["revision"]) for s in in_force})
+            out["join"] = BROKEN
+            out["reason"] = (f"the bundle sealed as in force at the decision time has revision "
+                             f"{other[0]!r}, not {rev!r}")
+            return out
+    else:
+        hit = [s for s in same if _safe_str(s["revision"]) == rev]
+        if not hit:
+            return cnl("name_not_found", "no sealed bundle has this revision")
+        hit = [s for s in hit if not any(_window(s))]
+        if not hit:
+            if ts is None:
+                return cnl("missing", "the decision has no readable timestamp to place in the "
+                                      "sealed bundle's window")
+            return cnl("name_not_found", "the sealed bundle with this revision was not in force "
+                                         "at the decision time")
+    if len({s["bundle_sha256"] for s in hit}) > 1:
+        return cnl("name_not_found", "two sealed bundles with different bytes share this "
+                                     "revision; which one is unknown")
+    s = hit[0]
+    fh = s.get("file_hashes") if isinstance(s.get("file_hashes"), dict) else {}
+    out["opa_signature_verified"] = s.get("opa_signature_verified")
+    if s.get("opa_signature_verified") == BROKEN or fh.get("verdict") == BROKEN:
+        out["join"] = BROKEN
+        out["reason"] = "the sealed bundle with this revision fails its own OPA signature"
+        return out
+    out["join"], out["bundle_sha256"] = VERIFIED, s["bundle_sha256"]
+    out["reason"] = "the decision's revision is the sealed bundle's revision"
+    return out
+
+
+def _join_row(r: dict, seals: list) -> dict:
+    row = json.loads(json.dumps(r))
+    row["signed_by_vendor"] = False
+    row["policy_bundle_sha256"] = None
+    d = row.get("decision") if isinstance(row.get("decision"), dict) else {}
+    bundles = d.get("bundles") if isinstance(d.get("bundles"), dict) else {}
+    ts = parse_ts(d.get("timestamp"))
+    per = {str(n): _join_one(str(n), rev, ts, seals) for n, rev in sorted(bundles.items())}
+    if isinstance(row.get("decision"), dict):
+        row["decision"]["policy_bundles"] = per
+    if not per:
+        row["policy_join"] = COULD_NOT_LOOK
+        row["policy_join_could_not_look"] = could_not_look(
+            "a bundle revision in the decision", f"{_WHERE} bundles", "missing",
+            "the decision names no bundle revision")
+        return row
+    word = max((p["join"] for p in per.values()), key=_JOIN_RANK.__getitem__)
+    row["policy_join"] = word
+    if word == COULD_NOT_LOOK:
+        row["policy_join_could_not_look"] = next(p["could_not_look"] for p in per.values()
+                                                 if "could_not_look" in p)
+    elif word == VERIFIED and len(per) == 1:
+        row["policy_bundle_sha256"] = next(iter(per.values()))["bundle_sha256"]
+    return row
+
+
+def join_bundles(rows: Any, seals: Any) -> list:
+    """Decision rows (from `ingest`) joined on `bundles.<name>.revision` to sealed
+    bundles (statements from arcaeon.connector.opa_bundle.seal_bundle). Returns new
+    rows; the input is not changed. Each relayed row gains:
+
+        signed_by_vendor      False: OPA signs bundles, not decisions
+        policy_join           VERIFIED  every bundle the decision names matched one
+                                        sealed bundle of that name and revision
+                              BROKEN    a sealed bundle declared in force at the
+                                        decision time has another revision, or the
+                                        matching sealed bundle fails its own signature
+                              COULD NOT LOOK  no revision, no sealed bundle for it,
+                                        two different sealed bundles share it, or the
+                                        matching seal's window excludes the decision
+        policy_bundle_sha256  the sealed bundle's sha256 when the row names exactly
+                              one bundle and joined VERIFIED, else None
+        decision.policy_bundles  {name: {revision, join, bundle_sha256,
+                              opa_signature_verified, reason}}
+
+    The relayed verdict is untouched. Anything that is not a relayed row passes
+    through as is; unreadable seals are ignored. Never raises."""
+    if not isinstance(rows, (list, tuple)):
+        return []
+    good = [s for s in (seals if isinstance(seals, (list, tuple)) else ()) if _usable_seal(s)]
+    out = []
+    for r in rows:
+        if not isinstance(r, dict) or r.get("kind") != ROW_KIND:
+            out.append(r)
+            continue
+        try:
+            out.append(_join_row(r, good))
+        except Exception as e:  # noqa: BLE001 - never a traceback on a row
+            row = json.loads(json.dumps(r, default=str))
+            row.update(signed_by_vendor=False, policy_bundle_sha256=None,
+                       policy_join=COULD_NOT_LOOK,
+                       policy_join_could_not_look=could_not_look(
+                           "a joinable decision row", "row", "unreadable",
+                           f"the join failed: {type(e).__name__}"))
+            out.append(row)
+    return out
 
 
 def ingest(raw: Any, *, allow_paths: Any = (), deny_paths: Any = (),

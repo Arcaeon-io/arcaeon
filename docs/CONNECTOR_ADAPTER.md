@@ -185,6 +185,83 @@ LOOK. A gzip body that is truncated, has trailing bytes or inflates past 32 MiB
 is one COULD NOT LOOK row. Decision logs are unsigned: every row is reported by
 the sender. `recheck` says COULD NOT LOOK for these rows; re-run `ingest`.
 
+### OPA bundles: which policy made the decision
+
+A decision event names its policy only as `bundles.<name>.revision`, the string
+in the bundle's `.manifest`. OPA signs bundles (a JWT in `.signatures.json`
+listing every file's hash), never decisions. So the claim "this decision was
+made under that signed policy" needs the bundle itself, sealed, and a join.
+
+`arcaeon.connector.opa_bundle.seal_bundle(source, name=...)` seals one bundle:
+`source` is the tarball's bytes, a path to a `.tar.gz`, or a bundle directory.
+The statement (`kind: "policy.bundle.sealed"`) carries `bundle_sha256` over the
+tarball's exact bytes (a directory: sha256 over its sorted `name NUL sha256`
+lines, scheme `sha256:opa-bundle-dir:v1`), the `revision` and `roots` read from
+`.manifest`, `opa_signatures_present`, a `file_hashes` block (each file the JWT
+lists, rehashed from the bundle bytes with stdlib `hashlib`), and
+`opa_signature_verified`. That last word is VERIFIED only when the caller
+supplied `verification_key` and `key_algorithm`, the JWT verifies under it
+(HS256/384/512 with stdlib `hmac`; RS, PS and ES with the optional
+`cryptography` package), and every listed file hash matched. A file hash that
+does not match, a listed file missing from the bundle, a bundle file the JWT
+does not list (unless named in `exclude_files`), a JWT `alg` other than the
+key's, or a bad signature is BROKEN. No key, no verifier installed, or two
+signatures is COULD NOT LOOK.
+
+The tarball is never extracted to disk: it is read in memory, and a member
+named with `..`, a backslash, a drive letter, a link or device member, or a name
+twice makes the whole bundle COULD NOT LOOK (`seal` and `revision` say so). A
+malformed or missing `.manifest`, bytes that are not a gzipped tarball, and a
+tarball over 16 MiB (digested, not read), inflating past 64 MiB or holding over
+10000 members are COULD NOT LOOK too.
+
+`arcaeon.connector.opa.join_bundles(rows, seals)` returns new decision rows,
+each with `signed_by_vendor: false`, `policy_join`, `policy_bundle_sha256` and
+`decision.policy_bundles` (per bundle name: revision, join word, digest,
+signature word, reason). The relayed verdict is not changed. A seal may carry
+`active_from` / `active_until`, the window the caller says the bundle was in
+force.
+
+| The decision's `bundles.<name>.revision` | `policy_join` |
+|---|---|
+| matches one sealed bundle of that name (and its window, if it has one, covers the decision time) | VERIFIED, with `policy_bundle_sha256` |
+| matches, but that sealed bundle fails its own OPA signature (file hash or JWT BROKEN) | BROKEN |
+| differs from the revision of a sealed bundle declared in force at the decision time | BROKEN |
+| no sealed bundle of that name has this revision | COULD NOT LOOK |
+| matches only a sealed bundle whose window excludes the decision time, or the decision has no readable timestamp to place in it | COULD NOT LOOK |
+| two sealed bundles with different bytes share the revision | COULD NOT LOOK |
+| absent or empty (no `bundles`, or no revision) | COULD NOT LOOK |
+
+A decision naming several bundles takes the worst word (BROKEN over COULD NOT
+LOOK over VERIFIED); `policy_bundle_sha256` is set only when it names exactly
+one bundle and joined VERIFIED.
+
+#### What this cannot prove
+
+- **VERIFIED is a revision match, not proof OPA loaded those bytes.** The
+  decision log carries no bundle hash, signature or key id; the revision is
+  text OPA reports. A join says the revision the decision names is the
+  revision of a bundle we hold, nothing more.
+- **Revisions need not be unique.** OPA does not require it. Two different
+  bundles with one revision are COULD NOT LOOK; a bundle we never sealed that
+  reuses a sealed revision is invisible to the join.
+- **File hashes without the key prove only that the bundle agrees with itself.**
+  Whoever built the bundle wrote the JWT's file list. Without the signing key's
+  public half, the JWT is COULD NOT LOOK, and so is `opa_signature_verified`.
+- **JSON and YAML file hashes may not be recomputable.** OPA hashes structured
+  files after parsing and sorting keys, but the exact bytes it hashes are not
+  documented here. We try the raw bytes and two compact sorted forms; a match
+  is a match, no match on a structured file is COULD NOT LOOK, never BROKEN.
+  YAML is not parsed.
+- **The window is the caller's word.** `active_from` / `active_until` come from
+  whoever sealed the bundle; a wrong window makes a wrong BROKEN or COULD NOT
+  LOOK. Without a window a different revision is never a conflict.
+- **The decision log is not a complete record.** Drop rules, masking and rate
+  limits mean decisions can be missing; a join covers only the rows we have.
+- **Not checked against a real OPA.** The bundle shapes are from OPA's Bundles
+  documentation; the tests build bundles from small in-test files, not a live
+  `opa build` output.
+
 ## Snyk agent-scan
 
 `arcaeon.connector.snyk_agent_scan.ingest(output_bytes, broken_at_score=...)`
