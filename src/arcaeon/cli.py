@@ -10,7 +10,10 @@ NETWORK: `pin --remote`, `seal`, `stamp` and `credits` reach the hosted
 witness, through arcaeon.remote. Two more go online on request: `receipt cite`
 looks each citation up with CourtListener's API (unless --fixture), and
 `proxy --pin-witness URL` pins the tape head at that witness at session end.
-Every other verb works offline.
+Every other verb works offline. Once a day at most, after a verb in
+CHECKIN_VERBS, the version check-in (arcaeon.checkin) asks arcaeon.io which
+version is current, sending only `arcaeon/<version>`; offline it is silent,
+and ARCAEON_NO_CHECKIN=1 turns it off. `verify` never fetches.
 
 THE 30-DAY FALLBACK. Before 0.9, `uvx arcaeon` (what an MCP registry client
 runs) started the MCP server, because the connector owned this name. Until the
@@ -171,7 +174,46 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         rc = V.EXIT_COULD_NOT_LOOK
     _journal(verb, rest, rc)
+    _checkin(verb, rest)
     return rc
+
+
+#: The verbs after which the once-a-day version check-in (arcaeon.checkin) may
+#: fetch and print its one stderr line. An allowlist on purpose: no checking
+#: verb (verify, receipt, envelope, gate, audit, reconcile, ...) and no server
+#: ever fetches, and a verb added later does not until it is listed here.
+CHECKIN_VERBS = frozenset({
+    "log", "pin", "deal", "escrow", "mandate", "badge", "seal", "distill", "dedup", "meter",
+    "export", "stamp", "credits", "buy", "connect", "schema", "open", "status", "version",
+    "doctor", "demo"})
+
+
+def _checkin(verb: str, rest: list[str]) -> None:
+    """After the verb has run and its exit code is fixed: at most one fetch a
+    day, and at most one line a day on stderr. Never raises, never changes rc,
+    prints nothing offline. ARCAEON_NO_CHECKIN=1 turns it off."""
+    if verb not in CHECKIN_VERBS or _wants_help(rest):
+        return
+    try:
+        from arcaeon import checkin
+        if not checkin.enabled():
+            return
+        checkin.maybe_fetch()
+        line = checkin.cli_notice()
+        if line:
+            print(line, file=sys.stderr)
+    except Exception:  # noqa: BLE001  the check-in never breaks the verb
+        pass
+
+
+def _checkin_cached() -> dict | None:
+    """The cached check-in answer for a report (agent detail), or None when
+    check-in is off or nothing is cached. Reads a file; never fetches."""
+    try:
+        from arcaeon import checkin
+        return checkin.block()
+    except Exception:  # noqa: BLE001
+        return None
 
 
 #: Verbs the activity journal does not record: `status` reads the journal
@@ -415,6 +457,12 @@ def _verify(argv) -> int:
         print(usage.splitlines()[0], file=sys.stderr)
         return V.EXIT_USAGE
     path = pos[0]
+    # The report header: the cached check-in answer, read from a file only.
+    # verify never fetches; with no cache or ARCAEON_NO_CHECKIN=1 this is None
+    # and the output is what it was before the check-in existed.
+    ci = _checkin_cached()
+    if ci is not None and ci.get("line"):
+        print(ci["line"], file=sys.stderr)
     r = verify_file(path, strict=strict)
     word = V.VERIFIED if r.ok is True else (V.COULD_NOT_LOOK if r.ok is None else V.BROKEN)
     # A missing, unreadable or directory path: verify_file() reports ok=False
@@ -454,6 +502,8 @@ def _verify(argv) -> int:
                   f"rows): {sp['rows_since_pin']}", file=sys.stderr)
         else:
             print(f"no pin compared: {sp['reason']}", file=sys.stderr)
+    if ci is not None:
+        report["checkin"] = ci
     print(json.dumps(report, indent=1))
     if unread and legacy:
         return V.EXIT_BAD                      # 0.9.0 / arcaeon-ledger verify said 1

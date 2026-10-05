@@ -294,6 +294,10 @@ def house_env(house: House, extra: dict | None = None) -> dict:
         # file lands there. The journal is a local convenience, not part of what
         # a release must do, so every command in the house runs with it off.
         "ARCAEON_JOURNAL": "0",
+        # The once-a-day version check-in (arcaeon.checkin) would ask arcaeon.io
+        # from inside the house and write ~/.arcaeon/checkin.json there; the
+        # release check tests the paid path, not the nudge, so it runs off.
+        "ARCAEON_NO_CHECKIN": "1",
     }
     if os.name == "nt":
         sysroot = os.environ.get("SYSTEMROOT") or os.environ.get("WINDIR") or "C:" + chr(92) + "Windows"

@@ -45,6 +45,12 @@ import tempfile  # noqa: E402
 os.environ["ARCAEON_HOME"] = tempfile.mkdtemp(prefix="arcaeon-test-home-")
 os.environ.pop("ARCAEON_JOURNAL", None)
 
+# 4b. The version check-in (arcaeon.checkin) is OFF for the whole run,
+#     subprocesses included, so no test ever asks arcaeon.io or PyPI anything.
+#     tests/test_checkin.py turns it back on per test, under a mocked opener.
+CHECKIN_OFF_ENV = "ARCAEON_NO_CHECKIN"
+os.environ[CHECKIN_OFF_ENV] = "1"
+
 # 5. The real home is never written (K14xR). mcp_vet's call record defaults to
 #    ~/.mcp_vet/audit.jsonl; it is pointed at the session's throwaway home too
 #    (tests/vet/conftest.py still gives the vet tree its own). The real
@@ -137,6 +143,8 @@ def _never_the_real_home(monkeypatch):
         monkeypatch.setenv("ARCAEON_HOME", SESSION_HOME)
     if _is_real(os.environ.get("MCP_VET_AUDIT_LEDGER"), REAL_HOME / ".mcp_vet" / "audit.jsonl"):
         monkeypatch.setenv("MCP_VET_AUDIT_LEDGER", SESSION_VET_LEDGER)
+    # a test that unset the check-in switch gets it back (opt-in is per test)
+    monkeypatch.setenv(CHECKIN_OFF_ENV, "1")
 
 
 HOME_VARS = ("HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH")

@@ -24,7 +24,10 @@ parser. Everything in the Record, Prove and Save lists below runs on the
 Python standard library. It also means no network on import. The hosted
 verbs open a connection when you run them, and so do a few options that say
 so: `proxy --pin-witness`, and `receipt cite`, which looks each citation up
-online. Everything else works offline.
+online. Everything else works offline. Once a day at most, the command line
+also asks arcaeon.io which version is current, sending only
+`arcaeon/<version>`; `arcaeon verify` never does, and `ARCAEON_NO_CHECKIN=1`
+turns it off ([docs/UPDATES.md](docs/UPDATES.md)).
 
 The heavy parts are extras. Add only what you use:
 
