@@ -1,0 +1,25 @@
+{
+  "eventVersion": "1.09",
+  "eventTime": "2026-10-05T12:00:00Z",
+  "eventSource": "verifiedpermissions.amazonaws.com",
+  "eventName": "IsAuthorized",
+  "awsRegion": "us-east-1",
+  "requestParameters": {
+    "principal": {"entityType": "Example::User", "entityId": "user-0001"},
+    "action": {"actionType": "Example::Action", "actionId": "ViewDocument"},
+    "resource": {"entityType": "Example::Document", "entityId": "doc-0001"},
+    "policyStoreId": "PSEXAMPLEabcdefg111111"
+  },
+  "responseElements": null,
+  "additionalEventData": {"decision": "ALLOW"},
+  "requestID": "00000000-0000-4000-8000-0000000000a1",
+  "eventID": "00000000-0000-4000-8000-0000000000e1",
+  "readOnly": true,
+  "resources": [
+    {"type": "AWS::VerifiedPermissions::PolicyStore",
+     "ARN": "arn:aws:verifiedpermissions::111122223333:policy-store/PSEXAMPLEabcdefg111111"}
+  ],
+  "eventType": "AwsApiCall",
+  "managementEvent": false,
+  "eventCategory": "Data"
+}

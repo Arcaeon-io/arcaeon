@@ -1,0 +1,35 @@
+{
+  "eventVersion": "1.09",
+  "eventTime": "2026-10-05T12:00:01Z",
+  "eventSource": "verifiedpermissions.amazonaws.com",
+  "eventName": "BatchIsAuthorized",
+  "awsRegion": "us-east-1",
+  "requestParameters": {"policyStoreId": "PSEXAMPLEabcdefg111111"},
+  "responseElements": null,
+  "additionalEventData": {
+    "results": [
+      {"request": {"principal": {"entityType": "Example::User", "entityId": "user-0001"},
+                   "action": {"actionType": "Example::Action", "actionId": "ViewDocument"},
+                   "resource": {"entityType": "Example::Document", "entityId": "doc-0001"}},
+       "decision": "ALLOW"},
+      {"request": {"principal": {"entityType": "Example::User", "entityId": "user-0002"},
+                   "action": {"actionType": "Example::Action", "actionId": "DeleteDocument"},
+                   "resource": {"entityType": "Example::Document", "entityId": "doc-0001"}},
+       "decision": "DENY"},
+      {"request": {"principal": {"entityType": "Example::User", "entityId": "user-0003"},
+                   "action": {"actionType": "Example::Action", "actionId": "ViewDocument"},
+                   "resource": {"entityType": "Example::Document", "entityId": "doc-0002"}},
+       "decision": "MAYBE"}
+    ]
+  },
+  "requestID": "00000000-0000-4000-8000-0000000000a2",
+  "eventID": "00000000-0000-4000-8000-0000000000e2",
+  "readOnly": true,
+  "resources": [
+    {"type": "AWS::VerifiedPermissions::PolicyStore",
+     "ARN": "arn:aws:verifiedpermissions::111122223333:policy-store/PSEXAMPLEabcdefg111111"}
+  ],
+  "eventType": "AwsApiCall",
+  "managementEvent": false,
+  "eventCategory": "Data"
+}
