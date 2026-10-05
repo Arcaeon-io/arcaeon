@@ -21,7 +21,8 @@ make it look like one or the other.
 
 Contents: Record (`log`, `verify`, `receipt`, `once`, `proxy`, `pin`, `deal`,
 `escrow`, `mandate`), Prove (`reconcile`, `audit`, `vet`, `badge`, `seal`, `baseline`,
-`compact`, `second-read`, `evidence-pack`, `export`, `envelope`, `gate`, `exchange`, `tally`), Save (`distill`, `dedup`,
+`compact`, `second-read`, `evidence-pack`, `export`, `envelope`, `gate`, `exchange`, `tally`,
+`register`), Save (`distill`, `dedup`,
 `meter`), Hosted (`stamp`, `credits`, `buy`), Serve (`mcp`, `serve`, `connect`,
 `schema`, `open`), This install (`status`, `selftest`, `version`, `doctor`,
 `demo`).
@@ -1065,6 +1066,41 @@ $ arcaeon tally pin --log TALLY_CHAIN.jsonl --dry-run --out S.json
 $ arcaeon tally build a.jsonl b.jsonl --json > tally.json
 $ arcaeon tally html tally.json --out tally.html
 wrote tally.html
+```
+
+## `register`
+
+Answers: who are the named operators in this register, and does the register
+itself check? `page` reads a register of named operators
+(`arcaeon.prove.register` rows, one JSON object per line or one JSON array),
+checks it against the register operator key you name with `--operator-key`
+(repeatable; the key comes from you, never from the rows) and writes one
+static HTML page with the verdict on top. VERIFIED: each operator with its
+keys (did:key and register digest), chains and witness endpoints, when each
+was added, every revocation (what, when, reason, compromised since), the head
+digest and the row count; publishing cadence reads "not stated" because the
+rows carry none. BROKEN or COULD NOT LOOK: the reason and no rows, not even
+the rows before the break. Inline CSS, no script, nothing fetched, every value
+escaped, the same register gives the same bytes. The page and its limits are
+[REGISTER.md](REGISTER.md); the row design is
+[design/REGISTER_REVOCATION.md](design/REGISTER_REVOCATION.md).
+
+**Usage**
+
+```text
+usage: arcaeon register page REGISTER.jsonl [--operator-key DID...] [--out FILE]
+```
+
+**Exit codes:** `page`: 0 VERIFIED (page written), 1 BROKEN (page written,
+BROKEN banner), 3 COULD NOT LOOK (page written with the reason: no rows, no
+`--operator-key`, no Ed25519 backend; or the file is missing or not JSON,
+nothing written), 2 bad usage or `--out` exists. New in 0.10.x, so
+`--legacy-exit` changes nothing here.
+
+```console
+$ arcaeon register page register.jsonl --operator-key did:key:z6Mk... --out page.html
+register VERIFIED: 4 rows, linked and signed by the operator key you named; head sha256:json-c14n:v1:2d3c...
+wrote page.html
 ```
 
 ## `distill`
