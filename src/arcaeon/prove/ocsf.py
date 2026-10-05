@@ -20,6 +20,8 @@ and earlier. That is the record's content only: no Parquet is written.
     verdict          severity_id          is_alert  emitted
     BROKEN           4 High               true      always
     COULD NOT LOOK   2 Low                false     always, naming what was not checked
+    COULD NOT LOOK   3 Medium             true      always, when a gate input's decision
+      on a refusal                                    is refuse
     VERIFIED         1 Informational      false     only with include_verified
 
 A gate refusal is never skipped and never reads VERIFIED: when a gate input's
@@ -57,7 +59,8 @@ from typing import Any
 from arcaeon import verdict as V
 
 __all__ = ["OCSF_VERSION", "OCSF_SOURCES", "CLASS_UID", "CATEGORY_UID", "ACTIVITY_ID",
-           "TYPE_UID", "SEVERITY", "LIMITS_LINE", "OCSF_VERSIONS", "OCSF_13_SOURCES",
+           "TYPE_UID", "SEVERITY", "SEVERITY_REFUSED_COULD_NOT_LOOK", "LIMITS_LINE",
+           "OCSF_VERSIONS", "OCSF_13_SOURCES",
            "OCSF_13_ALLOW", "ExportError", "normalize", "restrict", "to_ocsf", "dumps", "main"]
 
 #: The OCSF schema version the mapping was read from (schema.ocsf.io/api/version
@@ -132,6 +135,9 @@ STATUS_ID, STATUS_NAME = 1, "New"
 #: verdict -> (severity_id, severity caption, is_alert)
 SEVERITY = {V.BROKEN: (4, "High", True), V.COULD_NOT_LOOK: (2, "Low", False),
             V.VERIFIED: (1, "Informational", False)}
+#: COULD NOT LOOK on a gate input whose decision is refuse (a money or other
+#: guarded action was stopped): an alert, Medium, not the Low of an allowed read.
+SEVERITY_REFUSED_COULD_NOT_LOOK = (3, "Medium", True)
 FILE_TYPE_REGULAR = (1, "Regular File")
 SHA256_ALGORITHM = (3, "SHA-256")
 
@@ -400,6 +406,8 @@ def to_ocsf(obj: Any, *, now: datetime | None = None,
     if word == V.VERIFIED and not include_verified:
         return None
     sev_id, sev, alert = SEVERITY[word]
+    if word == V.COULD_NOT_LOOK and rec.get("decision") == "refuse":
+        sev_id, sev, alert = SEVERITY_REFUSED_COULD_NOT_LOOK
     t = _ms(now or datetime.now(timezone.utc))
     what = rec["file"] or "the checked input"
     uid = "arcaeon-" + hashlib.sha256(

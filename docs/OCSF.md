@@ -50,11 +50,16 @@ What the class says, as read:
 |---|---|---|---|
 | BROKEN | 4 (High) | true | always: a finding |
 | COULD NOT LOOK | 2 (Low) | false | always, with what was not checked |
+| COULD NOT LOOK on a gate refusal (`decision` is `refuse`) | 3 (Medium) | true | always, with what was not checked |
 | VERIFIED | 1 (Informational) | false | only with `--include-verified` (library: `include_verified=True`); by default nothing is printed and the exit is 0 |
 
 VERIFIED is skipped by default because a SIEM is a place for things to look
 at; a stream of "this was fine" findings buries the BROKEN ones. Turn it on
 when the SIEM is also the audit record.
+
+A COULD NOT LOOK that the gate turned into a refusal (an act, pay or
+irreversible it stopped) is an alert at Medium; one that allowed a read, and
+a bare verify report, stay Low.
 
 A gate refusal is never skipped and never reads as passed, whatever the
 envelope said. The gate can refuse a VERIFIED envelope: a checker row says
@@ -67,7 +72,7 @@ event reports the word the gate's exit code means:
 | gate veto | `status_code`, severity, is_alert | gate exit |
 |---|---|---|
 | `checker-broken` | BROKEN, 4 (High), true | 1 |
-| `checks-unreadable`, `nonparty-check` (or any other refusal of a VERIFIED envelope) | COULD NOT LOOK, as the COULD NOT LOOK row above | 3 |
+| `checks-unreadable`, `nonparty-check` (or any other refusal of a VERIFIED envelope) | COULD NOT LOOK, 3 (Medium), true | 3 |
 
 `unmapped.arcaeon.verdict` still says VERIFIED (the envelope's own word), and
 `unmapped.arcaeon.veto` names the veto. The title names the refused action
@@ -189,7 +194,7 @@ was read on 2026-10-05 from these pages, with no profile applied:
 As read there: Detection Finding is class_uid 2004 in 1.3.0, with the same
 required attributes (`activity_id`, `category_uid`, `class_uid`,
 `finding_info`, `metadata`, `severity_id`, `time`, `type_uid`); Create is
-activity_id 1, so type_uid is still 200401; severity_id 4/2/1 and status_id 1
+activity_id 1, so type_uid is still 200401; severity_id 4/3/2/1 and status_id 1
 (New) mean the same; `finding_info` requires `uid` and `title`, `product`
 requires `vendor_name`, `file` requires `name` and `type_id`, `fingerprint`
 requires `algorithm_id` and `value` (3 is SHA-256). So class_uid,
@@ -198,7 +203,7 @@ finding_info, evidences and unmapped are identical in both modes.
 
 Dropped in 1.3.0 mode:
 
-- `is_alert`: not in the 1.3.0 class. A BROKEN finding still has severity_id 4 (High), and `unmapped.arcaeon.verdict` still says BROKEN.
+- `is_alert`: not in the 1.3.0 class. A BROKEN finding still has severity_id 4 (High), a COULD NOT LOOK refusal 3 (Medium), and `unmapped.arcaeon.verdict` and `unmapped.arcaeon.decision` are kept.
 - Every profile name in `metadata.profiles` (the export applies none, so it stays `[]`); in particular the 1.9.0 Record Integrity profile (`attestation_list`).
 - `ai_agent` inside `evidences` (1.9.0), and any other key the allowlist does not name.
 

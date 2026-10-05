@@ -231,7 +231,9 @@ def test_real_verify_report_and_gate_decision(tmp_path, verdict, sev):
                  record_dir=tmp_path / "rec", now=NOW).to_dict()
     ev2 = O.to_ocsf(d, now=NOW, include_verified=True)
     a = ev2["unmapped"]["arcaeon"]
-    assert ev2["severity_id"] == sev
+    # F-R6: COULD NOT LOOK on a refused pay is Medium and an alert, not Low
+    assert ev2["severity_id"] == (3 if verdict == V.COULD_NOT_LOOK else sev)
+    assert ev2["is_alert"] is (verdict != V.VERIFIED)
     assert a["source"] == "gate decision" and a["action"] == "pay"
     assert a["decision"] == ("allow" if verdict == V.VERIFIED else "refuse")
     assert a["audience_checked"] == "instructor-1"

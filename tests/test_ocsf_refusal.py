@@ -123,3 +123,34 @@ def test_read_allowed_with_broken_note_still_skipped_by_default(tmp_path):
     d = _checker_broken(tmp_path, action="read")
     assert d.decision == "allow" and d.verdict == V.VERIFIED
     assert O.to_ocsf(d.to_dict()) is None
+
+
+# --- F-R6 ---------------------------------------------------------------------------
+
+def _cnl_pay(tmp_path):
+    f, did = TG._make(tmp_path, V.COULD_NOT_LOOK)          # unsigned: who sealed it unknown
+    return G.decide(f, action="pay", audience=AUD, signers=[did], **_ex(tmp_path))
+
+
+@pytest.mark.parametrize("make", [_cnl_pay, _checks_unreadable, _nonparty])
+def test_could_not_look_refusal_is_medium_alert(tmp_path, make):
+    d = make(tmp_path)
+    assert d.decision == "refuse" and d.exit_code == V.EXIT_COULD_NOT_LOOK
+    srcs = [d.to_dict()]
+    if d.evidence:
+        srcs.append(json.loads((Path(d.evidence) / "evidence.json").read_text(encoding="utf-8")))
+    for src in srcs:
+        ev = O.to_ocsf(src)
+        assert ev["status_code"] == V.COULD_NOT_LOOK
+        assert ev["severity_id"] == 3 and ev["severity"] == "Medium"
+        assert ev["is_alert"] is True
+
+
+def test_could_not_look_allowed_read_stays_low(tmp_path):
+    f, did = TG._make(tmp_path, V.COULD_NOT_LOOK)
+    d = G.decide(f, action="read", audience=AUD, signers=[did])
+    assert d.decision == "allow" and d.verdict == V.COULD_NOT_LOOK
+    ev = O.to_ocsf(d.to_dict())
+    assert ev["severity_id"] == 2 and ev["is_alert"] is False
+    r = O.to_ocsf(d.report)                                  # a bare verify report: no decision
+    assert r["severity_id"] == 2 and r["is_alert"] is False
