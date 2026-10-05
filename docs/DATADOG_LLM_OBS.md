@@ -48,6 +48,18 @@ One verdict is one span, in its own trace, with `meta.kind` `task`.
 | VERIFIED | `ok` | `arcaeon.verdict:VERIFIED` | none |
 | BROKEN | `error` | `arcaeon.verdict:BROKEN` | `type` `arcaeon.BROKEN`, a fixed message |
 | COULD NOT LOOK | `ok` | `arcaeon.verdict:COULD_NOT_LOOK` | none |
+| COULD NOT LOOK, gate refused | `error` | `arcaeon.verdict:COULD_NOT_LOOK` | none |
+
+Every span carries exactly one `arcaeon.verdict` tag, written as the token
+in the table (tags take no spaces, so `COULD NOT LOOK` is `COULD_NOT_LOOK`);
+`meta.metadata["arcaeon.verdict"]` keeps the word with its spaces.
+
+A COULD NOT LOOK on a gate input (a `gate decide --json` decision or an
+`evidence.json`) whose decision is `refuse` is an `error` span: the gate
+stopped the action, which a team watching error rates should see. This
+matches the OCSF export, where the same case is a Medium alert. Any other
+COULD NOT LOOK (a verify report, an allowed gate action) stays `ok`, with
+the `arcaeon.verdict:COULD_NOT_LOOK` tag to filter on.
 
 All three are exported. Unlike a SIEM finding, a trace of every check is
 the point, so VERIFIED is not skipped.

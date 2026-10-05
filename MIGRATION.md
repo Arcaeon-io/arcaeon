@@ -20,6 +20,8 @@
 
 - **F-R6 (7023143, branch b200-t4a-ocsf-refuse).** SIEM rules keyed on severity_id 2 for gate COULD NOT LOOK refusals now see severity_id 3 (Medium) and is_alert true.
 
+- **T6-DD-REFUSED (branch b200-t6b-fixes).** export-datadog: a COULD NOT LOOK span from a gate decision or evidence.json whose decision is refuse now has status "error" (was "ok"); Datadog monitors on error rate will count these. Tags unchanged (arcaeon.verdict:COULD_NOT_LOOK, arcaeon.decision:refuse); verify-report exports and allowed gate actions unchanged.
+
 - **F-R2 (d9f74ad, branch b200-t4b1-pairing).** with --accounts, a pairing whose key reacted after its revoke or rotation now reads BROKEN (was VERIFIED); each account_service answer gains `through`; consult_binding takes an optional reactions argument. Without --accounts, none.
 
 - **F-R3 (fdd55b1, branch b200-t4b1-pairing).** with --accounts, sibling-agent trades move from counts to `excluded` and account_service answers gain `owner`. Without --accounts, none.

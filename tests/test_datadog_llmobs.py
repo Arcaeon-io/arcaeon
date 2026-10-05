@@ -128,7 +128,65 @@ def test_gate_refusal_of_a_verified_envelope_is_never_verified():
     assert s["name"] == "arcaeon.gate.decide"
     d["checks"]["veto"] = "checks-unreadable"
     s = _span(DD.to_llmobs(d, now=NOW))
-    assert _tags(s)["arcaeon.verdict"] == "COULD_NOT_LOOK" and s["status"] == "ok"
+    assert _tags(s)["arcaeon.verdict"] == "COULD_NOT_LOOK" and s["status"] == "error"
+
+
+def _gate(verdict: str, decision: str, veto: str | None = None, action: str = "pay") -> dict:
+    d = {"verdict": verdict, "action": action, "decision": decision, "reason": SECRET,
+         "report": _report(verdict)}
+    if veto:
+        d["checks"] = {"veto": veto, "rows": 1, "broken": []}
+    return d
+
+
+def _evidence(verdict: str, decision: str) -> dict:
+    return {"kind": "arcaeon.gate.evidence/v1", "verdict": verdict, "action": "act",
+            "decision": decision, "reason": SECRET, "reasons": [SECRET],
+            "report": _report(verdict), "file": {"path": "/srv/x/" + SECRET, "sha256": SHA}}
+
+
+@pytest.mark.parametrize("obj", [
+    _gate(V.COULD_NOT_LOOK, "refuse"),
+    _gate(V.VERIFIED, "refuse", veto="checks-unreadable"),
+    _gate(V.VERIFIED, "refuse", veto="nonparty-check"),
+    _evidence(V.COULD_NOT_LOOK, "refuse"),
+], ids=["cnl-refuse", "veto-checks-unreadable", "veto-nonparty-check", "evidence-cnl-refuse"])
+def test_could_not_look_on_a_refused_gate_is_an_error_span(obj):
+    """The gate stopped the action: the span is an error, like OCSF's alert."""
+    s = _span(DD.to_llmobs(obj, now=NOW))
+    t = _tags(s)
+    assert t["arcaeon.verdict"] == "COULD_NOT_LOOK" and t["arcaeon.decision"] == "refuse"
+    assert s["status"] == "error"
+
+
+@pytest.mark.parametrize("obj", [
+    _report(V.COULD_NOT_LOOK),
+    _gate(V.COULD_NOT_LOOK, "allow", action="read"),
+    _evidence(V.COULD_NOT_LOOK, "allow"),
+], ids=["verify-report", "gate-allow", "evidence-allow"])
+def test_could_not_look_without_a_refusal_is_ok_and_tagged(obj):
+    s = _span(DD.to_llmobs(obj, now=NOW))
+    assert s["status"] == "ok"
+    assert [t for t in s["tags"] if t.startswith("arcaeon.verdict:")] == [
+        "arcaeon.verdict:COULD_NOT_LOOK"]
+
+
+_EVERY_INPUT = [(v, o) for v in (V.VERIFIED, V.BROKEN, V.COULD_NOT_LOOK)
+                for o in (_report(v), _gate(v, "allow", action="read"), _gate(v, "refuse"),
+                          _evidence(v, "allow"), _evidence(v, "refuse"))]
+
+
+@pytest.mark.parametrize("verdict,obj", _EVERY_INPUT)
+def test_every_span_carries_exactly_one_verdict_tag_matching_its_word(verdict, obj):
+    s = _span(DD.to_llmobs(obj, now=NOW))
+    vt = [t for t in s["tags"] if t.startswith("arcaeon.verdict:")]
+    word = s["meta"]["metadata"]["arcaeon.verdict"]
+    assert vt == ["arcaeon.verdict:" + TOKEN[word]]
+    assert " " not in vt[0]
+    # status follows the word, and a refusal never reads ok unless VERIFIED survived it
+    want = "error" if word == V.BROKEN or (word == V.COULD_NOT_LOOK
+                                           and obj.get("decision") == "refuse") else "ok"
+    assert s["status"] == want
 
 
 def test_not_an_arcaeon_verdict_is_refused():
@@ -361,6 +419,7 @@ def test_doc_cites_the_page_and_has_limits():
                  "span_id", "trace_id", "start_ns", "ml_app"):
         assert word in doc, word
     assert "## What it cannot prove" in doc
+    assert "| COULD NOT LOOK, gate refused | `error` | `arcaeon.verdict:COULD_NOT_LOOK` |" in doc
     low = doc.lower()
     assert "nothing" in low and "sent" in low
     assert "—" not in doc and "–" not in doc
