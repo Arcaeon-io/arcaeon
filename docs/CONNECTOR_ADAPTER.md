@@ -202,11 +202,16 @@ no id.
 | decision (case ignored) | errors | `relayed_verdict` | why |
 |---|---|---|---|
 | `Allow` / `ALLOW` | present and empty | VERIFIED | Cedar allowed, no policy errored, as Cedar says |
-| `Deny` / `DENY` | present and empty | BROKEN | Cedar denied (an empty policy list is an implicit deny) |
-| `Allow` or `Deny` | one or more | COULD NOT LOOK | Cedar skips a policy that errors, so the decision was reached without it |
-| `Allow` or `Deny` | not reported (CloudTrail, or the key is missing) | COULD NOT LOOK | a clean decision cannot be told from one reached with policies skipped |
-| any other word, or not a string | any | COULD NOT LOOK | not in the table |
-| any | policy or error list not readable | COULD NOT LOOK | the decision cannot be read |
+| `Allow` / `ALLOW` | one or more | COULD NOT LOOK | Cedar skips a policy that errors, so the Allow was reached without it |
+| `Allow` / `ALLOW` | not reported (CloudTrail, or the key is missing) | COULD NOT LOOK | a clean Allow cannot be told from one reached with policies skipped |
+| `Allow` / `ALLOW` | policy or error list not readable | COULD NOT LOOK | a clean Allow cannot be shown |
+| `Deny` / `DENY` | any: present, empty, non-empty or not reported | BROKEN | the decision is the verdict: Cedar denied (an empty policy list is an implicit deny) |
+| absent, null, not a string, or any other word | any | COULD NOT LOOK | the decision cannot be read |
+
+A Deny's row says why in `cedar.reason`: `Cedar denied`, then a note for errors
+reported (their count), an errors value that is not a list, or a policy list
+that cannot be read. A missing errors list adds no note; it only makes the
+reason shorter. So a CloudTrail row carrying a `DENY` reads BROKEN.
 
 Every row carries `signed_by_vendor: false`, `standing: "reported_by_sender"`
 and `input_sha256` (hex SHA-256 of the exact bytes given to `ingest`), written
@@ -233,8 +238,8 @@ shapes is one COULD NOT LOOK row. More than 10000 batch results stop with one
   pin policy text or a version. Tying a row to a policy needs the policy set
   sealed too, and that join is not built: `policy_ref.join` says COULD NOT LOOK.
 - **Which policy, from CloudTrail.** A CloudTrail event carries the decision and
-  the policy store only: no determining policies and no errors, so its rows are
-  COULD NOT LOOK even for an ALLOW. CloudTrail data events are also off by
+  the policy store only: no determining policies and no errors, so an ALLOW row
+  is COULD NOT LOOK (a DENY row is BROKEN, with no policy ids). CloudTrail data events are also off by
   default, so a missing event is not a missing decision.
 - **That the shape matches a live service.** The fixtures were written from the
   cedar-policy and AWS documentation, not captured; see

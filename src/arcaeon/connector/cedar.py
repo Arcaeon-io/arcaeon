@@ -25,21 +25,27 @@ text line, or an object of no shape or two shapes is one COULD NOT LOOK row.
 THE WORD. The decision word (strip + casefold) is read by this table:
 
     allow  -> VERIFIED   only when the errors list is present and empty
-    deny   -> BROKEN     only when the errors list is present and empty
+    deny   -> BROKEN     whatever the errors list says
 
-and then, per row:
+A Deny is the verdict: present and empty, present with errors, not reported
+(CloudTrail, or the key is missing), not a list, or a policy list that cannot be
+read, it is BROKEN, and `cedar.reason` says which ("Cedar denied", then any of
+those notes; a missing errors list adds none). For an Allow, per row:
 
     errors present (any count)  -> COULD NOT LOOK  Cedar skips a policy that errors, so
-                                   an Allow or a Deny was reached without it
+                                   the Allow was reached without it
     errors not reported         -> COULD NOT LOOK  the shape has no errors list (CloudTrail,
-                                   or the key is missing), so a clean decision cannot be told
+                                   or the key is missing), so a clean Allow cannot be told
                                    from one reached with policies skipped
-    unknown word / not a word   -> COULD NOT LOOK
     unreadable policy or error lists -> COULD NOT LOOK
 
+COULD NOT LOOK for any decision only when the decision itself cannot be read:
+absent, null, not a string, or a word other than Allow / Deny.
+
 The adapter's per-row reading is `cedar.outcome`: allow | deny | errored |
-errors_not_reported | unknown_decision | unreadable. vendor_word is the decision
-exactly as written.
+errors_not_reported | unknown_decision | unreadable (errored, errors_not_reported
+and unreadable are an Allow's only; a Deny is always `deny`). vendor_word is the
+decision exactly as written.
 
 THE ROW. The check.verdict.relayed row of arcaeon.connector.core, plus:
 
@@ -48,7 +54,8 @@ THE ROW. The check.verdict.relayed row of arcaeon.connector.core, plus:
                  errors_reported, errors_count, errors_digest (sha256:jcs:v1 of the errors
                  list; the error text is not copied), event_name, event_id,
                  request_digest (sha256:jcs:v1 of the CloudTrail request; principal,
-                 action and resource are not copied)
+                 action and resource are not copied), reason (a Deny's reason text,
+                 else None)
     policy_ref   {policy_store_id, policy_store_source ("payload" | "caller" | None),
                  policy_ids, version: None, join: COULD NOT LOOK, note}
     signed_by_vendor  False. Always.
@@ -176,7 +183,8 @@ def _row(base: dict, shape: str, idx: int, where: str) -> dict:
     row["cedar"] = {"shape": shape, "item_index": idx, "outcome": "unreadable",
                     "policy_ids": None, "policy_ids_total": None, "implicit_deny": None,
                     "errors_reported": False, "errors_count": None, "errors_digest": None,
-                    "event_name": None, "event_id": None, "request_digest": None}
+                    "event_name": None, "event_id": None, "request_digest": None,
+                    "reason": None}
     row["policy_ref"] = {"policy_store_id": None, "policy_store_source": None,
                          "policy_ids": None, "version": None, "join": COULD_NOT_LOOK,
                          "note": _POLICY_NOTE}
@@ -209,6 +217,19 @@ def _decide(row: dict, where: str, decision: Any, ids: Any, errors: Any,
             "name_not_found",
             f"decision {row['vendor_word']!r} is not in the cedar table" if rule == "unknown_word"
             else "the decision is not a word")
+    elif word == "deny":
+        # The decision IS the verdict: a Deny is BROKEN whatever the lists say.
+        # What they say (or that they are missing) goes into the reason only.
+        c["outcome"] = "deny"
+        notes = []
+        if bad:
+            notes.append(bad)
+        if errors_key and not isinstance(errors, list):
+            notes.append("errors is not a list")
+        elif errors:
+            notes.append(f"{len(errors)} policy evaluation error(s) reported; those "
+                         f"policies were skipped")
+        c["reason"] = "; ".join(["Cedar denied"] + notes)
     elif bad:
         c["outcome"] = "unreadable"
         _cnl(row, "a readable Cedar decision", where, "unreadable", bad)
