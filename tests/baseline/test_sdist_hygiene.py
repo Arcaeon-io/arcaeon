@@ -34,7 +34,7 @@ BANNED = (".hypothesis/", ".pytest_cache/", "__pycache__/", ".git/", "dist/", ".
 MAX_MEMBERS = 250  # the whole merged package is ~140 members; a cache blows past this
 
 # Top-level entries one level below the "arcaeon-X.Y.Z/" prefix.
-ALLOWED_TOP_LEVEL_DIRS = {"src"}
+ALLOWED_TOP_LEVEL_DIRS = {"src", "policies"}  # policies/: the D053 Rego policy
 ALLOWED_TOP_LEVEL_FILES = {
     "README.md", "LICENSE", "pyproject.toml",
     "PKG-INFO",       # generated metadata, always present
