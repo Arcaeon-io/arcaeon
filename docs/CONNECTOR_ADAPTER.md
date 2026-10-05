@@ -180,7 +180,10 @@ undeclared path, a non-boolean result (including the string `"true"`), an
 undefined decision (no result) and an erased or masked result all read COULD NOT
 LOOK. A gzip body that is truncated, has trailing bytes or inflates past 32 MiB
 is one COULD NOT LOOK row. Decision logs are unsigned: every row is reported by
-the sender. `recheck` says COULD NOT LOOK for these rows; re-run `ingest`.
+the sender, and every row `ingest` returns (COULD NOT LOOK rows included)
+carries `signed_by_vendor: false`. OPA signs bundles, never decisions, so no
+path here sets it true; a bundle whose signature verified under your key says so
+in its seal, not on the decision row. `recheck` says COULD NOT LOOK for these rows; re-run `ingest`.
 
 ### OPA bundles: which policy made the decision
 
@@ -198,12 +201,19 @@ lines, scheme `sha256:opa-bundle-dir:v1`), the `revision` and `roots` read from
 lists, rehashed from the bundle bytes with stdlib `hashlib`), and
 `opa_signature_verified`. That last word is VERIFIED only when the caller
 supplied `verification_key` and `key_algorithm`, the JWT verifies under it
-(HS256/384/512 with stdlib `hmac`; RS, PS and ES with the optional
-`cryptography` package), and every listed file hash matched. A file hash that
-does not match, a listed file missing from the bundle, a bundle file the JWT
-does not list (unless named in `exclude_files`), a JWT `alg` other than the
-key's, or a bad signature is BROKEN. No key, no verifier installed, or two
-signatures is COULD NOT LOOK.
+(HS256/384/512 with stdlib `hmac`; RS256/384/512, PS256/384/512 and
+ES256/384/512 with the optional `cryptography` package), and every listed file
+hash matched. Each of those twelve algorithms is tested with throwaway keys made
+in the test: a valid signature VERIFIED, one flipped signature byte BROKEN, the
+wrong key BROKEN, a key of the wrong type refused. PS uses PSS with MGF1 on the
+same hash and a salt as long as the hash; ES uses the JWS raw `r||s` form on
+P-256, P-384 and P-521. Any other `key_algorithm` (`none`, EdDSA, ...) is a
+caller error. A file hash that does not match, a listed file missing from the
+bundle, a bundle file the JWT does not list (unless named in `exclude_files`), a
+JWT `alg` other than the key's, or a bad signature is BROKEN. No key, no
+verifier installed, two signatures, or a key of the wrong type for the
+algorithm (an EC key for RS/PS, an RSA key or another curve for ES, a PEM key
+given as an HMAC secret) is COULD NOT LOOK.
 
 The tarball is never extracted to disk: it is read in memory, and a member
 named with `..`, a backslash, a drive letter, a link or device member, or a name

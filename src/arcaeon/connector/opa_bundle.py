@@ -59,6 +59,14 @@ leading "/" or "./" is dropped (OPA's own tarballs write "/.manifest"; this is
 not in R14 and is tolerated, not required). Bounded: MAX_BUNDLE_BYTES as
 received, MAX_TAR_BYTES inflated, MAX_FILES members.
 
+JWT ALGORITHMS (KEY_ALGORITHMS, each tested with throwaway in-test keys):
+HS256/384/512 (stdlib hmac), RS256/384/512 (PKCS#1 v1.5), PS256/384/512 (PSS,
+MGF1 with the same hash, salt length = hash length) and ES256/384/512 (P-256,
+P-384, P-521; the JWS raw r||s form). Any other `key_algorithm` is a caller
+error (ValueError). A key of the wrong type for the algorithm (an EC key for
+RS/PS, an RSA key or an EC key on another curve for ES, a PEM key given as an
+HMAC secret) is refused: COULD NOT LOOK, never checked.
+
 Stdlib only; RS/PS/ES signatures use the optional `cryptography` package when it
 is installed and say COULD NOT LOOK when it is not. No network.
 """
@@ -101,6 +109,8 @@ _HASHES = {"MD5": "md5", "SHA-1": "sha1", "SHA-224": "sha224", "SHA-256": "sha25
            "SHA-512-256": "sha512_256"}
 _HMAC = {"HS256": "sha256", "HS384": "sha384", "HS512": "sha512"}
 _ASYM = {f"{p}{n}": f"sha{n}" for p in ("RS", "PS", "ES") for n in (256, 384, 512)}
+#: RFC 7518 3.4: each ES alg names one curve; a key on another curve is refused.
+_ES_CURVE = {"ES256": "secp256r1", "ES384": "secp384r1", "ES512": "secp521r1"}
 #: The key algorithms OPA documents for bundle signing keys.
 KEY_ALGORITHMS = tuple(sorted(_HMAC) + sorted(_ASYM))
 
@@ -346,6 +356,9 @@ def _verify_jwt(parts: list, head: dict, key: Any, key_alg: str | None) -> tuple
         return BROKEN, "the JWT signature is not base64url"
     kb = key.encode("utf-8") if isinstance(key, str) else bytes(key)
     if alg in _HMAC:
+        if b"-----BEGIN" in kb:
+            # a PEM key handed over as an HMAC secret is the alg-confusion shape: refused
+            return COULD_NOT_LOOK, f"the supplied key is not a key for {alg} (it is a PEM key)"
         ok = hmac.compare_digest(hmac.new(kb, msg, _HMAC[alg]).digest(), sig)
         return (VERIFIED, "the JWT HMAC matches the supplied key") if ok else (
             BROKEN, "the JWT HMAC does not match the supplied key")
@@ -366,7 +379,10 @@ def _verify_jwt(parts: list, head: dict, key: Any, key_alg: str | None) -> tuple
                 mgf=padding.MGF1(h), salt_length=padding.PSS.DIGEST_LENGTH)
             pub.verify(sig, msg, pad, h)
         elif alg[:2] == "ES" and isinstance(pub, ec.EllipticCurvePublicKey):
-            n = (pub.curve.key_size + 7) // 8
+            if pub.curve.name != _ES_CURVE[alg]:
+                return COULD_NOT_LOOK, (f"the supplied key is not a key for {alg} (curve "
+                                        f"{pub.curve.name}, not {_ES_CURVE[alg]})")
+            n =(pub.curve.key_size + 7) // 8
             if len(sig) != 2 * n:
                 return BROKEN, "the JWT ECDSA signature has the wrong length"
             der = utils.encode_dss_signature(int.from_bytes(sig[:n], "big"),
