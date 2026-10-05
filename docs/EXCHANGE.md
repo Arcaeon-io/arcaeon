@@ -178,6 +178,62 @@ Per exchange, `status` is:
 Anything but `clean` is the mark. A VERIFIED verdict with mismatches in it
 means the record is sound and the parties disagree.
 
+## Disagreement classes
+
+On top of the status, each exchange where the two sides disagree carries one
+class word in `disagreement` and one plain sentence in
+`disagreement_reason`. An exchange where they agree carries `null` in both;
+so does a `broken` one (its record does not check, so no disagreement is read
+from it). `disagreements` counts each word, and the text output's first line
+ends with the four counts. `status` and its values are unchanged.
+
+| word | what it means | what it cannot prove |
+|---|---|---|
+| `missing` | one log has no record of the exchange; the other does | that the silent party never saw it, or that a row was not dropped by truncating the log (pin each head) |
+| `mismatched` | both logs have it, and a field differs: `reaction`, `file_sha256` or `counterparty`, named in the reason and in `differs` | which side is right |
+| `retracted` | a side superseded an earlier BROKEN for this exchange with another word (the retraction above); the old row stays in its log | why it changed its word |
+| `late` | both agree, but one row's `at` trails the other's by more than `--late-after SECONDS` | when either row was really written: `at` is each writer's own clock, signed, not witnessed |
+
+One word per exchange, in this order: `missing`, `mismatched`, `retracted`,
+`late`. A retracted exchange that is also mismatched reads `mismatched`; the
+side still shows under `retracted`.
+
+**The late window** defaults to 86400 seconds (one day): `at` is each
+writer's own clock and a reaction is often written by a scheduled job after
+delivery, so a day separates "answered in the same cycle" from "answered
+after the fact" without marking clock drift or a nightly batch as late. Set
+it with `--late-after SECONDS` (0 marks any gap). Every valid row carries a
+signed `at`, so the class is always readable; if two rows ever carried no
+comparable time, the exchange could not be `late` and its findings would say
+so.
+
+**Retraction** is the existing one: a BROKEN superseded by another word. There
+is no separate withdraw row; a party that wants to take a reaction back writes
+a new row that supersedes it.
+
+**`--strict`** marks `mismatched` and `missing` only (exit 1), as before.
+`late` and `retracted` are not marks under `--strict`: the current rows agree.
+
+**The dispute packet from the pair.** `arcaeon exchange packet A.jsonl
+B.jsonl --exchange ID` reads both logs with the same reader and puts one
+exchange on a page (kind `arcaeon.dispute.pair_packet/v1`): each side's own
+signed row (or "no record"), the status, the class word and its reason, the
+field that differs, DISPUTED claims for it, and the limits below. File names
+only, no directories. `--json` prints the JSON, `--out DIR` writes
+`dispute-packet.md` and `dispute-packet.json`. Exit 0 written; 2 bad usage,
+or nothing to dispute (the two sides agree and nobody disputes); 3 COULD NOT
+LOOK (a log cannot be read, or the exchange is in neither log). The library
+call is `arcaeon.prove.dispute_packet.from_pair`.
+
+**The MCP tool.** `exchange_pair_reconcile` takes `log_a`, `log_b` and
+optionally `exchange` (one exchange id), `late_after`, `owner_a`, `owner_b`,
+and answers the same JSON as `pair --json` with `exit` added. Like every tool
+on the connector it leaves one call-record row.
+
+**What the classes cannot prove.** A class says how the two records differ,
+not which party is right or at fault, and not that either record is true.
+Everything under "What it does not prove" below still holds.
+
 ## What it proves
 
 Each row was written by the key that owns its log, in the order the chain

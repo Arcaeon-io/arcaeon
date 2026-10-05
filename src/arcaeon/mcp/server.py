@@ -21,8 +21,9 @@ NAMESPACING. Upstream names that already read as ledger tools keep their names
 (`ledger_prove_my_conduct`, and so on), and mcp-vet's `mcp_vet_*` becomes
 `vet_*`. The deal lane's three writers and its verdict appear as `deal_mandate`,
 `deal_commit` and `deal_dispute`, calling `arcaeon.record.deal` directly (the
-same functions `arcaeon deal` runs). One list of seventeen tools where the
-prefix says which product answers.
+same functions `arcaeon deal` runs). The exchange pair reader appears as
+`exchange_pair_reconcile` (arcaeon.prove.exchange_log.pair, what `arcaeon
+exchange pair` runs). One list where the prefix says which product answers.
 
 THE DRIFT RISK, stated. The wrappers are written out by hand rather than
 generated, because the SDK derives a tool's JSON schema from a real Python
@@ -106,12 +107,13 @@ DEAL_TOOLS = ("deal_mandate", "deal_commit", "deal_dispute")
 MANDATE_TOOLS = ("mandate_check",)
 SECOND_READ_TOOLS = ("second_read_submit", "second_read_compare")
 EVIDENCE_TOOLS = ("evidence_pack_build", "evidence_pack_verify")
+EXCHANGE_TOOLS = ("exchange_pair_reconcile",)
 PAID_TOOLS = WITNESS_TOOLS
 STATUS_TOOL = "arcaeon_status"
 
 ALL_TOOLS = sorted([*LEDGER_TOOLS.values(), *VET_TOOLS.values(), *WITNESS_TOOLS,
                     *DEAL_TOOLS, *MANDATE_TOOLS, *SECOND_READ_TOOLS, *EVIDENCE_TOOLS,
-                    STATUS_TOOL])
+                    *EXCHANGE_TOOLS, STATUS_TOOL])
 FREE_TOOLS = [n for n in ALL_TOOLS if n not in PAID_TOOLS]
 
 
@@ -499,6 +501,40 @@ def _evidence_pack_verify(args: dict) -> dict:
                               namespace=args.get("namespace")))
 
 
+# --- the exchange pair reader (L3-RECON) -----------------------------------
+# Import only: the answer is arcaeon.prove.exchange_log.pair, the function
+# `arcaeon exchange pair` runs, with the four disagreement classes. Reads the
+# two caller-named logs; writes nothing but the call record.
+
+def _exchange_pair_reconcile(args: dict) -> dict:
+    from arcaeon import verdict as V
+    from arcaeon.prove import exchange_log as X  # lazy: only this tool loads it
+    for name in ("log_a", "log_b"):
+        if not isinstance(args.get(name), str) or not args[name]:
+            raise ValueError(f"`{name}` must be the path of an exchange log")
+    for name in ("exchange", "owner_a", "owner_b"):
+        if args.get(name) is not None and not isinstance(args[name], str):
+            raise ValueError(f"`{name}` must be a string")
+    for name in ("owner_a", "owner_b"):
+        if args.get(name) is not None and not X.is_did(args[name]):
+            raise ValueError(f"`{name}` must be an Ed25519 did:key")
+    late = args.get("late_after")
+    late = X.DEFAULT_LATE_AFTER if late is None else late
+    if isinstance(late, bool) or not isinstance(late, int) or late < 0:
+        raise ValueError("`late_after` must be a whole number of seconds, 0 or more")
+    r = X.pair(args["log_a"], args["log_b"], owner_a=args.get("owner_a"),
+               owner_b=args.get("owner_b"), late_after=late)
+    eid = args.get("exchange")
+    if eid is not None:
+        r["exchanges"] = [e for e in r["exchanges"] if e["exchange_id"] == eid]
+        r["claims"] = [c for c in r["claims"] if c["exchange_id"] == eid]
+        r["disagreements"] = {w: sum(1 for e in r["exchanges"] if e.get("disagreement") == w)
+                              for w in X.DISAGREEMENTS}
+        r["exchange"], r["exchange_found"] = eid, bool(r["exchanges"])
+    r["exit"] = V.exit_for(r["verdict"])
+    return _plain(r)
+
+
 def _server_class():
     """The SDK's server class under whichever name the installed version uses
     (2.x: MCPServer; 1.x: FastMCP). Same probe mcp-vet ships."""
@@ -816,6 +852,32 @@ def build_server():
         args = {"pack": pack, "witness": witness, "namespace": namespace, "remote": remote}
         outcome = _attempt(_evidence_pack_verify, args)
         return _record_call("evidence_pack_verify", args, outcome)
+
+    # --- the exchange pair reader --------------------------------------------
+
+    @_tool(
+        name="exchange_pair_reconcile",
+        description=(
+            "Read two parties' signed exchange-reaction logs (log_a, log_b: paths) "
+            "and line their rows up by exchange id, the same reader as `arcaeon "
+            "exchange pair`. Answers the record's verdict VERIFIED, BROKEN or COULD "
+            "NOT LOOK with exit 0, 1 or 3; per exchange the status (clean, mismatch, "
+            "not_verified, missing, broken) and, when the two sides disagree, one "
+            "class word with a one-sentence reason: missing (one log has no record), "
+            "mismatched (a field differs, named), retracted (a side superseded an "
+            "earlier BROKEN), late (both agree but one row's time trails the other's "
+            "by more than late_after seconds, default 86400). disagreements counts "
+            "them. Optional: exchange (one exchange id only), owner_a / owner_b (the "
+            "did:key each log must belong to). A class says how the records differ, "
+            "not who is right. Reads only."),
+    )
+    def exchange_pair_reconcile(log_a: str, log_b: str, exchange: str | None = None,
+                                late_after: int | None = None, owner_a: str | None = None,
+                                owner_b: str | None = None) -> dict:
+        args = {"log_a": log_a, "log_b": log_b, "exchange": exchange,
+                "late_after": late_after, "owner_a": owner_a, "owner_b": owner_b}
+        outcome = _attempt(_exchange_pair_reconcile, args)
+        return _record_call("exchange_pair_reconcile", args, outcome)
 
     # --- what is in here, and what costs money ----------------------------
 

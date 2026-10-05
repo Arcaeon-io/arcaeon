@@ -32,6 +32,13 @@ nonparty-check, or other.
 
 A decision that allowed the action has nothing to dispute: rendering one
 raises NothingToDispute. Stdlib only.
+
+THE PAIR PACKET (L3-RECON). `from_pair(log_a, log_b, exchange_id)` reads
+BOTH parties' exchange logs with arcaeon.prove.exchange_log.pair and puts one
+exchange on a page (kind arcaeon.dispute.pair_packet/v1): each side's own
+signed row (or "no record"), the status, the disagreement class word and its
+reason, the fields that differ, DISPUTED claims, and the exchange spec's
+limits. `arcaeon exchange packet A.jsonl B.jsonl --exchange ID` runs it.
 """
 from __future__ import annotations
 
@@ -47,7 +54,8 @@ from arcaeon import verdict as V
 __all__ = ["KIND", "SECTIONS", "DOES_NOT_PROVE", "LIMITS_SOURCE", "PACKET_LIMITS",
            "PacketError", "NothingToDispute", "ENVELOPE", "NONPARTY", "OTHER",
            "REFUSED_BY_PLAIN", "from_evidence", "from_decision",
-           "from_decision_file", "render_markdown", "render_json", "TEMPLATE"]
+           "from_decision_file", "render_markdown", "render_json", "TEMPLATE",
+           "PAIR_KIND", "PAIR_SECTIONS", "PAIR_TEMPLATE", "PAIR_PACKET_LIMITS", "from_pair"]
 
 KIND = "arcaeon.dispute.packet/v1"
 TEMPLATE = Path(__file__).with_name("templates") / "dispute_packet.md"
@@ -94,6 +102,20 @@ PACKET_LIMITS = (
     "out.",
     "A refusal is the receiver's answer about the envelope, not a finding about the "
     "content or about who is at fault.",
+)
+
+#: The pair packet (L3-RECON): one exchange read from both parties' logs.
+PAIR_KIND = "arcaeon.dispute.pair_packet/v1"
+PAIR_TEMPLATE = Path(__file__).with_name("templates") / "dispute_packet_pair.md"
+PAIR_SECTIONS = ("The pair", "Side a", "Side b", "Where they differ", "DISPUTED claims",
+                 "What this does not prove")
+PAIR_LIMITS_SOURCE = 'docs/EXCHANGE.md, "What it does not prove"'
+PAIR_PACKET_LIMITS = (
+    "This packet reads both logs with the pair reader and copies each side's own signed "
+    "row. It is not signed and adds no check of its own.",
+    "File names only: the directories the logs sat in are left out.",
+    "A disagreement class says how the two records differ, not which party is right or "
+    "at fault.",
 )
 
 #: refused_by values. CHECKER_BROKEN and CHECKS_UNREADABLE are the gate's own
@@ -363,6 +385,111 @@ def from_decision_file(path: str | Path, *, hash_file: bool = True) -> dict:
     return from_decision(data, hash_file=hash_file)
 
 
+# --- the pair: one exchange read from both logs (L3-RECON) ---------------------
+
+_SIDE_KEEP = ("reaction", "file_sha256", "counterparty", "signer", "at", "disputed", "reason",
+              "supersedes", "line", "row_digest", "note", "retracted", "retracted_at")
+
+
+def from_pair(log_a: str | Path, log_b: str | Path, exchange_id: str, *,
+              owner_a: str | None = None, owner_b: str | None = None,
+              late_after: int | None = None) -> dict:
+    """The packet for one exchange, read from BOTH parties' logs with
+    arcaeon.prove.exchange_log.pair (not from one side's claim). PacketError
+    when a log cannot be read (the pair is COULD NOT LOOK) or the exchange is
+    in neither log; NothingToDispute when the two sides agree (no class, no
+    mark, no DISPUTED claim). A pair whose record is BROKEN still renders:
+    the broken rows are on the page."""
+    from arcaeon.prove import exchange_log as X
+    kw = {} if late_after is None else {"late_after": late_after}
+    r = X.pair(log_a, log_b, owner_a=owner_a, owner_b=owner_b, **kw)
+    scrub = _Scrub([str(log_a), str(log_b), str(Path(log_a).resolve()),
+                    str(Path(log_b).resolve())])
+    if r["verdict"] == V.COULD_NOT_LOOK:
+        raise PacketError(scrub(str(r.get("reason") or "the pair could not be read")))
+    ex = next((e for e in r["exchanges"] if e["exchange_id"] == exchange_id), None)
+    if ex is None:
+        raise PacketError(scrub(f"exchange {exchange_id!r} is in neither log"
+                                + (f" ({r['reason']})" if r["verdict"] == V.BROKEN else "")))
+    claims = [c for c in r["claims"] if c["exchange_id"] == exchange_id]
+    if ex["disagreement"] is None and ex["status"] in ("clean", "not_verified") and not claims:
+        raise NothingToDispute(f"nothing to dispute: both logs agree on exchange "
+                               f"{exchange_id!r} ({ex['status']}, no disagreement class, no "
+                               f"DISPUTED claim)")
+    sides = {}
+    for nm in ("a", "b"):
+        s = r["logs"][nm]
+        rec = ex.get(nm)
+        sides[nm] = {"log": _name(s.get("log")), "owner": s.get("owner"),
+                     "owner_from": s.get("owner_from"), "log_verdict": s.get("verdict"),
+                     "log_reason": s.get("reason"),
+                     "record": {k: rec[k] for k in _SIDE_KEEP if k in rec} if rec else None,
+                     "retracted": nm in ex["retracted"],
+                     "broken_rows": [b for b in s.get("broken_rows", [])
+                                     if b.get("exchange_id") == exchange_id]}
+    p = {"kind": PAIR_KIND, "source": "both exchange logs", "exchange_id": exchange_id,
+         "pair_verdict": r["verdict"], "pair_reason": r["reason"], "status": ex["status"],
+         "disagreement": ex["disagreement"], "disagreement_reason": ex["disagreement_reason"],
+         "differs": list(ex["differs"]), "late_after": r["late_after"],
+         "sides": sides, "findings": list(ex["findings"]), "claims": claims,
+         "limits": list(X.DOES_NOT_PROVE_ITEMS), "limits_source": PAIR_LIMITS_SOURCE,
+         "packet_limits": list(PAIR_PACKET_LIMITS), "paths": "names only"}
+    out = scrub(p)
+    out["limits"], out["packet_limits"] = list(X.DOES_NOT_PROVE_ITEMS), list(PAIR_PACKET_LIMITS)
+    return out
+
+
+def _side_block(s: dict) -> str:
+    rec = s.get("record")
+    rows = [("Log", _code(s.get("log"))),
+            ("Owner key", f"{_code(s.get('owner'))} ({_text(s.get('owner_from') or 'not read')})"),
+            ("The log reads", f"**{s.get('log_verdict')}**: {_text(s.get('log_reason'))}")]
+    if rec is None:
+        rows.append(("Its row for this exchange", "no record: this log holds no row for it"))
+    else:
+        rows += [("Reaction", f"**{rec.get('reaction')}**"),
+                 ("file sha256", _code(rec.get("file_sha256"))),
+                 ("Names as the other party", _code(rec.get("counterparty"))),
+                 ("Signed at (the writer's clock)", _code(rec.get("at"))),
+                 ("Line, row digest", f"{rec.get('line')}, {_code(rec.get('row_digest'))}"),
+                 ("Supersedes", _code(rec.get("supersedes")) if rec.get("supersedes")
+                  else "nothing")]
+        if s.get("retracted"):
+            rows.append(("Retracted", f"{rec.get('retracted')} earlier BROKEN row(s), latest "
+                                      f"at {_code(rec.get('retracted_at'))}"))
+    for b in s.get("broken_rows") or []:
+        rows.append((f"BROKEN row, line {b.get('line')}", _text(b.get("finding"))))
+    return _rows(rows)
+
+
+def _render_pair_markdown(p: dict) -> str:
+    word = p.get("disagreement")
+    summary = (f"Exchange {_code(p['exchange_id'])}: the two logs read **{p['pair_verdict']}** "
+               f"as a record; the exchange's status is **{_text(p['status'])}**"
+               + (f" and its disagreement class is **{word}**." if word else
+                  ", with no disagreement class."))
+    pair_block = _rows([
+        ("Pair verdict (the record)", f"**{p['pair_verdict']}**: {_text(p.get('pair_reason'))}"),
+        ("Status", _code(p.get("status"))),
+        ("Disagreement class", f"**{word}**: {_text(p.get('disagreement_reason'))}" if word
+         else "none"),
+        ("Late window", f"{p.get('late_after')} seconds"),
+    ])
+    differ = [f"field {f}" for f in p.get("differs") or []] + list(p.get("findings") or [])
+    claims = [f"{c.get('side')} at {c.get('at')}"
+              f"{'' if c.get('current') else ' (superseded)'}: {c.get('reason')}"
+              for c in p.get("claims") or []]
+    tpl = Template(PAIR_TEMPLATE.read_text(encoding="utf-8"))
+    return tpl.substitute(
+        summary=summary, kind=p["kind"], pair_block=pair_block,
+        a_block=_side_block(p["sides"]["a"]), b_block=_side_block(p["sides"]["b"]),
+        differ_block=_bullets(differ, "No field differs."),
+        claims_block=_bullets(claims, "No DISPUTED claim for this exchange."),
+        limits_source=p["limits_source"],
+        limits_block="\n".join(f"> - {_text(t)}" for t in p["limits"]),
+        packet_limits_block="\n".join(f"- {t}" for t in p["packet_limits"]))
+
+
 # --- rendering ------------------------------------------------------------------
 
 def render_json(packet: dict) -> str:
@@ -397,6 +524,8 @@ def _rows(rows) -> str:
 
 
 def render_markdown(packet: dict) -> str:
+    if packet.get("kind") == PAIR_KIND:
+        return _render_pair_markdown(packet)
     p = packet
     h, by, fo, wh, ev = p["handed"], p["by"], p["for"], p["when"], p["evidence"]
     steps = p.get("steps") or {}

@@ -961,6 +961,10 @@ usage: arcaeon exchange react --exchange ID --counterparty ID --file PATH
        arcaeon exchange pair A.jsonl B.jsonl [--owner-a DID] [--owner-b DID]
                               [--json] [--strict]
                               [--accounts FILE --account-key DID...]
+                              [--late-after SECONDS]
+       arcaeon exchange packet A.jsonl B.jsonl --exchange ID
+                              [--owner-a DID] [--owner-b DID]
+                              [--late-after SECONDS] [--json] [--out DIR]
 ```
 
 **Exit codes:** `react`: 0 written, 2 refused or bad usage (a missing flag, a
