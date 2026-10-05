@@ -1,8 +1,10 @@
 # Register of named operators: revocation rows (design + stub)
 
 Status: a design and a reference stub (`arcaeon.prove.register`), not a
-service. No server route, no published register, no CLI verb, no network, no
-real keys. Tests: `tests/test_register_revocation.py`.
+service. No server route, no published register, no network, no real keys.
+One read-only CLI verb, `arcaeon register page` (L3-04), renders a register
+as a static page with its verdict on top: [REGISTER.md](../REGISTER.md).
+Tests: `tests/test_register_revocation.py`, `tests/test_register_page.py`.
 
 The register of named operators (TE-41) holds, per member, the things a
 reader checks a member's work against: its public key(s), its chain name and

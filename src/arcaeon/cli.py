@@ -59,6 +59,7 @@ VERBS = {
     "gate":      ("prove",  "allow or refuse an action on a sealed file, from its envelope's verdict"),
     "exchange":  ("prove",  "sign your reaction to an exchange, or pair two parties' reaction logs"),
     "tally":     ("prove",  "the tally of reaction chains as facts per ID, in columns; no score"),
+    "register":  ("prove",  "the register of named operators as one static page, its verdict on top"),
     "distill":   ("save",   "cut a tool output down to a token budget, with a drop receipt"),
     "dedup":     ("save",   "drop near-verbatim repeats from a list of texts"),
     "meter":     ("save",   "keyed usage metering: keys, usage, export"),
@@ -223,7 +224,7 @@ _UNJOURNALED = {"status", "mcp", "serve"}
 #: Verbs whose first positional word is a subcommand, not the target.
 _SUBCOMMAND_VERBS = {"receipt", "once", "audit", "vet", "baseline", "meter", "deal", "escrow",
                      "distill", "second-read", "evidence-pack", "mandate", "envelope", "gate",
-                     "exchange", "tally"}
+                     "exchange", "tally", "register"}
 
 
 def _journal_target(verb: str, rest: list[str]) -> str | None:
@@ -877,6 +878,11 @@ def _tally(argv) -> int:
     return _run(tally.main, argv)
 
 
+def _register(argv) -> int:
+    from arcaeon.prove import register_page
+    return _run(register_page.main, argv)
+
+
 def _baseline(argv) -> int:
     from arcaeon.prove.baseline import cli
     return _run(partial(cli.main, prog="arcaeon baseline"), argv)
@@ -1241,7 +1247,7 @@ HANDLERS = {
     "log": _log, "verify": _verify, "receipt": _receipt, "once": _once, "proxy": _proxy,
     "pin": _pin, "deal": _deal, "escrow": _escrow,
     "reconcile": _reconcile, "audit": _audit, "vet": _vet, "badge": _badge,
-    "seal": _seal, "envelope": _envelope, "gate": _gate, "exchange": _exchange, "tally": _tally, "baseline": _baseline, "compact": _compact, "distill": _distill,
+    "seal": _seal, "envelope": _envelope, "gate": _gate, "exchange": _exchange, "tally": _tally, "register": _register, "baseline": _baseline, "compact": _compact, "distill": _distill,
     "dedup": _dedup, "meter": _meter, "stamp": _stamp, "credits": _credits, "buy": _buy,
     "mcp": _mcp, "status": _status, "selftest": _selftest, "version": _version,
     **{verb: partial(_lazy, verb) for verb in LAZY_VERBS},
