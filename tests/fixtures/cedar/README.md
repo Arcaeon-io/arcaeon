@@ -34,7 +34,8 @@ documentation placeholder account).
 - The Cedar CLI `authorize` output and exit codes: not documented in R14, not read.
 - AVP `errors[].errorDescription` beyond its name; the adapter only counts and digests.
 - That AVP always returns an `errors` key. The adapter treats a missing key as
-  "errors not reported" (COULD NOT LOOK), never as empty.
+  "errors not reported", never as empty: COULD NOT LOOK for an Allow; a Deny is
+  BROKEN whatever the errors list says.
 - The AVP `BatchIsAuthorized` API response body: R14 does not document it, so it
   is not read. The only batch shape read is the CloudTrail
   `additionalEventData.results[{request, decision}]`.

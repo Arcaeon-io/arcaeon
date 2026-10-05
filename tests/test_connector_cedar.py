@@ -109,9 +109,9 @@ def test_cedar_deny_is_broken():
     assert r["cedar"]["outcome"] == "deny" and r["cedar"]["policy_ids"] == ["forbid-contractors"]
 
 
-@pytest.mark.parametrize("raw", [CEDAR_ERR, AVP_ERR,
-                                 _cedar("Deny", errors=["x"]), _avp("ALLOW", errors=[{}])])
-def test_any_errors_present_is_could_not_look_whatever_the_decision(raw):
+@pytest.mark.parametrize("raw", [CEDAR_ERR, _avp("ALLOW", errors=[{}]),
+                                 _cedar("allow", errors=["x", "y"])])
+def test_an_allow_with_errors_present_is_could_not_look(raw):
     r = _one(raw)
     assert r["relayed_verdict"] == COULD_NOT_LOOK
     assert r["cedar"]["outcome"] == "errored"
@@ -119,6 +119,22 @@ def test_any_errors_present_is_could_not_look_whatever_the_decision(raw):
     assert r["cedar"]["errors_digest"].startswith("sha256:jcs:v1:")
     assert r["could_not_look"]["reason_word"] == "unreadable"
     assert "error" in r["could_not_look"]["reason"]
+
+
+@pytest.mark.parametrize("raw,n", [(AVP_ERR, 1), (_cedar("Deny", errors=["x"]), 1),
+                                   (_avp("DENY", pols=(), errors=[{}, {}]), 2)])
+def test_a_deny_with_errors_present_is_still_broken(raw, n):
+    r = _one(raw)
+    assert r["relayed_verdict"] == BROKEN and "could_not_look" not in r
+    c = r["cedar"]
+    assert c["outcome"] == "deny" and c["errors_reported"] is True and c["errors_count"] == n
+    assert c["errors_digest"].startswith("sha256:jcs:v1:")
+    assert "denied" in c["reason"] and f"{n} policy evaluation error" in c["reason"]
+
+
+def test_a_clean_deny_says_why_and_an_allow_has_no_deny_reason():
+    assert _one(CEDAR_DENY)["cedar"]["reason"] == "Cedar denied"
+    assert _one(CEDAR_ALLOW)["cedar"]["reason"] is None
 
 
 def test_error_text_is_kept_by_digest_only():
@@ -176,7 +192,7 @@ def test_avp_capitalised_policy_id_is_read():
     {"decision": "ALLOW", "determiningPolicies": [{"policyId": "a"}]},
     {"decision": "Allow", "diagnostics": {"reason": ["a"]}},
 ])
-def test_errors_not_reported_is_could_not_look_even_for_allow(doc):
+def test_errors_not_reported_is_could_not_look_for_allow(doc):
     r = _one(_j(doc))
     assert r["relayed_verdict"] == COULD_NOT_LOOK
     assert r["cedar"]["errors_reported"] is False and r["cedar"]["outcome"] == "errors_not_reported"
@@ -203,6 +219,32 @@ def test_unreadable_policy_or_error_lists_are_could_not_look(doc):
     assert r["cedar"]["outcome"] in ("unreadable", "errors_not_reported")
 
 
+@pytest.mark.parametrize("doc", [
+    {"decision": "DENY", "determiningPolicies": [{"policyId": "a"}]},
+    {"decision": "Deny", "diagnostics": {"reason": ["a"]}},
+])
+def test_errors_not_reported_on_a_deny_is_still_broken_with_a_shorter_reason(doc):
+    r = _one(_j(doc))
+    assert r["relayed_verdict"] == BROKEN and "could_not_look" not in r
+    c = r["cedar"]
+    assert c["outcome"] == "deny" and c["errors_reported"] is False and c["errors_count"] is None
+    assert c["reason"] == "Cedar denied"
+    assert c["policy_ids"] == ["a"]
+
+
+@pytest.mark.parametrize("doc", [
+    {"decision": "DENY", "determiningPolicies": "SP1", "errors": []},
+    {"decision": "DENY", "determiningPolicies": [], "errors": "none"},
+    {"decision": "Deny", "diagnostics": {"reason": [1], "errors": []}},
+    {"decision": "Deny", "diagnostics": "ok"},
+    {"decision": "DENY", "errors": []},
+], ids=["dp_not_list", "errors_not_list", "reason_item_not_str", "diag_not_obj", "dp_missing"])
+def test_a_deny_with_unreadable_lists_is_still_broken(doc):
+    r = _one(_j(doc))
+    assert r["relayed_verdict"] == BROKEN and "could_not_look" not in r
+    assert r["cedar"]["outcome"] == "deny" and r["cedar"]["reason"].startswith("Cedar denied")
+
+
 # --- CloudTrail data events (single and batch) ---------------------------------------------
 
 def test_cloudtrail_event_is_read_but_cannot_be_verified():
@@ -223,14 +265,26 @@ def test_cloudtrail_event_is_read_but_cannot_be_verified():
     assert "user-0001" not in blob and "111122223333" not in blob
 
 
+def test_a_cloudtrail_deny_is_broken():
+    doc = json.loads(CT_ONE)
+    doc["additionalEventData"]["decision"] = "DENY"
+    r = _one(_j(doc))
+    assert r["relayed_verdict"] == BROKEN and "could_not_look" not in r
+    c = r["cedar"]
+    assert c["outcome"] == "deny" and c["errors_reported"] is False and c["policy_ids"] is None
+    assert c["implicit_deny"] is None and c["reason"] == "Cedar denied"
+
+
 def test_cloudtrail_batch_is_one_row_per_result_in_order():
     rows = _rows(CT_BATCH)
     assert len(rows) == 3
     assert [r["cedar"]["item_index"] for r in rows] == [0, 1, 2]
     assert [r["vendor_word"] for r in rows] == ["ALLOW", "DENY", "MAYBE"]
-    assert all(r["relayed_verdict"] == COULD_NOT_LOOK for r in rows)
-    assert [r["cedar"]["outcome"] for r in rows] == ["errors_not_reported", "errors_not_reported",
+    assert [r["relayed_verdict"] for r in rows] == [COULD_NOT_LOOK, BROKEN, COULD_NOT_LOOK]
+    assert "could_not_look" not in rows[1] and rows[1]["cedar"]["reason"] == "Cedar denied"
+    assert [r["cedar"]["outcome"] for r in rows] == ["errors_not_reported", "deny",
                                                     "unknown_decision"]
+    assert C.rollup(rows)["relayed_verdict"] == BROKEN
     assert all(r["cedar"]["event_name"] == "BatchIsAuthorized" for r in rows)
     assert all(r["vendor_id"] == "00000000-0000-4000-8000-0000000000a2" for r in rows)
     digests = {r["cedar"]["request_digest"] for r in rows}
@@ -256,6 +310,7 @@ def test_a_batch_item_that_is_not_an_object_is_its_own_row():
     assert [r["cedar"]["item_index"] for r in rows] == [0, 1]
     assert rows[0]["relayed_verdict"] == COULD_NOT_LOOK
     assert rows[0]["could_not_look"]["reason_word"] == "unreadable"
+    assert rows[1]["relayed_verdict"] == BROKEN
 
 
 # --- shape detection ----------------------------------------------------------------------
@@ -453,6 +508,7 @@ def test_too_many_batch_results_are_bounded(monkeypatch):
     items = [{"request": {"i": i}, "decision": "DENY"} for i in range(5)]
     rows = _rows(_j({"additionalEventData": {"results": items}}))
     assert len(rows) == 3 and rows[-1]["could_not_look"]["reason_word"] == "bounded"
+    assert [r["relayed_verdict"] for r in rows] == [BROKEN, BROKEN, COULD_NOT_LOOK]
     assert all(r["signed_by_vendor"] is False for r in rows)
 
 
@@ -479,3 +535,14 @@ def test_not_rechecked_or_imported_as_one_verdict():
     r = _one(CEDAR_ALLOW)
     assert recheck(r, CEDAR_ALLOW)["verdict"] == COULD_NOT_LOOK
     assert import_verdict(C.CEDAR, CEDAR_ALLOW)["relayed_verdict"] == COULD_NOT_LOOK
+
+
+def test_the_doc_table_says_a_deny_is_broken_whatever_the_errors():
+    doc = (ROOT / "docs" / "CONNECTOR_ADAPTER.md").read_text(encoding="utf-8")
+    sec = doc.split("## Cedar", 1)[1].split("\n## ", 1)[0]
+    assert "| `Deny` / `DENY` | any: present, empty, non-empty or not reported | BROKEN |" in sec
+    assert "| `Allow` or `Deny` |" not in sec
+
+
+def test_the_docstring_says_a_deny_is_broken_whatever_the_errors():
+    assert "deny   -> BROKEN     whatever the errors list says" in C.__doc__
