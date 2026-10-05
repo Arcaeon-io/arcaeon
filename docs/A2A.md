@@ -147,7 +147,8 @@ and the action it is about to take, and MUST follow the gate's table:
 `read` is the only action an unbound check allows: for `act`, `pay` and
 `irreversible` the receiver passes the deal and purpose it holds, and without
 either the gate answers COULD NOT LOOK (refuse, exit 3, "pass --deal and
---purpose so the envelope is held to this exchange" for `act`), so an
+--purpose so the envelope is held to this exchange" for `act`, and for any of
+the three when both are missing), so an
 envelope sealed for one exchange cannot be replayed into another.
 
 It MUST run the gate whether or not the request activated the extension and

@@ -346,7 +346,7 @@ def test_pay_without_deal_holds_could_not_look_no_traceback(tmp_path):
     rail.hold("d-x402-1", "0.01", "USDC")
     c = X.check(paid, BODY, "buyer-agent-7", "pay", signers=[did])
     assert c.release is False and c.escrow == "HOLD" and c.verdict == V.COULD_NOT_LOOK
-    assert "pass --deal so the envelope is held to this exchange" in c.decision.reasons
+    assert "pass --deal and --purpose so the envelope is held to this exchange" in c.decision.reasons
     assert c.evidence is None and c.dispute is None
     json.dumps(c.to_dict(), default=str)
     assert rail.settle("d-x402-1", c)["released"] is False and rail.refunds == []

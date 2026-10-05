@@ -375,7 +375,7 @@ def test_pay_without_deal_is_could_not_look_not_a_traceback(tmp_path, action):
     msg = _b(_task(_artifact(env)))
     d = A.receive(msg, BODY, action=action, audience=ME, signers=[did])
     assert d.verdict == V.COULD_NOT_LOOK and d.decision == "refuse" and d.exit_code == 3
-    assert "pass --deal so the envelope is held to this exchange" in d.reasons
+    assert "pass --deal and --purpose so the envelope is held to this exchange" in d.reasons
     assert d.evidence is None and d.a2a["carrier"] == "artifact"
     json.dumps(d.to_dict())
     d = A.receive(msg, BODY, action=action, audience=ME, signers=[did], deal="d-7f3a",
@@ -413,4 +413,4 @@ def test_cli_gate_a2a_pay_without_deal_is_3(tmp_path, capsys):
     m.write_bytes(_b(_task(_artifact(env))))
     assert cli.main(["gate", "a2a", "--message", str(m), "--audience", ME, "--signer", did,
                      "--action", "pay"]) == 3
-    assert "pass --deal so the envelope is held to this exchange" in capsys.readouterr().out
+    assert "pass --deal and --purpose so the envelope is held to this exchange" in capsys.readouterr().out
