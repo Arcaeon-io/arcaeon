@@ -58,8 +58,10 @@ DEAL, PURPOSE = "d-e2e", "delivery"
 INGEST_KW = {"opa": {"allow_paths": ("authz/allow",), "deny_paths": ("authz/deny",)},
              "lakera-guard": {"policy_mode": "enforce"}}
 #: the adapters on this base: every word must come from a real fixture row
-KNOWN = {"cedar", "kyverno", "lakera-guard", "mcp-scan", "mockscan", "opa", "prisma-airs",
-         "reported", "snyk-agent-scan"}
+KNOWN = {"cedar", "e2b", "hiddenlayer", "kyverno", "lakera-guard", "mcp-scan", "mockscan",
+         "opa", "prisma-airs", "reported", "snyk-agent-scan"}
+#: sentinelone is left out on purpose: an alert export never says VERIFIED (a missing
+#: alert is not a clean machine), so its VERIFIED row is always derived.
 
 
 def _import_all() -> None:

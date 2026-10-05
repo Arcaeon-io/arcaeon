@@ -32,6 +32,9 @@ The run objects carry no sandbox id; `sandbox_id`, `template_id` and
 - `execution_to_json_error.json`: the shape `Execution.to_json()` prints:
   `logs` and `error` are themselves JSON-encoded strings, and
   `execution_count` is left out. The error is a synthetic ZeroDivisionError.
+- `command_no_exit_code.json`: a `CommandResult` with `error` null and no
+  `exit_code` key (derived for the end-to-end checks test, not a documented
+  output); it reads COULD NOT LOOK (`no_exit_code`).
 
 What the sources do not settle: whether a future SDK changes `to_json()` to
 stop double-encoding `logs` and `error`, and what a JavaScript SDK caller
