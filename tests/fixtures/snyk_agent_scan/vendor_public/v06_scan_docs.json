@@ -1,0 +1,62 @@
+{
+  "scan_path_responses": [
+    {
+      "client": "cursor",
+      "path": "~/.cursor/mcp.json",
+      "server_risks": [
+        {
+          "name": "github",
+          "entities": [
+            {
+              "name": "create_pull_request",
+              "type": "tool"
+            },
+            {
+              "name": "search_code",
+              "type": "tool"
+            }
+          ],
+          "risk_indexes": {
+            "prompt_injection_tool_desc": {
+              "score": 1000,
+              "evidence": "The tool description contains instructions directed at the agent.",
+              "affected_tools": [0]
+            }
+          }
+        }
+      ],
+      "skill_risks": [
+        {
+          "name": "release-helper",
+          "files": [
+            {
+              "name": "SKILL.md",
+              "type": "instruction"
+            },
+            {
+              "name": "scripts/install.sh",
+              "type": "script"
+            }
+          ],
+          "risk_indexes": {
+            "suspicious_download_url": {
+              "score": 600,
+              "evidence": "The script downloads an executable from an untrusted host.",
+              "locations": [
+                {
+                  "start": {
+                    "path": "scripts/install.sh",
+                    "line": 12
+                  }
+                }
+              ],
+              "malicious_urls": [
+                "https://downloads.example.invalid/install.sh"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

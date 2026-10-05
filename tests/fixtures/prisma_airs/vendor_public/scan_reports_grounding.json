@@ -1,0 +1,32 @@
+[
+  {
+    "detection_results": [
+      {
+        "action": "allow", 
+        "data_type": "response",
+        "detection_service": "contextual_grounding",
+        "result_detail": {},
+        "verdict": "benign"
+      }
+    ],
+    "report_id": "R00000000-0000-0000-0000-000000000000",
+    "req_id": 1,
+    "scan_id": "00000000-0000-0000-0000-000000000000",
+    "transaction_id": "2882"
+  },
+  {
+    "detection_results": [
+      {
+        "action": "block",
+        "data_type": "response",
+        "detection_service": "contextual_grounding",
+        "result_detail": {},
+        "verdict": "malicious"
+      }
+    ],
+    "report_id": "R00000000-0000-0000-0000-000000000000",
+    "req_id": 2,
+    "scan_id": "00000000-0000-0000-0000-000000000000",
+    "transaction_id": "2082"
+  }
+]

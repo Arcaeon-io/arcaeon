@@ -1,0 +1,23 @@
+{
+  "alerts": {
+    "edges": [
+      {
+        "node": {
+          "id": "alert-1",
+          "name": "Alert 1",
+          "severity": "HIGH",
+          "status": "NEW",
+          "detectedAt": "2024-01-01T00:00:00Z"
+        },
+        "cursor": "cursor1"
+      }
+    ],
+    "pageInfo": {
+      "hasNextPage": false,
+      "hasPreviousPage": false,
+      "startCursor": null,
+      "endCursor": null
+    },
+    "totalCount": 1
+  }
+}

@@ -1,0 +1,15 @@
+{
+   "action" : "block",
+   "category" : "malicious",
+   "profile_id" : "00000000-0000-0000-0000-000000000000",
+   "profile_name" : "dummy-profile",
+   "prompt_detected" : {
+      "dlp" : false,
+      "injection" : true,
+      "url_cats" : false
+   },
+   "report_id" : "R00000000-0000-0000-0000-000000000000",
+   "response_detected" : {},
+   "scan_id" : "00000000-0000-0000-0000-000000000000",
+   "tr_id" : "1234"
+}

@@ -50,7 +50,7 @@ def test_adapter_is_on_the_one_base_and_registered():
     assert isinstance(P.PRISMA_AIRS, VendorAdapter)
     assert P.PRISMA_AIRS.one_row_per_payload is False
     assert adapter_for("prisma-airs") is P.PRISMA_AIRS
-    assert P.PRISMA_AIRS.version == "2"
+    assert P.PRISMA_AIRS.version == "3"
 
 
 def test_table_maps_only_into_our_three_words_and_nothing_unknown_is_verified():
@@ -67,7 +67,7 @@ def test_sync_block_is_broken():
     r = rows[0]
     assert r["kind"] == ROW_KIND and r["relayed"] is True and r["checked_by_us"] is False
     assert "verdict" not in r
-    assert r["vendor"] == {"name": "prisma-airs", "adapter_version": "2"}
+    assert r["vendor"] == {"name": "prisma-airs", "adapter_version": "3"}
     f = r["finding"]
     assert f["format"] == "sync-scan-response"
     assert f["action"] == "block" and f["category"] == "malicious"

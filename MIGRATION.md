@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **L2-14 (branch b200-t7c-vendor-samples).** kyverno rows (adapter version 2) gain `kyverno.scope` and `kyverno.subject_from`, and a result with no `resources[]` now takes its subject from the report `scope`. lakera-guard rows (version 2) gain `finding.tool_id` and four words (`tools_flagged`, `tool_detector_detected` BROKEN; `tools_unreadable`, `not_flagged_mode_conflict` COULD NOT LOOK). prisma-airs report rows (version 3) fill `ids.req_id` and `ids.tr_id`. Rows read by the older versions re-check COULD NOT LOOK (re-run `ingest`). `seal_bundle` now seals a bundle whose `.manifest` revision is `""` instead of COULD NOT LOOK.
+
 - **L4-03 (4853cb0, branch b200-t6d-gateways).** New subcommand `arcaeon gate mcp-after`; nothing else changes. `arcaeon gate --help` gains its usage lines. A Docker interceptor that does not pass `--tool` and whose input carries no request holds every result to `default_action` (default act).
 
 - **L4-02 (9a52a02, branch b200-t6d-gateways).** New, nothing to change for existing users. A tool server that wants its results to pass an arcaeon gateway puts its envelope under `_meta["dev.arcaeon/bundle"]` on each content block (or on the result when there is one block). Results that pass gain `_meta["dev.arcaeon/verdict"]`. Refused results are `isError: true` with one text block. A gateway config without `deal` and `purpose` refuses act/pay/irreversible even on a good seal (the gate's exchange rule), and an unlisted tool is held to `act`.

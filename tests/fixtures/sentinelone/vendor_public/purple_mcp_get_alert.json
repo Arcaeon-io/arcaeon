@@ -1,0 +1,9 @@
+{
+  "alert": {
+    "id": "alert-123",
+    "name": "Test Alert",
+    "severity": "HIGH",
+    "status": "NEW",
+    "detectedAt": "2024-01-01T00:00:00Z"
+  }
+}

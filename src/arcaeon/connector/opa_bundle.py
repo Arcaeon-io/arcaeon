@@ -32,7 +32,10 @@ THE STATEMENT (kind "policy.bundle.sealed"), every key always present:
                            the sorted lines "<name>\\0<sha256 hex of its bytes>\\n")
     bundle_sha256          the hex digest under that scheme, or None
     bundle_bytes           the tarball's length, or a directory's file bytes in total
-    revision, roots        from `.manifest`, or None when it cannot be read
+    revision, roots        from `.manifest`, or None when it cannot be read. An
+                           empty revision ("", the `opa build` default) is kept as
+                           "": the seal and signature are read, and the join
+                           (opa.join_bundles) never matches it
     files                  how many regular files the bundle holds
     opa_signatures_present True when `.signatures.json` is in the bundle
     opa_signature_verified VERIFIED only when the JWT was checked with the
@@ -232,8 +235,9 @@ def _manifest(files: dict) -> tuple[str, list]:
     if not isinstance(rev, str):
         raise _Unreadable("unreadable" if "revision" in doc else "missing",
                           ".manifest revision is not a string")
-    if not rev:
-        raise _Unreadable("empty", ".manifest revision is empty")
+    # An empty revision is what `opa build` writes by default (OPA's own signed test
+    # bundle, tests/fixtures/opa_bundle/vendor_public/): the bundle is still read
+    # and its signature checked; the join never matches an empty revision.
     if roots is not None and not (isinstance(roots, list) and all(isinstance(r, str) for r in roots)):
         raise _Unreadable("unreadable", ".manifest roots is not a list of strings")
     return rev, roots

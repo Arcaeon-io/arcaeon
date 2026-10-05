@@ -11,14 +11,19 @@ research R15):
      "payload":   [{start, end, text, detector_type, labels: [..], message_id}],
      "breakdown": [{project_id, policy_id, detector_id, detector_type, detected,
                     result, message_id}],
+     "tools":     {flagged, breakdown: [{.., detected, result, tool_id}]},
      "dev_info":  {git_revision, git_timestamp, model_version, version},
      "metadata":  {"request_uuid": ".."}}
 
-`payload` and `breakdown` come back only when the request asked for them.
-`flagged` is always false in Detect mode; only an Enforce-mode policy flags. The
-response does not document which mode ran (the meaning of `action` beyond the
-one example value is not documented), so the caller declares it
-(`policy_mode`), as the Snyk adapter makes the caller declare a score cut-off.
+`payload` and `breakdown` come back only when the request asked for them;
+`tools` (the screening of the request's tool definitions) only when the request
+sent tools. `flagged` is always false in Detect mode; only an Enforce-mode
+policy flags. The caller declares the mode (`policy_mode`), as the Snyk adapter
+makes the caller declare a score cut-off. The API reference (re-read
+2026-10-05, tests/fixtures/lakera_guard/vendor_public/) documents `action` as
+the project's mode, `enforce` or `detect`: a not-flagged response whose
+`action` names the other mode than the one declared is
+`not_flagged_mode_conflict`, COULD NOT LOOK. `action` alone never sets the mode.
 v2 has no `categories` field: `detector_type` is the category. The response
 is not signed.
 
@@ -36,6 +41,10 @@ THE WORD. Lakera writes a boolean, not a verdict word, so the adapter writes its
     not_flagged_mode_undeclared  `flagged` false, no mode declared          -> COULD NOT LOOK
     not_flagged_unsettled        `flagged` false, but a detector hit, a
                                  match span or an unreadable entry          -> COULD NOT LOOK
+    tools_flagged                `tools.flagged` is true                    -> BROKEN
+    tool_detector_detected       a tools.breakdown entry, `detected` true   -> BROKEN
+    not_flagged_mode_conflict    `flagged` false, `action` is the other mode -> COULD NOT LOOK
+    tools_unreadable             a `tools` block or entry we cannot read    -> COULD NOT LOOK
     flagged_unreadable           `flagged` missing or not a boolean         -> COULD NOT LOOK
     detector_unreadable          a breakdown entry that is not an object,
                                  or whose `detected` is not a boolean       -> COULD NOT LOOK
@@ -96,7 +105,7 @@ __all__ = ["VENDOR", "ADAPTER_VERSION", "TABLE", "MAX_PAYLOAD_BYTES", "MAX_DEPTH
            "standing_verdict"]
 
 VENDOR = "lakera-guard"
-ADAPTER_VERSION = "1"
+ADAPTER_VERSION = "2"
 #: A response over this is digested, never read.
 MAX_PAYLOAD_BYTES = 8 << 20
 MAX_DEPTH = 64
@@ -110,10 +119,14 @@ TABLE = {
     "flagged": BROKEN,
     "detector_detected": BROKEN,
     "payload_match": BROKEN,
+    "tools_flagged": BROKEN,
+    "tool_detector_detected": BROKEN,
     "not_flagged": VERIFIED,
     "not_flagged_detect_mode": COULD_NOT_LOOK,
     "not_flagged_mode_undeclared": COULD_NOT_LOOK,
     "not_flagged_unsettled": COULD_NOT_LOOK,
+    "not_flagged_mode_conflict": COULD_NOT_LOOK,
+    "tools_unreadable": COULD_NOT_LOOK,
     "flagged_unreadable": COULD_NOT_LOOK,
     "detector_unreadable": COULD_NOT_LOOK,
     "payload_unreadable": COULD_NOT_LOOK,
@@ -128,6 +141,10 @@ _WHY = {
                                                       "always false in Detect mode"),
     "not_flagged_unsettled": ("missing", "flagged is false but a detector, a match span or an "
                                          "unreadable entry points the other way"),
+    "not_flagged_mode_conflict": ("unreadable", "the response's action names another policy "
+                                                "mode than the one the caller declared"),
+    "tools_unreadable": ("unreadable", "the tools block is not an object with a boolean flagged "
+                                       "and a list of breakdown objects with a boolean detected"),
     "flagged_unreadable": ("unreadable", "flagged is missing or not a boolean"),
     "detector_unreadable": ("unreadable", "the breakdown entry is not an object with a "
                                           "boolean detected"),
@@ -138,7 +155,7 @@ _WHY = {
 _FINDING_KEYS = ("part", "index", "flagged", "action", "policy_mode", "detectors_reported",
                  "detectors_detected", "payload_matches", "model_version", "vendor_version",
                  "project_id", "policy_id", "detector_id", "detector_type", "detected",
-                 "result", "message_id", "labels", "start", "end", "text_digest")
+                 "result", "message_id", "labels", "start", "end", "text_digest", "tool_id")
 
 
 class LakeraGuardAdapter(VendorAdapter):
@@ -292,13 +309,48 @@ def _payload_rows(base: dict, pl: Any) -> tuple[list, int, bool]:
     return rows, n, bad
 
 
-def _response_word(flagged: Any, mode: str | None, unsettled: bool) -> str:
+def _tools_rows(base: dict, tl: Any) -> tuple[list, bool]:
+    """(rows, anything pointing away from a pass) for the `tools` block: the
+    screening of the request's tool definitions, which the API reference lists
+    beside the message-level flagged/breakdown (read 2026-10-05)."""
+    if tl is None:
+        return [], False
+    if not isinstance(tl, dict) or ("flagged" in tl and type(tl["flagged"]) is not bool):
+        return [_row(base, "tools_unreadable", "tools", part="tools")], True
+    rows, hit = [], False
+    if tl.get("flagged") is True:
+        rows.append(_row(base, "tools_flagged", "tools", part="tools", flagged=True))
+        hit = True
+    bd = tl.get("breakdown")
+    if bd is not None and not isinstance(bd, list):
+        return rows + [_row(base, "tools_unreadable", "tools.breakdown", part="tools")], True
+    for i, d in enumerate(bd or []):
+        w = f"tools.breakdown[{i}]"
+        if not isinstance(d, dict) or type(d.get("detected")) is not bool:
+            rows.append(_row(base, "tools_unreadable", w, part="tools_breakdown", index=i))
+            hit = True
+            continue
+        if d["detected"]:
+            hit = True
+            rows.append(_row(base, "tool_detector_detected", w, part="tools_breakdown", index=i,
+                             project_id=_safe_str(d.get("project_id")),
+                             policy_id=_safe_str(d.get("policy_id")),
+                             detector_id=_safe_str(d.get("detector_id")),
+                             detector_type=_safe_str(d.get("detector_type")), detected=True,
+                             result=_safe_str(d.get("result")), tool_id=_int(d.get("tool_id"))))
+    return rows, hit
+
+
+def _response_word(flagged: Any, mode: str | None, unsettled: bool,
+                   action: Any = None) -> str:
     if type(flagged) is not bool:
         return "flagged_unreadable"
     if flagged:
         return "flagged"
     if unsettled:
         return "not_flagged_unsettled"
+    if mode is not None and action in POLICY_MODES and action != mode:
+        return "not_flagged_mode_conflict"
     if mode == "enforce":
         return "not_flagged"
     return "not_flagged_detect_mode" if mode == "detect" else "not_flagged_mode_undeclared"
@@ -308,16 +360,17 @@ def _screening(doc: dict, out: _Out, mode: str | None) -> None:
     base = out.base
     d_rows, reported, detected, d_bad = _breakdown_rows(base, doc.get("breakdown"))
     p_rows, matches, p_bad = _payload_rows(base, doc.get("payload"))
-    unsettled = bool(detected or matches or d_bad or p_bad)
+    t_rows, t_hit = _tools_rows(base, doc.get("tools"))
+    unsettled = bool(detected or matches or d_bad or p_bad or t_hit)
     dev = doc.get("dev_info") if isinstance(doc.get("dev_info"), dict) else {}
-    word = _response_word(doc.get("flagged"), mode, unsettled)
+    word = _response_word(doc.get("flagged"), mode, unsettled, doc.get("action"))
     flagged = doc.get("flagged") if type(doc.get("flagged")) is bool else None
     out.add(_row(base, word, _WHERE, part="response", flagged=flagged,
                  action=_safe_str(doc.get("action")), policy_mode=mode,
                  detectors_reported=reported, detectors_detected=detected,
                  payload_matches=matches, model_version=_safe_str(dev.get("model_version")),
                  vendor_version=_safe_str(dev.get("version"))))
-    for r in d_rows + p_rows:
+    for r in d_rows + p_rows + t_rows:
         out.add(r)
 
 

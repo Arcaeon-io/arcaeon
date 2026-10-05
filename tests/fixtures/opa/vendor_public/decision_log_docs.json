@@ -1,0 +1,23 @@
+[
+  {
+    "labels": {
+      "app": "my-example-app",
+      "id": "1780d507-aea2-45cc-ae50-fa153c8e4a5a",
+      "version": "{{ current_version }}"
+    },
+    "decision_id": "4ca636c1-55e4-417a-b1d8-4aceb67960d1",
+    "bundles": {
+      "authz": {
+        "revision": "W3sibCI6InN5cy9jYXRhbG9nIiwicyI6NDA3MX1d"
+      }
+    },
+    "path": "http/example/authz/allow",
+    "input": {
+      "method": "GET",
+      "path": "/salary/bob"
+    },
+    "result": "true",
+    "requested_by": "[::1]:59943",
+    "timestamp": "2018-01-01T00:00:00.000000Z"
+  }
+]
