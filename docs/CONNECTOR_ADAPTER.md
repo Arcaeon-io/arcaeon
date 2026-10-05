@@ -155,7 +155,9 @@ adapter (`arcaeon.connector.lakera_guard`, below), the Prisma AIRS adapter
 (`arcaeon.connector.prisma_airs`, below), the Kyverno PolicyReport adapter
 (`arcaeon.connector.kyverno`, below), the Cedar / Verified Permissions adapter
 (`arcaeon.connector.cedar`, below), the generic reported-by-sender adapter
-(`arcaeon.connector.reported`, below) and the HiddenLayer alert adapter (`arcaeon.connector.hiddenlayer`, below). The base owns what they share:
+(`arcaeon.connector.reported`, below) the HiddenLayer alert adapter
+(`arcaeon.connector.hiddenlayer`, below) and the SentinelOne alert adapter
+(`arcaeon.connector.sentinelone`, below). The base owns what they share:
 
 - the row skeleton (`base_row`), relayed, `checked_by_us: false`, attestation
   `NONE` unless the payload claims a signature, and COULD NOT LOOK until a
@@ -712,6 +714,53 @@ report what its own checks look for. A missing alert proves nothing: no outcome 
 sent when a policy takes no action. The shapes were read from public docs, not a
 live alert, so a field HiddenLayer renames reads COULD NOT LOOK until the adapter
 is updated.
+
+## SentinelOne alert export
+
+`arcaeon.connector.sentinelone.ingest(body, vendor_request_id=None)` reads a
+SentinelOne Unified Alert Management (UAM) alert export into one row per alert.
+The shape is the GraphQL alert as SentinelOne's own public client reads it
+(https://github.com/Sentinel-One/purple-mcp/blob/main/src/purple_mcp/libs/alerts/models.py
+and `client.py` beside it): a list response `{"data": {"alerts": {"edges":
+[{"node": ...}]}}}`, a get response `{"data": {"alert": ...}}`, the same
+unwrapped, a JSON array of alerts, or one alert. It is not OCSF: the OCSF code
+SentinelOne publishes is for alerts going into SentinelOne, not out of it.
+
+`vendor_id` is the alert id, `subject` is `sentinelone:alert/<id>`, `at` is the
+alert's `detectedAt`, and `detection` holds the id, external id, name,
+severity, status, analyst verdict, classification, confidence level, asset id
+and type, detection product and vendor, storyline id and `result`. Host names,
+descriptions, assignees and data sources are not copied. `input_sha256` is the
+SHA-256 of the exact bytes read.
+
+| the alert says | vendor_word | relayed_verdict |
+|---|---|---|
+| `analystVerdict` `TRUE_POSITIVE_*` | `true_positive` | BROKEN |
+| `analystVerdict` `FALSE_POSITIVE_*`, or no verdict and status `FALSE_POSITIVE` | `false_positive` | COULD NOT LOOK |
+| verdict null or `UNDEFINED`, status `NEW`, `IN_PROGRESS`, `RESOLVED` or absent | `no_verdict` | COULD NOT LOOK |
+| `TRUE_POSITIVE_*` with status `FALSE_POSITIVE` | `verdict_status_conflict` | COULD NOT LOOK |
+| a verdict or status the source does not document | `unknown_verdict` / `unknown_status` | COULD NOT LOOK |
+
+Nothing maps to VERIFIED. A false positive is the analyst saying the alert was
+wrong, not that anything was scanned and passed. The source documents no
+mitigation field, so mitigated or blocked is not read; `result` is kept
+verbatim. A body that is empty, not UTF-8 JSON, carries a duplicate key, nests
+deeper than 32, is over 8 MiB, or is not one of the shapes above is one COULD
+NOT LOOK row; `ingest` never raises. Every row carries `signed_by_vendor: false`
+and `standing: "reported_by_sender"`; a body claiming a signature changes
+nothing. `standing_verdict(rows)` (also `rollup`) is BROKEN when any row is,
+else COULD NOT LOOK, never VERIFIED. `recheck` says COULD NOT LOOK; re-run
+`ingest`.
+
+### What this cannot prove
+
+The public source shows no signature on an alert, so these rows are unsigned
+(unconfirmed for any other export path). They prove only what the sender handed
+us, when, and that the bytes have not changed since. They do not prove the
+alerts came from SentinelOne, that the export is complete, that an analyst
+verdict is right, or that a threat was mitigated. A missing alert is not a
+clean machine. The shape was read from a public client library, not from a live
+tenant; a field the real export writes differently reads COULD NOT LOOK.
 
 ## The sha256:jcs:v1 digest
 

@@ -193,6 +193,7 @@ def adapter_for(name: str) -> VendorAdapter | None:
         from . import cedar  # noqa: F401  (registers itself)
         from . import reported  # noqa: F401  (registers itself)
         from . import hiddenlayer  # noqa: F401  (registers itself)
+        from . import sentinelone  # noqa: F401  (registers itself)
     return _ADAPTERS.get(name)
 
 
