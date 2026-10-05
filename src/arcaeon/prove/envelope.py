@@ -26,6 +26,11 @@ certificate, no transparency-log entry):
                "predicate": {label, sealed_by, sealed_at, chain, pin_ref,
                              witness_ref, flags, binding, bytes, version}}
 
+  checks (optional, TE-31) = check.verdict.relayed rows `seal --checks`
+  carried for this file's sha256, inside the signed payload; absent unless
+  given, so an envelope without them is byte-identical to before. A carried
+  row is the sender's report; arcaeon.prove.gate reads it like --checks.
+
   binding = {audience, deal, purpose, not_after}: all four MANDATORY. An
   unbound envelope can be replayed into another deal or at another receiver
   (threat T3), so `seal` refuses to write one and `verify` reads one as BROKEN.
@@ -68,7 +73,9 @@ from arcaeon.record.row import (JSON_C14N_PREFIX, DuplicateKeyError, digest_json
 
 __all__ = ["MEDIA_TYPE", "PAYLOAD_TYPE", "STATEMENT_TYPE", "PREDICATE_TYPE", "SUFFIX",
            "BINDING_FIELDS", "SealError", "pae", "envelope_path", "build_statement",
-           "seal", "verify", "resolve_pin", "PIN_STATEMENT", "main"]
+           "seal", "verify", "resolve_pin", "PIN_STATEMENT", "CHECKS_KEY",
+           "MAX_CARRIED_CHECKS", "MAX_CARRIED_CHECK_BYTES", "MAX_CARRIED_CHECKS_BYTES",
+           "carried_check_rows", "main"]
 
 MEDIA_TYPE = "application/vnd.arcaeon.envelope.v1+json"
 PAYLOAD_TYPE = "application/vnd.in-toto+json"
@@ -101,6 +108,24 @@ _TOP_KEYS = {"mediaType", "dsseEnvelope"}
 _DSSE_KEYS = {"payloadType", "payload", "signatures"}
 _PREDICATE_KEYS = {"version", "label", "sealed_by", "sealed_at", "chain", "pin_ref",
                    "witness_ref", "flags", "binding", "bytes"}
+#: The predicate key carried check rows ride under (TE-31). Written only when
+#: `seal` is given checks, so an envelope sealed without them is byte-identical
+#: to one sealed before this key existed.
+CHECKS_KEY = "checks"
+#: The connector row kind (arcaeon.connector.core.ROW_KIND) the only rows that ride.
+CHECK_ROW_KIND = "check.verdict.relayed"
+#: The words a carried row's relayed_verdict may hold (arcaeon.connector.core.OUR_WORDS).
+_CHECK_WORDS = (V.VERIFIED, V.BROKEN, V.COULD_NOT_LOOK)
+#: At most this many rows ride in one envelope.
+MAX_CARRIED_CHECKS = 64
+#: One carried row, as compact JSON, is at most this many bytes (a relayed row
+#: is 1 to 3 KiB; one kept with its vendor_payload may not fit, by design).
+MAX_CARRIED_CHECK_BYTES = 16 << 10
+#: All carried rows together are at most this many bytes, so the base64 payload
+#: stays well under MAX_ENVELOPE_BYTES and `verify` can still read the sidecar.
+MAX_CARRIED_CHECKS_BYTES = 256 << 10
+#: A --checks file bigger than this is not read by `seal`.
+MAX_CHECKS_FILE_BYTES = 1 << 20
 
 PROVES = ("the file's bytes are the bytes the named key sealed, under this label, "
           "for this audience, deal and purpose, before not_after")
@@ -235,15 +260,132 @@ def _load_seed(key_file: str | Path) -> bytes:
     return seed
 
 
+# --- carried check rows (TE-31) ---------------------------------------------------
+
+def _norm_sha(v: Any) -> str | None:
+    """64 lower-case hex from a sha256 as a row may write it (case and a
+    `sha256:` prefix ignored, the gate's reading), or None."""
+    if not isinstance(v, str):
+        return None
+    s = v.strip().lower()
+    if s.startswith("sha256:"):
+        s = s[len("sha256:"):]
+    return s if _HEX64.fullmatch(s) else None
+
+
+def _check_file_items(p: Path) -> tuple[list[tuple[str, Any]], list[str]]:
+    """((where, item), problems) for one --checks file: one JSON object, a JSON
+    list, or JSON lines (the shapes `gate decide --checks` reads)."""
+    try:
+        if p.stat().st_size > MAX_CHECKS_FILE_BYTES:
+            return [], [f"{p.name}: over {MAX_CHECKS_FILE_BYTES} bytes, not read"]
+        text = p.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError) as e:
+        return [], [f"{p.name}: cannot be read ({type(e).__name__})"]
+    if not text.strip():
+        return [], [f"{p.name}: holds no rows"]
+    try:
+        doc = loads_strict(text)
+    except (ValueError, RecursionError):
+        doc = None
+    if isinstance(doc, (dict, list)):
+        items = doc if isinstance(doc, list) else [doc]
+        if not items:
+            return [], [f"{p.name}: holds no rows"]
+        return [(f"{p.name} item {n}", x) for n, x in enumerate(items, 1)], []
+    out, problems = [], []
+    for n, line in enumerate(text.splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            out.append((f"{p.name} line {n}", loads_strict(line)))
+        except (ValueError, RecursionError) as e:
+            problems.append(f"{p.name} line {n}: not JSON ({type(e).__name__})")
+    return out, problems
+
+
+def _row_problem(row: Any, sha: str) -> str | None:
+    """Why `row` may not ride in an envelope sealing `sha`, or None."""
+    if not isinstance(row, dict):
+        return f"not a JSON object (a {type(row).__name__})"
+    if row.get("kind") != CHECK_ROW_KIND:
+        return f"kind {str(row.get('kind'))[:64]!r} is not {CHECK_ROW_KIND}"
+    if row.get("relayed") is not True or row.get("checked_by_us") is not False:
+        return "relayed is not true or checked_by_us is not false: not a relayed row"
+    if row.get("relayed_verdict") not in _CHECK_WORDS:
+        return (f"relayed_verdict {str(row.get('relayed_verdict'))[:64]!r} is not one of "
+                f"{', '.join(_CHECK_WORDS)}")
+    subj = row.get("subject")
+    got = _norm_sha(subj.get("sha256")) if isinstance(subj, dict) else None
+    if got is None:
+        return "no subject.sha256: the row does not say which bytes it judged"
+    if got != sha:
+        return f"its subject.sha256 is {got}, the sealed file's sha256 is {sha}"
+    return None
+
+
+def carried_check_rows(sources, sha: str) -> list[dict]:
+    """The check rows `seal` carries for a file whose sha256 is `sha`. Each
+    source is a path to a --checks file (one JSON object, a list, or JSON
+    lines) or a row dict. Every row must be a check.verdict.relayed row (relayed,
+    not checked by us, a relayed_verdict in our three words) whose
+    subject.sha256 is `sha`; any other row, a file that cannot be read or holds
+    none, more than MAX_CARRIED_CHECKS rows, a row over MAX_CARRIED_CHECK_BYTES
+    or all of them over MAX_CARRIED_CHECKS_BYTES raises SealError naming each
+    one. Nothing is dropped: a row rides as given, or the seal is refused."""
+    items: list[tuple[str, Any]] = []
+    problems: list[str] = []
+    for n, src in enumerate(sources or (), 1):
+        if isinstance(src, dict):
+            items.append((f"checks= row {n}", src))
+            continue
+        got, bad = _check_file_items(Path(src))
+        items.extend(got)
+        problems.extend(bad)
+    rows, total = [], 0
+    for where, row in items:
+        why = _row_problem(row, sha)
+        if why is None:
+            try:
+                size = len(json.dumps(row, sort_keys=True, separators=(",", ":"),
+                                      ensure_ascii=False).encode("utf-8"))
+            except (TypeError, ValueError) as e:
+                why = f"not plain JSON ({type(e).__name__})"
+            else:
+                if size > MAX_CARRIED_CHECK_BYTES:
+                    why = (f"{size} bytes as JSON, over the {MAX_CARRIED_CHECK_BYTES}-byte "
+                           f"limit for one carried row (import it without its vendor_payload)")
+                total += size
+        if why is not None:
+            problems.append(f"{where}: {why}")
+        else:
+            rows.append(row)
+    if len(items) > MAX_CARRIED_CHECKS:
+        problems.append(f"{len(items)} rows given; an envelope carries at most "
+                        f"{MAX_CARRIED_CHECKS}")
+    elif total > MAX_CARRIED_CHECKS_BYTES:
+        problems.append(f"the rows are {total} bytes together, over the "
+                        f"{MAX_CARRIED_CHECKS_BYTES}-byte limit an envelope carries")
+    if problems:
+        more = f" (and {len(problems) - 8} more)" if len(problems) > 8 else ""
+        raise SealError("refusing to carry check rows: " + "; ".join(problems[:8]) + more
+                        + f". Only {CHECK_ROW_KIND} rows for this file's sha256 ride, and "
+                        f"none is dropped")
+    return [json.loads(json.dumps(r)) for r in rows]         # a plain-JSON copy
+
+
 # --- seal -----------------------------------------------------------------------
 
 def build_statement(file: str | Path, *, label: str, audience: str, deal: str, purpose: str,
                     not_after: str, sealed_by: str | None = None, key_id: str | None = None,
                     chain: str | None = None, pin_ref: str | None = None,
                     witness_ref: str | None = None, flags: list[str] | tuple = (),
-                    now: datetime | None = None) -> dict:
+                    now: datetime | None = None, checks=None) -> dict:
     """The in-toto Statement for `file`. SealError when a binding field is
-    missing or malformed or the file cannot be read; nothing is written."""
+    missing or malformed or the file cannot be read; nothing is written.
+    `checks` (paths of --checks files, or row dicts) puts the check rows in
+    predicate.checks (carried_check_rows says which may ride); empty or None
+    writes no checks key at all."""
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).replace(microsecond=0)
     fields = {"label": label, "audience": audience, "deal": deal, "purpose": purpose,
               "not-after": not_after}
@@ -275,7 +417,8 @@ def build_statement(file: str | Path, *, label: str, audience: str, deal: str, p
     pin = file_pin(file)
     if "sha256" not in pin:
         raise SealError(f"cannot read the file to seal ({pin.get('error')})")
-    return {
+    carried = carried_check_rows(checks, pin["sha256"]) if checks else None
+    stmt = {
         "_type": STATEMENT_TYPE,
         "subject": [{"name": Path(file).name, "digest": {"sha256": pin["sha256"]}}],
         "predicateType": PREDICATE_TYPE,
@@ -293,6 +436,9 @@ def build_statement(file: str | Path, *, label: str, audience: str, deal: str, p
             "bytes": pin["bytes"],
         },
     }
+    if carried is not None:
+        stmt["predicate"][CHECKS_KEY] = carried
+    return stmt
 
 
 def seal(file: str | Path, *, key_file: str | Path | None = None, force: bool = False,
@@ -609,7 +755,13 @@ def _check_predicate(r: dict, stmt: dict, file: Path, audience, deal, purpose,
         find.append("the statement carries no predicate: an unbound envelope is refused")
         return
     r["sealed"] = {k: pred.get(k) for k in sorted(_PREDICATE_KEYS)}
-    key = (pred.get("sealed_by") or {}).get("key") if isinstance(pred.get("sealed_by"), dict) \
+    if CHECKS_KEY in pred:                       # TE-31: only when the sealer carried rows
+        r["sealed"][CHECKS_KEY] = pred[CHECKS_KEY]
+        r["not_checked"].append(
+            "the carried check rows (checks[]): signed by the sealer, so they are the "
+            "sender's report of a checker's word, not re-judged here; `gate decide` reads "
+            "them like --checks rows")
+    key =(pred.get("sealed_by") or {}).get("key") if isinstance(pred.get("sealed_by"), dict) \
         else None
     if key is not None and r["signers"] and key not in r["signers"]:
         st["signature"] = V.BROKEN
@@ -777,7 +929,8 @@ def _verify(r, file, env_path, audience, deal, purpose, signers, require_witness
 USAGE = """usage: arcaeon envelope seal <file> --label TEXT --audience ID --deal ID
                                --purpose TEXT --not-after WHEN [--key SEEDFILE]
                                [--by NAME] [--chain ID] [--pin-ref REF]
-                               [--witness-ref REF] [--flag NAME ...] [--force]
+                               [--witness-ref REF] [--flag NAME ...]
+                               [--checks FILE ...] [--force]
        arcaeon envelope verify <file> [--audience ID] [--signer DID ...]
                                [--deal ID] [--purpose TEXT] [--envelope PATH]
                                [--require-witness] [--pins DIR]"""
@@ -791,6 +944,16 @@ sha256) in a DSSE envelope, bound to one exchange. --label, --audience,
 30m). --key signs with Ed25519 (a 32-byte seed, base64, one line; needs
 arcaeon[sign]); without it the envelope is UNSIGNED and verify will answer
 COULD NOT LOOK on it.
+
+--checks FILE (repeatable) carries check.verdict.relayed rows (a connector
+adapter's output: one JSON object, a list, or JSON lines) inside the signed
+Statement, as predicate.checks: editing a carried row breaks the signature.
+Every row must name this file's sha256 as subject.sha256; any other row, or
+a FILE that cannot be read, refuses the seal (exit 2) naming it. At most 64
+rows, 16 KiB each, 256 KiB together. A carried row is the sender's report:
+`gate decide` reads it like a --checks row (a BROKEN vetoes act, pay and
+irreversible), and it never makes anything VERIFIED. Without --checks the
+envelope is exactly what it was before checks[] existed.
 
 verify answers VERIFIED (act), BROKEN (refuse, keep the evidence) or COULD NOT
 LOOK (do not act on money or an irreversible step), as JSON on stdout and one
@@ -842,7 +1005,7 @@ def _parse(argv: list[str], spec: dict[str, str]) -> tuple[list[str], dict]:
 _SEAL_SPEC = {"--label": "value", "--audience": "value", "--deal": "value",
               "--purpose": "value", "--not-after": "value", "--key": "value", "--by": "value",
               "--chain": "value", "--pin-ref": "value", "--witness-ref": "value",
-              "--flag": "list", "--force": "bool"}
+              "--flag": "list", "--checks": "list", "--force": "bool"}
 _VERIFY_SPEC = {"--audience": "value", "--signer": "list", "--deal": "value",
                 "--purpose": "value", "--envelope": "value", "--require-witness": "bool",
                 "--pins": "value"}
@@ -866,16 +1029,19 @@ def _seal_cli(argv: list[str]) -> int:
                    label=o.get("--label"), audience=o.get("--audience"), deal=o.get("--deal"),
                    purpose=o.get("--purpose"), not_after=o.get("--not-after"),
                    sealed_by=o.get("--by"), chain=o.get("--chain"), pin_ref=o.get("--pin-ref"),
-                   witness_ref=o.get("--witness-ref"), flags=o.get("--flag", []))
+                   witness_ref=o.get("--witness-ref"), flags=o.get("--flag", []),
+                   checks=o.get("--checks"))
     except SealError as e:
         print(f"arcaeon envelope seal: {e}; nothing was written", file=sys.stderr)
         return V.EXIT_USAGE
     stmt = json.loads(base64.b64decode(env["dsseEnvelope"]["payload"]))
     signed = bool(env["dsseEnvelope"]["signatures"])
-    print(json.dumps({"ok": True, "envelope": str(envelope_path(target)),
-                      "signed": signed,
-                      "signer": stmt["predicate"]["sealed_by"]["key"],
-                      "statement": stmt}, indent=1, ensure_ascii=False))
+    out = {"ok": True, "envelope": str(envelope_path(target)), "signed": signed,
+           "signer": stmt["predicate"]["sealed_by"]["key"]}
+    if CHECKS_KEY in stmt["predicate"]:
+        out["carried_checks"] = len(stmt["predicate"][CHECKS_KEY])
+    out["statement"] = stmt
+    print(json.dumps(out, indent=1, ensure_ascii=False))
     if not signed:
         print("UNSIGNED: no --key, so `envelope verify` will answer COULD NOT LOOK on who "
               "sealed it", file=sys.stderr)

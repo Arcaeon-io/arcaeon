@@ -111,6 +111,53 @@ reads neither.
 | `binding.purpose` | what the receiver may use it for | **yes** |
 | `binding.not_after` | when it stops being good (RFC 3339 with a zone, or a span at seal time: `7d`, `12h`, `30m`) | **yes** |
 | `bytes` | the file's size when sealed | written by `seal` |
+| `checks` | check rows carried for this file (`--checks FILE`, see below) | no; absent unless given |
+
+### Carried check rows (`checks[]`)
+
+`seal --checks FILE` (repeatable; library `seal(..., checks=[...])`, paths or
+row dicts) carries a checker's word with the file: the
+`check.verdict.relayed` rows a connector adapter writes
+([CONNECTOR_ADAPTER.md](CONNECTOR_ADAPTER.md)), placed in
+`predicate.checks`, inside the signed payload. Editing, adding or removing a
+carried row changes the payload, so the signature no longer verifies and
+`verify` answers BROKEN.
+
+TE-31 names a check row `{vendor, input_sha256, verdict, vendor_request_id,
+at, signed_by_vendor}`. A connector row spells those `vendor`,
+`subject.sha256`, `relayed_verdict`, `vendor_id`, `received_at` and
+`attestation` (whose `status` is the vendor's own claim, never checked, so
+`signed_by_vendor` is false for every row here).
+
+What rides, and what refuses the seal (exit 2, nothing written; the message
+names the file and the line or item of each row it refused, and drops none):
+
+- every row must be of kind `check.verdict.relayed`, say `relayed: true` and
+  `checked_by_us: false`, and hold a `relayed_verdict` of VERIFIED, BROKEN or
+  COULD NOT LOOK;
+- its `subject.sha256` must be the sealed file's sha256 (case and a
+  `sha256:` prefix ignored, as the gate reads it). A row for other bytes, or
+  for none, is refused;
+- at most 64 rows, each at most 16 KiB as compact JSON, at most 256 KiB
+  together, so the sidecar stays far under the 1 MiB `verify` reads. A row
+  imported with its `vendor_payload` kept may not fit: import it without;
+- a FILE that cannot be read, is not JSON, or holds no rows is refused.
+
+Without `--checks` there is no `checks` key, and the envelope is
+byte-identical to one sealed before `checks[]` existed; such envelopes verify
+exactly as before. A verifier that predates `checks[]` ignores the key (the
+predicate version is still 1), so it neither reads a carried BROKEN nor is
+misled by one.
+
+`verify` does not judge carried rows: its word is about the bytes, the
+signature and the binding. It shows them under `sealed.checks` and adds a
+`not_checked` line. A carried row is signed by the sealer, so it is the
+sender's report of what a checker said, not the checker's own signed word.
+`gate decide` reads it like a `--checks` row: on a VERIFIED envelope a
+carried BROKEN for this file vetoes `act`, `pay` and `irreversible` as
+`checker-broken`; a carried row never lifts a BROKEN or COULD NOT LOOK
+envelope, never makes anything VERIFIED by itself, and never counts toward
+the gate's non-party check rule (VERBS.md, `gate`).
 
 ### Why the binding is mandatory
 
