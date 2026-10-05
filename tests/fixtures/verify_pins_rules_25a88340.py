@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""FROZEN EXCERPT, not live code. Source: the operator's velouria repo, commit
+"""FROZEN EXCERPT, not live code. Source: the operator's private repo, commit
 25a88340, path bridge/witness/verify_pins.py (read with `git show`). The
 statement and digest rules below are copied byte for byte from that file
 (constants, _loads, canonical_bytes, chain_step, values_text, values_sha256,
