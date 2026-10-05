@@ -5,3 +5,6 @@ prune tools
 exclude conftest.py
 exclude MIGRATION.md
 prune registry
+# The OPA/Rego gate policy (D053): docs/OPA.md runs `opa eval` on it. No code
+# loads it, so it is not package data; it ships in the sdist, not the wheel.
+graft policies
