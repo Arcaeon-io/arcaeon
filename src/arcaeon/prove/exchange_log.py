@@ -425,7 +425,8 @@ def read_side(path: Path, owner: str | None, name: str) -> dict:
     side: dict[str, Any] = {"log": str(path), "verdict": None, "reason": None,
                             "owner": owner, "owner_from": "named" if owner else None,
                             "chain": None, "reaction_rows": 0, "binding_rows": 0,
-                            "broken_rows": [], "accounts": [], "_rows": []}
+                            "broken_rows": [], "accounts": [], "owner_refused": None,
+                            "_rows": []}
     looked = f"log {name} (an exchange reactions log)"
     try:
         if not path.exists():
@@ -465,10 +466,20 @@ def read_side(path: Path, owner: str | None, name: str) -> dict:
     for i, o in cand:
         problem = check_row(o) if o["kind"] == KIND else check_binding(o)
         checked.append((i, o, problem))
+    first = next((o["signer"] for _, o, p in checked if p is None), None)
     if side["owner"] is None:
-        first = next((o["signer"] for _, o, p in checked if p is None), None)
         side["owner"] = first
         side["owner_from"] = "first_row" if first else None
+    elif first is not None and first != side["owner"]:
+        # A08: the caller named the owner, so trust on first use is closed. A log
+        # whose first good row is another key's is not the named owner's log:
+        # refused whole (BROKEN), no row of it read, no exchange lined up from it.
+        side["owner_refused"] = {"named": side["owner"], "first_row": first}
+        side["verdict"] = V.BROKEN
+        side["reason"] = (f"refused: the first row that verifies is signed by {first}, not by "
+                          f"the named owner {side['owner']}; this is not that key's log, and "
+                          f"no row of it is read")
+        return side
     seen: dict[str, dict] = {}
     accounts: set[str] = set()
     for i, o, problem in checked:
@@ -661,7 +672,8 @@ def _pair(r: dict, pa: Path, pb: Path, owner_a, owner_b) -> dict:
     if same and not cnl:
         broken.append(f"both logs are owned by one key ({sa['owner']}): a pair needs two "
                       f"parties")
-    if not cnl:
+    refused = any(s.get("owner_refused") for s in (sa, sb))
+    if not cnl and not refused:
         ha, hb = latest_heads(sa), latest_heads(sb)
         ba: dict[str, list] = {}
         bb: dict[str, list] = {}
@@ -733,7 +745,9 @@ DISPUTED claim with a reason; it is a claim, never a verdict. A change is a
 new row: --supersedes names the old row's digest. Rows are never edited.
 
 pair reads two logs, verifies each chain and every row's signature against
-the log's key (--owner-a / --owner-b, else the first row's signer), takes the
+the log's key (--owner-a / --owner-b, else the first row's signer; a named
+owner that is not the signer of the log's first good row refuses that log,
+BROKEN, and no exchange is lined up), takes the
 latest non-superseded row per party per exchange and reports each exchange:
 clean (both VERIFIED, same sha256, each names the other), mismatch (names the
 field), not_verified (both said the same other word), missing (one side

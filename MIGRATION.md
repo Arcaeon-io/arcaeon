@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Exchange pair: a named owner closes trust on first use (A08).** Each log in `exchange pair --json` (and `read_side()`) adds `owner_refused`: null, or `{"named": DID, "first_row": DID}` when `--owner-a` / `--owner-b` names a key and the log's first row that verifies is signed by another. Such a log is refused whole: its verdict is BROKEN, its reason starts `refused:`, no row of it is read, and `exchanges` is empty with all `counts` 0 (exit 1, as before for a wrong owner). Without a named owner nothing changes.
+
 Everything on stack-2026-10-04c since 0.10.0, newest first. The first items
 are changes to verbs that are themselves new since 0.10.0; a script written
 against an earlier commit of this stack must act on them. Each says before
