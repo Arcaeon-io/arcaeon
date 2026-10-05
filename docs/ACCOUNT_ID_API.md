@@ -108,7 +108,9 @@ bound once.
 
 Request `{"reason": "key lost"}` (optional, one line). Response `200`
 `{"binding": {... "event": "revoke", "key": the revoked did:key, "reason": ...}}`.
-409 if the account has no active key. The account and its history stay.
+409 if the account has no active key, or if the request time is before
+the account's last row (see "Row times never go backwards" below). The
+account and its history stay.
 
 ### Rotate: `POST /v1/agents/{account}/rotate` (owner)
 
@@ -120,6 +122,13 @@ how an owner recovers an account whose key was lost or stolen. **The new key
 inherits the record** (TE-44d): the tally keys on the account, and the
 account's history is one hash-linked list that cannot be reset. Re-issuing a
 revoked account's name is 409.
+
+**Row times never go backwards.** Rotate, revoke and attach are refused with
+409, and nothing is written, when their time is before the account's last
+row. The verifier calls a history BROKEN when row i is dated before row
+i-1, and the history cannot be reset, so one backdated row would read every
+pairing on the account BROKEN at every time. An equal time (the same second)
+is allowed, as the verifier allows it.
 
 ### Fetch the public binding statement: `GET /v1/keys/{did}/binding` (anyone)
 
@@ -161,7 +170,8 @@ DPoP `cnf.jkt`, Entra mTLS-PoP `cnf`), `idp-tag` (an STS tag carries it) or
 active key (`jwk_thumbprint(did)`), and it must match. Any field outside this
 shape (`id_token`, `access_token`, `jwt`, `token`) is refused with 400, so a
 live bearer token cannot be written by mistake. Response `201` with an
-`event: "external"` row. Public Sigstore Fulcio takes no Entra or Okta token
+`event: "external"` row (409 if the account has no active key or the time
+is before its last row). Public Sigstore Fulcio takes no Entra or Okta token
 today (R10), so `sigstore` here means a Sigstore identity the agent already
 holds, bound the same way.
 

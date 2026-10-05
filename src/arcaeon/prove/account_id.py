@@ -327,6 +327,18 @@ def _row(event: str, account: str, owner: str, key: str | None, prev: str | None
     return row
 
 
+def _not_before_last(rec: dict, now: datetime) -> None:
+    """Refuse (409) a row dated before the account's last row. verify_binding
+    calls a history BROKEN when row i is dated before row i-1 (an equal time is
+    allowed there, so it is allowed here), and the history cannot be reset
+    (TE-44d): a backdated row would break every pairing on the account forever."""
+    last = _parse(rec["rows"][-1]["at"]) if rec.get("rows") else None
+    if last is not None and now < last:
+        raise AccountError(409, f"the time {_utc(now)} is before the account's last row "
+                                f"({rec['rows'][-1]['at']}); a row is never dated before "
+                                f"the one it follows")
+
+
 # --- the operations --------------------------------------------------------------------
 
 def issue(store: dict, caller: Any, *, agent: str, proof: Any, server_seed: bytes,
@@ -369,6 +381,7 @@ def rotate(store: dict, caller: Any, account: str, *, proof: Any, server_seed: b
     owner = _caller_owner(caller)
     rec = _owned(store, owner, account)
     now = _when(at)
+    _not_before_last(rec, now)
     did = _check_proof(proof, account, now)
     if did in store["keys"]:
         raise AccountError(409, "this key is already bound to an account; a key is bound once")
@@ -383,13 +396,15 @@ def revoke(store: dict, caller: Any, account: str, *, server_seed: bytes,
     history stay; envelopes the key sealed after this time read BROKEN."""
     owner = _caller_owner(caller)
     rec = _owned(store, owner, account)
+    now = _when(at)
+    _not_before_last(rec, now)
     key = _active_key(rec)
     if key is None:
         raise AccountError(409, f"{account} has no active key to revoke")
     if reason is not None and not _env._text_ok(reason, 256):
         raise AccountError(400, "reason is not one line of text (at most 256 chars)")
     row = _sign_row(_row("revoke", account, owner, key, row_digest(rec["rows"][-1]),
-                         _when(at), reason=reason), server_seed)
+                         now, reason=reason), server_seed)
     return _append(store, account, owner, row)
 
 
@@ -436,6 +451,8 @@ def attach_external(store: dict, caller: Any, account: str, *, receipt: Any,
     checked upstream; only its hash and the checked claims arrive here."""
     owner = _caller_owner(caller)
     rec = _owned(store, owner, account)
+    now = _when(at)
+    _not_before_last(rec, now)
     clean = _check_receipt(receipt)
     key = _active_key(rec)
     if key is None:
@@ -443,7 +460,7 @@ def attach_external(store: dict, caller: Any, account: str, *, receipt: Any,
     if clean["key_jkt"] is not None and clean["key_jkt"] != jwk_thumbprint(key):
         raise AccountError(400, "key_jkt is not the thumbprint of the account's active key")
     row = _sign_row(_row("external", account, owner, key, row_digest(rec["rows"][-1]),
-                         _when(at), external=clean), server_seed)
+                         now, external=clean), server_seed)
     return _append(store, account, owner, row)
 
 
