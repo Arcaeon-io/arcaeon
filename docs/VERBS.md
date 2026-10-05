@@ -676,6 +676,11 @@ is refused. `verify` is the receiving side, verify-before-act: VERIFIED act,
 BROKEN refuse and keep the evidence, COULD NOT LOOK do not act on money or an
 irreversible step. It proves who sealed the bytes and for whom, never that
 the content is true. The spec and its limits are [ENVELOPE.md](ENVELOPE.md).
+`export-ocsf` turns one verify report, `gate decide --json` decision or gate
+`evidence.json` into one OCSF 1.9.0 Detection Finding (class_uid 2004) for a
+SIEM: BROKEN is severity High, COULD NOT LOOK is Low and lists what was not
+checked, VERIFIED is emitted (Informational) only with `--include-verified`.
+File names only, never directories. The mapping is [OCSF.md](OCSF.md).
 
 **Usage**
 
@@ -687,6 +692,8 @@ usage: arcaeon envelope seal <file> --label TEXT --audience ID --deal ID
        arcaeon envelope verify <file> [--audience ID] [--signer DID ...]
                                [--deal ID] [--purpose TEXT] [--envelope PATH]
                                [--require-witness] [--pins DIR]
+       arcaeon envelope export-ocsf <report.json | -> [--include-verified]
+                               [--now WHEN] [--out FILE]
 ```
 
 **Exit codes:** `verify`: 0 VERIFIED, 1 BROKEN (changed bytes, a bad or
@@ -697,13 +704,16 @@ or unreadable sidecar, an unsigned envelope, no `--signer` or `--audience`
 given, no Ed25519 backend; with `--require-witness`, a pin not resolved in
 the `--pins` clone). `--pins` is offline: nothing is fetched.
 `seal`: 0 written, 2 refused (a missing binding field, a past not-after, an
-existing envelope without `--force`), 3 the file to seal is not there. 2 bad
-usage. New in 0.10, so `--legacy-exit` changes nothing here.
+existing envelope without `--force`), 3 the file to seal is not there.
+`export-ocsf`: 0 exported (or VERIFIED skipped), 3 the input is not a readable
+arcaeon verdict. 2 bad usage. New in 0.10, so `--legacy-exit` changes nothing here.
 
 ```console
 $ arcaeon envelope seal grades.csv --label "week 3 grades" --audience instructor-1 --deal d-7f3a --purpose grading --not-after 7d --key seal.key
 $ arcaeon envelope verify grades.csv --audience instructor-1 --signer did:key:z6Mk...
 VERIFIED: the file's bytes are the bytes the named key sealed, ...
+$ arcaeon envelope export-ocsf report.json --out finding.json
+finding.json
 ```
 
 ## `gate`
