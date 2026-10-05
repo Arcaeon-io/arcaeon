@@ -1,0 +1,27 @@
+{
+    "attributable_event_id": "0c7fe87b-9bc6-4651-bf2c-80f8376817d1",
+    "concluding_event_id": "0c7fe87b-9bc6-4651-bf2c-80f8376817d1",
+    "conviction_id": "b53bc9c8-e5cc-4bd8-a3bf-98576de4cb71",
+    "conviction_timestamp": 1765915610241793453,
+    "detection_category": "Guardrail Activation",
+    "engine_name": "llmproxy",
+    "mitre": {
+      "Tactic": {
+        "Name": "Impact",
+        "SrcUrl": "https://atlas.mitre.org/tactics/AML.TA0011",
+        "UID": "AML.TA0011"
+      },
+      "Technique": {
+        "Name": "External Harms",
+        "SrcUrl": "https://atlas.mitre.org/techniques/AML.T0048",
+        "UID": "AML.T0048"
+      }
+    },
+    "requester_id": "gpburdell",
+    "sensor_id": "7af8d1a8-742b-4400-b152-5ee702885b2f",
+    "severity": "Low",
+    "source": "aidr",
+    "tactic": "AML.TA0011",
+    "technique": "AML.T0048",
+    "tenant_id": "b2774567-7610-437a-1111-da6ec36cc347"
+}

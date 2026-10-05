@@ -154,8 +154,8 @@ adapter (`arcaeon.connector.snyk_agent_scan`, below), the Lakera Guard
 adapter (`arcaeon.connector.lakera_guard`, below), the Prisma AIRS adapter
 (`arcaeon.connector.prisma_airs`, below), the Kyverno PolicyReport adapter
 (`arcaeon.connector.kyverno`, below), the Cedar / Verified Permissions adapter
-(`arcaeon.connector.cedar`, below) and the generic reported-by-sender adapter
-(`arcaeon.connector.reported`, below). The base owns what they share:
+(`arcaeon.connector.cedar`, below), the generic reported-by-sender adapter
+(`arcaeon.connector.reported`, below) and the HiddenLayer alert adapter (`arcaeon.connector.hiddenlayer`, below). The base owns what they share:
 
 - the row skeleton (`base_row`), relayed, `checked_by_us: false`, attestation
   `NONE` unless the payload claims a signature, and COULD NOT LOOK until a
@@ -652,6 +652,66 @@ named a checker, gave its word, and pinned the input by digest at the time we
 received the row. It does not prove the checker exists, that it ran, that it
 said that word, or that the sender did not write the row alone. A VERIFIED here
 is the sender's report, never a check of ours.
+
+## HiddenLayer alerts
+
+`arcaeon.connector.hiddenlayer.ingest(body)` reads what a HiddenLayer webhook
+delivers, one JSON object or a JSON array of them (at most 1000), into one row per
+alert. The shape is taken from HiddenLayer's public docs, "Data Formats" on
+https://docs.hiddenlayer.ai/docs/integrations/webhook_integrations.md, with field
+meanings from https://docs.hiddenlayer.ai/docs/products/runtime/agentic/policy_outcomes.md
+(read 2026-10-05). It was not checked against a live alert.
+
+HiddenLayer writes no pass or fail word, so the adapter writes its own:
+
+| alert | when | relayed_verdict |
+|---|---|---|
+| runtime security conviction | severity `low`, `medium` or `high` | BROKEN (`conviction`) |
+| supply chain scan | status `done`, detection count over 0, known severity | BROKEN (`scan_detections`) |
+| supply chain scan | status `done`, detection count 0 in both places, files with detections 0, files failed 0, unknown files 0, file count over 0 and equal in both places, no scan error, no severity | VERIFIED (`scan_clean`) |
+| supply chain scan | done but any of the above missing or not clean | COULD NOT LOOK (`scan_incomplete`) |
+| supply chain scan | any status other than `done` | COULD NOT LOOK (`unknown_status`) |
+| runtime policy outcome | action `BLOCK` | BROKEN (`policy_block`) |
+| runtime policy outcome | `DETECT` or `REDACT` naming a detection | BROKEN (`policy_detect`, `policy_redact`) |
+| runtime policy outcome | `DETECT` or `REDACT` naming none | COULD NOT LOOK (`policy_action_without_detection`) |
+| runtime policy outcome | any other action | COULD NOT LOOK (`unknown_action`) |
+| any | severity or threat level outside the documented words | COULD NOT LOOK (`unknown_severity`) |
+| audit log, another schema, no known shape | | COULD NOT LOOK (`not_an_alert`) |
+
+A runtime security conviction is, in HiddenLayer's words, when it "has determined
+that a malicious event, or set of malicious events, has taken place", so it has no
+clean form: there is no VERIFIED conviction. A policy outcome is emitted only when
+a policy acts, so it has no clean form either. Only a finished model scan can read
+VERIFIED, and only when every documented count says it finished with nothing found;
+the docs show no clean scan, so that rule is our reading of the documented fields.
+
+Each row carries `input_sha256` (SHA-256 of the exact bytes received),
+`vendor_request_id` and `vendor_id` (the conviction id, scan id or outcome event
+id), `at` (HiddenLayer's own time, as written) and one adapter key `alert` with
+the source, id, severity or threat level, status, action, detection category or
+names, counts, MITRE technique, engine and schema name. Requester, tenant,
+sensor, session and project ids and model inventory are not copied. A body that
+is empty, not UTF-8 JSON, carries a duplicate key, nests too deep or is over
+8 MiB is one COULD NOT LOOK row; `ingest` never raises.
+
+The webhook page documents custom headers for the receiver's own auth and no
+payload signature, so every row carries `signed_by_vendor: false` and
+`standing: "reported_by_sender"`; no argument or payload field changes that.
+`standing_verdict(rows)` (also `rollup`) is BROKEN when any row is a relayed
+BROKEN, else COULD NOT LOOK, never VERIFIED. `recheck` says COULD NOT LOOK for
+these rows; re-run `ingest`.
+
+### What this cannot prove
+
+This proves only that someone handed us these bytes, when, and what the adapter
+reads in them. It does not prove HiddenLayer sent them: the alert is unsigned (as
+far as the public docs show), so anyone who can reach the webhook URL can write
+one. It does not prove a detection was right, that a scan covered the model that
+was later used, or that a clean scan means the model is safe; HiddenLayer can only
+report what its own checks look for. A missing alert proves nothing: no outcome is
+sent when a policy takes no action. The shapes were read from public docs, not a
+live alert, so a field HiddenLayer renames reads COULD NOT LOOK until the adapter
+is updated.
 
 ## The sha256:jcs:v1 digest
 

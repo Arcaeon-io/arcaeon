@@ -1,0 +1,36 @@
+{
+  "scan_result_summary": {
+    "detection_categories": [],
+    "detection_count": 0,
+    "end_time": "2025-12-16T20:01:16.010934055Z",
+    "file_count": 3,
+    "files_with_detections_count": 0,
+    "has_genealogy": false,
+    "inventory": {
+      "model_id": "00000000-0000-0000-0000-000000000000",
+      "model_name": "multiple onnx",
+      "model_source": null,
+      "model_version": "1",
+      "model_version_id": "00000000-0000-0000-0000-000000000000",
+      "origin": "Local File System",
+      "request_source": "UI Upload",
+      "requesting_entity": "example-user"
+    },
+    "scan_error": null,
+    "scan_id": "11111111-2222-4333-8444-555555555555",
+    "severity": null,
+    "signing": null,
+    "start_time": "2025-12-16T20:01:10.916810185Z",
+    "status": "done",
+    "summary": {
+      "detection_count": 0,
+      "file_count": 3,
+      "severity": null,
+      "files_with_detections_count": 0,
+      "detection_categories": [],
+      "files_failed_to_scan": 0,
+      "unknown_files": 0
+    },
+    "version": "25.12.1"
+  }
+}

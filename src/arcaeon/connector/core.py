@@ -192,6 +192,7 @@ def adapter_for(name: str) -> VendorAdapter | None:
         from arcaeon.prove import mcp_scan  # noqa: F401  (registers itself)
         from . import cedar  # noqa: F401  (registers itself)
         from . import reported  # noqa: F401  (registers itself)
+        from . import hiddenlayer  # noqa: F401  (registers itself)
     return _ADAPTERS.get(name)
 
 
