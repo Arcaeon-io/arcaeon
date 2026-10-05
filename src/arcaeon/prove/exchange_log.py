@@ -901,6 +901,8 @@ def _render(r: dict) -> str:
         lines.append(f"claim DISPUTED by {c['side']} on {c['exchange_id']} at {c['at']}"
                      f"{'' if c['current'] else ' (superseded)'}: {c['reason']}")
     svc = r.get("account_service") or {}
+    if svc.get("consulted"):
+        lines.append(f"account service: {svc['reason']}")
     for b in svc.get("bindings", []):
         lines.append(f"account service {b['verdict']} {b['account']} -> {b['key']}: {b['reason']}")
     if svc and not svc.get("consulted") and any(s.get("accounts") for s in r.get("logs", {}).values()):

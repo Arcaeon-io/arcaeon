@@ -744,6 +744,9 @@ def render(r: dict) -> str:
         lines.append(f"chain {c.get('log')}: {c.get('verdict') or 'skipped'}"
                      + (f" owner {c['owner']}" if c.get("owner") else "")
                      + (f" ({c['reason']})" if c.get("verdict") != V.VERIFIED else ""))
+    svc = r.get("account_service") or {}
+    if svc.get("consulted"):
+        lines.append(f"account service: {svc['reason']}")
     for b in r.get("bindings", []):
         lines.append(f"binding {b['account']} -> {b['key']}: "
                      + ((f"applied (signed binding row"

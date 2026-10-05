@@ -581,3 +581,14 @@ def test_sibling_trade_without_accounts_is_unchanged(w):
     assert _ib(r, w["a"].did)["paired"]["clean"] == 1
     assert "account_service" not in r
     assert not any("agent accounts of one owner" in x for x in r["limits"])
+
+
+def test_text_output_says_as_of_when_the_service_was_consulted(w):
+    # F-R11 (fold): the "as of" freshness line reaches the printed text, not only JSON
+    _issue(w, w["a"], NOW - timedelta(days=5))
+    _exchange(w)
+    r = _tally(w, accounts=w["store"])
+    assert "as of" in r["account_service"]["reason"]
+    assert r["account_service"]["reason"] in T.render(r)
+    p = _pair(w, accounts=w["store"])
+    assert p["account_service"]["reason"] in X._render(p)
