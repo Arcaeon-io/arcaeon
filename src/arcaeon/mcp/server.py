@@ -484,7 +484,34 @@ def _verify_bundle(args: dict) -> dict:
     r["exit_code"] = {_v.VERIFIED: _v.EXIT_GOOD, _v.BROKEN: _v.EXIT_BAD}.get(
         verdict, _v.EXIT_COULD_NOT_LOOK)
     r["honest_limits"] = VERIFY_LIMITS
+    action, enforce = args.get("action"), args.get("enforce")
+    if action is None:
+        if enforce is not None:                  # checked, though only a decision uses it
+            _gate_mode(enforce)
+        return _plain(r)
+    # With an action: the gate's own answer by the same rule (gate.decide,
+    # record=False: no pack, no row, verify_bundle stays read-only). The verify
+    # report and its exit_code above are unchanged.
+    from arcaeon.prove import gate as _gate
+    if action not in _gate.ACTIONS:
+        raise ValueError(f"`action` must be one of {', '.join(_gate.ACTIONS)}; got {action!r}")
+    d = _gate.decide(a["file"], action=action, audience=a["audience"], signers=a["signers"],
+                     deal=a["deal"], envelope=a["envelope"], purpose=a["purpose"],
+                     enforce=_gate_mode(enforce), record=False)
+    r.update(action=action, decision=d.decision, gate_reason=d.reason,
+             gate_exit_code=d.exit_code, would_refuse=d.would_refuse,
+             enforce_mode=d.enforce_mode, enforce_source=d.enforce_source,
+             enforce_detail=d.enforce_detail, warning=d.warning)
     return _plain(r)
+
+
+def _gate_mode(enforce):
+    """The enforce mode (L4-01): the argument, else ARCAEON_GATE_MODE, else the
+    cached signed latest.json, else block. An unknown value is a tool error."""
+    from arcaeon.prove import gate_mode as _gm
+    if enforce is not None and not isinstance(enforce, str):
+        raise ValueError("`enforce` must be warn or block")
+    return _gm.resolve(enforce)
 
 
 def _gate_decide(args: dict) -> dict:
@@ -496,10 +523,11 @@ def _gate_decide(args: dict) -> dict:
     # A deal id makes a refusal evidence (D066): the pack goes to the state dir
     # and its gate.evidence row to the connector's own ledger, its deal chain.
     led = ledger_path().resolve()
+    mode = _gate_mode(args.get("enforce"))
     d = _gate.decide(a["file"], action=args["action"], audience=a["audience"],
                      signers=a["signers"], deal=a["deal"], envelope=a["envelope"],
                      purpose=a["purpose"], record_dir=led.parent,
-                     ledger=led if a["deal"] else None)
+                     ledger=led if a["deal"] else None, enforce=mode)
     out = d.to_dict()
     out["honest_limits"] = _gate.ALLOW_MEANS
     return _plain(out)
@@ -878,13 +906,19 @@ def build_server():
             "exit_code 0, 1 or 3, and the full verify report. VERIFIED means "
             "unchanged and labeled, never that the content is true or safe. Paths "
             "must sit under $ARCAEON_BUNDLE_ROOT (default the working directory). "
-            "Reads only."),
+            "With an action (read, act, pay, irreversible) it also answers decision "
+            "allow or refuse by gate_decide's rule, with enforce_mode and "
+            "enforce_source (enforce: block or warn; see gate_decide), and writes "
+            "nothing. Reads only."),
     )
     def verify_bundle(file: str, envelope: str | None = None, audience: str | None = None,
                       signers: list[str] | None = None, deal: str | None = None,
-                      purpose: str | None = None) -> dict:
+                      purpose: str | None = None,
+                      action: Literal["read", "act", "pay", "irreversible"] | None = None,
+                      enforce: Literal["warn", "block"] | None = None) -> dict:
         args = {"file": file, "envelope": envelope, "audience": audience,
-                "signers": signers, "deal": deal, "purpose": purpose}
+                "signers": signers, "deal": deal, "purpose": purpose,
+                "action": action, "enforce": enforce}
         outcome = _attempt(_verify_bundle, args)
         return _record_call("verify_bundle", args, outcome)
 
@@ -902,14 +936,20 @@ def build_server():
             "writes an evidence pack to DEAL-<deal>/gate/ in the connector's state "
             "dir and a gate.evidence row to the connector's ledger. Allow means unchanged and labeled for you, never true or safe. "
             "Paths must sit under $ARCAEON_BUNDLE_ROOT (default the working "
-            "directory)."),
+            "directory). enforce: block (refuse as above) or warn (the same "
+            "decision is computed, then let through: decision allow, exit_code 0, "
+            "would_refuse, would_exit_code and a warning 'would refuse in block "
+            "mode'; warn only records). Default: $ARCAEON_GATE_MODE, else the "
+            "signed latest.json's block_after from the check-in cache, else block. "
+            "Every answer carries enforce_mode and enforce_source."),
     )
     def gate_decide(file: str, action: Literal["read", "act", "pay", "irreversible"],
                     audience: str, signers: list[str] | None = None,
                     envelope: str | None = None, deal: str | None = None,
-                    purpose: str | None = None) -> dict:
+                    purpose: str | None = None,
+                    enforce: Literal["warn", "block"] | None = None) -> dict:
         args = {"file": file, "action": action, "audience": audience, "signers": signers,
-                "envelope": envelope, "deal": deal, "purpose": purpose}
+                "envelope": envelope, "deal": deal, "purpose": purpose, "enforce": enforce}
         outcome = _attempt(_gate_decide, args)
         return _record_call("gate_decide", args, outcome)
 

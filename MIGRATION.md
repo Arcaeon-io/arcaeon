@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **L4-01 (branch b200-t6a-default-on).** `gate decide --json`, MCP `gate_decide` and `verify_bundle` with an `action` gain `enforce_mode` (`block` / `warn`), `enforce_source` (`flag` / `env` / `latest.json` / `default`), `enforce_detail`, `would_refuse`, `would_exit_code` (1, 3 or null) and `warning` (null unless warn let a refusal through; then `decision` is `allow` and `exit_code` 0); `verify_bundle` with an `action` also gains `action`, `decision`, `gate_reason` and `gate_exit_code`. New flag `--enforce {warn,block}`, new variable `ARCAEON_GATE_MODE`, library `decide(enforce=, record=)` and module `arcaeon.prove.gate_mode`. With nothing set and no signed latest.json cached the mode is block, which is what the gate already did: no decision changes unless you opt into warn or a signed `block_after` window says warn.
 - **L2-01b (6917273, branch b200-l201b-signed-by-vendor-plain).** ingest rows gain one key, signed_by_vendor (always false). A seal made with an ES key on the wrong curve now says COULD NOT LOOK instead of BROKEN.
 
 - **L2-06b (17a824b, branch b200-l206b-cedar-deny-broken).** rows from connector.cedar that carried a Deny with errors, without an errors list, or from CloudTrail now read BROKEN (outcome "deny") instead of COULD NOT LOOK (outcome "errored" / "errors_not_reported" / "unreadable"); re-run ingest on held bytes to get the new reading. ADAPTER_VERSION stays "1".

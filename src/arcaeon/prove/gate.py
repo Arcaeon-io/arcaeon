@@ -286,6 +286,21 @@ class GateDecision:
     checks: dict | None = None
     #: the non-party check rule's answer (D061), only when the rule was set
     nonparty_check: dict | None = None
+    #: the enforce mode (L4-01, arcaeon.prove.gate_mode): block or warn, and
+    #: where it came from (flag, env, latest.json, default)
+    enforce_mode: str = "block"
+    enforce_source: str = "default"
+    enforce_detail: str | None = None
+    #: the exit code the decision had before warn let it through (1 or 3), on
+    #: any refusal the rules made; None when the rules allowed
+    would_exit_code: int | None = None
+    #: warn mode only, on a would-refuse: the loud line
+    warning: str | None = None
+
+    @property
+    def would_refuse(self) -> bool:
+        """True when the rules refuse, whether or not warn let it through."""
+        return self.would_exit_code is not None or not self.allowed
 
     @property
     def allowed(self) -> bool:
@@ -328,6 +343,11 @@ class GateDecision:
                 "evidence_error": self.evidence_error,
                 "chain_row": dict(self.chain_row) if self.chain_row else None,
                 "chain_error": self.chain_error, "exit_code": self.exit_code,
+                "enforce_mode": self.enforce_mode, "enforce_source": self.enforce_source,
+                "enforce_detail": self.enforce_detail, "would_refuse": self.would_refuse,
+                "would_exit_code": (self.would_exit_code if self.would_exit_code is not None
+                                    else (None if self.allowed else self.exit_code)),
+                "warning": self.warning,
                 "limits": list(self.limits), "report": self.report}
 
 
@@ -993,7 +1013,8 @@ def decide(file: str | Path, *, action: str, audience: str | None,
            purpose: str | None = None, record_dir: str | Path | None = None,
            ledger: str | Path | None = None, now: datetime | None = None,
            check_files=(), require_nonparty_check_above=None,
-           amount=None, checks=(), checkers=(), on_pack=None) -> GateDecision:
+           amount=None, checks=(), checkers=(), on_pack=None,
+           enforce=None, record: bool = True) -> GateDecision:
     """allow or refuse `action` on `file`, from `envelope.verify`'s verdict.
 
     `file` is the handed file; `envelope` its sidecar (default: beside it).
@@ -1018,11 +1039,28 @@ def decide(file: str | Path, *, action: str, audience: str | None,
     and before its gate.evidence row is appended, so what it adds to the pack
     is covered by the row's pack_digest (the A2A receiver keeps its message
     this way); an exception in it is swallowed.
+    `enforce` (L4-01, arcaeon.prove.gate_mode): "block", "warn" (source
+    flag), a gate_mode.Mode (what gate_mode.resolve() answered: the CLI and
+    the MCP tools pass this), or None: block, source default, without reading
+    the environment or the check-in cache. In warn mode a refusal is still
+    computed, packed and chained, then let through: decision allow, exit 0,
+    `warning` says it would refuse in block mode and `would_exit_code` keeps
+    the refusal's code. `record=False` writes nothing (no pack, no row; a
+    `deal` then needs no `ledger`): the decision only.
     Raises ValueError on an unknown action, a `deal` without a `ledger` or an
-    unreadable cap, before anything is read or written; otherwise never raises."""
+    unreadable cap (and on an unknown `enforce` value; with record=False a
+    `deal` needs no `ledger`), before anything is read or written; otherwise
+    never raises."""
+    from arcaeon.prove import gate_mode as _gm
     if action not in ACTIONS:
         raise ValueError(f"action must be one of {ACTIONS}, got {action!r}")
-    if deal is not None and ledger is None:
+    if isinstance(enforce, _gm.Mode):
+        mode = enforce
+    elif enforce is None:
+        mode = _gm.LIBRARY_DEFAULT
+    else:
+        mode = _gm.resolve(enforce)
+    if record and deal is not None and ledger is None:
         raise ValueError(_NEEDS_LEDGER)
     cap = None
     if require_nonparty_check_above is not None:
@@ -1103,7 +1141,9 @@ def decide(file: str | Path, *, action: str, audience: str | None,
                               "file_sha256": None, "broken": [], "veto": None,
                               "problems": [f"the checks could not be read ({type(e).__name__})"]})
         allowed = d.decision == ALLOW
-    if not allowed and deal is not None:
+    if not allowed and deal is not None and not record:
+        d.reason += " Nothing was recorded (a decision only)."
+    elif not allowed and deal is not None:
         try:
             out = _write_evidence(d, file, env_path, signers,
                                   Path(record_dir) if record_dir is not None else Path.cwd(), now)
@@ -1127,6 +1167,22 @@ def decide(file: str | Path, *, action: str, audience: str | None,
                              f"({type(e).__name__}).")
     elif not allowed:
         d.reason += " No deal id was given, so no evidence pack was written."
+    return _enforce(d, mode)
+
+
+def _enforce(d: GateDecision, mode) -> GateDecision:
+    """Stamp the mode; in warn mode let a refusal through, loudly (L4-01)."""
+    from arcaeon.prove import gate_mode as _gm
+    d.enforce_mode, d.enforce_source, d.enforce_detail = mode.mode, mode.source, mode.detail
+    if d.decision != REFUSE:
+        return d
+    d.would_exit_code = d.exit_code
+    if mode.mode == _gm.WARN:
+        d.warning = (f"WARNING: {_gm.WOULD_REFUSE} (enforce warn, from {mode.source}); "
+                     f"the {d.action} is let through and only recorded: {d.reason}")
+        d.reason = (f"allow {d.action} (enforce warn, from {mode.source}): "
+                    f"{_gm.WOULD_REFUSE}. {d.reason}")
+        d.decision = ALLOW
     return d
 
 
@@ -1139,7 +1195,7 @@ USAGE = """usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
                            [--record-dir DIR]
                            [--require-nonparty-check-above AMOUNT
                             [--amount N] [--checker DID ...]]
-                           [--json]
+                           [--enforce {warn,block}] [--json]
        arcaeon gate packet (--evidence DIR | --decision FILE.json)
                            [--out DIR] [--json]
        arcaeon gate a2a --message FILE.json --audience ID --signer DID
@@ -1209,10 +1265,22 @@ is the larger of --amount and the deal record's commit total / pay amount
 and anything at or under AMOUNT, follow the table. This raises the cost of
 collusion between the parties; it does not prove the checker independent.
 
+--enforce {warn,block} (default on): block refuses as above. warn computes
+the same decision, lets the action through (exit 0) and prints a WARNING line
+on stderr, "would refuse in block mode"; the JSON keeps would_exit_code (1 or
+3). Warn mode lets the action through; it only records. The mode is
+--enforce, else ARCAEON_GATE_MODE=warn|block, else the signed latest.json's
+block_after from the check-in cache (warn before both its version and date,
+block at or after either; never a fetch), else block: with no signed answer
+cached the gate blocks (fail closed). Any other value is bad usage (exit 2).
+Every decision carries enforce_mode and enforce_source (flag, env,
+latest.json or default).
+
 Prints one line, `allow <action>: ...` or `refuse <action>: ...` (--json:
 the whole decision).
-Exit codes: 0 allow, 1 refuse (BROKEN or checker-broken), 3 refuse (COULD
-NOT LOOK, checks-unreadable, or no counting non-party check), 2 bad usage.
+Exit codes: 0 allow (and warn mode's let-through), 1 refuse (BROKEN or
+checker-broken), 3 refuse (COULD NOT LOOK, checks-unreadable, or no counting
+non-party check), 2 bad usage.
 Spec and limits: docs/ENVELOPE.md.
 
 packet renders a refusal as one page a dispute process can take: what was
@@ -1242,7 +1310,7 @@ _SPEC = {"--envelope": "value", "--audience": "value", "--signer": "list",
          "--record-dir": "value", "--ledger": "value", "--checks": "list",
          "--json": "bool",
          "--require-nonparty-check-above": "value", "--amount": "value",
-         "--checker": "list"}
+         "--checker": "list", "--enforce": "value"}
 _CHECK_GONE = ("--check is now --checks FILE (repeatable): one flag feeds the checker veto "
                "and the non-party check rule; --checker DID pins which keys count")
 
@@ -1269,16 +1337,23 @@ def _decide_cli(argv: list[str]) -> int:
         for flag in ("--require-nonparty-check-above", "--amount"):
             if o.get(flag) is not None and _decimal(o[flag]) is None:
                 raise E._Usage(f"{flag} must be a non-negative amount, got {o[flag]!r}")
+    from arcaeon.prove import gate_mode as _gm
+    try:
+        mode = _gm.resolve(o.get("--enforce"))
+    except ValueError as e:
+        raise E._Usage(str(e)) from None
     file, env_path = resolve(o["--envelope"], o.get("--file"))
     d = decide(file, envelope=env_path, action=o["--action"], audience=o["--audience"],
                signers=o["--signer"], deal=o.get("--deal"), purpose=o.get("--purpose"),
                record_dir=o.get("--record-dir"), ledger=o.get("--ledger"),
                check_files=o.get("--checks") or (), require_nonparty_check_above=cap,
-               amount=o.get("--amount"), checkers=o.get("--checker", []))
+               amount=o.get("--amount"), checkers=o.get("--checker", []), enforce=mode)
     if o.get("--json"):
         print(json.dumps(d.to_dict(), indent=1, ensure_ascii=False))
     else:
         print(d.reason)
+    if d.warning:
+        print(f"arcaeon gate: {d.warning}", file=sys.stderr)
     return d.exit_code
 
 

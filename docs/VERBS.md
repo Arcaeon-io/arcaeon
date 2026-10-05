@@ -777,7 +777,8 @@ the verdict, the reasons, the action, the UTC time and the verify report).
 Allow means the bytes are unchanged since the key you named sealed them and
 are labeled for you and in date; it does not say the content is true or safe.
 The library function is `arcaeon.prove.gate.decide`; an agent calls it as the
-MCP tool `gate_decide` on `arcaeon mcp` (paths must sit under
+MCP tool `gate_decide` on `arcaeon mcp` (`verify_bundle` with an `action`
+answers the same allow or refuse and writes nothing; paths must sit under
 `$ARCAEON_BUNDLE_ROOT`, default the working directory; an evidence pack lands
 in the connector's state dir).
 
@@ -897,6 +898,38 @@ JSON; `--file` the artifact's file (default: its one inline `raw` part; a
 NOT LOOK (`read` only). The extension and its limits are [A2A.md](A2A.md); the
 library is `arcaeon.prove.a2a_receiver`.
 
+**Enforce: block by default, warn by opt-out** (`--enforce {warn,block}`; the
+MCP tools' `enforce` argument; library `enforce=`, module
+`arcaeon.prove.gate_mode`). `block` is everything above: `act`, `pay` and
+`irreversible` are refused on any envelope that is not VERIFIED (BROKEN, or
+COULD NOT LOOK, which a missing envelope or sidecar is), exit 1 or 3; `read`
+follows the table. `warn` computes the same decision, then lets the action
+through: the decision is `allow`, the exit code is 0, the reason starts
+`allow <action> (enforce warn, from <source>): would refuse in block mode.`
+and stderr gets one `arcaeon gate: WARNING: would refuse in block mode ...`
+line. With `--deal`, warn still writes the evidence pack and its
+`gate.evidence` row (they record the refusal the rules made). **The limit:
+warn mode lets the action through; it only records.** The mode is, first
+match wins: `--enforce` (source `flag`); `ARCAEON_GATE_MODE=warn` or `block`
+(source `env`; empty is unset, case is ignored); the signed latest.json's
+`block_after`, read from the check-in cache only, never fetched (source
+`latest.json`: warn before both `block_after.version` and
+`block_after.date`, block once the installed version reaches the version or
+today reaches the date); else block (source `default`). Block is the default
+when no signed answer is cached: no cache, the check-in off, the unsigned
+PyPI fallback, an answer signed by a key this version does not trust, an
+edited cache, or a signed answer with no `block_after`. Fail closed: only a
+signed schedule can grant the warn window, so whoever can write the cache
+file or the network cannot turn blocking off. Any other value of the flag or
+the variable is bad usage (exit 2), never ignored. Every decision (`--json`
+and the MCP tools) carries `enforce_mode`, `enforce_source` (`flag`, `env`,
+`latest.json` or `default`; the MCP `enforce` argument reports `flag`),
+`enforce_detail`, `would_refuse`, `would_exit_code` (1 or 3 on a refusal the
+rules made, `null` on an allow) and `warning` (warn mode on a would-refuse,
+else `null`). The library call `decide(...)` without `enforce=` is block,
+source `default`, and reads neither the variable nor the cache, so library
+callers (the x402 release, `gate a2a`) keep refusing unless they pass a mode.
+
 **Usage**
 
 ```text
@@ -907,7 +940,7 @@ usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
                            [--record-dir DIR]
                            [--require-nonparty-check-above AMOUNT
                             [--amount N] [--checker DID ...]]
-                           [--json]
+                           [--enforce {warn,block}] [--json]
        arcaeon gate packet (--evidence DIR | --decision FILE.json)
                            [--out DIR] [--json]
        arcaeon gate a2a --message FILE.json --audience ID --signer DID
@@ -917,11 +950,13 @@ usage: arcaeon gate decide --envelope PATH --audience ID --signer DID
                         [--record-dir DIR] [--json]
 ```
 
-**Exit codes:** 0 allow, 1 refuse (BROKEN, or `checker-broken`), 3 refuse
+**Exit codes:** 0 allow (and, in warn mode, a would-refuse let through), 1
+refuse (BROKEN, or `checker-broken`), 3 refuse
 (COULD NOT LOOK, `checks-unreadable`, or no counting non-party check over the
 cap), 2 bad usage (a missing `--envelope`, `--audience`, `--signer` or
 `--action`, an action that is not one of the four, `--deal` without
-`--ledger`, an AMOUNT or `--amount` that is not a non-negative number, or
+`--ledger`, an `--enforce` or `ARCAEON_GATE_MODE` value other than `warn` or
+`block`, an AMOUNT or `--amount` that is not a non-negative number, or
 `--amount` or `--checker` without `--require-nonparty-check-above`, or the
 retired `--check`, which names `--checks` instead).
 `packet`: 0 written, 2 bad usage or
