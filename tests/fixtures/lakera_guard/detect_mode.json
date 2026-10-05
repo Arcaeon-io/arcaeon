@@ -1,0 +1,10 @@
+{"flagged": false,
+ "breakdown": [
+   {"project_id": "project-synthetic-0002", "policy_id": "policy-synthetic-0002",
+    "detector_id": "detector-synthetic-a", "detector_type": "prompt_attack",
+    "detected": true, "result": "l2_very_likely", "message_id": 1},
+   {"project_id": "project-synthetic-0002", "policy_id": "policy-synthetic-0002",
+    "detector_id": "detector-synthetic-b", "detector_type": "pii/email",
+    "detected": false, "result": "l5_unlikely", "message_id": 1}
+ ],
+ "metadata": {"request_uuid": "00000000-0000-4000-8000-000000000003"}}

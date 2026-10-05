@@ -1,0 +1,6 @@
+{"results": [
+   {"project_id": "project-synthetic-0001", "policy_id": "policy-synthetic-0001",
+    "detector_id": "detector-synthetic-a", "detector_type": "prompt_attack",
+    "result": "l1_confident", "custom_matched": false, "message_id": 0}
+ ],
+ "tools": {"flagged": false, "results": []}}

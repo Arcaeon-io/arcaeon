@@ -1,0 +1,20 @@
+{"flagged": true,
+ "action": "enforce",
+ "payload": [
+   {"start": 11, "end": 27, "text": "synthetic match text", "detector_type": "pii/email",
+    "labels": ["synthetic-label"], "message_id": 0}
+ ],
+ "breakdown": [
+   {"project_id": "project-synthetic-0001", "policy_id": "policy-synthetic-0001",
+    "detector_id": "detector-synthetic-a", "detector_type": "prompt_attack",
+    "detected": true, "result": "l1_confident", "message_id": 0},
+   {"project_id": "project-synthetic-0001", "policy_id": "policy-synthetic-0001",
+    "detector_id": "detector-synthetic-b", "detector_type": "pii/email",
+    "detected": true, "result": "l2_very_likely", "message_id": 0},
+   {"project_id": "project-synthetic-0001", "policy_id": "policy-synthetic-0001",
+    "detector_id": "detector-synthetic-c", "detector_type": "unknown_links",
+    "detected": false, "result": "l5_unlikely", "message_id": 0}
+ ],
+ "dev_info": {"git_revision": "0000000", "git_timestamp": "2026-01-01T00:00:00Z",
+              "model_version": "synthetic-model", "version": "0.0.0-synthetic"},
+ "metadata": {"request_uuid": "00000000-0000-4000-8000-000000000001"}}

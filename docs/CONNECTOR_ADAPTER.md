@@ -9,8 +9,9 @@ can then be exported as an in-toto Statement that tools outside Arcaeon can read
 
 This is not the MCP connector (`arcaeon mcp`, the `arcaeon.mcp` package). It is
 the library `arcaeon.connector`, phase 1: the adapter shape, one mock vendor
-(`mockscan`), the mcp-scan adapter, the OPA decision-log adapter and the Snyk
-agent-scan adapter on the same base class, and no command-line verb yet.
+(`mockscan`), the mcp-scan adapter, the OPA decision-log adapter, the Snyk
+agent-scan adapter and the Lakera Guard adapter on the same base class, and no
+command-line verb yet.
 
 ## What a relayed row says
 
@@ -147,9 +148,10 @@ a key twice, or a value outside our three words raises `TypeError`.
 
 Every adapter subclasses `VendorAdapter` in `arcaeon.connector.core`: the mock
 vendor (`arcaeon.connector.mockscan`), the mcp-scan tool-hash adapter
-(`arcaeon.prove.mcp_scan`, see [MCP_SCAN.md](MCP_SCAN.md)) and the OPA
-decision-log adapter (`arcaeon.connector.opa`, below) and the Snyk agent-scan
-adapter (`arcaeon.connector.snyk_agent_scan`, below). The base owns what they
+(`arcaeon.prove.mcp_scan`, see [MCP_SCAN.md](MCP_SCAN.md)), the OPA
+decision-log adapter (`arcaeon.connector.opa`, below), the Snyk agent-scan
+adapter (`arcaeon.connector.snyk_agent_scan`, below) and the Lakera Guard
+adapter (`arcaeon.connector.lakera_guard`, below). The base owns what they
 share:
 
 - the row skeleton (`base_row`), relayed, `checked_by_us: false`, attestation
@@ -245,6 +247,76 @@ relayed BROKEN stays BROKEN whatever else the row claims.
 - **Privacy of the scan.** agent-scan sends tool names, descriptions and skill
   files to Snyk for analysis. This adapter sends nothing; it reads output you
   already hold.
+
+## Lakera Guard
+
+`arcaeon.connector.lakera_guard.ingest(response_bytes, policy_mode=...)` reads
+the response body of a Lakera Guard API v2 screening call (`POST /v2/guard`):
+`flagged`, `action`, and, when the request asked for them, the `breakdown` of
+per-detector results and the `payload` of match spans. It writes one row for
+the response, plus one row per detector that says `detected: true` and one per
+match span. v2 has no `categories` field; a detector's `detector_type` is its
+category.
+
+Every row carries, besides the base keys:
+
+| key | what it holds |
+|---|---|
+| `signed_by_vendor` | always `false`. Lakera does not sign its responses; no argument, flag or payload field can set it |
+| `standing` | always `reported_by_sender` |
+| `input_sha256` | hex SHA-256 of the exact response bytes read |
+| `request_sha256` | hex SHA-256 of the request body, when the caller passes it as `request_body`, else null |
+| `vendor_request_id` | `metadata.request_uuid` from the response, else an id the caller passes, else null; `vendor_request_id_source` says which, and `ids` keeps both |
+| `finding` | which part (response, breakdown or payload) and its index; for the response `flagged`, `action`, the declared policy mode, detector and match counts, model version; for a detector its project, policy and detector ids, `detector_type`, `result`, `message_id`; for a match span `detector_type`, labels, offsets and a digest of the matched text |
+
+`flagged` is always false in Detect mode; only an Enforce-mode policy flags.
+The response does not document which mode ran, so the caller declares it in
+`policy_mode` (`"enforce"` or `"detect"`). "Not flagged" relays VERIFIED for its
+one row only when the caller declared `"enforce"` and nothing else in the
+response points the other way. Lakera writes a boolean, not a word, so the
+adapter writes its own:
+
+| adapter word | relayed as | when |
+|---|---|---|
+| `flagged` | BROKEN | `flagged` is true, whatever mode was declared |
+| `detector_detected` | BROKEN | a breakdown entry says `detected: true` |
+| `payload_match` | BROKEN | a payload match span |
+| `not_flagged` | VERIFIED | `flagged` is false, no detector hit, no match span, nothing unreadable, and the caller declared `"enforce"` |
+| `not_flagged_detect_mode` | COULD NOT LOOK | `flagged` is false and the caller declared `"detect"` |
+| `not_flagged_mode_undeclared` | COULD NOT LOOK | `flagged` is false and no mode was declared |
+| `not_flagged_unsettled` | COULD NOT LOOK | `flagged` is false but a detector hit, a match span or an unreadable entry points the other way |
+| `flagged_unreadable` | COULD NOT LOOK | `flagged` is missing or not a boolean |
+| `detector_unreadable` | COULD NOT LOOK | a breakdown entry that is not an object or has no boolean `detected` |
+| `payload_unreadable` | COULD NOT LOOK | a payload entry that is not an object |
+| `results_not_screening` | COULD NOT LOOK | a `/v2/guard/results` body, which makes no flagging decision |
+
+A response that is empty, not UTF-8 JSON, carries a duplicate key, nests deeper
+than 64, is over 8 MiB, or has neither shape is one COULD NOT LOOK row, still
+with its `input_sha256`. `ingest` never raises on the response.
+
+`standing_verdict(rows)` says what these rows can say on their own: BROKEN when
+any row relays BROKEN, otherwise COULD NOT LOOK. It never says VERIFIED, and a
+relayed BROKEN stays BROKEN whatever else the row claims.
+
+### What this cannot prove
+
+- **That the screening happened.** The rows are reported by the sender with
+  `signed_by_vendor: false`. Anyone can write this JSON by hand.
+- **That a not-flagged request is safe.** `not_flagged` relays what Lakera
+  reported, under a policy mode the caller declared; on its own it never makes a
+  VERIFIED.
+- **Which policy mode ran.** The response does not say; the caller's
+  `policy_mode` is the caller's word, not Lakera's.
+- **Which request was screened.** `request_uuid` names the call, but Lakera
+  offers no lookup by it: `/v2/guard/results` screens again rather than
+  returning the earlier answer. `request_sha256` is only as good as the bytes the
+  caller hands in.
+- **That the response shape is current.** The fixtures are shaped from the
+  published API reference, not a live capture; the full set of `action` values
+  and `detector_type` names is not documented there.
+- **Privacy of the screening.** A Lakera call sends the screened messages to
+  Lakera. This adapter sends nothing; it reads a response you already hold, and
+  keeps matched text by digest only.
 
 ## The sha256:jcs:v1 digest
 
