@@ -34,7 +34,8 @@ There is deliberately NO bare `verdict` key. A script that greps rows for
 ONE BASE CLASS. Every adapter subclasses VendorAdapter: the mock vendor here
 (arcaeon.connector.mockscan, one row per payload, read by import_verdict) and the
 mcp-scan adapter (arcaeon.prove.mcp_scan, one row per scanned tool, read by its
-ingest). The base owns what they share: the row skeleton (`base_row`, via
+ingest), and the OPA decision-log adapter (arcaeon.connector.opa, one row per
+decision event, read by its ingest). The base owns what they share: the row skeleton (`base_row`, via
 `relayed_row`), the could-not-look marking (`mark_could_not_look`), the table
 check, and the content digest (`digest`, which is `jcs_digest`). A row built by
 the base is unsigned unless the vendor's payload claims a signature, and even
@@ -183,7 +184,7 @@ def adapter_for(name: str) -> VendorAdapter | None:
     if not isinstance(name, str):
         return None
     if name not in _ADAPTERS:
-        from . import mockscan  # noqa: F401  (registers itself)
+        from . import mockscan, opa  # noqa: F401  (register themselves)
         from arcaeon.prove import mcp_scan  # noqa: F401  (registers itself)
     return _ADAPTERS.get(name)
 
