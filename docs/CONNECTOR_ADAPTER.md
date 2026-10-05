@@ -246,6 +246,73 @@ relayed BROKEN stays BROKEN whatever else the row claims.
   files to Snyk for analysis. This adapter sends nothing; it reads output you
   already hold.
 
+## Prisma AIRS
+
+`arcaeon.connector.prisma_airs.ingest(response_bytes)` reads a Palo Alto Prisma
+AIRS (AI Runtime Security) API response in any of four shapes: a sync scan
+response (`action`, `category`, `prompt_detected`, `response_detected`,
+`scan_id`, `report_id`, `tr_id`), an async scan acknowledgement (`received`,
+`scan_id`, `report_id`), a scan results list (`[{req_id, status, scan_id,
+result}]`), or a threat scan report (`detection_results[]` with `data_type`,
+`detection_service`, `verdict`, `action`, `result_detail`). It writes one row
+per scan, results item or detection result.
+
+Every row carries, besides the base keys:
+
+| key | what it holds |
+|---|---|
+| `signed_by_vendor` | always `false`. Prisma does not sign its verdicts; no argument, flag or payload field can set it |
+| `standing` | always `reported_by_sender` |
+| `input_sha256` | hex SHA-256 of the exact bytes read |
+| `vendor_request_id` | the `scan_id`, else the `report_id`, as Prisma wrote it; else null |
+| `ids` | `scan_id`, `report_id`, `tr_id` and `req_id` |
+| `refetch` | the re-fetch description below for this row's id, or null when no id has the documented shape |
+| `finding` | format, status, action, category, profile name, the names of detection flags that are true, and for a report the data type, detection service, verdict and a digest of `result_detail` |
+
+The adapter writes its own word from Prisma's `action`, and reads the detection
+flags and category so that an allow which names a threat is not taken as a pass:
+
+| adapter word | relayed as | when |
+|---|---|---|
+| `allow` | VERIFIED | action allow, no detection flag true, category (or report verdict) not `malicious` |
+| `block` | BROKEN | action block, whatever else the response says |
+| `allow_with_detection` | COULD NOT LOOK | action allow, but a detection flag is true or the category or report verdict is `malicious` |
+| `detection_unreadable` | COULD NOT LOOK | action allow, a detection map or flag that is not true or false |
+| `unknown_action` | COULD NOT LOOK | action missing, not a string, or not allow or block |
+| `pending` | COULD NOT LOOK | an async acknowledgement, or a results item with no result yet |
+
+A response that is empty, not UTF-8 JSON, carries a duplicate key, nests deeper
+than 64, is over 8 MiB, or has none of the four shapes is one COULD NOT LOOK
+row, still with its `input_sha256`. `ingest` never raises on vendor output.
+
+Prisma is the one vendor here that serves a stored result by id.
+`refetch_request(id)` returns a description of that request and nothing more:
+for a scan id (a UUID) `GET /v1/scan/results` with `scan_ids=<id>`, for a report
+id (`R` and a UUID) `GET /v1/scan/reports` with `report_ids=<id>`. It names no
+host, carries no key and makes no network call; any other id raises
+`ValueError`. A receiver with its own Prisma AIRS key can send it. A re-fetch is
+a second report from the same vendor, not a signature.
+
+`standing_verdict(rows)` says what these rows can say on their own: BROKEN when
+any row relays BROKEN, otherwise COULD NOT LOOK. It never says VERIFIED, and a
+relayed BROKEN stays BROKEN whatever else the row claims.
+
+### What this cannot prove
+
+- **That the scan happened.** The rows are reported by the sender with
+  `signed_by_vendor: false`. Anyone can write this JSON by hand.
+- **That an allow is safe.** `allow` relays that Prisma let the content
+  through; on its own it never makes a VERIFIED.
+- **That a re-fetch settles it.** A re-fetch by id shows what Prisma says now,
+  from the same vendor, with no signature. It can raise a receiver's confidence
+  that the sender did not invent the id; it cannot make a VERIFIED.
+- **That the id format and field values are current.** The fixtures are shaped
+  from the published API notes, not a live capture. The full id format,
+  `status` values, report `verdict` values, categories other than `malicious`
+  and the re-fetch query parameter names are not confirmed.
+- **Privacy of the scan.** Prisma AIRS receives the prompts and responses it
+  scans. This adapter sends nothing; it reads responses you already hold.
+
 ## The sha256:jcs:v1 digest
 
 This is the one place the scheme is defined. `arcaeon.connector.core.jcs_digest`
