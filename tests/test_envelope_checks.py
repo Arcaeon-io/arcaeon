@@ -300,7 +300,7 @@ def test_malformed_signed_checks_is_checks_unreadable(tmp_path, value):
     f = _file(tmp_path)
     k = _key(tmp_path)
     E.seal(f, key_file=k, **BIND)
-    did = _resign(f, k, lambda s: s["predicate"].__setitem__("checks", value))
+    did = _resign(f, k, lambda s: s["predicate"].update(version=2, checks=value))
     assert E.verify(f, audience=AUD, signers=[did])["verdict"] == V.VERIFIED
     d = G.decide(f, action="pay", audience=AUD, signers=[did], **_ex(tmp_path))
     assert d.decision == "refuse" and d.veto == G.CHECKS_UNREADABLE and d.exit_code == 3
@@ -311,8 +311,8 @@ def test_signed_row_for_another_sha_or_kind_is_ignored_like_checks(tmp_path):
     f = _file(tmp_path)
     k = _key(tmp_path)
     E.seal(f, key_file=k, **BIND)
-    did = _resign(f, k, lambda s: s["predicate"].__setitem__(
-        "checks", [_row(sha="2" * 64), _row(kind="other.kind")]))
+    did = _resign(f, k, lambda s: s["predicate"].update(
+        version=2, checks=[_row(sha="2" * 64), _row(kind="other.kind")]))
     d = G.decide(f, action="pay", audience=AUD, signers=[did], **_ex(tmp_path))
     assert d.allowed and d.checks["carried"]["rows"] == 1 and d.checks["broken"] == []
 

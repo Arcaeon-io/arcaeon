@@ -31,6 +31,11 @@ certificate, no transparency-log entry):
   given, so an envelope without them is byte-identical to before. A carried
   row is the sender's report; arcaeon.prove.gate reads it like --checks.
 
+  version = 1 without checks, 2 with them (L2-12b). `verify` reads version 1
+  and version 2; any other version (3, "2", a bool, missing) is COULD NOT
+  LOOK naming it, never read as if carried rows were absent. A version 1
+  predicate that holds a checks key contradicts its version: BROKEN.
+
   binding = {audience, deal, purpose, not_after}: all four MANDATORY. An
   unbound envelope can be replayed into another deal or at another receiver
   (threat T3), so `seal` refuses to write one and `verify` reads one as BROKEN.
@@ -74,6 +79,7 @@ from arcaeon.record.row import (JSON_C14N_PREFIX, DuplicateKeyError, digest_json
 __all__ = ["MEDIA_TYPE", "PAYLOAD_TYPE", "STATEMENT_TYPE", "PREDICATE_TYPE", "SUFFIX",
            "BINDING_FIELDS", "SealError", "pae", "envelope_path", "build_statement",
            "seal", "verify", "resolve_pin", "PIN_STATEMENT", "CHECKS_KEY",
+           "PREDICATE_VERSION", "PREDICATE_VERSION_CHECKS", "PREDICATE_VERSIONS",
            "MAX_CARRIED_CHECKS", "MAX_CARRIED_CHECK_BYTES", "MAX_CARRIED_CHECKS_BYTES",
            "carried_check_rows", "main"]
 
@@ -82,7 +88,13 @@ PAYLOAD_TYPE = "application/vnd.in-toto+json"
 STATEMENT_TYPE = "https://in-toto.io/Statement/v1"
 PREDICATE_TYPE = "https://arcaeon.io/labeled-exchange/v1"
 SUFFIX = ".envelope.json"
+#: The predicate version `seal` writes without carried checks (and every
+#: envelope sealed before checks[] existed).
 PREDICATE_VERSION = 1
+#: The predicate version `seal` writes when predicate.checks is present.
+PREDICATE_VERSION_CHECKS = 2
+#: Every predicate version this verifier reads. Any other is COULD NOT LOOK.
+PREDICATE_VERSIONS = (PREDICATE_VERSION, PREDICATE_VERSION_CHECKS)
 BINDING_FIELDS = ("audience", "deal", "purpose", "not_after")
 #: A sidecar bigger than this is not read: an envelope is a few KiB.
 MAX_ENVELOPE_BYTES = 1 << 20
@@ -384,8 +396,9 @@ def build_statement(file: str | Path, *, label: str, audience: str, deal: str, p
     """The in-toto Statement for `file`. SealError when a binding field is
     missing or malformed or the file cannot be read; nothing is written.
     `checks` (paths of --checks files, or row dicts) puts the check rows in
-    predicate.checks (carried_check_rows says which may ride); empty or None
-    writes no checks key at all."""
+    predicate.checks (carried_check_rows says which may ride) and makes the
+    predicate version 2; empty or None writes no checks key at all and
+    version 1."""
     now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).replace(microsecond=0)
     fields = {"label": label, "audience": audience, "deal": deal, "purpose": purpose,
               "not-after": not_after}
@@ -437,6 +450,7 @@ def build_statement(file: str | Path, *, label: str, audience: str, deal: str, p
         },
     }
     if carried is not None:
+        stmt["predicate"]["version"] = PREDICATE_VERSION_CHECKS
         stmt["predicate"][CHECKS_KEY] = carried
     return stmt
 
@@ -767,9 +781,33 @@ def _check_predicate(r: dict, stmt: dict, file: Path, audience, deal, purpose,
         st["signature"] = V.BROKEN
         find.append(f"the label says sealed by {key}, the signature is by "
                     f"{', '.join(r['signers'])}")
-    if pred.get("version") != PREDICATE_VERSION or not _text_ok(pred.get("label")):
+    ver = pred.get("version")
+    if type(ver) is not int or ver not in PREDICATE_VERSIONS:   # bool and 1.0 are not 1
+        # A predicate this verifier does not know: its binding and any carried
+        # rows cannot be read by v1/v2 rules, so they are not read at all.
+        st["binding"] = V.COULD_NOT_LOOK
+        known = " or ".join(str(v) for v in PREDICATE_VERSIONS)
+        if "version" not in pred:
+            r["_cnl"].append(("binding", "the predicate version", "missing",
+                              f"the predicate has no version: this verifier reads predicate "
+                              f"version {known} only, so it does not read the binding or "
+                              f"any carried checks[]"))
+        else:
+            shown = json.dumps(ver, ensure_ascii=False)[:64]
+            r["_cnl"].append(("binding", "a predicate version this verifier reads",
+                              "unreadable", f"predicate version {shown} is not one this "
+                              f"verifier reads ({known}), so it does not read the binding or "
+                              f"any carried checks[]"))
+        return
+    if ver == PREDICATE_VERSION and CHECKS_KEY in pred:
         st["binding"] = V.BROKEN
-        find.append("the predicate has no label or an unknown version")
+        find.append(f"predicate version 1 holds a checks key: version 1 has no checks[] "
+                    f"(an envelope that carries rows is version {PREDICATE_VERSION_CHECKS}), "
+                    f"so the signed statement contradicts itself")
+        return
+    if not _text_ok(pred.get("label")):
+        st["binding"] = V.BROKEN
+        find.append("the predicate has no label")
         return
     b = pred.get("binding")
     absent = [k for k in BINDING_FIELDS if not (isinstance(b, dict) and _text_ok(b.get(k)))]
@@ -955,8 +993,10 @@ Every row must name this file's sha256 as subject.sha256; any other row, or
 a FILE that cannot be read, refuses the seal (exit 2) naming it. At most 64
 rows, 16 KiB each, 256 KiB together. A carried row is the sender's report:
 `gate decide` reads it like a --checks row (a BROKEN vetoes act, pay and
-irreversible), and it never makes anything VERIFIED. Without --checks the
-envelope is exactly what it was before checks[] existed.
+irreversible), and it never makes anything VERIFIED. With --checks the
+predicate version is 2; without, it is 1 and the envelope is exactly what it
+was before checks[] existed. verify reads versions 1 and 2 only: any other
+is COULD NOT LOOK, and a version 1 predicate holding checks is BROKEN.
 
 verify answers VERIFIED (act), BROKEN (refuse, keep the evidence) or COULD NOT
 LOOK (do not act on money or an irreversible step), as JSON on stdout and one
