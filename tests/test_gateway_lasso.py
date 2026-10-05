@@ -84,6 +84,7 @@ def _refused(new: dict, word: str):
     text = new["content"][0]["text"]
     assert text.startswith(f"REFUSED by arcaeon: {word}.")
     assert SECRET not in json.dumps(new)                    # the output never rides along
+    assert "arcaeon-mcp-" not in json.dumps(new)            # no temp path leaks out
     assert new["_meta"][M.VERDICT_KEY]["verdict"] == word
     assert new["_meta"][M.VERDICT_KEY]["decision"] == "refuse"
     assert new["resultType"] == "complete"
@@ -347,3 +348,28 @@ def test_plugin_leaves_prompts_and_resources_alone():
     p.load({})
     r = {"messages": []}
     assert p.process_response(_ctx(r, kind="prompt")) is r
+
+
+# --- docs/GATEWAYS.md ------------------------------------------------------------------
+
+DOC = (Path(__file__).resolve().parents[1] / "docs" / "GATEWAYS.md").read_text(encoding="utf-8")
+
+
+def test_gateways_doc_says_what_the_code_does():
+    assert "mcp-gateway --mcp-json-path" in DOC and "-p arcaeon" in DOC
+    assert "**The gate is on by default.**" in DOC and "ARCAEON_GATE_MODE=warn" in DOC
+    assert "## What this cannot tell you" in DOC
+    assert "does not judge whether" in DOC and "always reads COULD NOT LOOK" in DOC
+    assert M.BUNDLE_KEY in DOC and M.VERDICT_KEY in DOC and L.CONFIG_ENV in DOC
+    assert f"`default_action`, which is **`{M.DEFAULT_ACTION}`**" in DOC
+    block = DOC.split("```json", 1)[1].split("```", 1)[0]
+    cfg = json.loads(block)
+    assert set(cfg) == M._CFG_KEYS
+    M.GatewayConfig.from_dict(cfg)                       # the example config loads
+
+
+def test_a_bundle_on_the_result_and_on_a_block_is_could_not_look(tmp_path):
+    res, did = _result(tmp_path)
+    res["_meta"] = {M.BUNDLE_KEY: res["content"][0]["_meta"][M.BUNDLE_KEY]}
+    new, d = M.verify_tool_result(res, action="act", config=_cfg(did))
+    assert d["verdict"] == V.COULD_NOT_LOOK and new["isError"] is True
