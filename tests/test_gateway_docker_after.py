@@ -2,8 +2,8 @@
 
     docker mcp gateway run --interceptor 'after:exec:arcaeon gate mcp-after --config FILE'
 
-The interceptor reads the tool-call response JSON on stdin and writes the
-(possibly rewritten) JSON on stdout, the check being
+The interceptor reads the bare CallToolResult JSON Docker's gateway writes on
+stdin and writes the (possibly rewritten) CallToolResult on stdout, the check being
 arcaeon.connect.mcp_result.verify_tool_result. Exit 0 for any stdin: the
 gateway must always get JSON back; malformed stdin is a refusal result, not a
 crash.
@@ -157,33 +157,111 @@ def test_per_tool_read_allows_could_not_look(tmp_path):
     _refused(json.loads(out), V.COULD_NOT_LOOK)
 
 
-def test_jsonrpc_response_is_rewritten_in_place(tmp_path):
-    res, did = _result(tmp_path, "broken")
-    msg = {"jsonrpc": "2.0", "id": 7, "result": res}
-    code, out, _ = _run(tmp_path, json.dumps(msg).encode(), "--config", _config(tmp_path, did))
-    out = json.loads(out)
-    assert code == 0 and out["jsonrpc"] == "2.0" and out["id"] == 7
-    _refused(out["result"], V.BROKEN)
+# --- the real shape: docker/mcp-gateway a34df45d, pkg/interceptors/interceptors.go ------
+# After the call the gateway writes json.Marshal(*mcp.CallToolResult) to stdin
+# (l.119-122), unmarshals non-empty stdout into mcp.CallToolResult (l.133-139),
+# and keeps the original when stdout is empty (l.142). See
+# tests/fixtures/docker_mcp_gateway/README.md.
+
+FIX = ROOT / "tests" / "fixtures" / "docker_mcp_gateway"
+GO_RESULT_KEYS = {"_meta", "content", "structuredContent", "isError"}   # protocol.go l.76-120
 
 
-def test_tool_name_from_the_request_in_the_input(tmp_path):
-    res, _ = _result(tmp_path, "none")
-    msg = {"request": {"method": "tools/call", "params": {"name": "search"}}, "response": res}
-    cfg = _config(tmp_path, "did:key:z6Mkx", tools={"search": "read"})
+def _go_bytes(obj) -> bytes:
+    return json.dumps(obj, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+def _sample() -> dict:
+    return json.loads((FIX / "after_stdin_tool_result.json").read_bytes())
+
+
+def _sealed_sample(tmp_path, signed=True) -> tuple[dict, str]:
+    s = _sample()
+    env, did = _seal(tmp_path, s["content"][0]["text"].encode("utf-8"), signed=signed)
+    s["content"][0]["_meta"] = {M.BUNDLE_KEY: env}       # TextContent: type, text, _meta
+    return s, did
+
+
+def _as_go_reads_it(out: bytes) -> dict:
+    """What CallToolResult.UnmarshalJSON keeps: the struct's fields only."""
+    assert out.strip(), "empty stdout would let the original result through (l.142)"
+    obj = json.loads(out)
+    assert isinstance(obj, dict) and isinstance(obj.get("content"), list)
+    assert all(isinstance(b, dict) and isinstance(b.get("type"), str) for b in obj["content"])
+    return {k: v for k, v in obj.items() if k in GO_RESULT_KEYS}
+
+
+def test_the_fixture_is_a_bare_call_tool_result():
+    raw = (FIX / "after_stdin_tool_result.json").read_bytes()
+    assert raw == _go_bytes(_sample())                   # compact, as json.Marshal writes it
+    assert set(_sample()) <= GO_RESULT_KEYS and "jsonrpc" not in _sample()
+
+
+def test_real_shape_verified_passes_through(tmp_path):
+    s, did = _sealed_sample(tmp_path)
+    code, out, err = _run(tmp_path, _go_bytes(s), "--config", _config(tmp_path, did))
+    assert code == 0, err
+    got = _as_go_reads_it(out)
+    assert got["content"] == s["content"] and not got.get("isError")
+    assert got["_meta"][M.VERDICT_KEY]["verdict"] == V.VERIFIED
+
+
+@pytest.mark.parametrize("signed", [False, None])
+def test_real_shape_unverified_is_refused_by_default(tmp_path, signed):
+    if signed is None:
+        s, did = _sample(), "did:key:z6Mkx"              # the fixture as-is: nothing sealed
+    else:
+        s, did = _sealed_sample(tmp_path, signed=False)
+    code, out, err = _run(tmp_path, _go_bytes(s), "--config", _config(tmp_path, did))
+    assert code == 0, err
+    got = _as_go_reads_it(out)
+    _refused(got, V.COULD_NOT_LOOK)
+
+
+def test_real_shape_opt_out_still_works(tmp_path):
+    s = _sample()
+    code, out, _ = _run(tmp_path, _go_bytes(s), "--config", _config(tmp_path, "did:key:z6Mkx"),
+                        "--enforce", "warn")
+    got = _as_go_reads_it(out)
+    assert code == 0 and got["content"] == s["content"] and not got.get("isError")
+    assert "would refuse in block mode" in got["_meta"][M.VERDICT_KEY]["warning"]
+    code, out, _ = _run(tmp_path, _go_bytes(s), "--config", _config(tmp_path, "did:key:z6Mkx"),
+                        env_extra={"ARCAEON_GATE_MODE": "warn"})
+    assert _as_go_reads_it(out)["content"] == s["content"]
+
+
+def test_null_stdin_is_the_gateway_error_and_passes_through(tmp_path):
+    raw = (FIX / "after_stdin_error_null.json").read_bytes()
+    assert raw == b"null"
+    code, out, err = _run(tmp_path, raw)
+    assert code == 0 and out == b""                      # empty: the gateway keeps its error
+    assert "error" in err
+
+
+@pytest.mark.parametrize("msg", [
+    {"jsonrpc": "2.0", "id": 7, "result": {"content": [{"type": "text", "text": TEXT}]}},
+    {"request": {"params": {"name": "search"}},
+     "response": {"content": [{"type": "text", "text": TEXT}]}},
+    {"jsonrpc": "2.0", "id": 1, "error": {"code": -32602, "message": "bad"}}])
+def test_envelopes_docker_never_sends_are_refused_as_not_a_result(tmp_path, msg):
+    cfg = _config(tmp_path, "did:key:z6Mkx", tools={"search": "read"}, default_action="read")
     code, out, _ = _run(tmp_path, json.dumps(msg).encode(), "--config", cfg)
-    out = json.loads(out)
-    assert code == 0 and out["response"]["content"] == res["content"]
-    assert out["response"]["_meta"][M.VERDICT_KEY]["tool"] == "search"
+    got = _as_go_reads_it(out)
+    _refused(got, V.COULD_NOT_LOOK)
+    assert "CallToolResult" in got["content"][0]["text"]
 
 
-def test_jsonrpc_error_passes_through(tmp_path):
-    msg = {"jsonrpc": "2.0", "id": 1, "error": {"code": -32602, "message": "bad"}}
-    code, out, _ = _run(tmp_path, json.dumps(msg).encode())
-    assert code == 0 and json.loads(out) == msg
+def test_a_tool_name_inside_the_result_is_not_read(tmp_path):
+    s = {**_sample(), "params": {"name": "search"}}       # server-supplied: never trusted
+    cfg = _config(tmp_path, "did:key:z6Mkx", tools={"search": "read"})
+    code, out, _ = _run(tmp_path, json.dumps(s).encode(), "--config", cfg)
+    got = _as_go_reads_it(out)
+    _refused(got, V.COULD_NOT_LOOK)
+    assert got["_meta"][M.VERDICT_KEY]["action"] == "act"
 
 
 @pytest.mark.parametrize("stdin", [b"", b"not json", b"[1, 2]", b'{"a": 1, "a": 2}',
-                                   b"\xff\xfe\x00", b'"just a string"'])
+                                   b"\xff\xfe\x00", b'"just a string"', b"{}"])
 def test_malformed_stdin_is_a_refusal_not_a_crash(tmp_path, stdin):
     code, out, err = _run(tmp_path, stdin)
     assert code == 0, err
@@ -251,3 +329,6 @@ def test_gateways_doc_has_the_docker_section():
     assert "docker mcp gateway run --interceptor" in doc
     assert "after:exec:arcaeon gate mcp-after" in doc
     assert "## Docker MCP Gateway (L4-03)" in doc
+    assert "a34df45d4ec0e941a9853ad768c4f6cd818966b3" in doc            # the cite (L4-05)
+    assert "pkg/interceptors/interceptors.go" in doc
+    assert "Not yet confirmed: the exact JSON Docker" not in doc

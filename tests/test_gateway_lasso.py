@@ -343,11 +343,15 @@ def test_plugin_rebuilds_a_pydantic_shaped_response(tmp_path):
     assert isinstance(new, Result) and new.d["isError"] is True
 
 
-def test_plugin_leaves_prompts_and_resources_alone():
+def test_plugin_no_longer_leaves_prompts_and_resources_alone():
     p = L.ArcaeonGuardrailPlugin()
     p.load({})
-    r = {"messages": []}
-    assert p.process_response(_ctx(r, kind="prompt")) is r
+    r = {"messages": [{"role": "user", "content": {"type": "text", "text": TEXT}}]}
+    out = p.process_response(_ctx(r, kind="prompt"))
+    assert out is not r and SECRET not in json.dumps(out)
+    out = p.process_response(_ctx((TEXT.encode(), "text/plain"), tool="file:///x",
+                                  kind="resource"))
+    assert out[0].startswith(b"REFUSED by arcaeon") and SECRET.encode() not in out[0]
 
 
 # --- docs/GATEWAYS.md ------------------------------------------------------------------
