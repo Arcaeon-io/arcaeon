@@ -1,0 +1,53 @@
+{
+ "data": {
+  "attributes": {
+   "ml_app": "arcaeon",
+   "spans": [
+    {
+     "duration": 0,
+     "meta": {
+      "error": {
+       "message": "BROKEN: a check came out wrong. The reasons stay in the arcaeon report; this span carries digests and verdict words only.",
+       "type": "arcaeon.BROKEN"
+      },
+      "input": {
+       "value": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "kind": "task",
+      "metadata": {
+       "arcaeon.input_digest_of": "the checked file",
+       "arcaeon.limits": "Limits: VERIFIED means the bytes are unchanged since the named key sealed them and are labeled for this receiver; it never means the content is true or safe. BROKEN means a check came out wrong, not who is at fault. COULD NOT LOOK means something was not checked; it vouches for nothing.",
+       "arcaeon.source": "verify report",
+       "arcaeon.verdict": "BROKEN"
+      },
+      "output": {
+       "value": "sha256:48a32dec3babaa042dfcb5142c73a6f1c6e178d9439ab9be240b759c6e5e6690"
+      }
+     },
+     "metrics": {
+      "arcaeon.broken": 1.0,
+      "arcaeon.could_not_look": 0.0,
+      "arcaeon.not_checked": 0.0,
+      "arcaeon.verified": 0.0
+     },
+     "name": "arcaeon.envelope.verify",
+     "parent_id": "undefined",
+     "span_id": "7696967602941901226",
+     "start_ns": 1791201600123456000,
+     "status": "error",
+     "tags": [
+      "arcaeon.verdict:BROKEN",
+      "arcaeon.source:verify_report",
+      "arcaeon.record_sha256:48a32dec3babaa042dfcb5142c73a6f1c6e178d9439ab9be240b759c6e5e6690",
+      "arcaeon.file_sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     ],
+     "trace_id": "87d0b1dcd6869015ac7f9d3a61de2556"
+    }
+   ],
+   "tags": [
+    "arcaeon.export:dd-llmobs-v1"
+   ]
+  },
+  "type": "span"
+ }
+}

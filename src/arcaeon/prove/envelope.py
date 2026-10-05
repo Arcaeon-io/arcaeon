@@ -1022,7 +1022,9 @@ USAGE = """usage: arcaeon envelope seal <file> --label TEXT --audience ID --deal
                                [--require-witness] [--pins DIR]
        arcaeon envelope export-ocsf <report.json | -> [--include-verified]
                                [--now WHEN] [--ocsf-version {1.9.0,1.3.0}]
-                               [--out FILE]"""
+                               [--out FILE]
+       arcaeon envelope export-datadog <report.json | -> [--ml-app NAME]
+                               [--service NAME] [--now WHEN] [--out FILE]"""
 
 HELP = USAGE + """
 
@@ -1070,7 +1072,16 @@ event time (UTC, e.g. 2026-10-04T12:00:00Z). Exit 0 exported (or VERIFIED
 skipped), 3 the input is not a readable arcaeon verdict, 2 bad usage.
 --ocsf-version 1.3.0 writes the same finding cut down to the OCSF 1.3.0
 attributes (no is_alert), for paths that take 1.3 and earlier; it writes
-JSON, not Parquet. Mapping: docs/OCSF.md."""
+JSON, not Parquet. Mapping: docs/OCSF.md.
+
+export-datadog turns the same inputs (or a JSON list of them) into the JSON
+body of a Datadog LLM Observability spans request, one span per verdict:
+the verdict in the tag arcaeon.verdict, status error on BROKEN, digests in
+place of content (no reasons, labels, file names or directories). It writes
+the body to stdout or --out and sends nothing; whoever sends it supplies
+DD-API-KEY. --ml-app (default arcaeon) and --service name the app. Exit 0
+written, 3 the input is not a readable arcaeon verdict, 2 bad usage.
+Mapping and limits: docs/DATADOG_LLM_OBS.md."""
 
 
 class _Usage(Exception):
@@ -1181,7 +1192,11 @@ def main(argv: list[str] | None = None) -> int:
         if sub == "export-ocsf":
             from arcaeon.prove import ocsf
             return ocsf.export_cli(rest, _parse, _Usage)
-        raise _Usage(f"unknown subcommand {sub!r} (seal, verify or export-ocsf)")
+        if sub == "export-datadog":
+            from arcaeon.prove import datadog_llmobs
+            return datadog_llmobs.export_cli(rest, _parse, _Usage)
+        raise _Usage(f"unknown subcommand {sub!r} (seal, verify, export-ocsf or "
+                     f"export-datadog)")
     except _Usage as e:
         print(f"arcaeon envelope: {e}\n{USAGE}", file=sys.stderr)
         return V.EXIT_USAGE

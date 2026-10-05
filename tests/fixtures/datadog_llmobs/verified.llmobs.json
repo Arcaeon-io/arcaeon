@@ -1,0 +1,49 @@
+{
+ "data": {
+  "attributes": {
+   "ml_app": "arcaeon",
+   "spans": [
+    {
+     "duration": 0,
+     "meta": {
+      "input": {
+       "value": "sha256:0118bfc2ce8e45041635c93b9d59389d8958d0bae1f38618da4bde00a57ac4fe"
+      },
+      "kind": "task",
+      "metadata": {
+       "arcaeon.input_digest_of": "the checked file",
+       "arcaeon.limits": "Limits: VERIFIED means the bytes are unchanged since the named key sealed them and are labeled for this receiver; it never means the content is true or safe. BROKEN means a check came out wrong, not who is at fault. COULD NOT LOOK means something was not checked; it vouches for nothing.",
+       "arcaeon.source": "verify report",
+       "arcaeon.verdict": "VERIFIED"
+      },
+      "output": {
+       "value": "sha256:b5f03cc72c7393348981a4f4af25f52fc36e8e978c8766a8ef11f083af92f20b"
+      }
+     },
+     "metrics": {
+      "arcaeon.broken": 0.0,
+      "arcaeon.could_not_look": 0.0,
+      "arcaeon.not_checked": 0.0,
+      "arcaeon.verified": 1.0
+     },
+     "name": "arcaeon.envelope.verify",
+     "parent_id": "undefined",
+     "span_id": "829709949530071473",
+     "start_ns": 1791201600123456000,
+     "status": "ok",
+     "tags": [
+      "arcaeon.verdict:VERIFIED",
+      "arcaeon.source:verify_report",
+      "arcaeon.record_sha256:b5f03cc72c7393348981a4f4af25f52fc36e8e978c8766a8ef11f083af92f20b",
+      "arcaeon.file_sha256:0118bfc2ce8e45041635c93b9d59389d8958d0bae1f38618da4bde00a57ac4fe"
+     ],
+     "trace_id": "6ba197a566e4a87c0c88575f7e5fb58b"
+    }
+   ],
+   "tags": [
+    "arcaeon.export:dd-llmobs-v1"
+   ]
+  },
+  "type": "span"
+ }
+}
