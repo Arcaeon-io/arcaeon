@@ -418,3 +418,52 @@ def test_tally_seal_does_not_take_accounts(w, capsys):
                  "--accounts", str(f), "--account-key", w["srv"].did])
     assert rc == V.EXIT_USAGE
     assert not (w["tmp"] / "tc.jsonl").exists()
+
+
+# --- L3-02b: a dropped pairing's note names the service's word and reason ----------
+
+def _cp_note(p):
+    (ex,) = p["exchanges"]
+    return [f for f in ex["findings"] if f.startswith("counterparty: b names")][0]
+
+
+def test_dropped_could_not_look_note_names_the_service_word_and_reason(w):
+    _exchange(w)                                    # a binding row, no service record
+    p = _pair(w, accounts=w["store"])
+    assert p["verdict"] == V.VERIFIED and p["counts"]["mismatch"] == 1
+    note = _cp_note(p)
+    assert "holds no signed binding row" not in note, note
+    assert f"log a binds {ACCT} by a signed binding row" in note, note
+    assert f"account service {V.COULD_NOT_LOOK}: " in note, note
+    assert "the account service has no record for this key" in note, note
+    assert note in X._render(p)
+
+
+def test_dropped_broken_note_names_the_service_word_and_reason(w):
+    _issue(w, w["a"], NOW - timedelta(days=5))
+    A.revoke(w["store"], SESSION, ACCT, server_seed=w["srv"].seed, at=NOW - timedelta(days=4))
+    _exchange(w)
+    p = _pair(w, accounts=w["store"])
+    assert p["verdict"] == V.BROKEN
+    note = _cp_note(p)
+    assert "holds no signed binding row" not in note, note
+    assert f"account service {V.BROKEN}: " in note and "revoked" in note, note
+
+
+def test_no_binding_row_with_service_keeps_the_holds_no_row_note(w):
+    _exchange_no_bind(w)
+    p = _pair(w, accounts=w["store"])
+    assert p["verdict"] == V.VERIFIED
+    note = _cp_note(p)
+    assert f"log a holds no signed binding row for {ACCT}" in note, note
+    assert "account service" not in note, note
+    assert p["account_service"]["consulted"] is True
+    assert p["account_service"]["bindings"] == []
+
+
+def test_without_service_the_exchange_notes_are_unchanged(w):
+    _exchange_no_bind(w)
+    p = X.pair(w["a"].log, w["b"].log)
+    assert f"log a holds no signed binding row for {ACCT}: which key it binds is not " \
+           f"checked here ({V.COULD_NOT_LOOK})" in _cp_note(p)
+    assert p["account_service"] == A.service_report(None)
