@@ -67,8 +67,9 @@ DEFINITIONS = {
     "paired": "exchanges where both parties' chains are among the inputs, lined up by "
               "exchange_id as `arcaeon exchange pair` does: clean, mismatch, missing, "
               "not_verified, broken",
-    "exchanges": "distinct paired exchanges (counterparty has its own chain among the inputs), "
-                 "self-trades excluded; the unrated threshold counts these",
+    "exchanges": "distinct paired exchanges (counterparty has its own chain among the inputs) "
+                 "where both sides hold a current row; a side that never answered is in "
+                 "paired.missing only. Self-trades excluded; the unrated threshold counts these",
     "counterparties_with_records": "distinct other IDs in paired exchanges: a counterparty "
                                    "counts only if a chain it owns is among the inputs",
     "disagreements": "paired exchanges whose status is mismatch or missing",
@@ -535,7 +536,8 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
                 me["filtered_out"]["paired"] += 1
                 continue
             me["events"].append({"t": t, "type": "paired", "status": ex["status"],
-                                 "eid": eid, "other": canon(other)})
+                                 "eid": eid, "other": canon(other),
+                                 "answered": bool(ha and hb)})
 
     # DISPUTED claims, by and about
     for k in sorted(owners):
@@ -628,7 +630,8 @@ def _window(a: dict, start: datetime | None, now: datetime) -> dict:
             broken += ev["word"] == V.BROKEN
         else:
             paired[ev["status"]] += 1
-            exchanges.add((ev["eid"], ev["other"]))
+            if ev["answered"]:                  # A02: a side that never answered
+                exchanges.add((ev["eid"], ev["other"]))   # is in paired.missing only
             others.add(ev["other"])
             broken += ev["status"] == "broken"
 

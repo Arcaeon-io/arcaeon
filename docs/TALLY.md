@@ -57,7 +57,7 @@ for `all`, side by side:
 | `said_unpaired` | the same words for every other exchange: a counterparty with no chain here, an account id with no binding row, or no answering row. `VERIFIED`, `COULD NOT LOOK`, `BROKEN`, `total`. Shown apart, never folded into `said` or its share: an invented counterparty cannot move `said` |
 | `received` | **what counterparties said**: the latest row per exchange of every other chain among the inputs that names this ID. Same five fields |
 | `paired` | **paired outcomes**: exchanges where both parties' chains are among the inputs, lined up as `arcaeon exchange pair` does: `clean`, `mismatch`, `missing`, `not_verified`, `broken`, `total`, `share_clean` |
-| `exchanges` | distinct paired exchanges (counterparty has its own chain among the inputs), self-trades excluded |
+| `exchanges` | distinct paired exchanges (counterparty has its own chain among the inputs) where both sides hold a current row, self-trades excluded. A pair where one side never answered is in `paired.missing` and `disagreements`, not here |
 | `counterparties_with_records` | distinct other IDs in paired exchanges. A counterparty counts only if a chain it owns is among the inputs |
 | `disagreements` | paired exchanges whose status is `mismatch` or `missing` |
 | `disputed` | current DISPUTED claims by or about this ID, self-trades excluded (each claim is listed in `claims`) |
@@ -100,7 +100,9 @@ An ID is `unrated` while it has fewer than 10 exchanges (all time, paired,
 self-trades excluded) or is under 14 days old. Its facts are still printed;
 `unrated` says there are not yet enough of them to read. Rows naming keys
 with no chain among the inputs never count toward the 10: anyone can write
-rows naming made-up keys.
+rows naming made-up keys. Nor do rows the other side never answered, even
+when its chain is among the inputs: one party alone cannot write its way
+past the threshold. Those pairs still show in `paired.missing`.
 
 ## Gaming rules
 

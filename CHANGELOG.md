@@ -8,6 +8,7 @@ that adds a JSON field or a verb.
 
 - **A18, no private path in the tally-chain tests (branch b50c-a18-no-private-path-tally-chain).** test_absolute_path_guard_reads_path_fields_only uses /srv/u/groups.json for its absolute POSIX path, so the whole-tree scan in tests/test_no_private_paths.py (which forbids any home-directory path) passes again.
 - 2026-10-05: A11 (branch b50c-a11-conftest-temp-home). A root conftest autouse fixture points HOME, USERPROFILE, HOMEDRIVE and HOMEPATH at a fresh tmp folder for every test, so no test can write the real ~/.arcaeon. The ballot pin ledger default is now resolved at call time, not import time; `ballot.DEFAULT_PIN_LEDGER` still works. Proof: tests/test_temp_home.py.
+- **A02, tally `exchanges` counts answered pairs only (branch b50c-a02-tally-exchanges-paired).** Closes the D077 known gap: a paired exchange where one side never wrote a current row (status `missing`) no longer counts in `exchanges` or toward the unrated threshold, for either ID. It still shows in `paired.missing` and `disagreements`; `counterparties_with_records` is unchanged. One party alone can no longer write its way past 10 exchanges by naming a counterparty whose chain is among the inputs.
 
 Everything below is on stack-2026-10-04c (the D-items stacked on 0.10.0, then
 the review and outside red team fixes on top). Newest first. Where a later

@@ -215,6 +215,27 @@ def test_unpaired_rows_do_not_count_toward_rating(w):
     assert ia["unrated"]
 
 
+def test_unanswered_pairs_do_not_count_toward_rating(w):
+    """A02 (D077 gap): b's chain is among the inputs but b never answered ten of
+    a's rows. Those pairs stay in paired.missing and disagreements, and never
+    count in exchanges or toward the unrated threshold, on either side."""
+    a, b = w["a"], w["b"]
+    both(w, a, b, "ex-both", days_ago=20)
+    for n in range(10):
+        react(w, a, b, f"ex-{n}", days_ago=20)
+    r = tally(a, b)
+    for p in (a, b):
+        i = by_id(r, p.did)
+        al = i["windows"]["all"]
+        assert al["paired"]["missing"] == 10 and al["disagreements"] == 10
+        assert al["exchanges"] == 1, al["exchanges"]
+        assert i["unrated"]
+        assert any("1 exchanges" in x for x in i["unrated_because"])
+    ia = by_id(r, a.did)
+    assert ia["windows"]["all"]["said"]["total"] == 1
+    assert ia["windows"]["all"]["said_unpaired"]["total"] == 10
+
+
 # --- gaming rules ---------------------------------------------------------------------------
 
 def test_gaming_a_self_trade_naming_own_key_is_excluded(w):
