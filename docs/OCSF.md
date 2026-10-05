@@ -134,3 +134,54 @@ Exit codes: 0 exported (or VERIFIED skipped), 3 the input is not a readable
 arcaeon verdict (nothing exported), 2 bad usage. The exit code is about the
 export, not the verdict: read the verdict from `status_code`. Given the same
 input and the same `--now`, the output is byte-identical (sorted keys).
+
+## 1.3 compatibility mode
+
+`--ocsf-version 1.3.0` (library: `to_ocsf(..., ocsf_version="1.3.0")`)
+writes the same finding stamped `metadata.version` `1.3.0` and cut down to
+the attributes OCSF 1.3.0 has. Without the flag, or with `--ocsf-version
+1.9.0`, the output is byte-for-byte what it was before the flag existed.
+
+Why 1.3.0: two places that take OCSF stop there.
+
+- Amazon Security Lake custom sources: "For custom sources, Security Lake supports OCSF version 1.3 and earlier", as Parquet (https://docs.aws.amazon.com/security-lake/latest/userguide/custom-sources.html).
+- Datadog Observability Pipelines, "Remap to OCSF": the prebuilt library mappings cover OCSF 1.1.0 to 1.3.0 (https://docs.datadoghq.com/observability_pipelines/processors/remap_ocsf/).
+
+What changes in 1.3.0 mode. The code keeps an allowlist
+(`arcaeon.prove.ocsf.OCSF_13_ALLOW`), not a denylist: anything not on it is
+dropped, so a field added to the 1.9.0 event later stays out of 1.3.0 mode
+until someone checks it against the 1.3.0 pages and adds it. The allowlist
+was read on 2026-10-05 from these pages, with no profile applied:
+
+- https://schema.ocsf.io/1.3.0/api/classes/detection_finding
+- https://schema.ocsf.io/1.3.0/api/objects/finding_info
+- https://schema.ocsf.io/1.3.0/api/objects/metadata
+- https://schema.ocsf.io/1.3.0/api/objects/product
+- https://schema.ocsf.io/1.3.0/api/objects/evidences
+- https://schema.ocsf.io/1.3.0/api/objects/file
+- https://schema.ocsf.io/1.3.0/api/objects/fingerprint
+
+As read there: Detection Finding is class_uid 2004 in 1.3.0, with the same
+required attributes (`activity_id`, `category_uid`, `class_uid`,
+`finding_info`, `metadata`, `severity_id`, `time`, `type_uid`); Create is
+activity_id 1, so type_uid is still 200401; severity_id 4/2/1 and status_id 1
+(New) mean the same; `finding_info` requires `uid` and `title`, `product`
+requires `vendor_name`, `file` requires `name` and `type_id`, `fingerprint`
+requires `algorithm_id` and `value` (3 is SHA-256). So class_uid,
+category_uid, activity_id, type_uid, severity_id, status_id, status_code,
+finding_info, evidences and unmapped are identical in both modes.
+
+Dropped in 1.3.0 mode:
+
+- `is_alert`: not in the 1.3.0 class. A BROKEN finding still has severity_id 4 (High), and `unmapped.arcaeon.verdict` still says BROKEN.
+- Every profile name in `metadata.profiles` (the export applies none, so it stays `[]`); in particular the 1.9.0 Record Integrity profile (`attestation_list`).
+- `ai_agent` inside `evidences` (1.9.0), and any other key the allowlist does not name.
+
+`unmapped.arcaeon` is kept whole: `unmapped` is in the 1.3.0 class, as
+OCSF's container for source-specific attributes.
+
+What this mode does not do, and cannot prove:
+
+- It writes JSON, one finding per call. Security Lake custom sources take Parquet (one OCSF class per source, time-sorted records, partitioned by region, account and day) delivered to the source's S3 location. arcaeon has no Parquet writer and no partitioning or delivery; that writer is not built.
+- No vendor has been sent one of these events. The fixture tests (tests/fixtures/ocsf/, one 1.3.0 finding per verdict word) check the shape against what the vendors' pages and the 1.3.0 schema say: version at most 1.3, the required attributes present, only allowlisted keys; and for Datadog's path the version string, class_uid, category_uid, type_uid and the base attributes a mapping keys on. They were not run through AWS's OCSF validation tool, a Security Lake custom source, or a Datadog pipeline. Passing them does not show either vendor accepts the event.
+- Datadog's library mappings are for named source formats; arcaeon is not one of them. Bringing this event in through Datadog would mean a custom mapping or plain log ingest, which is untested here.

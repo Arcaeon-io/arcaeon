@@ -693,7 +693,8 @@ usage: arcaeon envelope seal <file> --label TEXT --audience ID --deal ID
                                [--deal ID] [--purpose TEXT] [--envelope PATH]
                                [--require-witness] [--pins DIR]
        arcaeon envelope export-ocsf <report.json | -> [--include-verified]
-                               [--now WHEN] [--out FILE]
+                               [--now WHEN] [--ocsf-version {1.9.0,1.3.0}]
+                               [--out FILE]
 ```
 
 **Exit codes:** `verify`: 0 VERIFIED, 1 BROKEN (changed bytes, a bad or

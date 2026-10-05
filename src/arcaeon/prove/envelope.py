@@ -782,7 +782,8 @@ USAGE = """usage: arcaeon envelope seal <file> --label TEXT --audience ID --deal
                                [--deal ID] [--purpose TEXT] [--envelope PATH]
                                [--require-witness] [--pins DIR]
        arcaeon envelope export-ocsf <report.json | -> [--include-verified]
-                               [--now WHEN] [--out FILE]"""
+                               [--now WHEN] [--ocsf-version {1.9.0,1.3.0}]
+                               [--out FILE]"""
 
 HELP = USAGE + """
 
@@ -814,7 +815,9 @@ and names what was not checked, VERIFIED is emitted (Informational) only with
 --include-verified. File names only, never directories. --now fixes the
 event time (UTC, e.g. 2026-10-04T12:00:00Z). Exit 0 exported (or VERIFIED
 skipped), 3 the input is not a readable arcaeon verdict, 2 bad usage.
-Mapping: docs/OCSF.md."""
+--ocsf-version 1.3.0 writes the same finding cut down to the OCSF 1.3.0
+attributes (no is_alert), for paths that take 1.3 and earlier; it writes
+JSON, not Parquet. Mapping: docs/OCSF.md."""
 
 
 class _Usage(Exception):

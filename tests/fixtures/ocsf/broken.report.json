@@ -1,0 +1,38 @@
+{
+ "does_not_prove": "that the content is true or safe (a member can seal a lie honestly, T1), that the key belongs to who the label says (you chose to trust it, T6), anything about the pin or witness refs (recorded, not resolved), or that the receiver's clock is right (not_after is judged by it)",
+ "envelope": "/srv/deals/d-7f3a/in/grades.csv.envelope.json",
+ "file": "/srv/deals/d-7f3a/in/grades.csv",
+ "file_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+ "findings": [
+  "the file's sha256 is aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, the envelope sealed bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb: the bytes changed after sealing"
+ ],
+ "not_checked": [],
+ "proves": "the file's bytes are the bytes the named key sealed, under this label, for this audience, deal and purpose, before not_after",
+ "reason": "the file's sha256 is aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, the envelope sealed bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb: the bytes changed after sealing",
+ "sealed": {
+  "binding": {
+   "audience": "instructor-1",
+   "deal": "d-7f3a",
+   "not_after": "2026-10-11T11:00:00Z",
+   "purpose": "grading"
+  },
+  "bytes": 23,
+  "label": "week 3 grades",
+  "sealed_at": "2026-10-04T11:00:00Z",
+  "sealed_by": {
+   "key": "did:key:z6MkTEST",
+   "name": null
+  }
+ },
+ "signers": [
+  "did:key:z6MkTEST"
+ ],
+ "steps": {
+  "binding": "VERIFIED",
+  "envelope": "VERIFIED",
+  "file": "BROKEN",
+  "signature": "VERIFIED",
+  "witness": "NOT CLAIMED"
+ },
+ "verdict": "BROKEN"
+}

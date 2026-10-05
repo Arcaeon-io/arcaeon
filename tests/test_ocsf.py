@@ -310,3 +310,187 @@ def test_doc_cites_the_fetched_pages_and_the_version():
     for word in ("200401", "class_uid", "severity_id", "unmapped"):
         assert word in doc
     assert "—" not in doc and "–" not in doc
+
+
+
+# --- 1.3.0 compatibility mode (L2-10) ------------------------------------------------
+# Security Lake custom sources take OCSF 1.3 and earlier; Datadog's Remap to OCSF
+# library maps 1.1.0 to 1.3.0. These checks are written from those vendors' docs
+# and the 1.3.0 schema pages; neither vendor has been sent anything, and passing
+# them does not mean either vendor accepts the event.
+
+FIXTURES = ROOT / "tests" / "fixtures" / "ocsf"
+SLUG = {V.VERIFIED: "verified", V.BROKEN: "broken", V.COULD_NOT_LOOK: "could_not_look"}
+FIXTURE_PRODUCT_VERSION = "0.0.0+fixture"
+#: written here independently of the code's allowlist, from the 1.3.0 pages
+#: (schema.ocsf.io/1.3.0/api/classes/detection_finding and its objects)
+ALLOW_13 = {
+    "": {"activity_id", "activity_name", "category_uid", "category_name", "class_uid",
+         "class_name", "type_uid", "type_name", "severity_id", "severity", "status_id",
+         "status", "status_code", "status_detail", "time", "timezone_offset", "message",
+         "metadata", "finding_info", "evidences", "unmapped"},
+    "metadata": {"version", "profiles", "product"},
+    "metadata.product": {"name", "vendor_name", "version"},
+    "finding_info": {"uid", "title", "desc", "created_time", "types"},
+    "evidences[]": {"file"},
+    "evidences[].file": {"name", "type_id", "type", "size", "hashes"},
+    "evidences[].file.hashes[]": {"algorithm_id", "algorithm", "value"},
+}
+#: required by Detection Finding 1.3.0 with no profile, and by its objects
+REQUIRED_13 = ("activity_id", "category_uid", "class_uid", "finding_info", "metadata",
+               "severity_id", "time", "type_uid")
+
+
+def _walk_keys(obj, path=""):
+    """(path, key) for every key, not descending into unmapped."""
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            yield path, k
+            if path == "" and k == "unmapped":
+                continue
+            yield from _walk_keys(v, f"{path}.{k}" if path else k)
+    elif isinstance(obj, list):
+        for x in obj:
+            yield from _walk_keys(x, path + "[]")
+
+
+def _security_lake_check(ev):
+    """What a Security Lake custom source asks of one record's content, short of
+    Parquet, partitioning and delivery (none of which arcaeon writes)."""
+    v = tuple(int(x) for x in ev["metadata"]["version"].split("."))
+    assert v <= (1, 3, 0), ev["metadata"]["version"]
+    for k in REQUIRED_13:
+        assert k in ev, k
+    assert ev["metadata"]["product"]["vendor_name"]
+    assert ev["finding_info"]["uid"] and ev["finding_info"]["title"]
+    for e in ev.get("evidences", []):
+        assert e["file"]["name"] and type(e["file"]["type_id"]) is int
+    for path, k in _walk_keys(ev):
+        assert path in ALLOW_13 and k in ALLOW_13[path], (path, k)
+
+
+def _datadog_check(ev):
+    """The shape Datadog's Remap to OCSF library mappings target (1.1.0 to 1.3.0)."""
+    assert ev["metadata"]["version"] in ("1.1.0", "1.2.0", "1.3.0")
+    assert type(ev["class_uid"]) is int and ev["class_uid"] == 2004
+    assert type(ev["category_uid"]) is int and ev["category_uid"] == 2
+    assert type(ev["activity_id"]) is int
+    assert ev["type_uid"] == ev["class_uid"] * 100 + ev["activity_id"]
+    assert ev["severity_id"] in (0, 1, 2, 3, 4, 5, 6, 99)
+    assert ev["status_id"] in (0, 1, 2, 3, 4, 99)
+    assert type(ev["time"]) is int
+    assert isinstance(ev["metadata"]["product"], dict)
+    assert isinstance(ev["metadata"]["version"], str)
+
+
+@pytest.fixture
+def fixed_product(monkeypatch):
+    monkeypatch.setattr(O, "_product_version", lambda: FIXTURE_PRODUCT_VERSION)
+
+
+@pytest.mark.parametrize("verdict", [V.BROKEN, V.COULD_NOT_LOOK, V.VERIFIED])
+def test_default_is_1_9_0_and_unchanged(verdict):
+    a = O.to_ocsf(_report(verdict), now=NOW, include_verified=True)
+    b = O.to_ocsf(_report(verdict), now=NOW, include_verified=True, ocsf_version="1.9.0")
+    assert O.dumps(a) == O.dumps(b)
+    assert a["metadata"]["version"] == "1.9.0" and "is_alert" in a
+
+
+@pytest.mark.parametrize("verdict", [V.BROKEN, V.COULD_NOT_LOOK, V.VERIFIED])
+def test_1_3_0_mode_shape(verdict):
+    ev = O.to_ocsf(_report(verdict), now=NOW, include_verified=True, ocsf_version="1.3.0")
+    assert ev["metadata"]["version"] == "1.3.0"
+    assert "is_alert" not in ev
+    full = O.to_ocsf(_report(verdict), now=NOW, include_verified=True)
+    for k in ("class_uid", "category_uid", "activity_id", "type_uid", "severity_id",
+              "status_id", "status_code", "finding_info", "evidences", "unmapped", "time"):
+        assert ev[k] == full[k], k
+    _security_lake_check(ev)
+    _datadog_check(ev)
+
+
+def test_1_3_0_allowlist_drops_later_fields():
+    ev = O.to_ocsf(_report(V.BROKEN), now=NOW)
+    ev["attestation_list"] = [{"chain_uid": "c"}]                 # 1.9 Record Integrity
+    ev["metadata"]["profiles"] = ["record_integrity", "ai_operation"]
+    ev["evidences"].append({"ai_agent": {"uid": "did:key:z6MkTEST"}})
+    ev["evidences"][0]["ai_agent"] = {"uid": "did:key:z6MkTEST"}
+    ev["finding_info"]["analytic"] = {"type_id": 1}               # in 1.3, not allowlisted
+    ev["metadata"]["product"]["lang"] = "en"
+    out = O.restrict(ev, "1.3.0")
+    assert "attestation_list" not in out and "is_alert" not in out
+    assert out["metadata"]["profiles"] == []
+    assert all(set(e) == {"file"} for e in out["evidences"]) and len(out["evidences"]) == 2
+    assert "analytic" not in out["finding_info"]
+    assert "lang" not in out["metadata"]["product"]
+    assert out["metadata"]["version"] == "1.3.0"
+    assert out["unmapped"] == ev["unmapped"]
+    _security_lake_check(out)
+
+
+def test_code_allowlist_cites_its_sources():
+    assert O.OCSF_VERSIONS == ("1.9.0", "1.3.0")
+    for url in ("https://schema.ocsf.io/1.3.0/api/classes/detection_finding",
+                "https://docs.aws.amazon.com/security-lake/latest/userguide/custom-sources.html",
+                "https://docs.datadoghq.com/observability_pipelines/processors/remap_ocsf/"):
+        assert url in O.OCSF_13_SOURCES
+    assert "is_alert" not in O.OCSF_13_ALLOW[""]
+    assert O.OCSF_13_ALLOW == ALLOW_13
+
+
+def test_unknown_version_refused():
+    with pytest.raises(ValueError):
+        O.to_ocsf(_report(V.BROKEN), now=NOW, ocsf_version="1.4.0")
+
+
+@pytest.mark.parametrize("verdict", [V.BROKEN, V.COULD_NOT_LOOK, V.VERIFIED])
+def test_fixture_1_3_0_per_verdict(verdict, fixed_product):
+    src = json.loads((FIXTURES / f"{SLUG[verdict]}.report.json").read_text(encoding="utf-8"))
+    want = (FIXTURES / f"{SLUG[verdict]}.ocsf-1.3.0.json").read_text(encoding="utf-8")
+    got = O.dumps(O.to_ocsf(src, now=NOW, include_verified=True, ocsf_version="1.3.0"))
+    assert got == want
+    _no_dirs(want)
+
+
+@pytest.mark.parametrize("verdict", [V.BROKEN, V.COULD_NOT_LOOK, V.VERIFIED])
+def test_fixture_passes_security_lake_check(verdict):
+    ev = json.loads((FIXTURES / f"{SLUG[verdict]}.ocsf-1.3.0.json").read_text(encoding="utf-8"))
+    _security_lake_check(ev)
+    assert ev["status_code"] == verdict
+
+
+def test_fixtures_are_one_class_per_source():
+    uids = {json.loads(p.read_text(encoding="utf-8"))["class_uid"]
+            for p in FIXTURES.glob("*.ocsf-1.3.0.json")}
+    assert uids == {2004}
+
+
+@pytest.mark.parametrize("verdict", [V.BROKEN, V.COULD_NOT_LOOK, V.VERIFIED])
+def test_fixture_passes_datadog_check(verdict):
+    ev = json.loads((FIXTURES / f"{SLUG[verdict]}.ocsf-1.3.0.json").read_text(encoding="utf-8"))
+    _datadog_check(ev)
+
+
+def test_cli_ocsf_version(tmp_path, capsys, fixed_product):
+    from arcaeon import cli
+    p = FIXTURES / "broken.report.json"
+    base = ["envelope", "export-ocsf", str(p), "--now", "2026-10-04T12:00:00.123Z"]
+    assert cli.main(base) == 0
+    plain = capsys.readouterr().out
+    assert cli.main(base + ["--ocsf-version", "1.9.0"]) == 0
+    assert capsys.readouterr().out == plain
+    assert cli.main(base + ["--ocsf-version", "1.3.0"]) == 0
+    assert capsys.readouterr().out == (FIXTURES / "broken.ocsf-1.3.0.json").read_text(
+        encoding="utf-8")
+    assert cli.main(base + ["--ocsf-version", "1.4.0"]) == 2
+
+
+def test_doc_has_the_1_3_section_and_claims_no_vendor():
+    doc = (ROOT / "docs" / "OCSF.md").read_text(encoding="utf-8")
+    assert "## 1.3 compatibility mode" in doc
+    for url in O.OCSF_13_SOURCES:
+        assert url in doc, url
+    assert "Parquet" in doc and "--ocsf-version" in doc
+    low = doc.lower()
+    assert "security lake compatible" not in low and "security lake-compatible" not in low
+    assert "datadog compatible" not in low

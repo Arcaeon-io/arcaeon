@@ -12,6 +12,10 @@ as an OCSF event, so a security team sees a BROKEN handoff where it already
 looks. The event is shaped to OCSF schema 1.9.0, class Detection Finding
 (class_uid 2004, category Findings, category_uid 2), with no profile applied.
 The field-by-field mapping, and the pages it was read from, is docs/OCSF.md.
+With ocsf_version="1.3.0" the same event is cut down to OCSF_13_ALLOW (the
+1.3.0 attributes it uses; `is_alert` is not one) and stamped 1.3.0, for the
+Security Lake custom-source and Datadog Remap to OCSF paths, which target 1.3
+and earlier. That is the record's content only: no Parquet is written.
 
     verdict          severity_id          is_alert  emitted
     BROKEN           4 High               true      always
@@ -48,8 +52,8 @@ from typing import Any
 from arcaeon import verdict as V
 
 __all__ = ["OCSF_VERSION", "OCSF_SOURCES", "CLASS_UID", "CATEGORY_UID", "ACTIVITY_ID",
-           "TYPE_UID", "SEVERITY", "LIMITS_LINE", "ExportError", "normalize", "to_ocsf",
-           "dumps", "main"]
+           "TYPE_UID", "SEVERITY", "LIMITS_LINE", "OCSF_VERSIONS", "OCSF_13_SOURCES",
+           "OCSF_13_ALLOW", "ExportError", "normalize", "restrict", "to_ocsf", "dumps", "main"]
 
 #: The OCSF schema version the mapping was read from (schema.ocsf.io/api/version
 #: answered 1.9.0 on 2026-10-04) and the pages it was read from.
@@ -67,6 +71,51 @@ OCSF_SOURCES = (
     "https://schema.ocsf.io/api/data_types",
     "https://schema.ocsf.io/api/version",
 )
+
+#: The versions `to_ocsf` writes: 1.9.0 (the default) and 1.3.0 (compatibility).
+OCSF_VERSIONS = ("1.9.0", "1.3.0")
+
+#: Why 1.3.0, and where its allowlist was read (2026-10-05, research note R16
+#: and the 1.3.0 schema pages): Security Lake custom sources: "For custom
+#: sources, Security Lake supports OCSF version 1.3 and earlier" (and only in
+#: Parquet, which this module does not write); Datadog's Remap to OCSF
+#: processor ships library mappings for OCSF 1.1.0 to 1.3.0.
+OCSF_13_SOURCES = (
+    "https://docs.aws.amazon.com/security-lake/latest/userguide/custom-sources.html",
+    "https://docs.datadoghq.com/observability_pipelines/processors/remap_ocsf/",
+    "https://schema.ocsf.io/1.3.0/api/classes/detection_finding",
+    "https://schema.ocsf.io/1.3.0/api/objects/finding_info",
+    "https://schema.ocsf.io/1.3.0/api/objects/metadata",
+    "https://schema.ocsf.io/1.3.0/api/objects/product",
+    "https://schema.ocsf.io/1.3.0/api/objects/evidences",
+    "https://schema.ocsf.io/1.3.0/api/objects/file",
+    "https://schema.ocsf.io/1.3.0/api/objects/fingerprint",
+)
+
+#: The 1.3.0 allowlist: an allowlist, not a denylist, so a field added to the
+#: 1.9.0 event later is dropped in 1.3.0 mode until someone checks it against
+#: the 1.3.0 pages and adds it here. Each key is a path in the event ("" the
+#: top level, "[]" a list item); each set is the keys kept there. Every name
+#: was read on the 1.3.0 pages above, with no profile applied. Not here, so
+#: dropped: `is_alert` (not in the 1.3.0 class), the 1.9.0 Record Integrity
+#: profile (`attestation_list`), `ai_agent` in `evidences`, and every profile
+#: name in `metadata.profiles`. `unmapped` is kept whole: it is OCSF's own
+#: container for source-specific attributes and is in the 1.3.0 base event.
+OCSF_13_ALLOW = {
+    "": {"activity_id", "activity_name", "category_uid", "category_name", "class_uid",
+         "class_name", "type_uid", "type_name", "severity_id", "severity", "status_id",
+         "status", "status_code", "status_detail", "time", "timezone_offset", "message",
+         "metadata", "finding_info", "evidences", "unmapped"},
+    "metadata": {"version", "profiles", "product"},
+    "metadata.product": {"name", "vendor_name", "version"},
+    "finding_info": {"uid", "title", "desc", "created_time", "types"},
+    "evidences[]": {"file"},
+    "evidences[].file": {"name", "type_id", "type", "size", "hashes"},
+    "evidences[].file.hashes[]": {"algorithm_id", "algorithm", "value"},
+}
+#: Profiles kept in 1.3.0 mode: none (the export applies none).
+OCSF_13_PROFILES: frozenset = frozenset()
+_OPAQUE = {"unmapped"}
 
 CLASS_UID, CLASS_NAME = 2004, "Detection Finding"
 CATEGORY_UID, CATEGORY_NAME = 2, "Findings"
@@ -234,11 +283,58 @@ def _product_version() -> str:
         return "unknown"
 
 
+def _keep(obj: Any, path: str) -> Any:
+    """obj with only the keys OCSF_13_ALLOW lists at path; a dict at a path the
+    allowlist does not name is dropped whole (None), so nothing unlisted leaks."""
+    if isinstance(obj, list):
+        out = [_keep(x, path + "[]") for x in obj]
+        return [x for x in out if x not in (None, {})]
+    if not isinstance(obj, dict):
+        return obj
+    allowed = OCSF_13_ALLOW.get(path)
+    if allowed is None:
+        return None
+    out = {}
+    for k, v in obj.items():
+        if k not in allowed:
+            continue
+        sub = f"{path}.{k}" if path else k
+        if path == "" and k in _OPAQUE:
+            out[k] = v
+            continue
+        if isinstance(v, (dict, list)):
+            kept = _keep(v, sub)
+            if kept is None or (isinstance(v, list) and v and not kept):
+                continue            # nothing allowlisted was left in it
+            v = kept
+        out[k] = v
+    return out
+
+
+def restrict(event: dict, version: str) -> dict:
+    """The event as the given OCSF version: 1.9.0 returns it unchanged; 1.3.0
+    keeps only what OCSF_13_ALLOW lists, drops every profile not in
+    OCSF_13_PROFILES, and stamps metadata.version 1.3.0."""
+    if version not in OCSF_VERSIONS:
+        raise ValueError(f"OCSF version {version!r} is not one of {', '.join(OCSF_VERSIONS)}")
+    if version == OCSF_VERSION:
+        return event
+    out = _keep(json.loads(json.dumps(event)), "")
+    meta = out.setdefault("metadata", {})
+    meta["version"] = version
+    meta["profiles"] = [p for p in meta.get("profiles") or [] if p in OCSF_13_PROFILES]
+    return out
+
+
 def to_ocsf(obj: Any, *, now: datetime | None = None,
-            include_verified: bool = False) -> dict | None:
-    """One OCSF 1.9.0 Detection Finding for one arcaeon verdict, or None for a
-    VERIFIED input unless include_verified. Raises ExportError on an input
-    that is not an arcaeon verdict."""
+            include_verified: bool = False, ocsf_version: str = OCSF_VERSION) -> dict | None:
+    """One OCSF Detection Finding (1.9.0 by default, or 1.3.0) for one arcaeon
+    verdict, or None for a VERIFIED input unless include_verified. Raises
+    ExportError on an input that is not an arcaeon verdict, ValueError on an
+    ocsf_version not in OCSF_VERSIONS."""
+    if ocsf_version not in OCSF_VERSIONS:
+        raise ValueError(f"OCSF version {ocsf_version!r} is not one of "
+                         f"{', '.join(OCSF_VERSIONS)}")
     rec = normalize(obj)
     verdict = rec["verdict"]
     if verdict == V.VERIFIED and not include_verified:
@@ -296,7 +392,7 @@ def to_ocsf(obj: Any, *, now: datetime | None = None,
     }
     if evidences:
         event["evidences"] = evidences
-    return _scrub(event, [])
+    return restrict(_scrub(event, []), ocsf_version)
 
 
 def dumps(event: dict) -> str:
@@ -338,16 +434,21 @@ def read_input(path: str) -> Any:
 
 
 def export_cli(argv: list[str], parse, usage_error) -> int:
-    """`arcaeon envelope export-ocsf INPUT [--include-verified] [--now WHEN] [--out FILE]`."""
-    pos, o = parse(argv, {"--include-verified": "bool", "--now": "value", "--out": "value"})
+    """`arcaeon envelope export-ocsf INPUT [--include-verified] [--now WHEN]
+    [--ocsf-version {1.9.0,1.3.0}] [--out FILE]`."""
+    pos, o = parse(argv, {"--include-verified": "bool", "--now": "value", "--out": "value",
+                          "--ocsf-version": "value"})
     if len(pos) != 1:
         raise usage_error("export-ocsf takes one input (a JSON file, or - for stdin)")
     try:
         now = _parse_now(o["--now"]) if o.get("--now") else None
     except ValueError as e:
         raise usage_error(str(e)) from e
+    version = o.get("--ocsf-version") or OCSF_VERSION
+    if version not in OCSF_VERSIONS:
+        raise usage_error(f"--ocsf-version {version!r} is not one of {', '.join(OCSF_VERSIONS)}")
     try:
-        event = to_ocsf(read_input(pos[0]), now=now,
+        event = to_ocsf(read_input(pos[0]), now=now, ocsf_version=version,
                         include_verified=bool(o.get("--include-verified")))
     except ExportError as e:
         print(f"arcaeon envelope export-ocsf: {V.COULD_NOT_LOOK}: {e}; nothing was exported",
