@@ -125,10 +125,37 @@ unverified files at a published cutoff. The cutoff is set in the signed file's
 | minimum supported | set by the release owner | set by the release owner | older versions see `This version is no longer supported.` |
 | block after | set by the release owner | set by the release owner | receivers refuse to act on an unverified file unless opted out by flag |
 
+How the gate reads it (`arcaeon gate decide`, the MCP tools `gate_decide` and
+`verify_bundle` with an action; details in [VERBS.md](VERBS.md), `gate`):
+
+- The receiver is on by default. With no signed `latest.json` cached (no
+  cache, `ARCAEON_NO_CHECKIN=1`, only the unsigned PyPI answer, a file signed
+  by a key this version does not trust, an edited cache, or a signed file
+  with no `block_after`), the gate blocks: fail closed.
+- With a signed `block_after` cached: warn before both its version and its
+  date, block once the installed version reaches `block_after.version` or
+  today (UTC) reaches `block_after.date`. A null field is not a cutoff.
+- The gate reads the cache only. It never fetches, so the mode can lag the
+  published file by up to a day (or longer, offline).
+- Opt out: `--enforce warn` on the command line, `enforce: "warn"` on the MCP
+  tools, or `ARCAEON_GATE_MODE=warn` in the environment (`block` is accepted
+  too). The flag beats the variable, which beats `latest.json`. Any other
+  value is an error (exit 2), never ignored.
+- Warn mode lets the action through; it only records. The decision says
+  `allow`, the exit code is 0, and the output carries `would_refuse`,
+  `would_exit_code` and a `warning` line, "would refuse in block mode".
+- Every decision says which mode it ran in and why: `enforce_mode` and
+  `enforce_source` (`flag`, `env`, `latest.json` or `default`).
+
 ## Limits
 
-- The check-in is a nudge, not an enforcement: nothing stops an old version
-  from running, and the line never changes an exit code.
+- The check-in line is a nudge, not an enforcement: nothing stops an old
+  version from running, and the line never changes an exit code. The one
+  thing the signed file does change is the gate's mode above, and only
+  toward warn inside a signed window; nothing unsigned can move it off block.
+- Until the release owner's key is in `CHECKIN_KEYS`, no cached answer is
+  signed by a trusted key, so the gate's default is block everywhere unless
+  opted out.
 - Until the release owner's key is in `CHECKIN_KEYS`, every signed answer
   reads COULD NOT LOOK and no signed line is shown; only the unsigned PyPI
   fallback (when arcaeon.io is unreachable) can say `Update to the latest

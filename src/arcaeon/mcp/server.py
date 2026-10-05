@@ -69,6 +69,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Literal
 
 from arcaeon.record.ledger import Ledger
 from arcaeon.record.ledger import __version__ as LEDGER_VERSION
@@ -105,6 +106,8 @@ VET_TOOLS = {
 WITNESS_TOOLS = ("witness_pin", "witness_renew")
 DEAL_TOOLS = ("deal_mandate", "deal_commit", "deal_dispute")
 MANDATE_TOOLS = ("mandate_check",)
+# The labeled-exchange envelope's verify and the gate over it (D051 / TE-22).
+GATE_TOOLS = ("verify_bundle", "gate_decide")
 SECOND_READ_TOOLS = ("second_read_submit", "second_read_compare")
 EVIDENCE_TOOLS = ("evidence_pack_build", "evidence_pack_verify")
 EXCHANGE_TOOLS = ("exchange_pair_reconcile",)
@@ -113,7 +116,7 @@ STATUS_TOOL = "arcaeon_status"
 
 ALL_TOOLS = sorted([*LEDGER_TOOLS.values(), *VET_TOOLS.values(), *WITNESS_TOOLS,
                     *DEAL_TOOLS, *MANDATE_TOOLS, *SECOND_READ_TOOLS, *EVIDENCE_TOOLS,
-                    *EXCHANGE_TOOLS, STATUS_TOOL])
+                    *EXCHANGE_TOOLS, *GATE_TOOLS, STATUS_TOOL])
 FREE_TOOLS = [n for n in ALL_TOOLS if n not in PAID_TOOLS]
 
 
@@ -411,6 +414,123 @@ def _mandate_check(args: dict) -> dict:
                             spent=args.get("spent"))
     res["exit"] = mandate_cli.CHECK_EXIT[res["verdict"]]
     return _plain(res)
+
+
+# --- verify before act: the envelope and the gate (D051 / TE-22) ------------
+# Import only: verify_bundle is arcaeon.prove.envelope.verify and gate_decide
+# is arcaeon.prove.gate.decide(...).to_dict(), the functions `arcaeon envelope
+# verify` and `arcaeon gate decide` run. Neither checks a byte itself.
+#
+# THE PATH FENCE. No other file-taking tool on this server fences its paths
+# (vet_scan, mandate_check, evidence_pack_* read whatever they are named), so
+# there was no guard here to copy. This one is copied from the in-package
+# ledger server (arcaeon.mcp.ledger_server._contained): every path must
+# resolve (symlinks followed) under $ARCAEON_BUNDLE_ROOT, default the working
+# directory, and a path outside is a plain tool error naming the variable,
+# never a silent redirect. gate_decide's evidence pack (BROKEN with a deal) is
+# written to the connector's state dir, never to a caller-named directory.
+
+BUNDLE_ROOT_ENV = "ARCAEON_BUNDLE_ROOT"
+VERIFY_LIMITS = ("VERIFIED means unchanged and labeled: the file's bytes are the bytes the "
+                 "key you named sealed, labeled for you and in date; it never means the "
+                 "content is true or safe")
+
+
+def bundle_root() -> Path:
+    return Path(os.environ.get(BUNDLE_ROOT_ENV) or os.getcwd()).resolve()
+
+
+def _confined(path, what: str) -> Path:
+    if not isinstance(path, str) or not path.strip() or "\x00" in path:
+        raise ValueError(f"`{what}` must be a non-empty path")
+    root = bundle_root()
+    p = Path(path)
+    p = (p if p.is_absolute() else root / p).resolve()
+    try:
+        p.relative_to(root)
+    except ValueError:
+        raise ValueError(f"`{what}` must sit under {BUNDLE_ROOT_ENV}={root}; "
+                         f"got {path!r}") from None
+    return p
+
+
+def _bundle_args(args: dict) -> dict:
+    """The verify inputs, typed and fenced. The sidecar defaults to the one
+    beside the file and is fenced too (it may be a link out of the root)."""
+    from arcaeon.prove import envelope as _env  # lazy: only these tools load it
+    for name in ("audience", "deal", "purpose"):
+        if args.get(name) is not None and not isinstance(args[name], str):
+            raise ValueError(f"`{name}` must be a string")
+    signers = args.get("signers") or []
+    if not isinstance(signers, list) or not all(isinstance(s, str) for s in signers):
+        raise ValueError("`signers` must be a list of did:key strings")
+    file = _confined(args.get("file"), "file")
+    env = args.get("envelope")
+    env = _confined(env, "envelope") if env is not None else _confined(
+        str(_env.envelope_path(file)), "envelope")
+    return {"file": file, "envelope": env, "audience": args.get("audience"),
+            "deal": args.get("deal"), "purpose": args.get("purpose"), "signers": signers}
+
+
+def _verify_bundle(args: dict) -> dict:
+    from arcaeon import verdict as _v
+    from arcaeon.prove import envelope as _env
+    a = _bundle_args(args)
+    r = _env.verify(a["file"], a["envelope"], audience=a["audience"], deal=a["deal"],
+                    purpose=a["purpose"], signers=a["signers"])
+    verdict = r.get("verdict")
+    r["could_not_check"] = ({k: r.get(k) for k in ("looked_for", "where", "reason_word")}
+                            if verdict == _v.COULD_NOT_LOOK else None)
+    r["exit_code"] = {_v.VERIFIED: _v.EXIT_GOOD, _v.BROKEN: _v.EXIT_BAD}.get(
+        verdict, _v.EXIT_COULD_NOT_LOOK)
+    r["honest_limits"] = VERIFY_LIMITS
+    action, enforce = args.get("action"), args.get("enforce")
+    if action is None:
+        if enforce is not None:                  # checked, though only a decision uses it
+            _gate_mode(enforce)
+        return _plain(r)
+    # With an action: the gate's own answer by the same rule (gate.decide,
+    # record=False: no pack, no row, verify_bundle stays read-only). The verify
+    # report and its exit_code above are unchanged.
+    from arcaeon.prove import gate as _gate
+    if action not in _gate.ACTIONS:
+        raise ValueError(f"`action` must be one of {', '.join(_gate.ACTIONS)}; got {action!r}")
+    d = _gate.decide(a["file"], action=action, audience=a["audience"], signers=a["signers"],
+                     deal=a["deal"], envelope=a["envelope"], purpose=a["purpose"],
+                     enforce=_gate_mode(enforce), record=False)
+    r.update(action=action, decision=d.decision, gate_reason=d.reason,
+             gate_exit_code=d.exit_code, would_refuse=d.would_refuse,
+             enforce_mode=d.enforce_mode, enforce_source=d.enforce_source,
+             enforce_detail=d.enforce_detail, warning=d.warning)
+    return _plain(r)
+
+
+def _gate_mode(enforce):
+    """The enforce mode (L4-01): the argument, else ARCAEON_GATE_MODE, else the
+    cached signed latest.json, else block. An unknown value is a tool error."""
+    from arcaeon.prove import gate_mode as _gm
+    if enforce is not None and not isinstance(enforce, str):
+        raise ValueError("`enforce` must be warn or block")
+    return _gm.resolve(enforce)
+
+
+def _gate_decide(args: dict) -> dict:
+    from arcaeon.prove import gate as _gate  # lazy
+    if args.get("action") not in _gate.ACTIONS:
+        raise ValueError(f"`action` must be one of {', '.join(_gate.ACTIONS)}; "
+                         f"got {args.get('action')!r}")
+    a = _bundle_args(args)
+    # A deal id makes a refusal evidence (D066): the pack goes to the state dir
+    # and its gate.evidence row to the connector's own ledger, its deal chain.
+    led = ledger_path().resolve()
+    mode = _gate_mode(args.get("enforce"))
+    d = _gate.decide(a["file"], action=args["action"], audience=a["audience"],
+                     signers=a["signers"], deal=a["deal"], envelope=a["envelope"],
+                     purpose=a["purpose"], record_dir=led.parent,
+                     ledger=led if a["deal"] else None, enforce=mode)
+    out = d.to_dict()
+    out["honest_limits"] = _gate.ALLOW_MEANS
+    return _plain(out)
 
 
 # --- the second reader (K044) ------------------------------------------------
@@ -771,6 +891,67 @@ def build_server():
         args = {"mandate": mandate, "fields": fields, "at": at, "spent": spent}
         outcome = _attempt(_mandate_check, args)
         return _record_call("mandate_check", args, outcome)
+
+    # --- verify before act: the envelope and the gate -------------------------
+
+    @_tool(
+        name="verify_bundle",
+        description=(
+            "Verify a file someone handed you against its labeled-exchange envelope "
+            "(docs/ENVELOPE.md): file is the handed file, envelope its sidecar "
+            "(default FILE.envelope.json beside it), audience who you are, signers the "
+            "did:key ids you trust, deal and purpose optional ids to hold the "
+            "envelope to. Answers verdict VERIFIED, BROKEN (findings name what "
+            "changed) or COULD NOT LOOK (could_not_check names what and why), "
+            "exit_code 0, 1 or 3, and the full verify report. VERIFIED means "
+            "unchanged and labeled, never that the content is true or safe. Paths "
+            "must sit under $ARCAEON_BUNDLE_ROOT (default the working directory). "
+            "With an action (read, act, pay, irreversible) it also answers decision "
+            "allow or refuse by gate_decide's rule, with enforce_mode and "
+            "enforce_source (enforce: block or warn; see gate_decide), and writes "
+            "nothing. Reads only."),
+    )
+    def verify_bundle(file: str, envelope: str | None = None, audience: str | None = None,
+                      signers: list[str] | None = None, deal: str | None = None,
+                      purpose: str | None = None,
+                      action: Literal["read", "act", "pay", "irreversible"] | None = None,
+                      enforce: Literal["warn", "block"] | None = None) -> dict:
+        args = {"file": file, "envelope": envelope, "audience": audience,
+                "signers": signers, "deal": deal, "purpose": purpose,
+                "action": action, "enforce": enforce}
+        outcome = _attempt(_verify_bundle, args)
+        return _record_call("verify_bundle", args, outcome)
+
+    @_tool(
+        name="gate_decide",
+        description=(
+            "May I take this action on the file I was handed? Runs the same envelope "
+            "verify as verify_bundle and turns its word into decision allow or "
+            "refuse for action read, act, pay or irreversible: VERIFIED allows all "
+            "four (act, pay and irreversible also need deal and purpose), BROKEN "
+            "refuses all four, COULD NOT LOOK allows read only and "
+            "names what could not be checked (could_not_check). Answers decision, "
+            "verdict, reason, reasons, exit_code (0 allow, 1 refuse on BROKEN, 3 "
+            "refuse on COULD NOT LOOK) and limits. On a refusal with a deal id it "
+            "writes an evidence pack to DEAL-<deal>/gate/ in the connector's state "
+            "dir and a gate.evidence row to the connector's ledger. Allow means unchanged and labeled for you, never true or safe. "
+            "Paths must sit under $ARCAEON_BUNDLE_ROOT (default the working "
+            "directory). enforce: block (refuse as above) or warn (the same "
+            "decision is computed, then let through: decision allow, exit_code 0, "
+            "would_refuse, would_exit_code and a warning 'would refuse in block "
+            "mode'; warn only records). Default: $ARCAEON_GATE_MODE, else the "
+            "signed latest.json's block_after from the check-in cache, else block. "
+            "Every answer carries enforce_mode and enforce_source."),
+    )
+    def gate_decide(file: str, action: Literal["read", "act", "pay", "irreversible"],
+                    audience: str, signers: list[str] | None = None,
+                    envelope: str | None = None, deal: str | None = None,
+                    purpose: str | None = None,
+                    enforce: Literal["warn", "block"] | None = None) -> dict:
+        args = {"file": file, "action": action, "audience": audience, "signers": signers,
+                "envelope": envelope, "deal": deal, "purpose": purpose, "enforce": enforce}
+        outcome = _attempt(_gate_decide, args)
+        return _record_call("gate_decide", args, outcome)
 
     # --- the second reader --------------------------------------------------
 
