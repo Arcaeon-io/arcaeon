@@ -1019,6 +1019,11 @@ task). Un-editable, not un-gameable: a wash trade is sealed as a wash trade.
 `html` writes a tally JSON as one static page (inline CSS, no script, nothing
 fetched): the same fact columns, one row per ID per window in the tally's
 order, the sentence on every row, no score.
+`scitt-export` writes a pin statement as a SCITT-shaped Signed Statement
+(COSE_Sign1) and, with `--proof` and `--ts-key`, adds an RFC 9942-shaped
+receipt over an RFC 9162 inclusion proof; it is offline and sends nothing.
+`scitt-verify` checks one. SCITT-shaped, not a conformance claim: see
+[design/SCITT_RECEIPTS.md](design/SCITT_RECEIPTS.md).
 clean means unchanged and labeled, never true. The columns, the gaming rules,
 the tally chain and the limits are [TALLY.md](TALLY.md); the libraries are
 `arcaeon.prove.tally.build` and `arcaeon.prove.tally_chain`.
@@ -1039,6 +1044,12 @@ usage: arcaeon tally build CHAIN.jsonl... [--json] [--settled-only]
                             [--statement S.json] [--groups FILE]
                             [--aliases FILE] [--json]
        arcaeon tally html TALLY.json [--out FILE]
+       arcaeon tally scitt-export S.json --key SEEDFILE --out FILE.scitt
+                                 [--proof INCLUSION.json --ts-key SEEDFILE]
+                                 [--iss ID] [--ts-iss ID]
+       arcaeon tally scitt-verify FILE.scitt [--receipt FILE] [--ts-pub KEY]
+                                 [--issuer-pub KEY] [--statement S.json]
+                                 [--json]
 ```
 
 **Exit codes:** `build`: 0 VERIFIED (every chain reads; read the columns), 1
@@ -1051,7 +1062,12 @@ Ed25519 backend), 2 bad usage (a window or time that does not parse).
 chain does not verify, 3 missing or empty, 2 refused (no `--dry-run`).
 `verify`: 0 VERIFIED, 1 BROKEN, 3 COULD NOT LOOK (an input not given or
 unreadable, a chain missing or empty), 2 bad usage. `html`: 0 written, 3
-the input is not a tally, 2 bad usage or `--out` exists. New in 0.10.x, so
+the input is not a tally, 2 bad usage or `--out` exists. `scitt-export`: 0
+written, 1 the proof does not lead from the statement to its root, 3 an input
+cannot be read, 2 refused (not a v2 pin statement, a bad key file, `--out`
+exists). `scitt-verify`: 0 VERIFIED, 1 BROKEN (a bad signature or proof), 3
+COULD NOT LOOK (no `--ts-pub`, an unknown vds or alg, an unreadable file), 2
+bad usage. New in 0.10.x, so
 `--legacy-exit` changes nothing here.
 
 ```console
@@ -1065,6 +1081,8 @@ $ arcaeon tally pin --log TALLY_CHAIN.jsonl --dry-run --out S.json
 $ arcaeon tally build a.jsonl b.jsonl --json > tally.json
 $ arcaeon tally html tally.json --out tally.html
 wrote tally.html
+$ arcaeon tally scitt-export S.json --key me.key --proof inclusion.json --ts-key ts.key --out S.scitt
+$ arcaeon tally scitt-verify S.scitt --ts-pub TS_PUBKEY_HEX --statement S.json
 ```
 
 ## `distill`
