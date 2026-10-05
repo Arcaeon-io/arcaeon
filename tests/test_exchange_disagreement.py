@@ -22,7 +22,7 @@ from arcaeon.prove import exchange_log as X
 pytest.importorskip("cryptography", reason="signing needs the [sign] extra")
 
 T0 = datetime(2026, 10, 1, 12, 0, 0, tzinfo=timezone.utc)
-ZERO = {"missing": 0, "mismatched": 0, "late": 0, "retracted": 0}
+ZERO = {"missing": 0, "mismatched": 0, "late": 0, "retracted": 0, "withdrawn": 0}
 
 
 def _key(tmp_path: Path, name: str) -> tuple[Path, str]:
@@ -57,7 +57,7 @@ def _ex(r, eid="ex-1"):
 # --- 1. the four classes ----------------------------------------------------------------
 
 def test_the_words_and_the_default_window():
-    assert X.DISAGREEMENTS == ("missing", "mismatched", "late", "retracted")
+    assert X.DISAGREEMENTS == ("missing", "mismatched", "late", "retracted", "withdrawn")
     assert X.DEFAULT_LATE_AFTER == 86400
     assert "DISAGREEMENTS" in X.__all__ and "classify" in X.__all__
 

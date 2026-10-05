@@ -84,6 +84,14 @@ DEFINITIONS = {
                "inputs) and neither row DISPUTED. --settled-only drops every other row",
     "age": "from this ID's earliest signed `at` (any of its keys) to now; the writer's clock",
 }
+#: Added to the definitions, the window blocks and the text rows ONLY when an
+#: input chain holds a withdraw row, so a tally without one is byte-identical
+#: to one built before the withdraw row existed (sealed snapshots hash it).
+WITHDRAWN_DEFINITION = (
+    "reactions taken back entirely by a signed withdraw row (exchange.withdraw): `said`, "
+    "by this ID; `received`, by a counterparty about an exchange with it. Dated by the "
+    "withdraw row. A withdrawn reaction is not counted in said or received; a new reaction "
+    "written after it is")
 
 PROVES = ("each counted row was written by the key that owns its chain, and the counts are "
           "what those rows say, read the same way by anyone holding the same chains")
@@ -395,6 +403,7 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
     bound: dict[str, set[str]] = {}
     cnl_chains: list[str] = []
     seen_paths: set[str] = set()
+    any_withdraw = False
     for i, p in enumerate(paths, 1):
         try:
             where = str(p.resolve())
@@ -407,6 +416,8 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
         seen_paths.add(where)
         side = X.read_side(p, None, f"#{i}")
         rows = side.pop("_rows", [])
+        seq = side.pop("_seq", [])
+        any_withdraw = any_withdraw or bool(side.get("withdraw_rows"))
         own = side.get("owner")
         entry = {k: side.get(k) for k in ("log", "verdict", "reason", "owner", "owner_from",
                                           "reaction_rows", "broken_rows", "chain")}
@@ -427,17 +438,20 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
             continue
         for acct in side.get("accounts", []):
             bound.setdefault(acct, set()).add(own)
-        chains_by_key.setdefault(own, []).append((p.name, rows, side["broken_rows"]))
+        chains_by_key.setdefault(own, []).append((p.name, rows, side["broken_rows"], seq))
 
     # R3-2: one key, more than one chain. Concatenating them let argument order
     # pick the head (a BROKEN or a VERIFIED). A copy, or an earlier prefix, of
     # one chain is one history: read the longest once. Chains that diverge are
     # a fork: BROKEN for that key, which then credits nothing (F10).
+    # The comparison reads every accepted row in chain order (reactions and
+    # withdraw rows: read_side's _seq), so a copy taken before a withdraw is a
+    # prefix, not the same history. With no withdraw row, _seq is the reaction
+    # digests, and this reads exactly as before.
     for own, chs in chains_by_key.items():
-        chs = sorted(chs, key=lambda c: -len(c[1]))
-        longest = [x["row_digest"] for x in chs[0][1]]
-        diverge = [c[0] for c in chs[1:]
-                   if [x["row_digest"] for x in c[1]] != longest[:len(c[1])]]
+        chs = sorted(chs, key=lambda c: -len(c[3]))
+        longest = chs[0][3]
+        diverge = [c[0] for c in chs[1:] if c[3] != longest[:len(c[3])]]
         if diverge:
             names = ", ".join(sorted(c[0] for c in chs))
             why = (f"fork: key {own} owns {len(chs)} chains among the inputs ({names}) that "
@@ -450,6 +464,8 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
             rows_by_key[own] = list(chs[0][1])
             broken_rows_by_key[own] = list(chs[0][2])
 
+    if any_withdraw:
+        r["definitions"] = {**DEFINITIONS, "withdrawn": WITHDRAWN_DEFINITION}
     owners = set(rows_by_key)
     broken_owners = set(record_broken) | {k for k, v in broken_rows_by_key.items() if v}
     heads = {k: X.latest_heads({"_rows": v}) for k, v in rows_by_key.items()}
@@ -568,6 +584,21 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
                 acc(canon(cp))["events"].append({"t": t, "type": "received",
                                                  "word": h["reaction"]})
 
+    # withdrawn reactions: not said, not received; counted apart
+    for k in sorted(owners):
+        me = acc(canon(k))
+        for row in rows_by_key[k]:
+            wb = row.get("withdrawn_by")
+            if not wb:
+                continue
+            cp = resolve(row["counterparty"])
+            if exclusion(k, cp):
+                continue
+            t = _at(wb["at"])
+            me["events"].append({"t": t, "type": "withdrawn_said"})
+            if cp in owners and k not in broken_owners:
+                acc(canon(cp))["events"].append({"t": t, "type": "withdrawn_received"})
+
     # paired outcomes
     for a, b, eid in sorted(pairs):
         ha, hb = heads[a].get(eid), heads[b].get(eid)
@@ -613,7 +644,7 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
     windows = [(r["windows"][0]["name"], now - span), ("all", None)]
     out = []
     for i, a in ids.items():
-        blocks = {name: _window(a, start, now) for name, start in windows}
+        blocks = {name: _window(a, start, now, any_withdraw) for name, start in windows}
         exchanges = blocks["all"]["exchanges"]
         age = (now - a["first"]).days if a["first"] else None
         because = []
@@ -658,11 +689,12 @@ def _of(n: int, total: int) -> str:
     return f"{n} of {total}"
 
 
-def _window(a: dict, start: datetime | None, now: datetime) -> dict:
+def _window(a: dict, start: datetime | None, now: datetime, withdrawals: bool = False) -> dict:
     said = {w: 0 for w in WORDS}
     unpaired = {w: 0 for w in WORDS}
     recv = {w: 0 for w in WORDS}
     retracted = {"said": 0, "received": 0}
+    withdrawn = {"said": 0, "received": 0}
     from_broken = {"received": 0, "paired": 0}
     paired = {s: 0 for s in X.STATUSES}
     exchanges, others = set(), set()
@@ -677,6 +709,8 @@ def _window(a: dict, start: datetime | None, now: datetime) -> dict:
             unpaired[ev["word"]] += 1
         elif ev["type"].startswith("retracted_"):
             retracted[ev["type"][len("retracted_"):]] += 1
+        elif ev["type"].startswith("withdrawn_"):
+            withdrawn[ev["type"][len("withdrawn_"):]] += 1
         elif ev["type"].startswith("broken_"):
             from_broken[ev["type"][len("broken_"):]] += 1
         elif ev["type"] == "received":
@@ -697,7 +731,7 @@ def _window(a: dict, start: datetime | None, now: datetime) -> dict:
     excluded = sum(1 for e in a["excluded"] if inwin(e["at"]))
     flags = (["BROKEN"] if broken else []) + (["DISPUTED"] if disputes else [])
     st, sr, sp = sum(said.values()), sum(recv.values()), sum(paired.values())
-    return {"flags": flags, "broken": broken,
+    out = {"flags": flags, "broken": broken,
             "said": {**said, "total": st, "share_verified": _of(said[V.VERIFIED], st)},
             "said_unpaired": {**unpaired, "total": sum(unpaired.values())},
             "received": {**recv, "total": sr, "share_verified": _of(recv[V.VERIFIED], sr)},
@@ -706,6 +740,9 @@ def _window(a: dict, start: datetime | None, now: datetime) -> dict:
             "disagreements": paired["mismatch"] + paired["missing"],
             "disputed": disputes, "excluded": excluded, "retracted": retracted,
             "from_broken_chain": from_broken}
+    if withdrawals:
+        out["withdrawn"] = withdrawn
+    return out
 
 
 # --- text ------------------------------------------------------------------------------------
@@ -735,6 +772,12 @@ _ROWS = (
     ("retracted BROKEN received", lambda b: str(b["retracted"]["received"])),
     ("from broken chain received", lambda b: str(b["from_broken_chain"]["received"])),
     ("from broken chain paired", lambda b: str(b["from_broken_chain"]["paired"])),
+)
+#: Printed after _ROWS only when the blocks carry `withdrawn` (a withdraw row is
+#: among the inputs), so the text of a tally without one is unchanged.
+_WITHDRAWN_ROWS = (
+    ("withdrawn said", lambda b: str(b["withdrawn"]["said"])),
+    ("withdrawn received", lambda b: str(b["withdrawn"]["received"])),
 )
 
 
@@ -767,7 +810,8 @@ def render(r: dict) -> str:
         lines.append(f"  first row {i['first_row_at'] or '-'}, age "
                      f"{'-' if i['age_days'] is None else i['age_days']} days")
         lines.append(f"  {'':28}" + "".join(f"  {n:>16}" for n in names))
-        for label, fn in _ROWS:
+        extra = _WITHDRAWN_ROWS if "withdrawn" in i["windows"][names[0]] else ()
+        for label, fn in _ROWS + extra:
             lines.append(f"  {label:28}"
                          + "".join(f"  {fn(i['windows'][n]):>16}" for n in names))
         for f in i["record_broken"]:

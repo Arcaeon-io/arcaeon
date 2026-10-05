@@ -6,6 +6,7 @@
                            [--disputed REASON] [--supersedes ROWDIGEST]
                            --key SEEDFILE [--log PATH]
     arcaeon exchange bind --account acct:NAME@arcaeon.io --key SEEDFILE [--log PATH]
+    arcaeon exchange withdraw --row ROWDIGEST --key SEEDFILE [--reason TEXT] [--log PATH]
     arcaeon exchange pair A.jsonl B.jsonl [--owner-a DID] [--owner-b DID] [--json]
                           [--strict] [--late-after SECONDS]
     arcaeon exchange packet A.jsonl B.jsonl --exchange ID [--json] [--out DIR]
@@ -70,11 +71,24 @@ A row that said BROKEN and was later superseded by a row with another word is
 RETRACTED: the current row is read, and the retraction stays visible as a mark
 (`retracted` on the head, in the pair and in the tally). Never erased.
 
+THE WITHDRAW ROW (kind "exchange.withdraw", v 1). A party takes its own
+reaction back entirely: {"kind", "v", "exchange_id", "withdraws" (the
+reaction row's digest), "reason" (TEXT or null), "at", "signer"} + "sig",
+Ed25519 by `signer` over PAE(WITHDRAW_PAYLOAD_TYPE, canon_json(those seven
+fields)). Append-only: the withdrawn row stays. It must be signed by the
+log's owner and name the current (not superseded, not already withdrawn)
+reaction row earlier in the same log, for the same exchange; anything else
+(signed by the other party or a stranger, naming the other party's row, a
+superseded row, a withdraw row) is a BROKEN row. A withdrawal is final: a
+row that supersedes a withdrawn reaction or a withdraw row is BROKEN; a new
+reaction is a new row (supersedes null). The pair reader and the tally read
+it as its own word, `withdrawn`, apart from retracted and superseded.
+
 THE DISAGREEMENT CLASSES (L3-RECON). On top of the status, pair() gives each
 exchange that disagrees one word from DISAGREEMENTS (missing, mismatched,
-retracted, late, read in that precedence) and a one-sentence reason; see
-classify() and docs/EXCHANGE.md. There is no separate retraction row: the
-retraction is the one above (a BROKEN superseded by another word).
+withdrawn, retracted, late, read in that precedence) and a one-sentence
+reason; see classify() and docs/EXCHANGE.md. There is no separate retraction
+row: the retraction is the one above (a BROKEN superseded by another word).
 
 Never raises from pair(): an unreadable or hostile log is COULD NOT LOOK.
 The spec and its limits: docs/EXCHANGE.md.
@@ -95,7 +109,8 @@ from arcaeon.record.row import canon_json, digest_json, file_pin, loads_strict
 
 __all__ = ["KIND", "ROW_VERSION", "SIG_PAYLOAD_TYPE", "REACTIONS", "SIGNED_FIELDS",
            "BIND_KIND", "BIND_PAYLOAD_TYPE", "BIND_SIGNED", "build_binding", "check_binding",
-           "bind",
+           "bind", "WITHDRAW_KIND", "WITHDRAW_PAYLOAD_TYPE", "WITHDRAW_SIGNED",
+           "build_withdraw", "check_withdraw", "withdraw_digest", "withdraw", "withdrawn_rows",
            "PAIR_KIND", "STATUSES", "DISAGREEMENTS", "DEFAULT_LATE_AFTER",
            "DOES_NOT_PROVE_ITEMS", "classify", "ACCOUNT_ID_RE", "ACCOUNT_ID_FORM", "ExchangeError",
            "text_ok", "is_did", "is_account_id", "is_counterparty_id", "signed_fields",
@@ -112,6 +127,9 @@ SIGNED_FIELDS = ("kind", "v", "exchange_id", "counterparty", "file_sha256", "rea
 BIND_KIND = "exchange.binding"
 BIND_PAYLOAD_TYPE = "application/vnd.arcaeon.exchange.binding.v1+json"
 BIND_SIGNED = ("kind", "v", "account", "at", "signer")
+WITHDRAW_KIND = "exchange.withdraw"
+WITHDRAW_PAYLOAD_TYPE = "application/vnd.arcaeon.exchange.withdraw.v1+json"
+WITHDRAW_SIGNED = ("kind", "v", "exchange_id", "withdraws", "reason", "at", "signer")
 #: Keys a row may carry outside the signature: the signature and the ledger's stamps.
 UNSIGNED_FIELDS = ("sig", "ts", "chain")
 #: A log bigger than this is not read.
@@ -120,10 +138,12 @@ DEFAULT_LOG = "exchange.jsonl"
 
 STATUSES = ("clean", "mismatch", "not_verified", "missing", "broken")
 
-#: The four disagreement classes (L3-RECON), in precedence order: an exchange
-#: that fits more than one carries the first. Read by pair() on top of the
-#: status; pair_exchange (which the tally calls) does not carry them.
-DISAGREEMENTS = ("missing", "mismatched", "late", "retracted")
+#: The disagreement classes (L3-RECON), in the order they are counted and
+#: printed. Precedence (an exchange that fits more than one carries the first)
+#: is missing, mismatched, withdrawn, retracted, late: see classify(). Read by
+#: pair() on top of the status; pair_exchange (which the tally calls) does not
+#: carry them. `withdrawn` was added last so the earlier four keep their order.
+DISAGREEMENTS = ("missing", "mismatched", "late", "retracted", "withdrawn")
 #: --late-after default, in seconds: one day. `at` is each signer's own clock
 #: and a reaction is often written by a scheduled job after delivery, so a day
 #: separates "answered in the same cycle" from "answered after the fact"
@@ -396,10 +416,152 @@ def bind(log: str | Path, *, key_file: str | Path, account: str,
     return {"log": str(log), "row": row, "chain": chain}
 
 
-def _own_rows(path: Path) -> list[dict]:
-    """The reaction and binding rows already in a log, parsed loosely (write side)."""
+def _withdraw_bytes(row: dict) -> bytes:
+    from arcaeon.prove.envelope import pae
+    return pae(WITHDRAW_PAYLOAD_TYPE, canon_json({k: row[k] for k in WITHDRAW_SIGNED}))
+
+
+def withdraw_digest(row: dict) -> str:
+    """The digest of a withdraw row: digest_json(its seven signed fields)."""
+    return digest_json({k: row[k] for k in WITHDRAW_SIGNED})
+
+
+def build_withdraw(*, seed: bytes, exchange_id: str, withdraws: str,
+                   reason: str | None = None, at: datetime | None = None) -> dict:
+    """A signed exchange.withdraw row (not yet chained): the seed's did:key takes
+    back the reaction row whose digest is `withdraws`. ExchangeError on a bad field.
+    Whether that row is the signer's own current reaction is the log's check."""
+    if not text_ok(exchange_id):
+        raise ExchangeError("exchange_id must be one line of text, at most 256 characters")
+    if not (isinstance(withdraws, str) and _DIGEST.fullmatch(withdraws)):
+        raise ExchangeError("--row must be a row digest, sha256:json-c14n:v1:<64 hex>")
+    if reason is not None and not text_ok(reason, 1024):
+        raise ExchangeError("--reason must be one line, at most 1024 characters")
+    try:
+        from arcaeon.prove.vet import receipts as R
+        pub = R.public_key_from_seed(seed)
+    except Exception as e:  # noqa: BLE001  ReceiptsUnavailable: no backend
+        raise ExchangeError(f"signing needs an Ed25519 backend: pip install 'arcaeon[sign]' "
+                            f"({type(e).__name__})") from None
+    when = (at or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    row = {"kind": WITHDRAW_KIND, "v": ROW_VERSION, "exchange_id": exchange_id,
+           "withdraws": withdraws, "reason": reason, "at": when.strftime(_TS_FMT),
+           "signer": R.did_key(pub)}
+    row["sig"] = base64.b64encode(R._sign_bytes(seed, _withdraw_bytes(row))).decode("ascii")
+    return row
+
+
+def check_withdraw(row: Any) -> str | None:
+    """None when a withdraw row is well formed (kind exchange.withdraw, v 1) and
+    signed by its `signer`; else why it is BROKEN. (Whether the signer owns the
+    log, and what the row names, are the reader's checks.)"""
+    if not isinstance(row, dict):
+        return "not a JSON object"
+    keys = set(row)
+    missing = [k for k in WITHDRAW_SIGNED + ("sig",) if k not in keys]
+    if missing:
+        return f"withdraw row missing field(s) {', '.join(missing)}"
+    extra = sorted(keys - set(WITHDRAW_SIGNED) - set(UNSIGNED_FIELDS))
+    if extra:
+        return f"withdraw row has fields outside the signature: {', '.join(extra)}"
+    if row["kind"] != WITHDRAW_KIND:
+        return f"withdraw row kind is not {WITHDRAW_KIND}"
+    if row["v"] != ROW_VERSION or isinstance(row["v"], bool):
+        return f"unknown withdraw row version {row['v']!r}"
+    if not text_ok(row["exchange_id"]):
+        return "withdraw row exchange_id is not one line of text (at most 256 characters)"
+    if not (isinstance(row["withdraws"], str) and _DIGEST.fullmatch(row["withdraws"])):
+        return "withdraw row withdraws is not sha256:json-c14n:v1:<64 hex>"
+    if row["reason"] is not None and not text_ok(row["reason"], 1024):
+        return "withdraw row reason is neither null nor one line (at most 1024 characters)"
+    if not _parse_at(row["at"]):
+        return "withdraw row at is not a UTC time"
+    if not is_did(row["signer"]) or not isinstance(row["sig"], str):
+        return "withdraw row signer is not an Ed25519 did:key or sig is not text"
+    from arcaeon.prove.envelope import _pubkey_from_did
+    from arcaeon.prove.vet import receipts as R
+    try:
+        sig = base64.b64decode(row["sig"], validate=True)
+    except (binascii.Error, ValueError):
+        return "withdraw row sig is not base64"
+    try:
+        message = _withdraw_bytes(row)
+    except ValueError as e:
+        return f"the withdraw row's signed fields cannot be canonicalized ({e})"
+    if not R._verify_bytes(_pubkey_from_did(row["signer"]), message, sig):
+        return (f"the withdraw signature by {row['signer']} does not verify (a field or the "
+                f"signature was changed)")
+    return None
+
+
+def _log_state(existing: list[dict]) -> tuple[dict, set, dict, set]:
+    """(reaction digest -> row, withdraw-row digests, withdrawn reaction digest ->
+    withdraw row, superseded digests) of a log's rows, read loosely (write side)."""
+    reactions: dict[str, dict] = {}
+    wdig: set[str] = set()
+    withdrawn: dict[str, dict] = {}
+    superseded: set[str] = set()
+    for r in existing:
+        try:
+            if r.get("kind") == KIND:
+                reactions[row_digest(r)] = r
+                if r.get("supersedes"):
+                    superseded.add(r["supersedes"])
+            elif r.get("kind") == WITHDRAW_KIND:
+                wdig.add(withdraw_digest(r))
+                withdrawn.setdefault(r["withdraws"], r)
+        except (KeyError, ValueError, TypeError):
+            continue
+    return reactions, wdig, withdrawn, superseded
+
+
+def withdraw(log: str | Path, *, key_file: str | Path, row: str, reason: str | None = None,
+             at: datetime | None = None) -> dict:
+    """Append one signed withdraw row to `log`: the key's own current reaction
+    row `row` (a row digest) is taken back entirely. The withdrawn row stays.
+    Returns {row, row_digest, chain, log}; ExchangeError on any refusal, before
+    writing (the row is not this log's reaction, is superseded, is already
+    withdrawn, or is itself a withdraw row; the log belongs to another key)."""
+    from arcaeon.prove.envelope import SealError, _load_seed
     from arcaeon.record.ledger import Ledger
-    return [r for r in Ledger(path) if isinstance(r, dict) and r.get("kind") in (KIND, BIND_KIND)]
+    try:
+        seed = _load_seed(key_file)
+    except SealError as e:
+        raise ExchangeError(str(e)) from None
+    if not (isinstance(row, str) and _DIGEST.fullmatch(row)):
+        raise ExchangeError("--row must be a row digest, sha256:json-c14n:v1:<64 hex>")
+    log = Path(log)
+    existing = _own_rows(log)
+    reactions, wdig, withdrawn, superseded = _log_state(existing)
+    if row in wdig:
+        raise ExchangeError(f"--row {row} is a withdraw row: a withdrawal is not taken back; "
+                            f"a new reaction is a new row")
+    target = reactions.get(row)
+    if target is None:
+        raise ExchangeError(f"--row {row}: no reaction row with that digest in {log} (a party "
+                            f"withdraws only its own reaction, from its own log)")
+    if row in withdrawn:
+        raise ExchangeError(f"--row {row} is already withdrawn")
+    if row in superseded:
+        raise ExchangeError(f"--row {row} is superseded: a withdraw names the current reaction")
+    w = build_withdraw(seed=seed, exchange_id=target["exchange_id"], withdraws=row,
+                       reason=reason, at=at)
+    owners = [r.get("signer") for r in existing if isinstance(r.get("signer"), str)]
+    if owners and owners[0] != w["signer"]:
+        raise ExchangeError(f"this log belongs to {owners[0]}; the key given is "
+                            f"{w['signer']}. A party withdraws only its own reaction")
+    if target.get("signer") != w["signer"]:
+        raise ExchangeError(f"--row {row} is signed by {target.get('signer')}, not by the key "
+                            f"given: a party withdraws only its own reaction")
+    chain = Ledger(log).append(dict(w))
+    return {"log": str(log), "row": w, "row_digest": withdraw_digest(w), "chain": chain}
+
+
+def _own_rows(path: Path) -> list[dict]:
+    """The reaction, binding and withdraw rows already in a log, parsed loosely (write side)."""
+    from arcaeon.record.ledger import Ledger
+    return [r for r in Ledger(path) if isinstance(r, dict)
+            and r.get("kind") in (KIND, BIND_KIND, WITHDRAW_KIND)]
 
 
 def react(log: str | Path, *, key_file: str | Path, exchange_id: str, counterparty: str,
@@ -428,6 +590,11 @@ def react(log: str | Path, *, key_file: str | Path, exchange_id: str, counterpar
     if row["signer"] == counterparty:
         raise ExchangeError("--counterparty is your own key: a pair needs two parties")
     if supersedes is not None:
+        _, wdig, withdrawn, _ = _log_state(existing)
+        if supersedes in wdig or supersedes in withdrawn:
+            raise ExchangeError(f"--supersedes {supersedes} names a withdrawn reaction or a "
+                                f"withdraw row: a withdrawal is not re-instated; a new reaction "
+                                f"is a new row (no --supersedes)")
         target = None
         for r in existing:
             try:
@@ -459,8 +626,9 @@ def read_side(path: Path, owner: str | None, name: str) -> dict:
     side: dict[str, Any] = {"log": str(path), "verdict": None, "reason": None,
                             "owner": owner, "owner_from": "named" if owner else None,
                             "chain": None, "reaction_rows": 0, "binding_rows": 0,
+                            "withdraw_rows": 0,
                             "broken_rows": [], "accounts": [], "owner_refused": None,
-                            "_rows": []}
+                            "_rows": [], "_seq": []}
     looked = f"log {name} (an exchange reactions log)"
     try:
         if not path.exists():
@@ -493,13 +661,14 @@ def read_side(path: Path, owner: str | None, name: str) -> dict:
     side["chain"] = {"ok": res.ok, "rows": res.rows, "breaks": res.breaks,
                      "first_break": res.first_break}
     cand = [(i, o) for i, o in parsed
-            if isinstance(o, dict) and o.get("kind") in (KIND, BIND_KIND)]
+            if isinstance(o, dict) and o.get("kind") in (KIND, BIND_KIND, WITHDRAW_KIND)]
     side["reaction_rows"] = sum(1 for _, o in cand if o["kind"] == KIND)
-    side["binding_rows"] = len(cand) - side["reaction_rows"]
+    side["binding_rows"] = sum(1 for _, o in cand if o["kind"] == BIND_KIND)
+    side["withdraw_rows"] = sum(1 for _, o in cand if o["kind"] == WITHDRAW_KIND)
     checked = []
+    check = {KIND: check_row, BIND_KIND: check_binding, WITHDRAW_KIND: check_withdraw}
     for i, o in cand:
-        problem = check_row(o) if o["kind"] == KIND else check_binding(o)
-        checked.append((i, o, problem))
+        checked.append((i, o, check[o["kind"]](o)))
     first = next((o["signer"] for _, o, p in checked if p is None), None)
     if side["owner"] is None:
         side["owner"] = first
@@ -515,10 +684,14 @@ def read_side(path: Path, owner: str | None, name: str) -> dict:
                           f"no row of it is read")
         return side
     seen: dict[str, dict] = {}
+    wseen: dict[str, int] = {}          # withdraw row digest -> its line
+    withdrawn: dict[str, int] = {}      # withdrawn reaction digest -> the withdraw's line
+    superseded: set[str] = set()
     accounts: set[str] = set()
+    prefix = {BIND_KIND: "binding row ", WITHDRAW_KIND: "withdraw row "}
     for i, o, problem in checked:
         if problem is None and o["signer"] != side["owner"]:
-            problem = (f"{'binding row ' if o['kind'] == BIND_KIND else ''}signed by "
+            problem = (f"{prefix.get(o['kind'], '')}signed by "
                        f"{o['signer']}, not by the key that owns this log ({side['owner']})")
         if o["kind"] == BIND_KIND:
             if problem is None:
@@ -526,9 +699,30 @@ def read_side(path: Path, owner: str | None, name: str) -> dict:
             else:
                 side["broken_rows"].append({"line": i, "exchange_id": None, "finding": problem})
             continue
+        if o["kind"] == WITHDRAW_KIND:
+            if problem is None:
+                problem = _withdraw_problem(o, seen, wseen, withdrawn, superseded)
+            if problem is not None:
+                eid = o.get("exchange_id") if isinstance(o.get("exchange_id"), str) else None
+                side["broken_rows"].append({"line": i, "exchange_id": eid, "finding": problem})
+                continue
+            d = withdraw_digest(o)
+            wseen[d] = i
+            withdrawn[o["withdraws"]] = i
+            seen[o["withdraws"]]["withdrawn_by"] = {"line": i, "at": o["at"], "row_digest": d,
+                                                    "reason": o["reason"]}
+            side["_seq"].append(d)
+            continue
         if problem is None and o["supersedes"] is not None:
             tgt = seen.get(o["supersedes"])
-            if tgt is None:
+            if o["supersedes"] in wseen:
+                problem = ("supersedes a withdraw row: a withdrawal is not re-instated; a new "
+                           "reaction is a new row (supersedes null)")
+            elif o["supersedes"] in withdrawn:
+                problem = (f"supersedes a withdrawn reaction (withdrawn at line "
+                           f"{withdrawn[o['supersedes']]}): a withdrawn reaction is not "
+                           f"re-instated; a new reaction is a new row (supersedes null)")
+            elif tgt is None:
                 problem = "supersedes a row that is not earlier in this log"
             elif tgt["exchange_id"] != o["exchange_id"]:
                 problem = (f"supersedes a row for another exchange "
@@ -540,7 +734,10 @@ def read_side(path: Path, owner: str | None, name: str) -> dict:
         d = row_digest(o)
         r = {**signed_fields(o), "line": i, "row_digest": d}
         seen[d] = r
+        if o["supersedes"] is not None:
+            superseded.add(o["supersedes"])
         side["_rows"].append(r)
+        side["_seq"].append(d)
     side["accounts"] = sorted(accounts)
     findings = []
     if res.ok is False:
@@ -554,17 +751,56 @@ def read_side(path: Path, owner: str | None, name: str) -> dict:
     return side
 
 
+def _withdraw_problem(o: dict, seen: dict, wseen: dict, withdrawn: dict,
+                      superseded: set) -> str | None:
+    """Why a signed withdraw row (by the log's owner) does not hold, read in chain
+    order against the rows before it; None when it holds."""
+    t = o["withdraws"]
+    if t in wseen:
+        return (f"withdraws a withdraw row (line {wseen[t]}): a withdrawal is not taken back; "
+                f"a new reaction is a new row")
+    tgt = seen.get(t)
+    if tgt is None:
+        return ("withdraws a row that is not an earlier reaction in this log (a party "
+                "withdraws only its own reaction)")
+    if tgt["exchange_id"] != o["exchange_id"]:
+        return f"withdraws a row for another exchange ({tgt['exchange_id']!r})"
+    if tgt["signer"] != o["signer"]:
+        return f"withdraws a row signed by {tgt['signer']}, not by the withdrawing key"
+    if t in withdrawn:
+        return f"withdraws a reaction already withdrawn (line {withdrawn[t]})"
+    if t in superseded:
+        return "withdraws a superseded row: a withdraw names the current reaction"
+    return None
+
+
+def withdrawn_rows(side: dict) -> dict[str, list[dict]]:
+    """exchange_id -> this log's withdrawn reaction rows (each carries
+    `withdrawn_by`: the withdraw row's line, at, digest and reason)."""
+    out: dict[str, list[dict]] = {}
+    for r in side["_rows"]:
+        if r.get("withdrawn_by"):
+            out.setdefault(r["exchange_id"], []).append(r)
+    return out
+
+
 def latest_heads(side: dict) -> dict[str, dict]:
-    """exchange_id -> the latest non-superseded row (with notes on forks). A head
-    that is not BROKEN, for an exchange where this log said BROKEN in a row now
-    superseded, carries `retracted` (how many such rows) and `retracted_at` (the
-    latest one's `at`): the retraction is a mark, never erased (F7)."""
+    """exchange_id -> the latest non-superseded, non-withdrawn row (with notes on
+    forks). A head that is not BROKEN, for an exchange where this log said BROKEN
+    in a row now superseded, carries `retracted` (how many such rows) and
+    `retracted_at` (the latest one's `at`): the retraction is a mark, never
+    erased (F7). A head written after this log withdrew an earlier reaction for
+    the exchange carries `withdrawn` and `withdrawn_at` the same way. A withdrawn
+    row is never a head (withdrawn_rows lists it)."""
     rows = side["_rows"]
     superseded = {r["supersedes"] for r in rows if r["supersedes"]}
     by_ex: dict[str, list[dict]] = {}
     gone: dict[str, list[dict]] = {}
+    wd: dict[str, list[dict]] = {}
     for r in rows:
-        if r["row_digest"] not in superseded:
+        if r.get("withdrawn_by"):
+            wd.setdefault(r["exchange_id"], []).append(r)
+        elif r["row_digest"] not in superseded:
             by_ex.setdefault(r["exchange_id"], []).append(r)
         elif r["reaction"] == V.BROKEN:
             gone.setdefault(r["exchange_id"], []).append(r)
@@ -574,6 +810,9 @@ def latest_heads(side: dict) -> dict[str, dict]:
         if head["reaction"] != V.BROKEN and gone.get(eid):
             head["retracted"] = len(gone[eid])
             head["retracted_at"] = max(g["at"] for g in gone[eid])
+        if wd.get(eid):
+            head["withdrawn"] = len(wd[eid])
+            head["withdrawn_at"] = max(w["withdrawn_by"]["at"] for w in wd[eid])
         if len(heads) > 1:
             head["note"] = (f"{len(heads)} rows for this exchange are not superseded "
                             f"(lines {', '.join(str(h['line']) for h in heads)}); the last "
@@ -599,28 +838,45 @@ def _summary(r: dict | None) -> dict | None:
     if r is None:
         return None
     keep = ("reaction", "file_sha256", "counterparty", "signer", "at", "disputed", "reason",
-            "supersedes", "line", "row_digest", "note", "retracted", "retracted_at")
+            "supersedes", "line", "row_digest", "note", "retracted", "retracted_at",
+            "withdrawn", "withdrawn_at")
     return {k: r[k] for k in keep if k in r}
 
 
 def pair_exchange(eid: str, a: dict | None, b: dict | None, own_a, own_b,
                    broken_a: list, broken_b: list, ids_a=None, ids_b=None,
-                   shared=(), dropped=None) -> dict:
+                   shared=(), dropped=None, withdrawn_a=None, withdrawn_b=None) -> dict:
     """Line one exchange up. ids_a / ids_b: the IDs that name each party (its key,
     plus accounts its log binds by a valid binding row); default its key only.
     shared: accounts both logs bind (resolved to neither). dropped: {log name:
-    {account: account service answer}} for bindings the service did not confirm."""
+    {account: account service answer}} for bindings the service did not confirm.
+    withdrawn_a / withdrawn_b: that side's withdrawn rows for this exchange
+    (withdrawn_rows); a side with no current row and a withdrawn one reads
+    status missing and is listed under `withdrawn`."""
     ids_a = {own_a} if ids_a is None else set(ids_a)
     ids_b = {own_b} if ids_b is None else set(ids_b)
     ex: dict[str, Any] = {"exchange_id": eid, "status": None, "differs": [],
                           "a": _summary(a), "b": _summary(b), "retracted": [],
-                          "findings": []}
+                          "withdrawn": [], "findings": []}
     for nm, row in (("a", a), ("b", b)):
         if row and row.get("retracted"):
             ex["retracted"].append(nm)
             ex["findings"].append(f"{nm} retracted an earlier BROKEN ({row['retracted']} "
                                   f"row(s), latest at {row['retracted_at']}); its current row "
                                   f"says {row['reaction']}")
+    for nm, row, wl in (("a", a, withdrawn_a), ("b", b, withdrawn_b)):
+        if row and row.get("withdrawn"):
+            ex["withdrawn"].append(nm)
+            ex["findings"].append(f"{nm} withdrew an earlier reaction ({row['withdrawn']} "
+                                  f"row(s), latest withdraw at {row['withdrawn_at']}); its "
+                                  f"current row, written after, says {row['reaction']}")
+        elif row is None and wl:
+            w = wl[-1]
+            ex["withdrawn"].append(nm)
+            ex["findings"].append(f"{nm} withdrew its reaction (line {w['line']}, which said "
+                                  f"{w['reaction']}; withdraw row line "
+                                  f"{w['withdrawn_by']['line']} at {w['withdrawn_by']['at']}); "
+                                  f"it has no current reaction")
     if broken_a or broken_b:
         ex["status"] = "broken"
         for nm, bl in (("a", broken_a), ("b", broken_b)):
@@ -682,18 +938,34 @@ def classify(ex: dict, a: dict | None, b: dict | None, *,
     the two head rows): (word, one-sentence reason, note). word is one of
     DISAGREEMENTS, or None when the two sides agree, or when the status is
     broken (a record that does not check is not read for a disagreement).
-    Precedence: missing, mismatched, retracted, late. note is set when the
+    Precedence: missing, mismatched, withdrawn, retracted, late. missing,
+    mismatched and a withdrawal with no current row say the current records do
+    not reconcile; withdrawn (as a mark), retracted and late are read on
+    current records that agree. A withdrawn reaction is a record taken back,
+    not a record that never was, so it is not missing. note is set when the
     late class could not be read (no comparable `at` on both rows).
     ValueError on a bad late_after."""
     late_after = _late_window(late_after)
     status = ex.get("status")
     if status == "broken":
         return None, None, None
+    wd = list(ex.get("withdrawn") or [])
     if status == "missing" or a is None or b is None:
-        gone, has, row = ("a", "b", b) if a is None else ("b", "a", a)
-        said = f" (its row says {row['reaction']} at {row['at']})" if row else ""
-        return ("missing", f"log {gone} has no record of this exchange; log {has} "
-                           f"does{said}.", None)
+        absent = [nm for nm, row in (("a", a), ("b", b)) if row is None and nm not in wd]
+        if absent:
+            gone = absent[0]
+            has, row = ("b", b) if gone == "a" else ("a", a)
+            said = (f" (its row says {row['reaction']} at {row['at']})" if row else
+                    " (it withdrew its reaction)" if has in wd else "")
+            return ("missing", f"log {gone} has no record of this exchange; log {has} "
+                               f"does{said}.", None)
+        who = " and ".join(wd)
+        other = next(((nm, row) for nm, row in (("a", a), ("b", b)) if row), None)
+        tail = (f"; log {other[0]}'s current row says {other[1]['reaction']}" if other
+                else "")
+        return ("withdrawn", f"log {who} withdrew its reaction to this exchange by a signed "
+                             f"withdraw row and has no current one{tail}; the withdrawn row "
+                             f"stays in the log.", None)
     differs = list(ex.get("differs") or [])
     if differs:
         parts = []
@@ -704,6 +976,11 @@ def classify(ex: dict, a: dict | None, b: dict | None, *,
                 parts.append(f"{f} (a {_short(f, a.get(f))}, b {_short(f, b.get(f))})")
         what = "this field differs" if len(parts) == 1 else "these fields differ"
         return "mismatched", f"both logs have it, but {what}: {'; '.join(parts)}.", None
+    if wd:
+        who = " and ".join(wd)
+        return ("withdrawn", f"log {who} withdrew an earlier reaction for this exchange and "
+                             f"wrote a new one (the current rows agree on {a['reaction']}); "
+                             f"the withdrawn row stays in the log.", None)
     if ex.get("retracted"):
         who = " and ".join(ex["retracted"])
         return ("retracted", f"log {who} retracted an earlier BROKEN for this exchange "
@@ -761,7 +1038,7 @@ def pair(log_a: str | Path, log_b: str | Path, *, owner_a: str | None = None,
     late_after = _late_window(late_after)
     r: dict[str, Any] = {"kind": PAIR_KIND, "verdict": None, "reason": None,
                          "logs": {}, "exchanges": [], "claims": [], "retracted": 0,
-                         "counts": {s: 0 for s in STATUSES}, "findings": [],
+                         "withdrawn": 0, "counts": {s: 0 for s in STATUSES}, "findings": [],
                          "disagreements": {w: 0 for w in DISAGREEMENTS},
                          "late_after": late_after,
                          "proves": PROVES, "does_not_prove": DOES_NOT_PROVE}
@@ -778,7 +1055,7 @@ def pair(log_a: str | Path, log_b: str | Path, *, owner_a: str | None = None,
         return _pair(r, Path(log_a), Path(log_b), owner_a, owner_b, svc, late_after)
     except Exception as e:  # noqa: BLE001  never a traceback, never a green
         r.update({"verdict": V.COULD_NOT_LOOK, "exchanges": [], "claims": [], "retracted": 0,
-                  "counts": {s: 0 for s in STATUSES},
+                  "withdrawn": 0, "counts": {s: 0 for s in STATUSES},
                   "disagreements": {w: 0 for w in DISAGREEMENTS},
                   "reason": f"the check could not finish ({type(e).__name__})",
                   **V.could_not_look("a finished pair check", f"{log_a}, {log_b}",
@@ -786,6 +1063,7 @@ def pair(log_a: str | Path, log_b: str | Path, *, owner_a: str | None = None,
                                      f"the check could not finish ({type(e).__name__})")})
         for side in r["logs"].values():
             side.pop("_rows", None)
+            side.pop("_seq", None)
         return r
 
 
@@ -818,6 +1096,7 @@ def _pair(r: dict, pa: Path, pb: Path, owner_a, owner_b, svc=None,
     refused = any(s.get("owner_refused") for s in (sa, sb))
     if not cnl and not refused:
         ha, hb = latest_heads(sa), latest_heads(sb)
+        wa, wb = withdrawn_rows(sa), withdrawn_rows(sb)
         ba: dict[str, list] = {}
         bb: dict[str, list] = {}
         for src, dst in ((sa["broken_rows"], ba), (sb["broken_rows"], bb)):
@@ -831,11 +1110,11 @@ def _pair(r: dict, pa: Path, pb: Path, owner_a, owner_b, svc=None,
             acc_a, acc_b = _hold_to_accounts(r, svc, sa, sb, acc_a - shared, acc_b - shared,
                                              broken, dropped)
         ids_a, ids_b = {sa["owner"]} | (acc_a - shared), {sb["owner"]} | (acc_b - shared)
-        ids = sorted(set(ha) | set(hb) | set(ba) | set(bb))
+        ids = sorted(set(ha) | set(hb) | set(ba) | set(bb) | set(wa) | set(wb))
         for eid in ids:
             ex = pair_exchange(eid, ha.get(eid), hb.get(eid), sa["owner"], sb["owner"],
                                 ba.get(eid, []), bb.get(eid, []), ids_a, ids_b, shared,
-                                dropped)
+                                dropped, wa.get(eid), wb.get(eid))
             word, why, note = classify(ex, ha.get(eid), hb.get(eid), late_after=late_after)
             ex["disagreement"], ex["disagreement_reason"] = word, why
             if note:
@@ -845,6 +1124,7 @@ def _pair(r: dict, pa: Path, pb: Path, owner_a, owner_b, svc=None,
             r["exchanges"].append(ex)
             r["counts"][ex["status"]] += 1
             r["retracted"] += len(ex["retracted"])
+            r["withdrawn"] += len(ex["withdrawn"])
         for nm, s in (("a", sa), ("b", sb)):
             heads = {h["row_digest"] for h in (ha if nm == "a" else hb).values()}
             for row in s["_rows"]:
@@ -854,9 +1134,12 @@ def _pair(r: dict, pa: Path, pb: Path, owner_a, owner_b, svc=None,
                                         "reason": row["reason"], "at": row["at"],
                                         "reaction": row["reaction"], "line": row["line"],
                                         "row_digest": row["row_digest"],
-                                        "current": row["row_digest"] in heads})
+                                        "current": row["row_digest"] in heads,
+                                        **({"withdrawn": True} if row.get("withdrawn_by")
+                                           else {})})
     for s in (sa, sb):
         s.pop("_rows", None)
+        s.pop("_seq", None)
     r["findings"] = broken + [f"log {nm}: {s['reason']}" for nm, s in cnl]
     if broken:
         r["verdict"] = V.BROKEN
@@ -872,7 +1155,8 @@ def _pair(r: dict, pa: Path, pb: Path, owner_a, owner_b, svc=None,
         r["reason"] = (f"both chains verify and every reaction row checks under its log's key; "
                        f"{c['clean']} clean, {c['mismatch']} mismatch, {c['not_verified']} "
                        f"not verified, {c['missing']} missing, {len(r['claims'])} DISPUTED "
-                       f"claim(s), {r['retracted']} retracted BROKEN")
+                       f"claim(s), {r['retracted']} retracted BROKEN"
+                       + (f", {r['withdrawn']} withdrawn" if r["withdrawn"] else ""))
     return r
 
 
@@ -884,6 +1168,8 @@ USAGE = """usage: arcaeon exchange react --exchange ID --counterparty ID --file 
                               [--supersedes ROWDIGEST] [--log PATH]
        arcaeon exchange bind --account acct:NAME@arcaeon.io --key SEEDFILE
                               [--log PATH]
+       arcaeon exchange withdraw --row ROWDIGEST --key SEEDFILE
+                              [--reason TEXT] [--log PATH]
        arcaeon exchange pair A.jsonl B.jsonl [--owner-a DID] [--owner-b DID]
                               [--json] [--strict]
                               [--accounts FILE --account-key DID...]
@@ -914,10 +1200,18 @@ absent), broken (a row for it is BROKEN). DISPUTED claims are listed apart.
 A BROKEN later superseded by another word is listed as retracted, never
 erased.
 
+withdraw appends one signed row (kind exchange.withdraw) to your own log: it
+takes your current reaction row --row (its digest) back entirely. The
+withdrawn row stays; the withdraw row is signed by the same key. It cannot be
+withdrawn or superseded; to react again, write a new row (no --supersedes).
+A withdraw signed by any other key, or naming a row that is not this log's
+current reaction, is a BROKEN row. pair lists it as withdrawn.
+
 Each exchange that disagrees also carries one class word, with a one-sentence
 reason (precedence in this order): missing (one log has no record of it),
-mismatched (both have it, a field differs; the reason names it), retracted (a
-side superseded an earlier BROKEN for it), late (both agree, but one row's
+mismatched (both have it, a field differs; the reason names it), withdrawn (a
+side took its reaction back by a withdraw row; status missing when it has no
+current row), retracted (a side superseded an earlier BROKEN for it), late (both agree, but one row's
 `at` trails the other's by more than --late-after SECONDS, default 86400: one
 day). An agreeing exchange carries none; a broken one carries none (its record
 does not check). The counts are under `disagreements` and on the first line.
@@ -943,12 +1237,14 @@ row the key signed. Confirmed pairs; revoked or rotated out by either time, or
 another owner, is BROKEN; no record is COULD NOT LOOK (both unpaired).
 
 Exit codes: react 0 written, 2 refused or bad usage, 3 the file is not there.
-bind 0 written, 2 refused or bad usage.
+bind 0 written, 2 refused or bad usage. withdraw 0 written, 2 refused or bad
+usage.
 pair 0 VERIFIED (both logs check; read the statuses), 1 BROKEN, 3 COULD NOT
 LOOK, 2 bad usage. pair --strict: also 1 when both logs check but any
 exchange is mismatch or missing (not_verified stays 0; 3 and 2 unchanged).
 late and retracted are not marks under --strict: both sides agree on the
-current record. Spec and limits: docs/EXCHANGE.md."""
+current record. A withdrawal with no current row is status missing, so
+--strict marks it; a withdrawal followed by a new agreeing row is not marked. Spec and limits: docs/EXCHANGE.md."""
 
 
 class _Usage(Exception):
@@ -959,6 +1255,7 @@ _REACT_SPEC = {"--exchange": "value", "--counterparty": "value", "--file": "valu
                "--reaction": "value", "--disputed": "value", "--supersedes": "value",
                "--key": "value", "--log": "value"}
 _BIND_SPEC = {"--account": "value", "--key": "value", "--log": "value"}
+_WITHDRAW_SPEC = {"--row": "value", "--key": "value", "--reason": "value", "--log": "value"}
 _PAIR_SPEC = {"--owner-a": "value", "--owner-b": "value", "--json": "bool",
               "--strict": "bool", "--accounts": "value", "--account-key": "list",
               "--late-after": "value"}
@@ -1029,6 +1326,27 @@ def _bind_cli(argv: list[str]) -> int:
     return V.EXIT_GOOD
 
 
+def _withdraw_cli(argv: list[str]) -> int:
+    from arcaeon.prove.envelope import _parse, _Usage as _EUsage
+    try:
+        pos, o = _parse(argv, _WITHDRAW_SPEC)
+    except _EUsage as e:
+        raise _Usage(str(e)) from None
+    if pos:
+        raise _Usage(f"withdraw takes no positional argument (got {pos[0]!r})")
+    need = [k for k in ("--row", "--key") if k not in o]
+    if need:
+        raise _Usage("withdraw needs " + ", ".join(need))
+    try:
+        out = withdraw(o.get("--log", DEFAULT_LOG), key_file=o["--key"], row=o["--row"],
+                       reason=o.get("--reason"))
+    except ExchangeError as e:
+        print(f"arcaeon exchange withdraw: {e}; nothing was written", file=sys.stderr)
+        return V.EXIT_USAGE
+    print(json.dumps({"ok": True, **out}, indent=1, ensure_ascii=True))
+    return V.EXIT_GOOD
+
+
 def _render(r: dict) -> str:
     d = r.get("disagreements") or {}
     first = f"{r['verdict']}: {r['reason']}"
@@ -1048,7 +1366,8 @@ def _render(r: dict) -> str:
         lines.append(f"{ex['exchange_id']}: {ex['status']}{cls}" + (f" ({tail})" if tail else ""))
     for c in r.get("claims", []):
         lines.append(f"claim DISPUTED by {c['side']} on {c['exchange_id']} at {c['at']}"
-                     f"{'' if c['current'] else ' (superseded)'}: {c['reason']}")
+                     f"{'' if c['current'] else ' (withdrawn)' if c.get('withdrawn') else ' (superseded)'}"
+                     f": {c['reason']}")
     svc = r.get("account_service") or {}
     if svc.get("consulted"):
         lines.append(f"account service: {svc['reason']}")
@@ -1141,7 +1460,9 @@ def main(argv: list[str] | None = None) -> int:
             return _bind_cli(rest)
         if sub == "packet":
             return _packet_cli(rest)
-        raise _Usage(f"unknown subcommand {sub!r} (react, bind, pair or packet)")
+        if sub == "withdraw":
+            return _withdraw_cli(rest)
+        raise _Usage(f"unknown subcommand {sub!r} (react, bind, withdraw, pair or packet)")
     except _Usage as e:
         print(f"arcaeon exchange: {e}\n{USAGE}", file=sys.stderr)
         return V.EXIT_USAGE
