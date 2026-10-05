@@ -1,0 +1,6 @@
+{
+ "receipt_url": "https://example.invalid/r/00000000-0000-4000-8000-000000000001",
+ "source": "synthetic",
+ "result_sha256": "4f2a7b0b5a9e0c43e3d6c6f1f2d0bbd8a1f8b5f3b0c1d2e3f405162738495a6b",
+ "output_hash": "4f2a7b0b5a9e0c43e3d6c6f1f2d0bbd8a1f8b5f3b0c1d2e3f405162738495a6b"
+}

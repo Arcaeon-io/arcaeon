@@ -221,6 +221,11 @@ def verify_one(path: Path, *, ledger_path: Optional[str | Path] = None,
                          "a first-wins and a last-wins parser, so no verdict can "
                          "cover it")
         return row
+    if res.get("foreign_format"):
+        # Not ours: could not look, never BROKEN (A01).
+        row["reason"] = (f"not an Arcaeon receipt (format: {res['foreign_format']}); "
+                         "this verifier does not read it, nothing was found altered")
+        return _could_not_look(row, "an Arcaeon receipt", str(path), "unreadable")
     if not res["body_digest_ok"]:
         row["verdict"] = FAIL
         row["reason"] = ("body digest mismatch: a body field was altered "

@@ -52,6 +52,29 @@ def _body_of(receipt: dict) -> dict:
     return {k: receipt.get(k) for k in BODY_FIELDS}
 
 
+def foreign_format(receipt: dict) -> Optional[str]:
+    """Name the format of an object that is not an Arcaeon receipt, else None.
+
+    Not ours means: no `body_digest` AND no `arcaeon-receipt/` receipt_version.
+    Such an object makes no body-digest claim, so recomputing one over seven
+    absent fields and calling the difference an alteration is false (A01: an
+    AER-1 receipt read "body digest mismatch"). An object that carries a
+    body_digest, or our receipt_version, is still checked as ours, so a
+    tampered or version-stripped Arcaeon receipt still fails as before."""
+    ver = receipt.get("receipt_version")
+    if isinstance(ver, str) and ver.startswith("arcaeon-receipt/"):
+        return None
+    if "body_digest" in receipt:
+        return None
+    if "merkle_root" in receipt and isinstance(receipt.get("steps"), list):
+        return "AER-1"
+    if "result_sha256" in receipt and "output_hash" in receipt:
+        return "AER-1"
+    # Anything else still reads as ours: a receipt stripped of both fields
+    # must keep failing as a mismatch, not soften into "not ours".
+    return None
+
+
 # --------------------------------------------------------------------------
 # witness
 # --------------------------------------------------------------------------
@@ -569,6 +592,15 @@ def verify_receipt(receipt: Any, *, ledger_path: Optional[str | Path] = None,
     if dup:
         res["duplicate_keys"] = dup
         res["notes"].append(f"{dup}: the file is ambiguous between JSON parsers")
+    fmt = foreign_format(receipt)
+    if fmt is not None:
+        # Not ok (nothing was verified), and not an accusation either.
+        res["foreign_format"] = fmt
+        res["notes"].append(
+            f"not an Arcaeon receipt (format: {fmt}; no body_digest, no "
+            "arcaeon-receipt receipt_version): this verifier does not read "
+            "that format, so no digest was checked and nothing was found altered")
+        return res
     try:
         expected = digest_json(_body_of(receipt))
     except (TypeError, ValueError) as e:
