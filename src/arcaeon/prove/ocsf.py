@@ -20,7 +20,14 @@ and earlier. That is the record's content only: no Parquet is written.
     verdict          severity_id          is_alert  emitted
     BROKEN           4 High               true      always
     COULD NOT LOOK   2 Low                false     always, naming what was not checked
+    COULD NOT LOOK   3 Medium             true      always, when a gate input's decision
+      on a refusal                                    is refuse
     VERIFIED         1 Informational      false     only with include_verified
+
+A gate refusal is never skipped and never reads VERIFIED: when a gate input's
+decision is refuse but its verdict is VERIFIED (a veto), the event reports
+BROKEN on checker-broken and COULD NOT LOOK on checks-unreadable, nonparty-check
+or any other veto, with the veto and the broken check rows in unmapped.
 
 activity_id is 1 (Create), so type_uid = 2004 * 100 + 1 = 200401; status_id
 is 1 (New); time is integer milliseconds since the epoch, the export time.
@@ -52,7 +59,8 @@ from typing import Any
 from arcaeon import verdict as V
 
 __all__ = ["OCSF_VERSION", "OCSF_SOURCES", "CLASS_UID", "CATEGORY_UID", "ACTIVITY_ID",
-           "TYPE_UID", "SEVERITY", "LIMITS_LINE", "OCSF_VERSIONS", "OCSF_13_SOURCES",
+           "TYPE_UID", "SEVERITY", "SEVERITY_REFUSED_COULD_NOT_LOOK", "LIMITS_LINE",
+           "OCSF_VERSIONS", "OCSF_13_SOURCES",
            "OCSF_13_ALLOW", "ExportError", "normalize", "restrict", "to_ocsf", "dumps", "main"]
 
 #: The OCSF schema version the mapping was read from (schema.ocsf.io/api/version
@@ -127,6 +135,9 @@ STATUS_ID, STATUS_NAME = 1, "New"
 #: verdict -> (severity_id, severity caption, is_alert)
 SEVERITY = {V.BROKEN: (4, "High", True), V.COULD_NOT_LOOK: (2, "Low", False),
             V.VERIFIED: (1, "Informational", False)}
+#: COULD NOT LOOK on a gate input whose decision is refuse (a money or other
+#: guarded action was stopped): an alert, Medium, not the Low of an allowed read.
+SEVERITY_REFUSED_COULD_NOT_LOOK = (3, "Medium", True)
 FILE_TYPE_REGULAR = (1, "Regular File")
 SHA256_ALGORITHM = (3, "SHA-256")
 
@@ -191,10 +202,58 @@ def _cnl_reasons(text: Any) -> list[str]:
     return [s for s in str(text or "").split("; ") if s]
 
 
+#: The gate vetoes (gate.CHECKER_BROKEN, CHECKS_UNREADABLE, NONPARTY_VETO): each
+#: refuses with the envelope's own verdict left VERIFIED. Named here, not
+#: imported, so this module stays pure.
+_CHECKER_BROKEN = "checker-broken"
+_MAX_BROKEN_LISTED = 100
+
+
+def _checks_summary(c: Any) -> dict | None:
+    """A gate decision's --checks answer, cut to what a SIEM needs: the veto,
+    how many rows were read, and each row that said BROKEN (by checker, id,
+    word and where it was read), never the row's own payload."""
+    if not isinstance(c, dict):
+        return None
+    broken = [b for b in (c.get("broken") or []) if isinstance(b, dict)]
+    out = {"veto": c.get("veto"), "files": [_name(p) for p in (c.get("files") or [])],
+           "rows": c.get("rows"), "file_sha256": c.get("file_sha256"),
+           "broken_count": len(broken),
+           "broken": [{k: b.get(k) for k in ("checker", "adapter_version", "vendor_id",
+                                             "vendor_word", "subject", "attestation",
+                                             "reported_by", "source", "line")}
+                      | {"file": _name(b.get("file"))} for b in broken[:_MAX_BROKEN_LISTED]],
+           "problems": [str(p) for p in (c.get("problems") or [])]}
+    for k in ("would_veto", "carried"):
+        if c.get(k) is not None:
+            out[k] = c[k]
+    return out
+
+
+def _nonparty_summary(n: Any) -> dict | None:
+    if not isinstance(n, dict):
+        return None
+    return {k: n.get(k) for k in ("rule", "cap", "amount", "applies", "satisfied", "veto")}
+
+
+def _word(rec: dict) -> str:
+    """The word the event reports (status_code, severity, title): the verdict,
+    except that a gate refusal is never VERIFIED. A refusal of a VERIFIED
+    envelope is BROKEN on checker-broken (the gate exits 1) and COULD NOT LOOK
+    on any other veto (checks-unreadable, nonparty-check, or one not named;
+    the gate exits 3)."""
+    verdict = rec["verdict"]
+    if rec.get("decision") == "refuse" and verdict == V.VERIFIED:
+        return V.BROKEN if rec.get("veto") == _CHECKER_BROKEN else V.COULD_NOT_LOOK
+    return verdict
+
+
 def normalize(obj: Any) -> dict:
     """The input as one flat record: which kind it was, the verdict and what
     the event carries. Raises ExportError on anything that is not an arcaeon
-    envelope verify report, gate decision or gate evidence.json."""
+    envelope verify report, gate decision or gate evidence.json. A gate input
+    that carries `checks` (the --checks answer) or `nonparty_check` (the
+    non-party rule) adds `veto`, `checks` and `nonparty_check` to the record."""
     if not isinstance(obj, dict):
         raise ExportError("the input is not one JSON object")
     paths: list = []
@@ -239,6 +298,13 @@ def normalize(obj: Any) -> dict:
     verdict = rec["verdict"]
     if verdict not in SEVERITY:
         raise ExportError(f"verdict {verdict!r} is not one of VERIFIED, BROKEN, COULD NOT LOOK")
+    if rec["source"] != "verify report":
+        checks, nonparty = _checks_summary(obj.get("checks")), _nonparty_summary(
+            obj.get("nonparty_check"))
+        if checks is not None or nonparty is not None:
+            rec["veto"] = (checks or {}).get("veto") or (nonparty or {}).get("veto")
+            rec["checks"], rec["nonparty_check"] = checks, nonparty
+    word = _word(rec)
     cc = obj.get("could_not_check") if isinstance(obj.get("could_not_check"), dict) else {}
     paths += [rep.get("file"), rep.get("envelope"), rep.get("where"), cc.get("where")]
     if rec.get("reasons") is None:
@@ -248,7 +314,7 @@ def normalize(obj: Any) -> dict:
     rec["reasons"] = [str(r) for r in (rec["reasons"] or []) if r]
     sealed = rep.get("sealed") if isinstance(rep.get("sealed"), dict) else {}
     cnc = None
-    if verdict == V.COULD_NOT_LOOK:
+    if word == V.COULD_NOT_LOOK:
         src = obj.get("could_not_check") if isinstance(obj.get("could_not_check"), dict) else rep
         cnc = {"looked_for": src.get("looked_for"), "where": _name(src.get("where")),
                "reason_word": src.get("reason_word")}
@@ -336,23 +402,38 @@ def to_ocsf(obj: Any, *, now: datetime | None = None,
         raise ValueError(f"OCSF version {ocsf_version!r} is not one of "
                          f"{', '.join(OCSF_VERSIONS)}")
     rec = normalize(obj)
-    verdict = rec["verdict"]
-    if verdict == V.VERIFIED and not include_verified:
+    verdict = word = _word(rec)              # a gate refusal is never VERIFIED here
+    if word == V.VERIFIED and not include_verified:
         return None
-    sev_id, sev, alert = SEVERITY[verdict]
+    sev_id, sev, alert = SEVERITY[word]
+    if word == V.COULD_NOT_LOOK and rec.get("decision") == "refuse":
+        sev_id, sev, alert = SEVERITY_REFUSED_COULD_NOT_LOOK
     t = _ms(now or datetime.now(timezone.utc))
     what = rec["file"] or "the checked input"
     uid = "arcaeon-" + hashlib.sha256(
         json.dumps(rec, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:32]
-    if verdict == V.BROKEN:
+    veto = rec.get("veto") if word != rec["verdict"] else None
+    refused = f"{rec['action'] or 'the action'} refused"
+    if word == V.BROKEN and veto == _CHECKER_BROKEN:
+        names = ", ".join(sorted({str(b.get("checker")) for b in rec["checks"]["broken"]})) \
+            or "a checker"
+        title = f"BROKEN: a checker says BROKEN for {what}; {refused} ({veto})"
+        lead = (f"BROKEN ({veto}): the envelope reads VERIFIED, but {names} says BROKEN for "
+                f"these bytes; {refused}: "
+                f"{'; '.join(rec['reasons']) or rec['reason'] or 'a checker said BROKEN'}.")
+    elif word == V.BROKEN:
         title = f"BROKEN: {what} failed its arcaeon check"
         lead = f"BROKEN: {'; '.join(rec['reasons']) or rec['reason'] or 'a check failed'}."
-    elif verdict == V.COULD_NOT_LOOK:
+    elif word == V.COULD_NOT_LOOK:
         c = rec["could_not_check"] or {}
-        title = f"COULD NOT LOOK: {what} could not be fully checked"
+        title = f"COULD NOT LOOK: {what} could not be fully checked" + (
+            f"; {refused}" + (f" ({veto})" if veto else "") if word != rec["verdict"] else "")
         why = "; ".join(rec["reasons"]) or rec["reason"]
         lead = (f"COULD NOT LOOK: could not check {c.get('looked_for') or 'a step'} "
                 f"({c.get('reason_word') or 'unreadable'})" + (f": {why}." if why else "."))
+        if word != rec["verdict"]:
+            lead += (f" The envelope reads VERIFIED; {refused} "
+                     f"({veto or 'a veto'}).")
     else:
         title = f"VERIFIED: {what} passed its arcaeon check"
         lead = "VERIFIED: the bytes are the bytes the named key sealed, labeled for this receiver."
@@ -370,6 +451,9 @@ def to_ocsf(obj: Any, *, now: datetime | None = None,
         "sealed_by", "sealed_at", "sealed_for", "signers_valid", "signers_named",
         "audience_checked", "deal_checked", "purpose_checked", "action", "decision",
         "gate_reason", "checked_at", "evidence", "note")}
+    for k in ("veto", "checks", "nonparty_check"):   # only on a gate input that has them
+        if k in rec:
+            unmapped[k] = rec[k]
     unmapped["limits"] = LIMITS_LINE
     event: dict[str, Any] = {
         "activity_id": ACTIVITY_ID, "activity_name": ACTIVITY_NAME,
