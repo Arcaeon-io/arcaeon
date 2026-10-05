@@ -188,6 +188,7 @@ def _base(raw: bytes | None, at: str) -> dict:
     row["vendor_request_id"] = None
     row["ids"] = {"scan_id": None, "report_id": None, "tr_id": None, "req_id": None}
     row["refetch"] = None
+    row["finding"] = None  # the doc: every row carries `finding`; a refusal row has none
     return _seal(row)
 
 

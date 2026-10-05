@@ -183,6 +183,7 @@ def _base(raw: bytes | None, at: str, caller: str | None, req_sha: str | None) -
     if req_sha is not None:
         row["subject"] = {"name": f"{VENDOR}:screened-request", "sha256": req_sha}
     _set_id(row, None, caller)
+    row["finding"] = None  # the doc: every row carries `finding`; a refusal row has none
     return _seal(row)
 
 

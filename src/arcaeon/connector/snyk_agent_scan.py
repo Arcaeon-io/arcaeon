@@ -161,6 +161,7 @@ def _base(raw: bytes | None, at: str, req_id: str | None) -> dict:
     row["input_sha256"] = hashlib.sha256(raw).hexdigest() if raw is not None else None
     row["vendor_request_id"] = req_id
     row["vendor_id"] = req_id
+    row["finding"] = None  # the doc: every row carries `finding`; a refusal row has none
     return _seal(row)
 
 

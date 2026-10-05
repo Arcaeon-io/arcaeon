@@ -55,7 +55,8 @@ def test_v05_one_row_per_tool_plus_unreadable_servers(rows05):
 def test_row_shape_matches_d011_and_is_reported_by_sender(rows05):
     for r in rows05:
         assert D011_KEYS <= set(r)
-        assert set(r) - D011_KEYS <= {"tool", "could_not_look"}
+        assert set(r) - D011_KEYS <= {"tool", "could_not_look", "signed_by_vendor"}
+        assert r["signed_by_vendor"] is False  # the base row carries it (L2 conformance)
         assert "verdict" not in r
         assert r["kind"] == "check.verdict.relayed"
         assert r["relayed"] is True and r["checked_by_us"] is False
