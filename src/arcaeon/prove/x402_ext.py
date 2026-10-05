@@ -26,9 +26,10 @@ verifier (envelope.verify) decides; this module never checks a byte itself.
 A missing or malformed extension reaches verify as a missing or unreadable
 sidecar, so it reads COULD NOT LOOK there, never VERIFIED.
 
-`release` is True only when the action is `pay` or `act`, the gate allowed
-it (so the verdict was VERIFIED), and the settlement response says
-`"success": true`. `escrow` is then RELEASE; on anything else it is HOLD.
+`release` is True only when the action is `pay` or `act`, a deal id and a
+purpose were given (the envelope held to this exchange, for `act` too), the
+gate allowed it (so the verdict was VERIFIED), and the settlement response
+says `"success": true`. `escrow` is then RELEASE; on anything else it is HOLD.
 There is no third word: this path never refunds (D068, docs/X402.md "BROKEN
 is a hold, not a refund").
 
@@ -125,7 +126,8 @@ SCHEMA = {
 
 LIMITS = [
     "release means the paid body's bytes are the bytes the key you named sealed, labeled "
-    "for you, for this deal when you gave one, and in date; not that they are true or safe",
+    "for you, for the deal and purpose you named (a release needs both), and in date; not "
+    "that they are true or safe",
     "the x402 settlement fields (success, transaction, payer) are read as the seller sent "
     "them; nothing here checks a chain or a facilitator",
     "the mock rail holds and moves nothing; a refusal holds and never refunds from this path",
@@ -310,9 +312,17 @@ def check(response: Any, file_bytes: bytes, audience: str | None, action: str, *
         if d.verdict == V.BROKEN and not d.allowed:
             packet, packet_error = made.get("packet") or _dispute(d)
     settled = isinstance(obj, dict) and obj.get("success") is True
-    release = bool(d.allowed and d.verdict == V.VERIFIED and settled and state == "present")
+    # R3-1: a release moves escrowed money whatever the action word, so it needs
+    # the exchange named, as pay does (F2): the gate allows `act` unbound, and an
+    # envelope sealed for another deal must not come back RELEASE.
+    bound = bool(deal) and bool(purpose)
+    release = bool(d.allowed and d.verdict == V.VERIFIED and settled and state == "present"
+                   and bound)
     if release:
         reason = f"release: {d.reason}"
+    elif d.allowed and not bound:
+        reason = ("hold: a release needs --deal and --purpose so the envelope is held to "
+                  f"this exchange; without them it could be a replay from another. {d.reason}")
     elif d.allowed and not settled:
         reason = ("hold: the settlement response does not say success: true, so there is "
                   f"nothing to release. {d.reason}")

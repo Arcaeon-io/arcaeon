@@ -165,6 +165,21 @@ def test_rail_refuses_a_check_run_for_another_deal_or_none(tmp_path):
     assert rail.state("d-other") == X.HELD
 
 
+def test_act_without_deal_or_purpose_never_releases(tmp_path):
+    """R3-1: the gate allows `act` unbound (F2 binds pay/irreversible only), but a
+    release moves escrowed money: an envelope sealed for another deal must not
+    come back RELEASE because the check named no deal."""
+    paid, did = _paid(tmp_path)
+    for deal, purpose in ((None, None), (None, "market-data"), ("d-x402-1", None)):
+        c = _check(paid, BODY, did, tmp_path, action="act", deal=deal, purpose=purpose)
+        assert c.release is False and c.escrow == "HOLD", (deal, purpose)
+        assert "--deal and --purpose" in c.reason
+    rail = X.MockEscrowRail()
+    rail.hold("d-x402-1", "0.01", "USDC")
+    c = _check(paid, BODY, did, tmp_path, action="act", deal=None, purpose=None)
+    assert rail.settle("d-x402-1", c)["released"] is False
+
+
 def test_only_pay_or_act(tmp_path):
     paid, did = _paid(tmp_path)
     assert _check(paid, BODY, did, tmp_path, action="act").release is True
