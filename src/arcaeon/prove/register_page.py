@@ -2,7 +2,8 @@
 """arcaeon.prove.register_page: the register of named operators as one static
 HTML page (L3-04).
 
-    arcaeon register page REGISTER.jsonl [--operator-key DID...] [--out FILE]
+    arcaeon register page REGISTER.jsonl [--operator-key DID...]
+                          [--pin-log [MEMBER=]FILE...] [--out FILE]
 
 Reads a register (arcaeon.prove.register rows, one JSON object per line, or
 one JSON array) and checks it with check_register against the register
@@ -23,10 +24,22 @@ The page is a view, not a service: inline CSS, no script, no link, no image,
 no font, nothing fetched. Every value is HTML-escaped (tally_html's _e). The
 same register and the same named keys give the same bytes: nothing on the page
 depends on the clock or on where the file sits (the file's name only).
+
+PUBLISHING CADENCE (L3-07). The register's rows carry no cadence, so each
+member's line reads "not stated" unless a pin task's log is given:
+--pin-log MEMBER=FILE (or a bare FILE when the register names one member).
+The log is JSONL, one row per pin, its time in the first of at, pinned_at,
+ts, timestamp, time (RFC 3339 with a zone). From the last PIN_RECENT dated
+rows the line says "observed every ~N hours (last K pins)": the median gap,
+what was observed, not a promise. A log that is missing, unreadable, over
+the cap, or with fewer than two dated rows keeps "not stated"; nothing is
+guessed. The page names the log by its file name only.
 """
 from __future__ import annotations
 
+import json
 import sys
+from datetime import timezone
 from pathlib import Path
 from typing import Any
 
@@ -36,12 +49,20 @@ from arcaeon.prove import register as G
 from arcaeon.prove.tally_html import _e
 from arcaeon.record.row import loads_strict
 
-__all__ = ["MAX_INPUT", "RegisterPageError", "load_rows", "render_page", "page_cli", "main",
-           "USAGE", "HELP", "LIMITS"]
+__all__ = ["MAX_INPUT", "MAX_PIN_LOG", "PIN_RECENT", "PIN_TIME_FIELDS", "RegisterPageError",
+           "load_rows", "pin_cadence", "render_page", "page_cli", "main", "USAGE", "HELP",
+           "LIMITS"]
 
 MAX_INPUT = 64 << 20
+#: A pin log over this is not read (the cadence stays "not stated").
+MAX_PIN_LOG = 16 << 20
+#: How many of the newest dated pins the observed cadence is taken from.
+PIN_RECENT = 10
+#: Where a pin row's time is looked for, first match wins.
+PIN_TIME_FIELDS = ("at", "pinned_at", "ts", "timestamp", "time")
 
-USAGE = "usage: arcaeon register page REGISTER.jsonl [--operator-key DID...] [--out FILE]"
+USAGE = ("usage: arcaeon register page REGISTER.jsonl [--operator-key DID...] "
+         "[--pin-log [MEMBER=]FILE...] [--out FILE]")
 
 HELP = USAGE + """
 
@@ -54,7 +75,11 @@ operator with its keys, chains and witness endpoints, the revocations (what,
 when, reason, compromised since), the head digest and the row count. A BROKEN
 or COULD NOT LOOK register shows the reason and no rows. No script, nothing
 fetched, every value escaped; the same register gives the same bytes.
-Without --out the page goes to stdout and the verdict line to stderr. --out
+--pin-log MEMBER=FILE (repeatable; a bare FILE when the register names one
+member) reads a pin task's JSONL log and says that member's publishing
+cadence as observed: "observed every ~N hours (last K pins)", from the
+newest 10 dated rows. Without one, or when the log cannot be read as dated
+pins, the cadence reads "not stated". Without --out the page goes to stdout and the verdict line to stderr. --out
 is never overwritten.
 
 Exit codes: 0 VERIFIED (page written), 1 BROKEN (page written), 3 COULD NOT
@@ -107,6 +132,84 @@ def load_rows(path: Any) -> list:
         raise RegisterPageError(f"{p.name} is not JSON rows ({type(e).__name__})") from None
 
 
+def pin_cadence(path: Any) -> dict | None:
+    """{"name", "pins", "every_hours", "latest"} observed in a pin task's JSONL
+    log, from its newest PIN_RECENT dated rows (median gap); None when the log
+    is missing, unreadable, over MAX_PIN_LOG, or holds fewer than two rows
+    with a zoned time. Never raises, never guesses."""
+    from arcaeon.prove.envelope import _parse_time
+    try:
+        p = Path(path)
+        if not p.is_file() or p.stat().st_size > MAX_PIN_LOG:
+            return None
+        text = p.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError, TypeError, ValueError):
+        return None
+    times = []
+    for line in text.splitlines():
+        try:
+            row = json.loads(line) if line.strip() else None
+        except ValueError:
+            continue
+        if not isinstance(row, dict):
+            continue
+        val = next((row[k] for k in PIN_TIME_FIELDS if k in row), None)
+        t = _parse_time(val) if isinstance(val, str) else None
+        if t is not None:
+            times.append(t.astimezone(timezone.utc))
+    recent = sorted(times[-PIN_RECENT:])
+    if len(recent) < 2:
+        return None
+    gaps = sorted((b - a).total_seconds() for a, b in zip(recent, recent[1:]))
+    mid = len(gaps) // 2
+    median = gaps[mid] if len(gaps) % 2 else (gaps[mid - 1] + gaps[mid]) / 2
+    hours = median / 3600
+    every = str(round(hours)) if hours >= 2 else f"{round(hours, 1):g}"
+    return {"name": p.name, "pins": len(recent), "every_hours": every,
+            "latest": recent[-1].strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+
+_NOT_STATED = ("<p>publishing cadence: not stated (the register's rows carry no "
+               "cadence)</p>")
+
+
+def _pin_logs_by_member(pin_logs: Any, members: list[str]) -> tuple[dict, str | None]:
+    """({member: path}, note for every member or None). MEMBER=FILE names its
+    member; a bare FILE goes to the one member of a one-member register, and
+    with more members is not guessed."""
+    by: dict = {}
+    bare = []
+    for item in ([pin_logs] if isinstance(pin_logs, (str, Path)) else list(pin_logs or ())):
+        s = str(item)
+        left, sep, right = s.partition("=")
+        if sep and X.ACCOUNT_ID_RE.fullmatch(left):
+            by[left] = right
+        else:
+            bare.append(s)
+    note = None
+    if bare:
+        if len(members) == 1 and len(bare) == 1 and members[0] not in by:
+            by[members[0]] = bare[0]
+        else:
+            note = (f"<p>publishing cadence: not stated (a pin log was given without a "
+                    f"member and this register names {_e(len(members))}; give it as "
+                    f"MEMBER=FILE)</p>")
+    return by, note
+
+
+def _cadence_line(member: str, by: dict, note: str | None) -> str:
+    if member not in by:
+        return note or _NOT_STATED
+    c = pin_cadence(by[member])
+    name = Path(by[member]).name
+    if c is None:
+        return (f"<p>publishing cadence: not stated (the pin log {_e(name)} could not be "
+                f"read as two or more dated pins)</p>")
+    return (f"<p>publishing cadence: observed every ~{_e(c['every_hours'])} hours (last "
+            f"{_e(c['pins'])} pins) in the pin log {_e(c['name'])}, latest pin "
+            f"{_e(c['latest'])}; what was observed in that log, not a promise</p>")
+
+
 def _keys(operator_keys: Any) -> list[str]:
     if isinstance(operator_keys, str):
         return [operator_keys]
@@ -133,7 +236,7 @@ def _table(head: list[str], rows: list[str]) -> list[str]:
              + "</tr></thead>", "<tbody>"] + rows + ["</tbody>", "</table>"])
 
 
-def _verified_body(rows: list, chk: dict) -> list[str]:
+def _verified_body(rows: list, chk: dict, pin_logs: Any = None) -> list[str]:
     _, things, _ = G._walk(rows, verify=False)
     out = ["<h2>The register</h2>",
            f"<p>head <code>{_e(chk['head'])}</code>; {_e(chk['rows'])} rows; signed by "
@@ -145,11 +248,11 @@ def _verified_body(rows: list, chk: dict) -> list[str]:
         if e["member"] not in members:
             members.append(e["member"])
     head = ["what", "value", "register digest", "added", "status"]
+    by, note = _pin_logs_by_member(pin_logs, members)
     for m in members:
         nm = X.ACCOUNT_ID_RE.fullmatch(m)
         out.append(f"<h3>{_e(nm.group('name'))} ({_e(m)})</h3>" if nm else f"<h3>{_e(m)}</h3>")
-        out.append("<p>publishing cadence: not stated (the register's rows carry no "
-                   "cadence)</p>")
+        out.append(_cadence_line(m, by, note))
         out += _table(head, [_row([("", e["what"]), ("id", e["value"]), ("id", d),
                                    ("", e["added_at"]), ("", _status(e))])
                              for d, e in things.items() if e["member"] == m])
@@ -170,7 +273,8 @@ def _verified_body(rows: list, chk: dict) -> list[str]:
     return out
 
 
-def _render(rows: Any, operator_keys: Any = (), source: Any = None) -> tuple[str, dict]:
+def _render(rows: Any, operator_keys: Any = (), source: Any = None,
+            pin_logs: Any = None) -> tuple[str, dict]:
     keys = _keys(operator_keys)
     chk = G.check_register(rows, operator_keys=keys)
     word = chk["verdict"]
@@ -185,7 +289,7 @@ def _render(rows: Any, operator_keys: Any = (), source: Any = None) -> tuple[str
     out.append("<p>checked against the register operator key(s) you named: "
                f"{_e(', '.join(keys) if keys else 'none named')}</p>")
     if word == V.VERIFIED:
-        out += _verified_body(rows, chk)
+        out += _verified_body(rows, chk, pin_logs)
     elif word == V.BROKEN:
         out.append("<p>The register does not check, so no row is shown: not the rows past "
                    "the break, and not the rows before it as the register's word. A register "
@@ -203,11 +307,13 @@ def _render(rows: Any, operator_keys: Any = (), source: Any = None) -> tuple[str
     return "\n".join(out), chk
 
 
-def render_page(rows: Any, operator_keys: Any = (), source: Any = None) -> str:
-    """The page, as text. Same rows and keys in, same bytes out. Never raises
-    on hostile rows (check_register never raises; a BROKEN or COULD NOT LOOK
-    register renders no row)."""
-    return _render(rows, operator_keys, source)[0]
+def render_page(rows: Any, operator_keys: Any = (), source: Any = None,
+                pin_logs: Any = None) -> str:
+    """The page, as text. Same rows, keys and pin logs in, same bytes out.
+    Never raises on hostile rows (check_register never raises; a BROKEN or
+    COULD NOT LOOK register renders no row). `pin_logs`: ["MEMBER=FILE" or
+    "FILE", ...], see pin_cadence."""
+    return _render(rows, operator_keys, source, pin_logs)[0]
 
 
 class _Usage(Exception):
@@ -217,7 +323,8 @@ class _Usage(Exception):
 def page_cli(argv: list[str]) -> int:
     from arcaeon.prove.envelope import _parse, _Usage as EU
     try:
-        pos, o = _parse(argv, {"--operator-key": "list", "--out": "value"})
+        pos, o = _parse(argv, {"--operator-key": "list", "--pin-log": "list",
+                               "--out": "value"})
     except EU as e:
         raise _Usage(str(e)) from None
     if len(pos) != 1:
@@ -231,7 +338,8 @@ def page_cli(argv: list[str]) -> int:
         print(f"arcaeon register page: {V.COULD_NOT_LOOK}: {e}; nothing written",
               file=sys.stderr)
         return V.EXIT_COULD_NOT_LOOK
-    page, chk = _render(rows, o.get("--operator-key") or [], Path(pos[0]).name)
+    page, chk = _render(rows, o.get("--operator-key") or [], Path(pos[0]).name,
+                        o.get("--pin-log"))
     line = f"register {chk['verdict']}: {chk['reason']}"
     if out:
         with open(out, "x", encoding="utf-8", newline="\n") as fh:
