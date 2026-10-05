@@ -852,7 +852,13 @@ USAGE = """usage: arcaeon tally build CHAIN.jsonl... [--json] [--settled-only]
        arcaeon tally verify --log TALLY_CHAIN.jsonl [--inputs CHAIN.jsonl...]
                             [--statement S.json] [--groups FILE]
                             [--aliases FILE] [--json]
-       arcaeon tally html TALLY.json [--out FILE]"""
+       arcaeon tally html TALLY.json [--out FILE]
+       arcaeon tally scitt-export S.json --key SEEDFILE --out FILE.scitt
+                                 [--proof INCLUSION.json --ts-key SEEDFILE]
+                                 [--iss ID] [--ts-iss ID]
+       arcaeon tally scitt-verify FILE.scitt [--receipt FILE] [--ts-pub KEY]
+                                 [--issuer-pub KEY] [--statement S.json]
+                                 [--json]"""
 
 HELP = USAGE + """
 
@@ -885,6 +891,13 @@ scheduled task. verify checks the tally chain, that no row is backdated, and
 with --inputs that every snapshot's logs still hold the sealed rows (rows
 appended since are fine), with --statement that it commits to this chain.
 Un-editable, not un-gameable: a wash trade is sealed as a wash trade.
+
+scitt-export writes the pin statement as a SCITT-shaped Signed Statement
+(COSE_Sign1, RFC 9995 hash envelope); with --proof and --ts-key it adds an
+RFC 9942-shaped receipt (vds 1, RFC 9162 inclusion proof) under 394. Offline:
+nothing is sent. scitt-verify checks one: a bad signature or proof is BROKEN,
+an unknown vds or no --ts-pub is COULD NOT LOOK. Not a conformance claim: the
+leaf preimage rule is open (docs/design/SCITT_RECEIPTS.md).
 
 html reads a tally JSON (build --json, seal --out) and writes one static
 page: inline CSS, no script, nothing fetched. One row per ID per window in
@@ -974,13 +987,20 @@ def main(argv: list[str] | None = None) -> int:
         if sub == "html":
             from arcaeon.prove import tally_html
             return tally_html.html_cli(rest)
+        if sub in ("scitt-export", "scitt-verify"):
+            from arcaeon.prove import tally_chain as TC
+            from arcaeon.remote import scitt
+            try:
+                return (scitt.export_cli if sub == "scitt-export" else scitt.verify_cli)(rest)
+            except TC.Usage as e:
+                raise _Usage(str(e)) from None
         if sub in ("seal", "pin", "verify"):
             from arcaeon.prove import tally_chain as TC
             try:
                 return {"seal": TC.seal_cli, "pin": TC.pin_cli, "verify": TC.verify_cli}[sub](rest)
             except TC.Usage as e:
                 raise _Usage(str(e)) from None
-        raise _Usage(f"unknown subcommand {sub!r} (build, alias, seal, pin, verify or html)")
+        raise _Usage(f"unknown subcommand {sub!r} (build, alias, seal, pin, verify, html, scitt-export or scitt-verify)")
     except _Usage as e:
         print(f"arcaeon tally: {e}\n{USAGE}", file=sys.stderr)
         return V.EXIT_USAGE
