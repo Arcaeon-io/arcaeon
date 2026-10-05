@@ -198,6 +198,26 @@ def test_execution_to_json_error_string_null_is_no_error(err):
     assert r["run"]["error_present"] is False and r["run"]["error_digest"] is None
 
 
+@pytest.mark.parametrize("logs", [{"stdout": ["a"], "stderr": []},
+                                  json.dumps({"stdout": ["a"], "stderr": []})])
+def test_execution_empty_error_string_is_no_error_like_the_command_path(logs):
+    """An Execution whose `error` is "" read BROKEN while a CommandResult's ""
+    read as no error. Both now read "" as no error: execution_no_error."""
+    r = _doc(results=[], logs=logs, error="")
+    assert r["vendor_word"] == "execution_no_error" and r["relayed_verdict"] == VERIFIED
+    assert r["run"]["error_present"] is False and r["run"]["error_digest"] is None
+    assert "could_not_look" not in r
+    cmd = _doc(stdout="a", stderr="", exit_code=0, error="")
+    assert cmd["run"]["error_present"] is False and cmd["relayed_verdict"] == VERIFIED
+
+
+@pytest.mark.parametrize("err", [" ", "\n"])
+def test_execution_whitespace_error_string_still_reads_as_an_error(err):
+    """Only the exact empty string is no error, as on the command path."""
+    r = _doc(results=[], logs={"stdout": [], "stderr": []}, error=err)
+    assert r["relayed_verdict"] == BROKEN and r["vendor_word"] == "execution_error"
+
+
 @pytest.mark.parametrize("err", ['"null"', "nul", "Null", "[]", "0", "false"])
 def test_execution_error_strings_that_are_not_json_null_still_read_as_errors(err):
     r = _doc(results=[], logs={"stdout": [], "stderr": []}, error=err)

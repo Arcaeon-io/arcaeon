@@ -685,6 +685,12 @@ A gate refusal is never skipped: a VERIFIED envelope refused as
 `checker-broken` exports as BROKEN (High, an alert, the broken check rows in
 `unmapped.arcaeon.checks`), one refused as `checks-unreadable` or
 `nonparty-check` as COULD NOT LOOK. File names only, never directories. The mapping is [OCSF.md](OCSF.md).
+`export-datadog` turns the same inputs (or a JSON list of them) into the
+body of a Datadog LLM Observability spans request, one span per verdict:
+the tag `arcaeon.verdict:VERIFIED|BROKEN|COULD_NOT_LOOK`, status `error` on
+BROKEN, digests in place of content. It writes the body and sends nothing;
+the sender supplies `DD-API-KEY`. The mapping and its limits are
+[DATADOG_LLM_OBS.md](DATADOG_LLM_OBS.md).
 
 `seal --checks FILE` (repeatable; library `checks=`, paths or row dicts)
 carries checker rows inside the signed Statement, as `predicate.checks`
@@ -723,6 +729,8 @@ usage: arcaeon envelope seal <file> --label TEXT --audience ID --deal ID
        arcaeon envelope export-ocsf <report.json | -> [--include-verified]
                                [--now WHEN] [--ocsf-version {1.9.0,1.3.0}]
                                [--out FILE]
+       arcaeon envelope export-datadog <report.json | -> [--ml-app NAME]
+                               [--service NAME] [--now WHEN] [--out FILE]
 ```
 
 **Exit codes:** `verify`: 0 VERIFIED, 1 BROKEN (changed bytes, a bad or
@@ -735,6 +743,7 @@ the `--pins` clone). `--pins` is offline: nothing is fetched.
 `seal`: 0 written, 2 refused (a missing binding field, a past not-after, an
 existing envelope without `--force`), 3 the file to seal is not there.
 `export-ocsf`: 0 exported (or VERIFIED skipped), 3 the input is not a readable
+arcaeon verdict. `export-datadog`: 0 written, 3 the input is not a readable
 arcaeon verdict. 2 bad usage. New in 0.10, so `--legacy-exit` changes nothing here.
 
 ```console

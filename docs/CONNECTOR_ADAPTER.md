@@ -868,10 +868,10 @@ E2B writes no verdict word, so the adapter writes its own:
 | adapter word | relayed as | when |
 |---|---|---|
 | `command_exit_zero` | VERIFIED | `exit_code` 0 and `error` null or empty |
-| `execution_no_error` | VERIFIED | an Execution whose `error` key is null, or a string that decodes as JSON null (what `to_json` writes for no error) |
+| `execution_no_error` | VERIFIED | an Execution whose `error` key is null, the empty string `""` (read as no error, as on the command path), or a string that decodes as JSON null (what `to_json` writes for no error) |
 | `command_exit_nonzero` | BROKEN | `exit_code` is an integer other than 0 |
 | `command_error` | BROKEN | `exit_code` 0 or missing, but a non-empty `error` string |
-| `execution_error` | BROKEN | an Execution with an error (object or string) |
+| `execution_error` | BROKEN | an Execution with an error (an object, or a non-empty string that is not JSON null) |
 | `no_exit_code` | COULD NOT LOOK | a command row with no `exit_code` (the JavaScript name `exitCode` is not read) |
 | `unreadable_exit_code` | COULD NOT LOOK | `exit_code` is not an integer (`true`, `"0"`, `0.0`) |
 | `error_not_stated` | COULD NOT LOOK | an Execution with no `error` key at all |

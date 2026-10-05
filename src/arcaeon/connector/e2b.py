@@ -35,11 +35,13 @@ THE BODY: one run object, or a JSON array of them (at most MAX_ROWS).
 THE WORD. E2B writes no verdict word, so the adapter writes its own:
 
     command_exit_zero      exit_code 0, error null or ""              -> VERIFIED
-    execution_no_error     an Execution whose `error` key is null, or
+    execution_no_error     an Execution whose `error` key is null, the
+                           empty string "" (as on the command path), or
                            a string that decodes as JSON null (to_json) -> VERIFIED
     command_exit_nonzero   exit_code an int other than 0              -> BROKEN
     command_error          exit_code 0 but a non-empty error string   -> BROKEN
-    execution_error        an Execution with an error (object/string) -> BROKEN
+    execution_error        an Execution with an error (object or a
+                           non-empty string not JSON null)            -> BROKEN
     no_exit_code           a command row with no exit_code            -> COULD NOT LOOK
     unreadable_exit_code   exit_code not an int (bool, float, str...) -> COULD NOT LOOK
     error_not_stated       an Execution with no `error` key           -> COULD NOT LOOK
@@ -93,7 +95,8 @@ __all__ = ["VENDOR", "ADAPTER_VERSION", "TABLE", "MAX_PAYLOAD_BYTES", "MAX_DEPTH
            "STANDING", "E2BRunAdapter", "E2B", "ingest", "standing_verdict", "rollup"]
 
 VENDOR = "e2b"
-ADAPTER_VERSION = "2"  # 2: an error string that decodes as JSON null is no error
+ADAPTER_VERSION = "2"  # 2: an Execution error of "" or of a string that decodes
+                       # as JSON null is no error
 #: A body over this is digested, never read (stdout can be large).
 MAX_PAYLOAD_BYTES = 8 << 20
 #: Results can carry chart and JSON data; room for that, refused past it.
@@ -293,7 +296,8 @@ def _execution(doc: dict, run: dict, problems: list) -> str:
     if "error" not in doc:
         return "error_not_stated"
     err = doc["error"]
-    if err is None:
+    if err is None or err == "":
+        # "" is no error, as on the command path (only the exact empty string)
         run["error_present"] = False
         return "execution_no_error"
     if isinstance(err, str):
