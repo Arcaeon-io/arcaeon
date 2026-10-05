@@ -29,6 +29,7 @@ command-line verb yet.
 | `mapping.rule` | `table`, `unknown_word`, `not_a_word` or `not_read` |
 | `subject` | `{name, sha256}` of what the vendor says it checked, or null |
 | `attestation` | `{status, checked_by_us, claimed}`: the vendor's own signature claim. `status` is `CLAIMED` or `NONE`, `checked_by_us` is `false` |
+| `signed_by_vendor` | always `false`: no adapter checks a vendor signature, so even a `CLAIMED` attestation leaves the row unsigned |
 | `vendor_payload_digest` | `sha256:raw-bytes:v1:<hex>` over the payload exactly as received |
 | `vendor_payload_bytes` | its length |
 | `received_at` | our clock when it arrived |
@@ -167,6 +168,17 @@ adapter (`arcaeon.connector.lakera_guard`, below), the Prisma AIRS adapter
 An adapter whose one payload becomes many rows (mcp-scan: one row per scanned
 tool) sets `one_row_per_payload = False` and builds its rows with `base_row`.
 `recheck` re-reads one-row adapters only; for the others it says COULD NOT LOOK.
+
+**Conformance.** Every new adapter must pass `tests/test_connector_conformance.py`.
+That one file finds the adapters in the registry (what `adapter_for` resolves),
+checks the set equals the modules this section names, and runs each through the
+same checks: every row has the keys above, a `relayed_verdict` in our three
+words and `signed_by_vendor: false`; the rollup is never VERIFIED; and hostile
+input (empty, not JSON, not UTF-8, 9 MiB, nested 10000 deep, null, a number, a
+list of 10000 empty objects, wrong-typed fields), through the adapter's own
+entry and through `import_verdict`, gives COULD NOT LOOK rows, never a
+traceback. Name the module here, register the adapter, and add its entry
+signature to the table in that file.
 
 ## OPA decision logs
 
@@ -632,7 +644,8 @@ The word, after trimming and casefolding:
 `true` and `allow` are left out on purpose: a boolean or a policy word says
 nothing about which way is a pass (see OPA above). When both `input_b64` and
 `input_sha256` are given and they differ, the row is BROKEN whatever the word,
-with `reported.reason` "claimed digest does not match the bytes", and
+with `reported.reason` "claimed digest does not match the bytes" and
+`mapping.rule` `digest_mismatch`, and
 `input_sha256` is the digest of the bytes. A row with no input, a vendor name
 that is missing or too long, or a digest or base64 that does not read is
 COULD NOT LOOK. A body that is empty, not UTF-8 JSON, carries a duplicate key,

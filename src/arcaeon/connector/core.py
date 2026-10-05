@@ -18,6 +18,8 @@ THE ROW (kind "check.verdict.relayed"), every key always present:
                          claim of a signature. status is "CLAIMED" or "NONE";
                          checked_by_us is False. Phase 1 never checks a vendor
                          signature, so it never says one is valid.
+    signed_by_vendor     False. Always: no adapter checks a vendor signature, so
+                         even a CLAIMED attestation leaves the row unsigned.
     vendor_payload_digest  "sha256:raw-bytes:v1:<hex>" over the bytes exactly as received
     vendor_payload_bytes   their length
     received_at          our clock when we received it (ISO 8601 UTC)
@@ -279,6 +281,7 @@ def relayed_row(adapter: Any, raw: Any = None, received_at: str | None = None) -
         "mapping": {"rule": "not_read"},
         "subject": None,
         "attestation": _attestation(None),
+        "signed_by_vendor": False,
         "vendor_payload_digest": digest_bytes(bytes(raw)) if raw_ok else None,
         "vendor_payload_bytes": len(raw) if raw_ok else None,
         "received_at": received_at if isinstance(received_at, str) else _now_iso(),
@@ -294,7 +297,19 @@ def mark_could_not_look(row: dict, looked_for: str, where: str, reason_word: str
 
 
 def _base(adapter: Any, received_at: str | None) -> dict:
-    return relayed_row(adapter, None, received_at)
+    """The adapter's own skeleton (`base_row`, so an adapter that adds keys to every
+    row adds them to an import_verdict row too), else the module skeleton. Either
+    way the row says signed_by_vendor False: nothing here checks a signature."""
+    row = None
+    if isinstance(adapter, VendorAdapter):
+        try:
+            row = adapter.base_row(None, received_at)
+        except Exception:  # noqa: BLE001 - a buggy adapter is a could-not-look, never a traceback
+            row = None
+    if not isinstance(row, dict):
+        row = relayed_row(adapter, None, received_at)
+    row["signed_by_vendor"] = False
+    return row
 
 
 def _cnl(row: dict, looked_for: str, reason_word: str, reason: str) -> dict:
