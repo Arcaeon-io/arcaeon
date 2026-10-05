@@ -1,0 +1,227 @@
+[
+  {
+    "labels": {
+      "app": "example-gateway",
+      "id": "00000000-0000-4000-8000-0000000000aa",
+      "version": "v1.0.0"
+    },
+    "decision_id": "00000000-0000-4000-8000-000000000000",
+    "bundles": {
+      "authz": {
+        "revision": "rev-synthetic-0001"
+      }
+    },
+    "path": "authz/allow",
+    "input": {
+      "method": "GET",
+      "path": "/docs/0",
+      "user": "user-a"
+    },
+    "requested_by": "192.0.2.10:50000",
+    "timestamp": "2026-10-04T11:00:00.000000Z",
+    "metrics": {
+      "timer_rego_query_eval_ns": 1000
+    },
+    "req_id": 0,
+    "result": true
+  },
+  {
+    "labels": {
+      "app": "example-gateway",
+      "id": "00000000-0000-4000-8000-0000000000aa",
+      "version": "v1.0.0"
+    },
+    "decision_id": "00000000-0000-4000-8000-000000000001",
+    "bundles": {
+      "authz": {
+        "revision": "rev-synthetic-0001"
+      }
+    },
+    "path": "authz/allow",
+    "input": {
+      "method": "DELETE",
+      "path": "/docs/1",
+      "user": "**REDACTED**"
+    },
+    "requested_by": "192.0.2.10:50000",
+    "timestamp": "2026-10-04T11:00:01.000000Z",
+    "metrics": {
+      "timer_rego_query_eval_ns": 1001
+    },
+    "req_id": 1,
+    "result": false,
+    "masked": [
+      "/input/user"
+    ]
+  },
+  {
+    "labels": {
+      "app": "example-gateway",
+      "id": "00000000-0000-4000-8000-0000000000aa",
+      "version": "v1.0.0"
+    },
+    "decision_id": "00000000-0000-4000-8000-000000000002",
+    "bundles": {
+      "authz": {
+        "revision": "rev-synthetic-0001"
+      }
+    },
+    "path": "authz/deny",
+    "input": {
+      "method": "GET",
+      "path": "/docs/2",
+      "user": "user-a"
+    },
+    "requested_by": "192.0.2.10:50000",
+    "timestamp": "2026-10-04T11:00:02.000000Z",
+    "metrics": {
+      "timer_rego_query_eval_ns": 1002
+    },
+    "req_id": 2,
+    "result": true
+  },
+  {
+    "labels": {
+      "app": "example-gateway",
+      "id": "00000000-0000-4000-8000-0000000000aa",
+      "version": "v1.0.0"
+    },
+    "decision_id": "00000000-0000-4000-8000-000000000003",
+    "bundles": {
+      "authz": {
+        "revision": "rev-synthetic-0001"
+      }
+    },
+    "path": "authz/deny",
+    "input": {
+      "method": "GET",
+      "path": "/docs/3",
+      "user": "user-a"
+    },
+    "requested_by": "192.0.2.10:50000",
+    "timestamp": "2026-10-04T11:00:03.000000Z",
+    "metrics": {
+      "timer_rego_query_eval_ns": 1003
+    },
+    "req_id": 3,
+    "result": false
+  },
+  {
+    "labels": {
+      "app": "example-gateway",
+      "id": "00000000-0000-4000-8000-0000000000aa",
+      "version": "v1.0.0"
+    },
+    "decision_id": "00000000-0000-4000-8000-000000000004",
+    "bundles": {
+      "authz": {
+        "revision": "rev-synthetic-0001"
+      }
+    },
+    "path": "authz/allow",
+    "input": {
+      "method": "GET",
+      "path": "/docs/4",
+      "user": "user-a"
+    },
+    "requested_by": "192.0.2.10:50000",
+    "timestamp": "2026-10-04T11:00:04.000000Z",
+    "metrics": {
+      "timer_rego_query_eval_ns": 1004
+    },
+    "req_id": 4,
+    "result": {
+      "allow": true
+    }
+  },
+  {
+    "labels": {
+      "app": "example-gateway",
+      "id": "00000000-0000-4000-8000-0000000000aa",
+      "version": "v1.0.0"
+    },
+    "decision_id": "00000000-0000-4000-8000-000000000005",
+    "bundles": {
+      "authz": {
+        "revision": "rev-synthetic-0001"
+      }
+    },
+    "path": "authz/allow",
+    "input": {
+      "method": "GET",
+      "path": "/docs/5",
+      "user": "user-a"
+    },
+    "requested_by": "192.0.2.10:50000",
+    "timestamp": "2026-10-04T11:00:05.000000Z",
+    "metrics": {
+      "timer_rego_query_eval_ns": 1005
+    },
+    "req_id": 5
+  },
+  {
+    "labels": {
+      "app": "example-gateway",
+      "id": "00000000-0000-4000-8000-0000000000aa",
+      "version": "v1.0.0"
+    },
+    "decision_id": "00000000-0000-4000-8000-000000000006",
+    "bundles": {
+      "authz": {
+        "revision": "rev-synthetic-0001"
+      }
+    },
+    "path": "authz/allow",
+    "input": {
+      "method": "GET",
+      "path": "/docs/6",
+      "user": "user-a"
+    },
+    "requested_by": "192.0.2.10:50000",
+    "timestamp": "2026-10-04T11:00:06.000000Z",
+    "metrics": {
+      "timer_rego_query_eval_ns": 1006
+    },
+    "req_id": 6,
+    "erased": [
+      "/result"
+    ]
+  },
+  {
+    "labels": {
+      "app": "example-gateway",
+      "id": "00000000-0000-4000-8000-0000000000aa",
+      "version": "v1.0.0"
+    },
+    "decision_id": "00000000-0000-4000-8000-000000000007",
+    "bundles": {
+      "authz": {
+        "revision": "rev-synthetic-0001"
+      }
+    },
+    "path": "reports/summary",
+    "input": {
+      "method": "GET",
+      "path": "/docs/7",
+      "user": "user-a"
+    },
+    "requested_by": "192.0.2.10:50000",
+    "timestamp": "2026-10-04T11:00:07.000000Z",
+    "metrics": {
+      "timer_rego_query_eval_ns": 1007
+    },
+    "req_id": 7,
+    "result": {
+      "count": 3
+    },
+    "request_context": {
+      "http": {
+        "headers": {
+          "x-request-id": [
+            "req-7"
+          ]
+        }
+      }
+    }
+  }
+]

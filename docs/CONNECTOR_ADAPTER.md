@@ -9,8 +9,8 @@ can then be exported as an in-toto Statement that tools outside Arcaeon can read
 
 This is not the MCP connector (`arcaeon mcp`, the `arcaeon.mcp` package). It is
 the library `arcaeon.connector`, phase 1: the adapter shape, one mock vendor
-(`mockscan`), the mcp-scan adapter on the same base class, and no command-line
-verb yet.
+(`mockscan`), the mcp-scan adapter and the OPA decision-log adapter on the same
+base class, and no command-line verb yet.
 
 ## What a relayed row says
 
@@ -146,8 +146,9 @@ a key twice, or a value outside our three words raises `TypeError`.
 ## One base class
 
 Every adapter subclasses `VendorAdapter` in `arcaeon.connector.core`: the mock
-vendor (`arcaeon.connector.mockscan`) and the mcp-scan tool-hash adapter
-(`arcaeon.prove.mcp_scan`, see [MCP_SCAN.md](MCP_SCAN.md)). The base owns what
+vendor (`arcaeon.connector.mockscan`), the mcp-scan tool-hash adapter
+(`arcaeon.prove.mcp_scan`, see [MCP_SCAN.md](MCP_SCAN.md)) and the OPA
+decision-log adapter (`arcaeon.connector.opa`, below). The base owns what
 they share:
 
 - the row skeleton (`base_row`), relayed, `checked_by_us: false`, attestation
@@ -160,6 +161,26 @@ they share:
 An adapter whose one payload becomes many rows (mcp-scan: one row per scanned
 tool) sets `one_row_per_payload = False` and builds its rows with `base_row`.
 `recheck` re-reads one-row adapters only; for the others it says COULD NOT LOOK.
+
+## OPA decision logs
+
+`arcaeon.connector.opa.ingest(body, allow_paths=..., deny_paths=...)` reads the
+body OPA's decision-log plugin POSTs (a JSON array of decision events, gzipped
+or plain, as the OPA Decision Logs page documents it) into one row per event:
+`vendor_id` is the `decision_id`, `subject` is `opa:<path>` with the
+`sha256:jcs:v1` digest of the input, and one adapter key `decision` holds the
+path, timestamp, labels id and version, bundle revisions, erased and masked
+pointers, and digests of the input and result. Client addresses, headers,
+metrics and the input and result themselves are not copied.
+
+A policy result is not a verdict word: `true` at an allow rule is a pass, at a
+deny rule a refusal. So only a boolean result at a path the caller declared in
+`allow_paths` or `deny_paths` maps (`allowed` VERIFIED, `denied` BROKEN). An
+undeclared path, a non-boolean result (including the string `"true"`), an
+undefined decision (no result) and an erased or masked result all read COULD NOT
+LOOK. A gzip body that is truncated, has trailing bytes or inflates past 32 MiB
+is one COULD NOT LOOK row. Decision logs are unsigned: every row is reported by
+the sender. `recheck` says COULD NOT LOOK for these rows; re-run `ingest`.
 
 ## The sha256:jcs:v1 digest
 
