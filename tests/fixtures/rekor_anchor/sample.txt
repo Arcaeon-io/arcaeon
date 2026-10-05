@@ -1,0 +1,1 @@
+test-only sample file for the rekor anchor fixtures
