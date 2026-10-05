@@ -34,13 +34,16 @@ There is no third word: this path never refunds (D068, docs/X402.md "BROKEN
 is a hold, not a refund").
 
 BROKEN: HOLD, and a dispute packet (arcaeon.prove.dispute_packet) is made
-and kept on the check. COULD NOT LOOK: HOLD, no dispute packet. With a deal
-id (which needs a ledger, D066) the gate writes its evidence pack and a
-gate.evidence row on either refusal; the settlement response as received goes
-into the pack, and on BROKEN the packet too (dispute-packet.json and .md).
-An exception that escapes gate.decide is COULD NOT LOOK, HOLD, no pack from
-this module, the reason naming only the exception's type (gate.decide itself
-swallows one from the pack hook, and its own verdict stands).
+and kept on the check. COULD NOT LOOK: HOLD, and with a deal id a dispute
+packet too, its verdict recorded as COULD NOT LOOK (never BROKEN) and its
+"what failed" empty (A16, docs/X402.md); without a deal id, no packet. With
+a deal id (which needs a ledger, D066) the gate writes its evidence pack and
+a gate.evidence row on either refusal; the settlement response as received
+goes into the pack, and the packet too (dispute-packet.json and .md).
+An exception that escapes gate.decide is COULD NOT LOOK, HOLD, no pack and
+no packet from this module (there is no gate record to render), the reason
+naming only the exception's type (gate.decide itself swallows one from the
+pack hook, and its own verdict stands).
 
 THE MOCK RAIL. `MockEscrowRail` is in memory and test-only: nothing is held
 or moved, there is no network and no key. It has no refund method. A refund
@@ -298,7 +301,8 @@ def check(response: Any, file_bytes: bytes, audience: str | None, action: str, *
                 except Exception:  # noqa: BLE001  the refusal stands either way
                     pass
             ev = json.loads((out / "evidence.json").read_text(encoding="utf-8"))
-            if ev.get("verdict") == V.BROKEN:
+            # A16: a pack exists only with a deal id, so money is held either way
+            if ev.get("verdict") in (V.BROKEN, V.COULD_NOT_LOOK):
                 made["packet"] = _dispute_pack(out)
 
         try:
@@ -308,8 +312,11 @@ def check(response: Any, file_bytes: bytes, audience: str | None, action: str, *
         except Exception as e:  # noqa: BLE001  a crash is a HOLD, never a traceback
             d = _crashed(e, action, audience, signers, deal, purpose)
         # BROKEN is a HOLD with a dispute packet; made while the body still exists
+        # COULD NOT LOOK with the gate's own evidence pack (a deal id) gets one too,
+        # its verdict recorded as COULD NOT LOOK, never BROKEN (A16)
         packet, packet_error = None, None
-        if d.verdict == V.BROKEN and not d.allowed:
+        if not d.allowed and (d.verdict == V.BROKEN
+                              or (d.verdict == V.COULD_NOT_LOOK and d.evidence)):
             packet, packet_error = made.get("packet") or _dispute(d)
     settled = isinstance(obj, dict) and obj.get("success") is True
     # R3-1: a release moves escrowed money whatever the action word, so it needs
@@ -394,8 +401,8 @@ class MockEscrowRail:
     """In-memory, test-only escrow. MOCK RAIL: nothing is held or moved, no
     network, no keys. A hold is RELEASED only on a check whose `release` is
     True and that was run with this hold's deal id; anything else leaves it
-    HELD and logs why. A BROKEN check keeps the hold and records its dispute
-    packet. There is no refund method: a refund comes only from the escrow
+    HELD and logs why. A refusal with a dispute packet (BROKEN, or COULD NOT
+    LOOK with a deal id) keeps the hold and records the packet. There is no refund method: a refund comes only from the escrow
     rule's own timer or dispute outcome (docs/X402.md), never from here."""
 
     def __init__(self) -> None:
@@ -433,7 +440,7 @@ class MockEscrowRail:
         elif isinstance(result, X402Check):
             if result.evidence:
                 h["evidence"] = result.evidence
-            if result.dispute:                  # BROKEN: hold, keep the packet, no refund
+            if result.dispute:                  # a refusal's packet: hold, keep it, no refund
                 h["dispute"] = result.dispute
                 self.log.append({"deal": deal, "event": "dispute", "state": HELD,
                                  "verdict": result.verdict, "evidence": result.evidence})

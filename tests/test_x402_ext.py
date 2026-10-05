@@ -123,8 +123,8 @@ def test_stripped_extension_is_could_not_look_and_holds(tmp_path):
         assert c.release is False and c.verdict == V.COULD_NOT_LOOK
         assert c.extension == "missing" and c.reason.startswith("hold")
         # D066 on the stack: a COULD NOT LOOK refusal with a deal id writes a pack too
-        # (no dispute packet: that is BROKEN only)
-        assert c.evidence is not None and c.dispute is None
+        # and, A16, the dispute packet with the verdict recorded as COULD NOT LOOK
+        assert c.evidence is not None and c.dispute["verdict"] == V.COULD_NOT_LOOK
     rail = X.MockEscrowRail()
     rail.hold("d-x402-1", "0.01", "USDC")
     assert rail.settle("d-x402-1", c)["released"] is False
@@ -315,16 +315,40 @@ def test_broken_without_a_deal_id_still_has_a_packet(tmp_path):
     assert c.dispute["handed"]["sha256"]                        # hashed while the body existed
 
 
-def test_could_not_look_holds_no_packet_no_refund(tmp_path):
+def test_could_not_look_with_a_deal_holds_with_a_packet_that_says_could_not_look(tmp_path):
+    """A16: money is held on a named deal either way, so COULD NOT LOOK writes
+    the dispute packet too, as BROKEN does. The packet records COULD NOT LOOK,
+    never BROKEN, and lists nothing as failed: it asserts no finding."""
+    from arcaeon.prove import dispute_packet as P
+    from arcaeon.prove import gate as G
     paid, did = _paid(tmp_path)
     del paid["extensions"]["arcaeon-labeled-exchange"]
     rail = RefundTrapRail()
     rail.hold("d-x402-1", "0.01", "USDC")
     c = _check(paid, BODY, did, tmp_path)
-    assert c.verdict == V.COULD_NOT_LOOK and c.escrow == "HOLD" and c.dispute is None
+    assert c.verdict == V.COULD_NOT_LOOK and c.escrow == "HOLD" and c.release is False
+    assert c.dispute is not None and c.dispute_error is None
+    assert c.dispute["kind"] == P.KIND and c.dispute["verdict"] == V.COULD_NOT_LOOK
+    assert c.dispute["failed"] == [] and c.dispute["not_checked"]
+    ev = Path(c.evidence)
+    on_disk = json.loads((ev / X.PACKET_JSON).read_text(encoding="utf-8"))
+    assert on_disk["verdict"] == V.COULD_NOT_LOOK and V.BROKEN not in on_disk["verdict"]
+    md = (ev / X.PACKET_MD).read_text(encoding="utf-8")
+    assert "**COULD NOT LOOK**" in md and "**BROKEN**" not in md
+    # the packet is in the pack before its gate.evidence row: the digest still matches
+    assert G.verify_evidence_pack(ev, c.decision.chain_row)["verdict"] == V.VERIFIED
     for _ in range(3):                                          # held, however often settled
         assert rail.settle("d-x402-1", c)["state"] == X.HELD
-    assert rail.refunds == [] and rail.holds["d-x402-1"]["dispute"] is None
+    assert rail.refunds == [] and rail.holds["d-x402-1"]["dispute"]["verdict"] == V.COULD_NOT_LOOK
+    assert c.reason.startswith("hold")
+
+
+def test_could_not_look_without_a_deal_has_no_packet(tmp_path):
+    paid, did = _paid(tmp_path)
+    del paid["extensions"]["arcaeon-labeled-exchange"]
+    c = _check(paid, BODY, did, tmp_path, deal=None)
+    assert c.verdict == V.COULD_NOT_LOOK and c.escrow == "HOLD"
+    assert c.evidence is None and c.dispute is None
 
 
 def test_verified_path_unchanged(tmp_path):
