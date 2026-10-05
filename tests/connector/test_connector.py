@@ -28,6 +28,7 @@ from arcaeon.mcp import __version__  # noqa: E402
 from arcaeon.mcp.server import (  # noqa: E402
     DEAL_TOOLS,
     EVIDENCE_TOOLS,
+    EXCHANGE_TOOLS,
     LEDGER_TOOLS,
     MANDATE_TOOLS,
     PAID_TOOLS,
@@ -105,7 +106,7 @@ def test_one_install_exposes_the_full_tool_list():
     alone passes if a tool is silently renamed.
     """
     names = _tool_names()
-    assert len(names) == len(LEDGER_TOOLS) + len(VET_TOOLS) + len(WITNESS_TOOLS) + len(DEAL_TOOLS) + len(MANDATE_TOOLS) + len(SECOND_READ_TOOLS) + len(EVIDENCE_TOOLS) + 1
+    assert len(names) == len(LEDGER_TOOLS) + len(VET_TOOLS) + len(WITNESS_TOOLS) + len(DEAL_TOOLS) + len(MANDATE_TOOLS) + len(SECOND_READ_TOOLS) + len(EVIDENCE_TOOLS) + len(EXCHANGE_TOOLS) + 1
     assert names == sorted([
         "arcaeon_status",
         "deal_commit",
@@ -113,6 +114,7 @@ def test_one_install_exposes_the_full_tool_list():
         "deal_mandate",
         "evidence_pack_build",
         "evidence_pack_verify",
+        "exchange_pair_reconcile",
         "ledger_append",
         "ledger_declare_break",
         "ledger_prove_my_conduct",
@@ -437,7 +439,7 @@ def test_the_installed_entry_point_serves_over_real_stdio(tmp_path):
         proc.kill()
         proc.wait(timeout=15)
 
-    assert len(names) == len(LEDGER_TOOLS) + len(VET_TOOLS) + len(WITNESS_TOOLS) + len(DEAL_TOOLS) + len(MANDATE_TOOLS) + len(SECOND_READ_TOOLS) + len(EVIDENCE_TOOLS) + 1, names
+    assert len(names) == len(LEDGER_TOOLS) + len(VET_TOOLS) + len(WITNESS_TOOLS) + len(DEAL_TOOLS) + len(MANDATE_TOOLS) + len(SECOND_READ_TOOLS) + len(EVIDENCE_TOOLS) + len(EXCHANGE_TOOLS) + 1, names
     assert appended["ok"] is True, appended
     assert "buy.stripe.com" in gated_text, gated_text
 

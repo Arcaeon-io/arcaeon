@@ -7,7 +7,8 @@
                            --key SEEDFILE [--log PATH]
     arcaeon exchange bind --account acct:NAME@arcaeon.io --key SEEDFILE [--log PATH]
     arcaeon exchange pair A.jsonl B.jsonl [--owner-a DID] [--owner-b DID] [--json]
-                          [--strict]
+                          [--strict] [--late-after SECONDS]
+    arcaeon exchange packet A.jsonl B.jsonl --exchange ID [--json] [--out DIR]
 
 After an exchange each party writes ONE row under its own account key into its
 own hash-chained log (arcaeon.record.ledger.Ledger.append, the same writer the
@@ -69,6 +70,12 @@ A row that said BROKEN and was later superseded by a row with another word is
 RETRACTED: the current row is read, and the retraction stays visible as a mark
 (`retracted` on the head, in the pair and in the tally). Never erased.
 
+THE DISAGREEMENT CLASSES (L3-RECON). On top of the status, pair() gives each
+exchange that disagrees one word from DISAGREEMENTS (missing, mismatched,
+retracted, late, read in that precedence) and a one-sentence reason; see
+classify() and docs/EXCHANGE.md. There is no separate retraction row: the
+retraction is the one above (a BROKEN superseded by another word).
+
 Never raises from pair(): an unreadable or hostile log is COULD NOT LOOK.
 The spec and its limits: docs/EXCHANGE.md.
 """
@@ -89,7 +96,8 @@ from arcaeon.record.row import canon_json, digest_json, file_pin, loads_strict
 __all__ = ["KIND", "ROW_VERSION", "SIG_PAYLOAD_TYPE", "REACTIONS", "SIGNED_FIELDS",
            "BIND_KIND", "BIND_PAYLOAD_TYPE", "BIND_SIGNED", "build_binding", "check_binding",
            "bind",
-           "PAIR_KIND", "STATUSES", "ACCOUNT_ID_RE", "ACCOUNT_ID_FORM", "ExchangeError",
+           "PAIR_KIND", "STATUSES", "DISAGREEMENTS", "DEFAULT_LATE_AFTER",
+           "DOES_NOT_PROVE_ITEMS", "classify", "ACCOUNT_ID_RE", "ACCOUNT_ID_FORM", "ExchangeError",
            "text_ok", "is_did", "is_account_id", "is_counterparty_id", "signed_fields",
            "signing_bytes", "row_digest", "build_row", "react", "check_row", "read_side",
            "latest_heads", "pair_exchange", "pair", "main"]
@@ -112,6 +120,16 @@ DEFAULT_LOG = "exchange.jsonl"
 
 STATUSES = ("clean", "mismatch", "not_verified", "missing", "broken")
 
+#: The four disagreement classes (L3-RECON), in precedence order: an exchange
+#: that fits more than one carries the first. Read by pair() on top of the
+#: status; pair_exchange (which the tally calls) does not carry them.
+DISAGREEMENTS = ("missing", "mismatched", "late", "retracted")
+#: --late-after default, in seconds: one day. `at` is each signer's own clock
+#: and a reaction is often written by a scheduled job after delivery, so a day
+#: separates "answered in the same cycle" from "answered after the fact"
+#: without marking clock drift or a nightly batch as late.
+DEFAULT_LATE_AFTER = 86400
+
 PROVES = ("each row was written by the key that owns its log, in the order the chain "
           "records, and says what that party said about which bytes and when")
 DOES_NOT_PROVE = ("that the file is true or safe (two clean rows mean both parties said "
@@ -119,6 +137,17 @@ DOES_NOT_PROVE = ("that the file is true or safe (two clean rows mean both parti
                   "colluding parties write two clean rows), what either party meant, that "
                   "a key belongs to who it claims, or that a log was not truncated (pin "
                   "its head outside your control)")
+#: The same limits as items, for a page that lists them (the pair dispute packet).
+DOES_NOT_PROVE_ITEMS = (
+    "That the file is true or safe: two clean rows mean both parties said VERIFIED about "
+    "the same bytes, not that the bytes say anything true.",
+    "That the parties did not collude: two parties who agree to lie write two clean rows.",
+    "What either party meant: a DISPUTED reason is the disputer's sentence.",
+    "Who holds a key: a did:key is a key, not a person or a company.",
+    "That a log was not truncated or re-minted: pin each log's head outside your control.",
+    "The at time: it is the writer's clock, signed, not witnessed. A late class is read "
+    "from those two clocks.",
+)
 
 #: The arcaeon.io account id form (TE-41), the one definition. See the module doc.
 ACCOUNT_ID_FORM = "acct:NAME@arcaeon.io"
@@ -628,6 +657,71 @@ def pair_exchange(eid: str, a: dict | None, b: dict | None, own_a, own_b,
     return ex
 
 
+def _late_window(late_after: Any) -> int:
+    if isinstance(late_after, bool) or not isinstance(late_after, int) or late_after < 0:
+        raise ValueError(f"late_after must be a whole number of seconds, 0 or more "
+                         f"(got {late_after!r})")
+    return late_after
+
+
+def _when(row: dict | None) -> datetime | None:
+    try:
+        return datetime.strptime(row["at"], _TS_FMT).replace(tzinfo=timezone.utc)
+    except (TypeError, KeyError, ValueError):
+        return None
+
+
+def _short(field: str, v: Any) -> str:
+    s = str(v)
+    return s[:12] + "..." if field == "file_sha256" and len(s) > 12 else s
+
+
+def classify(ex: dict, a: dict | None, b: dict | None, *,
+             late_after: int = DEFAULT_LATE_AFTER) -> tuple[str | None, str | None, str | None]:
+    """The disagreement class of one lined-up exchange (pair_exchange's dict and
+    the two head rows): (word, one-sentence reason, note). word is one of
+    DISAGREEMENTS, or None when the two sides agree, or when the status is
+    broken (a record that does not check is not read for a disagreement).
+    Precedence: missing, mismatched, retracted, late. note is set when the
+    late class could not be read (no comparable `at` on both rows).
+    ValueError on a bad late_after."""
+    late_after = _late_window(late_after)
+    status = ex.get("status")
+    if status == "broken":
+        return None, None, None
+    if status == "missing" or a is None or b is None:
+        gone, has, row = ("a", "b", b) if a is None else ("b", "a", a)
+        said = f" (its row says {row['reaction']} at {row['at']})" if row else ""
+        return ("missing", f"log {gone} has no record of this exchange; log {has} "
+                           f"does{said}.", None)
+    differs = list(ex.get("differs") or [])
+    if differs:
+        parts = []
+        for f in differs:
+            if f == "counterparty":
+                parts.append("counterparty (each side names a party the other log is not)")
+            else:
+                parts.append(f"{f} (a {_short(f, a.get(f))}, b {_short(f, b.get(f))})")
+        what = "this field differs" if len(parts) == 1 else "these fields differ"
+        return "mismatched", f"both logs have it, but {what}: {'; '.join(parts)}.", None
+    if ex.get("retracted"):
+        who = " and ".join(ex["retracted"])
+        return ("retracted", f"log {who} retracted an earlier BROKEN for this exchange "
+                             f"(superseded; the current rows agree on {a['reaction']}); the "
+                             f"retracted row stays in the log.", None)
+    ta, tb = _when(a), _when(b)
+    if ta is None or tb is None:
+        return None, None, ("late not read: the two rows carry no comparable at time, so "
+                            "this exchange cannot be late")
+    gap = int(abs((tb - ta).total_seconds()))
+    if gap > late_after:
+        late, early = (("b", b), ("a", a)) if tb > ta else (("a", a), ("b", b))
+        return ("late", f"both agree on {a['reaction']}, but log {late[0]}'s record time "
+                        f"({late[1]['at']}) trails log {early[0]}'s ({early[1]['at']}) by "
+                        f"{gap} s, past the {late_after} s window.", None)
+    return None, None, None
+
+
 def _hold_to_accounts(r: dict, svc: dict, sa: dict, sb: dict, acc_a: set, acc_b: set,
                       broken: list, dropped: dict) -> tuple[set, set]:
     """L3-02: an account a log binds pairs only if the account service confirms it."""
@@ -646,7 +740,8 @@ def _hold_to_accounts(r: dict, svc: dict, sa: dict, sb: dict, acc_a: set, acc_b:
 
 
 def pair(log_a: str | Path, log_b: str | Path, *, owner_a: str | None = None,
-         owner_b: str | None = None, accounts: Any = None, account_keys: Any = ()) -> dict:
+         owner_b: str | None = None, accounts: Any = None, account_keys: Any = (),
+         late_after: int = DEFAULT_LATE_AFTER) -> dict:
     """Read two parties' reaction logs and line their rows up by exchange_id.
 
     verdict: BROKEN if either chain fails, any reaction row is BROKEN (bad
@@ -658,10 +753,17 @@ def pair(log_a: str | Path, log_b: str | Path, *, owner_a: str | None = None,
     missing / broken; DISPUTED rows are listed under `claims`, never as a
     status. accounts / account_keys: hold each account binding to the account
     service (account_id.load_service); without them `account_service` says it
-    was not consulted. Never raises."""
+    was not consulted. Each exchange also carries `disagreement` (one of
+    DISAGREEMENTS, or None) and `disagreement_reason`; `disagreements` counts
+    them and `late_after` is the window used. Never raises on what it reads;
+    a late_after that is not a whole number of seconds >= 0 is a ValueError
+    (the caller's bug, before anything is read)."""
+    late_after = _late_window(late_after)
     r: dict[str, Any] = {"kind": PAIR_KIND, "verdict": None, "reason": None,
                          "logs": {}, "exchanges": [], "claims": [], "retracted": 0,
                          "counts": {s: 0 for s in STATUSES}, "findings": [],
+                         "disagreements": {w: 0 for w in DISAGREEMENTS},
+                         "late_after": late_after,
                          "proves": PROVES, "does_not_prove": DOES_NOT_PROVE}
     try:
         from arcaeon.prove import account_id as A
@@ -673,10 +775,11 @@ def pair(log_a: str | Path, log_b: str | Path, *, owner_a: str | None = None,
                 r.update({"verdict": V.COULD_NOT_LOOK, "reason": why,
                           **V.could_not_look("the accounts file", str(accounts), "unreadable", why)})
                 return r
-        return _pair(r, Path(log_a), Path(log_b), owner_a, owner_b, svc)
+        return _pair(r, Path(log_a), Path(log_b), owner_a, owner_b, svc, late_after)
     except Exception as e:  # noqa: BLE001  never a traceback, never a green
         r.update({"verdict": V.COULD_NOT_LOOK, "exchanges": [], "claims": [], "retracted": 0,
                   "counts": {s: 0 for s in STATUSES},
+                  "disagreements": {w: 0 for w in DISAGREEMENTS},
                   "reason": f"the check could not finish ({type(e).__name__})",
                   **V.could_not_look("a finished pair check", f"{log_a}, {log_b}",
                                      "unreadable",
@@ -686,7 +789,8 @@ def pair(log_a: str | Path, log_b: str | Path, *, owner_a: str | None = None,
         return r
 
 
-def _pair(r: dict, pa: Path, pb: Path, owner_a, owner_b, svc=None) -> dict:
+def _pair(r: dict, pa: Path, pb: Path, owner_a, owner_b, svc=None,
+          late_after: int = DEFAULT_LATE_AFTER) -> dict:
     for nm, own in (("a", owner_a), ("b", owner_b)):
         if own is not None and not is_did(own):
             r.update({"verdict": V.COULD_NOT_LOOK,
@@ -732,6 +836,12 @@ def _pair(r: dict, pa: Path, pb: Path, owner_a, owner_b, svc=None) -> dict:
             ex = pair_exchange(eid, ha.get(eid), hb.get(eid), sa["owner"], sb["owner"],
                                 ba.get(eid, []), bb.get(eid, []), ids_a, ids_b, shared,
                                 dropped)
+            word, why, note = classify(ex, ha.get(eid), hb.get(eid), late_after=late_after)
+            ex["disagreement"], ex["disagreement_reason"] = word, why
+            if note:
+                ex["findings"].append(note)
+            if word:
+                r["disagreements"][word] += 1
             r["exchanges"].append(ex)
             r["counts"][ex["status"]] += 1
             r["retracted"] += len(ex["retracted"])
@@ -776,7 +886,11 @@ USAGE = """usage: arcaeon exchange react --exchange ID --counterparty ID --file 
                               [--log PATH]
        arcaeon exchange pair A.jsonl B.jsonl [--owner-a DID] [--owner-b DID]
                               [--json] [--strict]
-                              [--accounts FILE --account-key DID...]"""
+                              [--accounts FILE --account-key DID...]
+                              [--late-after SECONDS]
+       arcaeon exchange packet A.jsonl B.jsonl --exchange ID
+                              [--owner-a DID] [--owner-b DID]
+                              [--late-after SECONDS] [--json] [--out DIR]"""
 
 HELP = USAGE + """
 
@@ -800,6 +914,21 @@ absent), broken (a row for it is BROKEN). DISPUTED claims are listed apart.
 A BROKEN later superseded by another word is listed as retracted, never
 erased.
 
+Each exchange that disagrees also carries one class word, with a one-sentence
+reason (precedence in this order): missing (one log has no record of it),
+mismatched (both have it, a field differs; the reason names it), retracted (a
+side superseded an earlier BROKEN for it), late (both agree, but one row's
+`at` trails the other's by more than --late-after SECONDS, default 86400: one
+day). An agreeing exchange carries none; a broken one carries none (its record
+does not check). The counts are under `disagreements` and on the first line.
+
+packet reads both logs (the same reader as pair) and writes one exchange's
+dispute packet: both sides' rows, the status, the class word and the field
+that differs, DISPUTED claims, and the limits. File names only. Markdown by
+default, --json for the JSON, --out DIR writes dispute-packet.md and .json.
+Exit 0 written, 2 bad usage or nothing to dispute (the exchange agrees), 3
+COULD NOT LOOK (a log cannot be read, or the exchange is in neither log).
+
 bind appends one signed row (kind exchange.binding) to the key's own log:
 this did:key binds the account id acct:NAME@arcaeon.io. An account id pairs
 ONLY through such a row in the other party's log, signed by that log's key; a
@@ -817,7 +946,9 @@ Exit codes: react 0 written, 2 refused or bad usage, 3 the file is not there.
 bind 0 written, 2 refused or bad usage.
 pair 0 VERIFIED (both logs check; read the statuses), 1 BROKEN, 3 COULD NOT
 LOOK, 2 bad usage. pair --strict: also 1 when both logs check but any
-exchange is mismatch or missing (not_verified stays 0; 3 and 2 unchanged). Spec and limits: docs/EXCHANGE.md."""
+exchange is mismatch or missing (not_verified stays 0; 3 and 2 unchanged).
+late and retracted are not marks under --strict: both sides agree on the
+current record. Spec and limits: docs/EXCHANGE.md."""
 
 
 class _Usage(Exception):
@@ -829,7 +960,19 @@ _REACT_SPEC = {"--exchange": "value", "--counterparty": "value", "--file": "valu
                "--key": "value", "--log": "value"}
 _BIND_SPEC = {"--account": "value", "--key": "value", "--log": "value"}
 _PAIR_SPEC = {"--owner-a": "value", "--owner-b": "value", "--json": "bool",
-              "--strict": "bool", "--accounts": "value", "--account-key": "list"}
+              "--strict": "bool", "--accounts": "value", "--account-key": "list",
+              "--late-after": "value"}
+_PACKET_SPEC = {"--exchange": "value", "--owner-a": "value", "--owner-b": "value",
+                "--late-after": "value", "--json": "bool", "--out": "value"}
+
+
+def _late_flag(o: dict) -> int:
+    v = o.get("--late-after")
+    if v is None:
+        return DEFAULT_LATE_AFTER
+    if not re.fullmatch(r"[0-9]{1,12}", v):
+        raise _Usage(f"--late-after must be a whole number of seconds, 0 or more (got {v!r})")
+    return int(v)
 
 
 def _react_cli(argv: list[str]) -> int:
@@ -887,7 +1030,11 @@ def _bind_cli(argv: list[str]) -> int:
 
 
 def _render(r: dict) -> str:
-    lines = [f"{r['verdict']}: {r['reason']}"]
+    d = r.get("disagreements") or {}
+    first = f"{r['verdict']}: {r['reason']}"
+    if r.get("verdict") == V.VERIFIED and d:
+        first += "; disagreements: " + ", ".join(f"{d.get(w, 0)} {w}" for w in DISAGREEMENTS)
+    lines = [first]
     for nm, s in r.get("logs", {}).items():
         lines.append(f"log {nm}: {s.get('verdict')} {s.get('log')} owner {s.get('owner')} "
                      f"({s.get('owner_from')})"
@@ -896,7 +1043,9 @@ def _render(r: dict) -> str:
             lines.append(f"  BROKEN row line {br['line']}: {br['finding']}")
     for ex in r.get("exchanges", []):
         tail = "; ".join(ex["findings"])
-        lines.append(f"{ex['exchange_id']}: {ex['status']}" + (f" ({tail})" if tail else ""))
+        cls = (f" [{ex['disagreement']}: {ex['disagreement_reason']}]"
+               if ex.get("disagreement") else "")
+        lines.append(f"{ex['exchange_id']}: {ex['status']}{cls}" + (f" ({tail})" if tail else ""))
     for c in r.get("claims", []):
         lines.append(f"claim DISPUTED by {c['side']} on {c['exchange_id']} at {c['at']}"
                      f"{'' if c['current'] else ' (superseded)'}: {c['reason']}")
@@ -923,8 +1072,10 @@ def _pair_cli(argv: list[str]) -> int:
             raise _Usage(f"{flag} must be an Ed25519 did:key")
     if ("--accounts" in o) != ("--account-key" in o):
         raise _Usage("--accounts and --account-key go together")
+    late_after = _late_flag(o)
     r = pair(pos[0], pos[1], owner_a=o.get("--owner-a"), owner_b=o.get("--owner-b"),
-             accounts=o.get("--accounts"), account_keys=o.get("--account-key", ()))
+             accounts=o.get("--accounts"), account_keys=o.get("--account-key", ()),
+             late_after=late_after)
     if o.get("--json"):
         print(json.dumps(r, indent=1, ensure_ascii=True))     # F11: a lone surrogate prints
     else:
@@ -936,6 +1087,43 @@ def _pair_cli(argv: list[str]) -> int:
               f"{r['counts']['missing']} missing; exit {V.EXIT_BAD}", file=sys.stderr)
         return V.EXIT_BAD
     return code
+
+
+def _packet_cli(argv: list[str]) -> int:
+    from arcaeon.prove import dispute_packet as P
+    from arcaeon.prove.envelope import _parse, _Usage as _EUsage
+    try:
+        pos, o = _parse(argv, _PACKET_SPEC)
+    except _EUsage as e:
+        raise _Usage(str(e)) from None
+    if len(pos) != 2:
+        raise _Usage("packet takes two logs: A.jsonl B.jsonl")
+    if not o.get("--exchange"):
+        raise _Usage("packet needs --exchange ID")
+    for flag in ("--owner-a", "--owner-b"):
+        if flag in o and not is_did(o[flag]):
+            raise _Usage(f"{flag} must be an Ed25519 did:key")
+    late_after = _late_flag(o)
+    try:
+        p = P.from_pair(pos[0], pos[1], o["--exchange"], owner_a=o.get("--owner-a"),
+                        owner_b=o.get("--owner-b"), late_after=late_after)
+    except P.NothingToDispute as e:
+        print(f"arcaeon exchange packet: {e}", file=sys.stderr)
+        return V.EXIT_USAGE
+    except P.PacketError as e:
+        print(f"arcaeon exchange packet: {V.COULD_NOT_LOOK}: {e}", file=sys.stderr)
+        return V.EXIT_COULD_NOT_LOOK
+    md, js = P.render_markdown(p), P.render_json(p)
+    if o.get("--out"):
+        out = Path(o["--out"])
+        out.mkdir(parents=True, exist_ok=True)
+        for name, text in (("dispute-packet.md", md), ("dispute-packet.json", js)):
+            (out / name).write_text(text, encoding="utf-8", newline="\n")
+            print(out / name)
+    else:
+        text = js if o.get("--json") else md
+        sys.stdout.write(text.encode("utf-8", "backslashreplace").decode("utf-8"))
+    return V.EXIT_GOOD
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -951,7 +1139,9 @@ def main(argv: list[str] | None = None) -> int:
             return _pair_cli(rest)
         if sub == "bind":
             return _bind_cli(rest)
-        raise _Usage(f"unknown subcommand {sub!r} (react, bind or pair)")
+        if sub == "packet":
+            return _packet_cli(rest)
+        raise _Usage(f"unknown subcommand {sub!r} (react, bind, pair or packet)")
     except _Usage as e:
         print(f"arcaeon exchange: {e}\n{USAGE}", file=sys.stderr)
         return V.EXIT_USAGE
