@@ -153,9 +153,9 @@ def test_an_absolute_path_in_a_path_field_still_refuses_seal(w, monkeypatch, cap
 
 
 def test_absolute_path_guard_reads_path_fields_only():
-    t = {"where": "/home/u/groups.json", "chains": [{"log": "a.jsonl", "reason": "/var/log/x/"}],
+    t = {"where": "/srv/u/groups.json", "chains": [{"log": "a.jsonl", "reason": "/var/log/x/"}],
          "ids": [{"chains": ["C:\\logs\\a.jsonl"], "claims": [{"reason": "/var/log/x/"}]}]}
-    assert TC._absolute_strings(t) == ["/home/u/groups.json", "C:\\logs\\a.jsonl"]
+    assert TC._absolute_strings(t) == ["/srv/u/groups.json", "C:\\logs\\a.jsonl"]
     assert TC._absolute_strings({"reason": "/etc/x/", "findings": ["C:\\x"]}) == []
 
 
