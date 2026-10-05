@@ -1,0 +1,20 @@
+{
+  "~/.cursor/mcp.json": {
+    "client": "cursor", "path": "~/.cursor/mcp.json", "error": null,
+    "servers": [
+      {"name": "weather", "config_path": "~/.cursor/mcp.json", "server": {"command": "weather-mcp"},
+       "signature": {"tools": [{"name": "get_forecast", "description": "synthetic"}]}, "error": null},
+      {"name": "files", "config_path": "~/.cursor/mcp.json", "server": {"command": "files-mcp"},
+       "signature": {"tools": [{"name": "read_file", "description": "synthetic"}]}, "error": null},
+      {"name": "mail", "config_path": "~/.cursor/mcp.json", "server": {"command": "mail-mcp"},
+       "signature": null, "error": {"message": "synthetic: timed out"}}
+    ],
+    "issues": [
+      {"code": "E001", "message": "synthetic tool poisoning", "reference": [0, 0], "extra_data": null},
+      {"code": "W008", "message": "synthetic hardcoded secret", "reference": [0, null], "extra_data": null},
+      {"code": "X002", "message": "synthetic scan failure", "reference": [2, null], "extra_data": null},
+      {"code": "Q999", "message": "synthetic code this adapter does not know", "reference": [0, null], "extra_data": null}
+    ],
+    "labels": []
+  }
+}

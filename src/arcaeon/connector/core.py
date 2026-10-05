@@ -184,7 +184,7 @@ def adapter_for(name: str) -> VendorAdapter | None:
     if not isinstance(name, str):
         return None
     if name not in _ADAPTERS:
-        from . import mockscan, opa  # noqa: F401  (register themselves)
+        from . import mockscan, opa, snyk_agent_scan  # noqa: F401  (register themselves)
         from arcaeon.prove import mcp_scan  # noqa: F401  (registers itself)
     return _ADAPTERS.get(name)
 
