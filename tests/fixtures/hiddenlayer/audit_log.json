@@ -1,0 +1,12 @@
+{
+  "action": "login",
+  "actor_type": "USER",
+  "api_permissions_required": [],
+  "correlation_id": "1833e46c-2043-4142-8976-7f859a728e51",
+  "description": null,
+  "metadata": null,
+  "occurred_at": "2025-12-16T20:17:16.169Z",
+  "resource_id": "a6478cdd-62d2-4e6c-2222-8c11e8663777",
+  "resource_type": "user",
+  "session_id": null
+}
