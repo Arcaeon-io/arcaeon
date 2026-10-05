@@ -671,8 +671,15 @@ def load_service(src: Any, server_keys: Any = ()) -> tuple[dict | None, str | No
     save_store shape), {"statements": [binding statement, ...]} (what GET
     /v1/keys/{did}/binding answers), a list of statements, or a path to one
     as JSON. `server_keys` are the binding keys the reader trusts; they are
-    never taken from the file. Never raises."""
+    never taken from the file. Never raises.
+
+    FRESHNESS. service["fetched_at"] is when the statements were fetched: a
+    top-level "fetched_at" (UTC) in the data, the file's mtime when read from
+    a file (the older of the two when both are there), the load time for a
+    live in-memory store, else None (unknown). A statement is as fresh as its
+    fetch; a revocation after fetched_at is not seen."""
     name = "the account service"
+    mtime = None
     try:
         if isinstance(src, (dict, list)):
             data = src
@@ -684,6 +691,7 @@ def load_service(src: Any, server_keys: Any = ()) -> tuple[dict | None, str | No
                 return None, f"{name} is not there"
             if p.stat().st_size > MAX_STORE_BYTES:
                 return None, f"{name} is over {MAX_STORE_BYTES} bytes; not read"
+            mtime = datetime.fromtimestamp(p.stat().st_mtime, timezone.utc).replace(microsecond=0)
             data = loads_strict(p.read_bytes().decode("utf-8"))
     except (OSError, UnicodeDecodeError, ValueError, TypeError) as e:
         return None, f"{name} is not JSON ({type(e).__name__})"
@@ -691,8 +699,19 @@ def load_service(src: Any, server_keys: Any = ()) -> tuple[dict | None, str | No
     if any(_pub(k) is None for k in keys):
         return None, ("an --account-key is not an Ed25519 did:key (the length is checked "
                       "before any decode)")
-    if isinstance(data, dict) and isinstance(data.get("accounts"), dict) \
-            and isinstance(data.get("keys"), dict):
+    stamped = None
+    if isinstance(data, dict) and "fetched_at" in data:
+        stamped = _parse(data["fetched_at"])
+        if stamped is None:
+            return None, f"{name} fetched_at is not a UTC time (YYYY-MM-DDTHH:MM:SSZ)"
+    times = [t for t in (stamped, mtime) if t is not None]
+    live = (isinstance(data, dict) and isinstance(data.get("accounts"), dict)
+            and isinstance(data.get("keys"), dict))
+    if times:
+        fetched_at = _utc(min(times))
+    else:
+        fetched_at = _utc(_when(None)) if live else None
+    if live:
         def lookup(did, store=data):
             return binding_statement(store, did)
     else:
@@ -707,7 +726,8 @@ def load_service(src: Any, server_keys: Any = ()) -> tuple[dict | None, str | No
 
         def lookup(did, index=index):
             return index.get(did) if _did_shape_ok(did) else None
-    return {"source": name, "lookup": lookup, "server_keys": sorted(set(keys))}, None
+    return {"source": name, "lookup": lookup, "server_keys": sorted(set(keys)),
+            "fetched_at": fetched_at}, None
 
 
 def _other_account(claimed: str, rep: dict) -> str:
@@ -812,10 +832,14 @@ def service_report(service: dict | None, results: Any = ()) -> dict:
     """The `account_service` block a report carries."""
     if service is None:
         return {"consulted": False, "reason": NOT_CONSULTED, "bindings": []}
+    fetched = service.get("fetched_at")
+    as_of = f"as of {fetched}" if fetched else "as of an unknown time"
     return {"consulted": True, "source": service["source"],
-            "server_keys": list(service["server_keys"]), "bindings": list(results),
+            "server_keys": list(service["server_keys"]), "fetched_at": fetched,
+            "bindings": list(results),
             "reason": (f"each binding row was held to {service['source']}, read with the "
-                       f"binding key(s) named")}
+                       f"binding key(s) named, {as_of} (a statement is as fresh as its "
+                       f"fetch; a revocation after then is not seen)")}
 
 
 # --- the thin handler ------------------------------------------------------------------

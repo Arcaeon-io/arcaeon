@@ -256,6 +256,17 @@ rotate row is read at that row's time (the proof is signed minutes before
 the issue). Without `--accounts`, nothing changes and the pair report says
 "account service not consulted". Tables: docs/EXCHANGE.md, docs/TALLY.md.
 
+**Freshness: a statement is as fresh as its fetch; a revocation after
+`fetched_at` is not seen.** A FILE is a replay of what the service said
+when it was fetched, so the report's `account_service` block carries
+`fetched_at` and its reason says "as of <time>". `fetched_at` is a top-level
+`"fetched_at": "YYYY-MM-DDTHH:MM:SSZ"` in FILE if the fetcher wrote one, else
+FILE's modification time; when both are there the older one is used (a
+statement is never claimed fresher than either says). A `fetched_at` that is
+not a UTC time refuses the file. A live in-memory store is read at load time;
+in-memory statements with no time say "as of an unknown time". Fetch again
+before relying on a pairing near or after a key's possible revocation.
+
 ## Rate and Sybil notes
 
 - **Keys per owner.** At most `MAX_AGENTS_PER_OWNER` agent accounts per owner
