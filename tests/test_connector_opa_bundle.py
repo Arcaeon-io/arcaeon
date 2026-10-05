@@ -360,3 +360,154 @@ def test_join_never_raises_and_does_not_change_its_input():
 def test_the_seal_is_jcs_digestable():
     O.OPA.digest(_seal(_bundle()))
     O.OPA.digest(_seal(b"junk"))
+
+
+# --- L2-01b: every accepted JWT algorithm, tested with throwaway in-test keys ---------
+
+_HS = ("HS256", "HS384", "HS512")
+_RSA_ALGS = ("RS256", "RS384", "RS512", "PS256", "PS384", "PS512")
+_EC_ALGS = ("ES256", "ES384", "ES512")
+TESTED_ALGS = _HS + _RSA_ALGS + _EC_ALGS
+
+
+def test_every_accepted_algorithm_has_a_test_here():
+    assert set(B.KEY_ALGORITHMS) == set(TESTED_ALGS)
+
+
+def _pem(pub) -> bytes:
+    from cryptography.hazmat.primitives import serialization
+    return pub.public_bytes(serialization.Encoding.PEM,
+                            serialization.PublicFormat.SubjectPublicKeyInfo)
+
+
+_KEYS: dict = {}
+
+
+def _rsa(i: int):
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    if ("rsa", i) not in _KEYS:
+        _KEYS[("rsa", i)] = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    return _KEYS[("rsa", i)]
+
+
+_CURVE = {"ES256": "SECP256R1", "ES384": "SECP384R1", "ES512": "SECP521R1"}
+
+
+def _ec(curve: str, i: int):
+    from cryptography.hazmat.primitives.asymmetric import ec
+    if (curve, i) not in _KEYS:
+        _KEYS[(curve, i)] = ec.generate_private_key(getattr(ec, curve)())
+    return _KEYS[(curve, i)]
+
+
+def _signer(alg: str):
+    """(sign(msg) -> JWS signature bytes, the right verification key, a wrong key of
+    the same type)."""
+    n = int(alg[2:])
+    if alg in _HS:
+        secret, other = os.urandom(32), os.urandom(32)
+        h = getattr(hashlib, f"sha{n}")
+        return (lambda m: hmac.new(secret, m, h).digest()), secret, other
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec, padding, utils
+    h = getattr(hashes, f"SHA{n}")()
+    if alg in _RSA_ALGS:
+        k = _rsa(0)
+        pad = padding.PKCS1v15() if alg.startswith("RS") else padding.PSS(
+            mgf=padding.MGF1(h), salt_length=h.digest_size)
+        return (lambda m: k.sign(m, pad, h)), _pem(k.public_key()), _pem(_rsa(1).public_key())
+    k = _ec(_CURVE[alg], 0)
+    size = (k.curve.key_size + 7) // 8
+
+    def sign(m):
+        r, s = utils.decode_dss_signature(k.sign(m, ec.ECDSA(h)))
+        return r.to_bytes(size, "big") + s.to_bytes(size, "big")
+    return sign, _pem(k.public_key()), _pem(_ec(_CURVE[alg], 1).public_key())
+
+
+def _flip(sign):
+    def f(m):
+        b = bytearray(sign(m))
+        b[len(b) // 2] ^= 0x01
+        return bytes(b)
+    return f
+
+
+def _needs(alg):
+    if alg not in _HS:
+        pytest.importorskip("cryptography")
+
+
+@pytest.mark.parametrize("alg", TESTED_ALGS)
+def test_each_algorithm_valid_signature_is_verified(alg):
+    _needs(alg)
+    sign, key, _ = _signer(alg)
+    s = _seal(_bundle(alg=alg, sign=sign), verification_key=key, key_algorithm=alg)
+    assert s["opa_signature_verified"] == VERIFIED, s["opa_signature_reason"]
+    assert s["signature"]["alg"] == alg
+
+
+@pytest.mark.parametrize("alg", TESTED_ALGS)
+def test_each_algorithm_one_flipped_signature_byte_is_broken(alg):
+    _needs(alg)
+    sign, key, _ = _signer(alg)
+    s = _seal(_bundle(alg=alg, sign=_flip(sign)), verification_key=key, key_algorithm=alg)
+    assert s["opa_signature_verified"] == BROKEN, s["opa_signature_reason"]
+
+
+@pytest.mark.parametrize("alg", TESTED_ALGS)
+def test_each_algorithm_wrong_key_is_broken(alg):
+    _needs(alg)
+    sign, _, wrong = _signer(alg)
+    s = _seal(_bundle(alg=alg, sign=sign), verification_key=wrong, key_algorithm=alg)
+    assert s["opa_signature_verified"] == BROKEN, s["opa_signature_reason"]
+
+
+@pytest.mark.parametrize("alg", TESTED_ALGS)
+def test_each_algorithm_the_jwt_naming_another_alg_is_broken(alg):
+    _needs(alg)
+    sign, key, _ = _signer(alg)
+    other = "HS256" if alg != "HS256" else "HS384"
+    s = _seal(_bundle(alg=other, sign=sign), verification_key=key, key_algorithm=alg)
+    assert s["opa_signature_verified"] == BROKEN
+
+
+def _wrong_type_keys(alg):
+    """Keys of a type that cannot verify `alg`: refused, never checked."""
+    rsa_pem = _pem(_rsa(0).public_key())
+    p256 = _pem(_ec("SECP256R1", 0).public_key())
+    if alg in _HS:
+        return [rsa_pem, p256, rsa_pem.decode()]
+    if alg in _RSA_ALGS:
+        return [p256, _pem(_ec("SECP521R1", 0).public_key())]
+    wrong_curve = {"ES256": "SECP384R1", "ES384": "SECP256R1", "ES512": "SECP384R1"}[alg]
+    return [rsa_pem, _pem(_ec(wrong_curve, 0).public_key())]
+
+
+@pytest.mark.parametrize("alg", TESTED_ALGS)
+def test_each_algorithm_a_key_of_the_wrong_type_is_refused(alg):
+    pytest.importorskip("cryptography")
+    sign, _, _ = _signer(alg)
+    raw = _bundle(alg=alg, sign=sign)
+    for k in _wrong_type_keys(alg):
+        s = _seal(raw, verification_key=k, key_algorithm=alg)
+        assert s["opa_signature_verified"] == COULD_NOT_LOOK, (alg, s["opa_signature_reason"])
+        assert "not a key for" in s["opa_signature_reason"]
+
+
+def test_an_unsupported_algorithm_is_refused_by_the_caller_check():
+    for alg in ("none", "EdDSA", "HS1", "RS1"):
+        with pytest.raises(ValueError):
+            _seal(_bundle(), verification_key=KEY, key_algorithm=alg)
+
+
+def test_a_bundle_whose_jwt_says_an_unsupported_alg_is_broken_not_verified():
+    s = _seal(_bundle(alg="none"), verification_key=KEY, key_algorithm="HS256")
+    assert s["opa_signature_verified"] == BROKEN
+
+
+def test_a_join_on_a_key_verified_bundle_is_still_not_signed_by_vendor():
+    s = _seal(_bundle(), verification_key=KEY, key_algorithm="HS256")
+    assert s["opa_signature_verified"] == VERIFIED
+    r = O.join_bundles(_decisions(_ev()), [s])[0]
+    assert r["policy_join"] == VERIFIED and r["signed_by_vendor"] is False

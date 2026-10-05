@@ -44,8 +44,9 @@ adapter writes its own per-event word (as mcp-scan's adapter does):
     undefined        no result (OPA's undefined decision)            -> COULD NOT LOOK
     masked           the result was erased or masked (/result pointer) -> COULD NOT LOOK
 
-THE ROW. The check.verdict.relayed row of arcaeon.connector.core, plus ONE
-adapter key, `decision`:
+THE ROW. The check.verdict.relayed row of arcaeon.connector.core, plus
+`signed_by_vendor: False` on every row ingest returns (COULD NOT LOOK rows too;
+OPA signs bundles, never decisions), plus ONE adapter key, `decision`:
 
     decision.event_index, path, query, timestamp, labels {id, version},
     bundles {name: revision}, erased, masked, input_masked,
@@ -128,6 +129,13 @@ class OpaDecisionLogAdapter(VendorAdapter):
     max_payload_bytes = MAX_PAYLOAD_BYTES
     max_depth = MAX_DEPTH
     one_row_per_payload = False
+
+    def base_row(self, raw: bytes | None = None, received_at: str | None = None) -> dict:
+        """The base skeleton plus `signed_by_vendor: False`, on every ingest row: OPA
+        signs bundles, never decisions, and nothing here checks a decision signature."""
+        row = super().base_row(raw, received_at)
+        row["signed_by_vendor"] = False
+        return row
 
     def extract(self, doc: dict) -> Extracted:
         raise AdapterError("an OPA decision log is one row per event; read it with "

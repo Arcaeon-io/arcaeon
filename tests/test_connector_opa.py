@@ -176,3 +176,24 @@ def test_not_rechecked_or_imported_as_one_verdict():
     assert recheck(rows[0], PLAIN)["verdict"] == COULD_NOT_LOOK
     one = import_verdict(O.OPA, PLAIN)
     assert one["relayed_verdict"] == COULD_NOT_LOOK
+
+
+# --- L2-01b: every plain ingest row says it is not signed by the vendor ---------------
+
+@pytest.mark.parametrize("raw", [
+    PLAIN, GZ, b"", b"not json", b"[]", b"{\"a\": 1}", None,
+    json.dumps([1, {"decision_id": "d", "path": "authz/allow", "result": True}]).encode(),
+], ids=["plain", "gzip", "empty", "not_json", "no_events", "object", "none", "bad_event"])
+def test_every_ingest_row_carries_signed_by_vendor_false(raw):
+    rows = O.ingest(raw, received_at=AT, allow_paths=ALLOW, deny_paths=DENY)
+    assert rows
+    for r in rows:
+        assert "signed_by_vendor" in r and r["signed_by_vendor"] is False
+
+
+def test_a_bounded_ingest_row_carries_signed_by_vendor_false(monkeypatch):
+    monkeypatch.setattr(O, "MAX_ROWS", 1)
+    rows = _rows(_events([{"path": "authz/allow", "result": True}] * 2))
+    assert len(rows) == 2 and all(r["signed_by_vendor"] is False for r in rows)
+    bomb = gzip.compress(b"[" + b" " * (O.MAX_BODY_BYTES + 10) + b"]")
+    assert O.ingest(bomb, received_at=AT)[0]["signed_by_vendor"] is False
