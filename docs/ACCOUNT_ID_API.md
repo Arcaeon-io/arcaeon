@@ -39,10 +39,10 @@ returns the key" convenience path is not offered; see the open questions.)
 
 | caller | may |
 |---|---|
-| owner session (the site login) | issue, list, rotate, revoke, attach |
-| owner API key (made by the owner on the site) | issue, list, rotate, revoke, attach |
+| owner session (the site login) | issue, list, rotate, revoke, attach, read full receipts |
+| owner API key (made by the owner on the site) | issue, list, rotate, revoke, attach, read full receipts |
 | agent key | nothing on this API: 403. An agent never self-issues |
-| anyone, no auth | fetch the public binding statement for a did:key |
+| anyone, no auth | fetch the public binding statement for a did:key (no IdP `sub`) |
 
 The stub takes the caller as already authenticated by the site's auth layer
 (`{"kind": "owner_session" | "owner_api_key", "owner": ...}`); checking
@@ -145,6 +145,22 @@ reader sees rotations and revocations. 404 for a key never bound. The
 top-level `account` and `owner` are a convenience; the verifier reads the
 rows and calls a disagreement BROKEN.
 
+**No IdP `sub` in the public view.** An external row carries the receipt's
+`iss` and `sub_sha256`, never `sub` (an Okta `sub` can be an email address).
+`sub_sha256` is `sha256(salt || sub)` with a fresh 16-byte random salt per
+receipt that stays owner-only. Salted, not plain, because a plain sha256 of
+an email is undone by guessing addresses, and the same `sub` on two
+accounts would publish the link between them. The hash is inside the signed
+row, so the public statement verifies as it is; the owner can open it by
+showing `sub` and the salt.
+
+### Read the full receipts: `GET /v1/agents/{account}/binding` (owner)
+
+The same signed history as the public statement, plus `receipts`: one
+`{"row": INDEX, "receipt": {... "sub": ...}, "sub_salt": "32 hex"}` per
+external row, where `sha256(bytes.fromhex(sub_salt) + sub)` is that row's
+`sub_sha256`. 401 no owner, 403 agent key, 404 not this owner's account.
+
 ### Attach an external identity: `POST /v1/agents/{account}/external` (owner)
 
 The IdP token (an Entra access token with `aud` = arcaeon, an Okta ID-JAG or
@@ -170,7 +186,8 @@ DPoP `cnf.jkt`, Entra mTLS-PoP `cnf`), `idp-tag` (an STS tag carries it) or
 active key (`jwk_thumbprint(did)`), and it must match. Any field outside this
 shape (`id_token`, `access_token`, `jwt`, `token`) is refused with 400, so a
 live bearer token cannot be written by mistake. Response `201` with an
-`event: "external"` row (409 if the account has no active key or the time
+`event: "external"` row whose `external` holds the receipt with `sub`
+replaced by `sub_sha256` (see the public statement above) (409 if the account has no active key or the time
 is before its last row). Public Sigstore Fulcio takes no Entra or Okta token
 today (R10), so `sigstore` here means a Sigstore identity the agent already
 holds, bound the same way.
@@ -190,7 +207,7 @@ Kind `account.binding`, v `1`. Every field is signed; unused ones are null.
 | `at` | UTC, `YYYY-MM-DDTHH:MM:SSZ` |
 | `signer` | the server binding key |
 | `agent_proof` | issue/rotate: the agent's `exchange.binding` row, verbatim |
-| `external` | external: the receipt |
+| `external` | external: the receipt with `sub` replaced by `sub_sha256` (salted; the full receipt is owner-only) |
 | `reason` | revoke: optional text |
 | `sig` | base64 Ed25519 over `PAE("application/vnd.arcaeon.account.binding.v1+json", C)`, `C` the json-c14n v1 bytes of the signed fields |
 

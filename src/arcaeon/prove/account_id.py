@@ -12,6 +12,7 @@ endpoints, the auth model and the limits, is docs/ACCOUNT_ID_API.md.
     attach_external(store, caller, ACCOUNT, receipt=DICT, server_seed=SEED)
     list_agents(store, caller)                                     -> [summary]
     binding_statement(store, DID)                                  -> statement | None
+    owner_binding(store, caller, ACCOUNT)                          -> statement + receipts
     verify_binding(statement, DID, server_keys=[DID], at=, now=)   -> report
     load_service(STORE|STATEMENTS|PATH, server_keys=[DID])         -> (service, why)
     consult_binding(service, DID, ACCOUNT, [exchange.binding rows]) -> report
@@ -80,7 +81,7 @@ __all__ = ["BIND_KIND", "PAYLOAD_TYPE", "STATEMENT_TYPE", "ROW_VERSION", "SIGNED
            "MAX_AGENTS_PER_OWNER", "PROOF_MAX_AGE", "AccountError", "new_store",
            "load_store", "save_store", "agent_account", "possession_proof", "jwk_thumbprint",
            "row_digest", "issue", "rotate", "revoke", "attach_external", "list_agents",
-           "binding_statement", "control_cluster", "verify_binding", "handle",
+           "binding_statement", "owner_binding", "PUBLIC_RECEIPT_FIELDS", "control_cluster", "verify_binding", "handle",
            "NOT_CONSULTED", "load_service", "consult_binding", "log_binding_rows",
            "consult_pairings", "service_report"]
 
@@ -100,6 +101,12 @@ ISSUER_FAMILIES = ("entra", "okta", "aws-sts", "spiffe", "sigstore")
 BINDING_STRENGTHS = ("idp-cnf", "idp-tag", "possession-sig")
 RECEIPT_FIELDS = ("issuer_family", "iss", "sub", "facets", "key_jkt", "jwt_sha256",
                   "jwk_sha256", "binding_strength", "checked_at")
+#: What a signed external row (and so the public binding statement) carries:
+#: the receipt with `sub` replaced by sub_sha256 = sha256(salt || sub), the salt
+#: 16 random bytes per receipt kept owner-only. An IdP `sub` can be an email; a
+#: plain sha256 of an email is reversed by guessing, and one sub on two accounts
+#: would link them. The full receipt and the salt are in owner_binding only.
+PUBLIC_RECEIPT_FIELDS = tuple(k for k in RECEIPT_FIELDS if k != "sub") + ("sub_sha256",)
 #: Accounts one owner may hold, revoked ones included (a revoke does not free a
 #: slot, or churn would reset the count). A stub default, not a price.
 MAX_AGENTS_PER_OWNER = 100
@@ -448,7 +455,9 @@ def attach_external(store: dict, caller: Any, account: str, *, receipt: Any,
                     server_seed: bytes, at: datetime | None = None) -> dict:
     """Record an outside identity (Entra / Okta / AWS STS / SPIFFE / Sigstore)
     as a BOUND receipt on the account, never a rival ID. The IdP token was
-    checked upstream; only its hash and the checked claims arrive here."""
+    checked upstream; only its hash and the checked claims arrive here. The
+    signed row carries the receipt with `sub` as a salted sha256
+    (PUBLIC_RECEIPT_FIELDS); the full receipt and its salt stay owner-only."""
     owner = _caller_owner(caller)
     rec = _owned(store, owner, account)
     now = _when(at)
@@ -459,9 +468,15 @@ def attach_external(store: dict, caller: Any, account: str, *, receipt: Any,
         raise AccountError(409, f"{account} has no active key to bind an identity to")
     if clean["key_jkt"] is not None and clean["key_jkt"] != jwk_thumbprint(key):
         raise AccountError(400, "key_jkt is not the thumbprint of the account's active key")
+    salt = os.urandom(16)
+    public = {k: clean[k] for k in RECEIPT_FIELDS if k != "sub"}
+    public["sub_sha256"] = hashlib.sha256(salt + clean["sub"].encode("utf-8")).hexdigest()
     row = _sign_row(_row("external", account, owner, key, row_digest(rec["rows"][-1]),
-                         now, external=clean), server_seed)
-    return _append(store, account, owner, row)
+                         now, external=public), server_seed)
+    out = _append(store, account, owner, row)
+    rec.setdefault("receipts", {})[row_digest(row)] = {"receipt": clean,
+                                                       "sub_salt": salt.hex()}
+    return out
 
 
 def list_agents(store: dict, caller: Any) -> list:
@@ -480,7 +495,8 @@ def list_agents(store: dict, caller: Any) -> list:
 
 
 def binding_statement(store: dict, did: Any) -> dict | None:
-    """PUBLIC: the account history that binds `did`, or None. Anyone may fetch it."""
+    """PUBLIC: the account history that binds `did`, or None. Anyone may fetch it.
+    External rows carry iss and a salted sub_sha256, never the IdP `sub`."""
     if not _did_shape_ok(did):
         return None
     account = store["keys"].get(did)
@@ -489,6 +505,23 @@ def binding_statement(store: dict, did: Any) -> dict | None:
         return None
     return {"type": STATEMENT_TYPE, "did": did, "account": account, "owner": rec["owner"],
             "rows": copy.deepcopy(rec["rows"])}
+
+
+def owner_binding(store: dict, caller: Any, account: Any) -> dict:
+    """OWNER ONLY: the account's history (the same signed rows the public
+    statement carries) plus each external row's full receipt and sub salt:
+    receipts = [{"row": INDEX, "receipt": {... "sub" ...}, "sub_salt": HEX}].
+    sha256(bytes.fromhex(sub_salt) + sub) is the row's sub_sha256."""
+    owner = _caller_owner(caller)
+    rec = _owned(store, owner, account)
+    held = rec.get("receipts") or {}
+    receipts = []
+    for i, r in enumerate(rec["rows"]):
+        full = held.get(row_digest(r)) if r.get("event") == "external" else None
+        if full is not None:
+            receipts.append({"row": i, **copy.deepcopy(full)})
+    return {"type": STATEMENT_TYPE, "did": _active_key(rec), "account": account,
+            "owner": owner, "rows": copy.deepcopy(rec["rows"]), "receipts": receipts}
 
 
 def control_cluster(store: dict, ident: Any) -> str | None:
@@ -815,9 +848,13 @@ def handle(store: dict, caller: Any, method: str, path: str, body: Any, *,
                 return (201 if after > before else 200), {"binding": row}
             raise AccountError(405, "GET or POST only")
         if parts[:2] == ["v1", "agents"] and len(parts) == 4:
+            acct, op = parts[2], parts[3]
+            if op == "binding":
+                if method != "GET":
+                    raise AccountError(405, "GET only")
+                return 200, owner_binding(store, caller, acct)
             if method != "POST":
                 raise AccountError(405, "POST only")
-            acct, op = parts[2], parts[3]
             if op == "revoke":
                 return 200, {"binding": revoke(store, caller, acct, server_seed=server_seed,
                                                at=now, reason=body.get("reason"))}
