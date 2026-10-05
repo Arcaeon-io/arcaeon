@@ -40,9 +40,13 @@ about who sealed the bytes. A signed envelope verifies VERIFIED only against a
 key the receiver names (--signer): a valid signature from a key you did not
 name says only that SOME key signed it.
 
-PIN AND WITNESS REFS are recorded and shape-checked, never resolved: resolving
+PIN AND WITNESS REFS are recorded and shape-checked, never fetched: fetching
 them needs the network and is out of scope here. Present, the witness step
 reads COULD NOT LOOK (and, with --require-witness, so does the verdict).
+With --pins DIR, a local clone of a pins repo (tips/<chain>/<stamp>/
+statement.json), the pin_ref is resolved offline: the pin's statement digest
+matches = VERIFIED; the pin not in the clone, or the clone unreadable = COULD
+NOT LOOK; the pin the witness_ref names there with another digest = BROKEN.
 
 Never raises from verify(): a sidecar that cannot be read is an answer too.
 """
@@ -50,6 +54,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import re
 import sys
@@ -58,11 +63,12 @@ from pathlib import Path
 from typing import Any
 
 from arcaeon import verdict as V
-from arcaeon.record.row import DuplicateKeyError, file_pin, loads_strict
+from arcaeon.record.row import (JSON_C14N_PREFIX, DuplicateKeyError, digest_json, file_pin,
+                                loads_strict)
 
 __all__ = ["MEDIA_TYPE", "PAYLOAD_TYPE", "STATEMENT_TYPE", "PREDICATE_TYPE", "SUFFIX",
            "BINDING_FIELDS", "SealError", "pae", "envelope_path", "build_statement",
-           "seal", "verify", "main"]
+           "seal", "verify", "resolve_pin", "PIN_STATEMENT", "main"]
 
 MEDIA_TYPE = "application/vnd.arcaeon.envelope.v1+json"
 PAYLOAD_TYPE = "application/vnd.in-toto+json"
@@ -79,6 +85,15 @@ NOT_CLAIMED = "NOT CLAIMED"
 _HEX64 = re.compile(r"[0-9a-f]{64}")
 _PIN_REF = re.compile(r"sha256:(json-c14n:v1:|raw-bytes:v1:)?[0-9a-f]{64}")
 _WITNESS_REF = re.compile(r"(https://[^\s]{1,2040}|urn:[a-z0-9][a-z0-9-]{0,31}:[^\s]{1,2000})")
+#: A pin folder's name in a pins repo: <YYYY-MM-DD>T<HHMM>Z.
+_STAMP = re.compile(r"\d{4}-\d{2}-\d{2}T\d{4}Z")
+#: The pin statement in each pin folder, canonical bytes exactly as hashed.
+PIN_STATEMENT = "statement.json"
+#: A pin statement bigger than this is not read: a statement is a few hundred bytes.
+MAX_PIN_STATEMENT_BYTES = 1 << 20
+#: How deep under --pins a pin folder is looked for: DIR may be the stamp folder,
+#: its <chain> folder, tips/, or the clone root holding tips/.
+_PINS_DEPTH = 3
 _FLAG = re.compile(r"[a-z0-9][a-z0-9_.:-]{0,63}")
 _DURATION = re.compile(r"([1-9][0-9]{0,4})([dhm])")
 _TS_FMT = "%Y-%m-%dT%H:%M:%SZ"
@@ -454,8 +469,112 @@ def _statement(r: dict, payload: bytes):
     return stmt
 
 
+def _pin_locator(wit) -> tuple[str | None, str | None]:
+    """(chain, stamp) named by a witness_ref, or (None, None). The stamp is the
+    first <YYYY-MM-DD>T<HHMM>Z segment of the URL or urn; the chain is the
+    segment before it (a hint, used only to pick between same-named stamps)."""
+    if not isinstance(wit, str):
+        return None, None
+    parts = re.split(r"[/:]", wit)
+    for i, p in enumerate(parts):
+        if _STAMP.fullmatch(p):
+            return (parts[i - 1] or None) if i else None, p
+    return None, None
+
+
+def _pin_folders(root: Path) -> list[Path]:
+    """Every folder at most _PINS_DEPTH below root (root included) that holds a
+    statement.json, sorted. OSError when root cannot be listed."""
+    out, level = [], [root]
+    for depth in range(_PINS_DEPTH + 1):
+        nxt = []
+        for d in level:
+            if (d / PIN_STATEMENT).is_file():
+                out.append(d)
+            if depth < _PINS_DEPTH:
+                try:
+                    kids = [k for k in d.iterdir() if k.is_dir() and not k.is_symlink()]
+                except OSError:
+                    if d == root:
+                        raise
+                    continue
+                nxt.extend(kids)
+        level = nxt
+    return sorted(out)
+
+
+def _pin_digest(folder: Path, c14n: bool) -> str | None:
+    """sha256 hex of folder/statement.json (its bytes, or for a json-c14n:v1
+    pin_ref its parsed value), or None when it cannot be read."""
+    p = folder / PIN_STATEMENT
+    try:
+        if p.stat().st_size > MAX_PIN_STATEMENT_BYTES:
+            return None
+        raw = p.read_bytes()
+    except OSError:
+        return None
+    if not c14n:
+        return hashlib.sha256(raw).hexdigest()
+    try:
+        return digest_json(loads_strict(raw.decode("utf-8")))[len(JSON_C14N_PREFIX):]
+    except (UnicodeDecodeError, ValueError):
+        return None
+
+
+def resolve_pin(pins: str | Path, pin_ref: str, witness_ref: str | None = None) -> dict:
+    """Resolve pin_ref against a local pins clone, offline. -> {"word", "reason",
+    "reason_word", "pin"}: VERIFIED with the pin folder when its statement digest
+    matches; BROKEN when the pin the witness_ref names is there with another
+    digest; COULD NOT LOOK when the pin is not there or the clone is unreadable."""
+    c14n = pin_ref.startswith(JSON_C14N_PREFIX)
+    want = pin_ref.rsplit(":", 1)[1]
+    root = Path(pins)
+
+    def cnl(rw, reason):
+        return {"word": V.COULD_NOT_LOOK, "reason_word": rw, "reason": reason, "pin": None}
+
+    if not root.exists():
+        return cnl("missing", f"--pins {root} does not exist")
+    if not root.is_dir():
+        return cnl("unreadable", f"--pins {root} is not a folder")
+    try:
+        folders = _pin_folders(root)
+    except OSError as e:
+        return cnl("unreadable", f"--pins {root} cannot be listed ({type(e).__name__})")
+    if not folders:
+        return cnl("empty", f"--pins {root} holds no pin folder with a {PIN_STATEMENT} "
+                            f"(expected tips/<chain>/<YYYY-MM-DD>T<HHMM>Z/{PIN_STATEMENT})")
+    hint, stamp = _pin_locator(witness_ref)
+    if stamp is not None:
+        folders = [f for f in folders if f.name == stamp]
+        if len(folders) > 1 and hint:
+            folders = [f for f in folders if f.parent.name == hint] or folders
+        if not folders:
+            return cnl("missing", f"the pin {stamp} the witness_ref names is not in --pins "
+                                  f"{root} (a clone older than the pin, or no such pin)")
+    got = [(f, _pin_digest(f, c14n)) for f in folders]
+    for f, d in got:
+        if d == want:
+            return {"word": V.VERIFIED, "reason_word": None, "reason": None,
+                    "pin": {"folder": str(f), "statement_sha256": want, "pin_ref": pin_ref}}
+    if any(d is None for _, d in got):
+        bad = next(f for f, d in got if d is None)
+        return cnl("unreadable", f"{bad / PIN_STATEMENT} cannot be read (or is over "
+                                 f"{MAX_PIN_STATEMENT_BYTES} bytes, or not JSON for a "
+                                 f"json-c14n:v1 pin_ref)")
+    if stamp is None:
+        return cnl("missing", f"no pin statement under --pins {root} has digest {want} (a pin "
+                              f"not yet in this clone cannot be told from one never made)")
+    if len(got) > 1:
+        return cnl("bounded", f"{len(got)} pins are named {stamp} under --pins {root} and none "
+                              f"has digest {want}: point --pins at the chain folder")
+    return {"word": V.BROKEN, "reason_word": None, "pin": None,
+            "reason": f"the pin {got[0][0].name} the witness_ref names has statement digest "
+                      f"{got[0][1]}, the pin_ref sealed {want}: the pin is not the one sealed"}
+
+
 def _check_predicate(r: dict, stmt: dict, file: Path, audience, deal, purpose,
-                     now: datetime) -> None:
+                     now: datetime, pins=None) -> None:
     st, find = r["steps"], r["findings"]
     pred = stmt.get("predicate")
     subj = stmt.get("subject")
@@ -549,6 +668,19 @@ def _check_predicate(r: dict, stmt: dict, file: Path, audience, deal, purpose,
         find.extend(shape)
     elif pin_ref is None and wit is None:
         st["witness"] = NOT_CLAIMED
+    elif pins is not None and pin_ref is not None:
+        res = resolve_pin(pins, pin_ref, wit)
+        st["witness"] = res["word"]
+        r["pin"] = res["pin"]
+        if res["word"] == V.BROKEN:
+            find.append(res["reason"])
+        elif res["word"] == V.COULD_NOT_LOOK:
+            r["_pin_cnl"] = ("pins", "the pin the pin_ref names, in --pins",
+                             res["reason_word"], res["reason"])
+        else:
+            r["not_checked"].append(
+                "the pin's proofs (.ots, Bitcoin) and that --pins is a faithful clone of the "
+                "public pins: run verify_pins for those; the witness_ref is not fetched")
     else:
         st["witness"] = V.COULD_NOT_LOOK
         r["not_checked"].append("pin_ref / witness_ref: recorded and shape-checked, not resolved "
@@ -557,7 +689,8 @@ def _check_predicate(r: dict, stmt: dict, file: Path, audience, deal, purpose,
 
 def verify(file: str | Path, envelope: str | Path | None = None, *, audience: str | None = None,
            deal: str | None = None, purpose: str | None = None, signers=(),
-           require_witness: bool = False, now: datetime | None = None) -> dict:
+           require_witness: bool = False, now: datetime | None = None,
+           pins: str | Path | None = None) -> dict:
     """VERIFIED / BROKEN / COULD NOT LOOK for FILE against its envelope.
 
     BROKEN if anything checked came out wrong (bytes, signature, a field
@@ -565,15 +698,21 @@ def verify(file: str | Path, envelope: str | Path | None = None, *, audience: st
     deal or purpose than the one given). Else COULD NOT LOOK if a step that
     decides the verdict could not be checked (missing or garbage sidecar,
     unsigned, no --signer, no --audience, no Ed25519 backend; the witness step
-    only under require_witness). Else VERIFIED. Never raises."""
+    only under require_witness). Else VERIFIED. Never raises.
+
+    `pins`, a local pins clone, resolves the pin_ref offline (resolve_pin);
+    without it nothing about the pin or witness refs is resolved."""
     file = Path(file)
     env_path = Path(envelope) if envelope is not None else envelope_path(file)
     r = _report(file, env_path)
+    if pins is not None:
+        r["pin"] = None
     try:
         out = _verify(r, file, env_path, audience, deal, purpose, tuple(signers or ()),
-                      require_witness, (now or datetime.now(timezone.utc)))
+                      require_witness, (now or datetime.now(timezone.utc)), pins)
     except Exception as e:  # noqa: BLE001  never a traceback, never a green
         r.pop("_cnl", None)
+        r.pop("_pin_cnl", None)
         out = _could_not_look(r, "envelope", "a finished check", env_path, "unreadable",
                               f"the check could not finish ({type(e).__name__})")
     return _with_file_sha256(out, file)
@@ -592,7 +731,8 @@ def _with_file_sha256(r: dict, file: Path) -> dict:
     return r
 
 
-def _verify(r, file, env_path, audience, deal, purpose, signers, require_witness, now) -> dict:
+def _verify(r, file, env_path, audience, deal, purpose, signers, require_witness, now,
+            pins=None) -> dict:
     got = _read_envelope(r, env_path)
     if isinstance(got, dict):
         return got                                   # COULD NOT LOOK already set
@@ -604,22 +744,26 @@ def _verify(r, file, env_path, audience, deal, purpose, signers, require_witness
     _check_signatures(r, dsse, payload, signers)
     stmt = _statement(r, payload)
     if stmt is not None:
-        _check_predicate(r, stmt, file, audience, deal, purpose, now.astimezone(timezone.utc))
+        _check_predicate(r, stmt, file, audience, deal, purpose, now.astimezone(timezone.utc),
+                         pins)
     cnl = r.pop("_cnl")
+    pin_cnl = r.pop("_pin_cnl", None)
     steps = r["steps"]
     if V.BROKEN in steps.values():
         broken = [k for k, v in steps.items() if v == V.BROKEN]
         r["verdict"] = V.BROKEN
         r["reason"] = "; ".join(r["findings"]) or f"step(s) {', '.join(broken)} failed"
         return r
-    if require_witness and steps["witness"] in (V.COULD_NOT_LOOK, NOT_CLAIMED):
+    if require_witness and pin_cnl is not None:
+        cnl.append(pin_cnl)
+    elif require_witness and steps["witness"] in (V.COULD_NOT_LOOK, NOT_CLAIMED):
         cnl.append(("witness", "a resolved pin / witness ref", "network",
                     "--require-witness: the pin and witness refs are not resolved offline "
                     "(or none was recorded), so the witness step could not look"))
     if cnl:
         step, looked_for, rw, reason = cnl[0]
-        r.update(V.could_not_look(looked_for, str(env_path if step != "file" else file),
-                                  rw, reason))
+        where = file if step == "file" else (pins if step == "pins" else env_path)
+        r.update(V.could_not_look(looked_for, str(where), rw, reason))
         r["verdict"] = V.COULD_NOT_LOOK
         r["reason"] = "; ".join(c[3] for c in cnl)      # every step that could not look
         return r
@@ -636,7 +780,7 @@ USAGE = """usage: arcaeon envelope seal <file> --label TEXT --audience ID --deal
                                [--witness-ref REF] [--flag NAME ...] [--force]
        arcaeon envelope verify <file> [--audience ID] [--signer DID ...]
                                [--deal ID] [--purpose TEXT] [--envelope PATH]
-                               [--require-witness]"""
+                               [--require-witness] [--pins DIR]"""
 
 HELP = USAGE + """
 
@@ -652,7 +796,11 @@ verify answers VERIFIED (act), BROKEN (refuse, keep the evidence) or COULD NOT
 LOOK (do not act on money or an irreversible step), as JSON on stdout and one
 line on stderr. VERIFIED needs a signature by a key you name (--signer
 did:key:...) and your own id (--audience). Pin and witness refs are recorded
-and shape-checked, never resolved (that needs the network).
+and shape-checked, never fetched (that needs the network). --pins DIR, a local
+clone of a pins repo (tips/<chain>/<stamp>/statement.json), resolves the
+pin_ref offline: the statement digest matches = VERIFIED, the pin not in the
+clone = COULD NOT LOOK, the pin the witness_ref names there with another
+digest = BROKEN.
 
 Exit codes: 0 VERIFIED (seal: written), 1 BROKEN, 2 bad usage or a refused
 seal, 3 COULD NOT LOOK. Spec and limits: docs/ENVELOPE.md."""
@@ -696,7 +844,8 @@ _SEAL_SPEC = {"--label": "value", "--audience": "value", "--deal": "value",
               "--chain": "value", "--pin-ref": "value", "--witness-ref": "value",
               "--flag": "list", "--force": "bool"}
 _VERIFY_SPEC = {"--audience": "value", "--signer": "list", "--deal": "value",
-                "--purpose": "value", "--envelope": "value", "--require-witness": "bool"}
+                "--purpose": "value", "--envelope": "value", "--require-witness": "bool",
+                "--pins": "value"}
 
 
 def _seal_cli(argv: list[str]) -> int:
@@ -739,7 +888,7 @@ def _verify_cli(argv: list[str]) -> int:
         raise _Usage("verify takes one file")
     r = verify(pos[0], o.get("--envelope"), audience=o.get("--audience"), deal=o.get("--deal"),
                purpose=o.get("--purpose"), signers=o.get("--signer", []),
-               require_witness=bool(o.get("--require-witness")))
+               require_witness=bool(o.get("--require-witness")), pins=o.get("--pins"))
     print(json.dumps(r, indent=1, ensure_ascii=False))
     print(f"{r['verdict']}: {r['reason']}", file=sys.stderr)
     return V.exit_for(r["verdict"])

@@ -172,7 +172,7 @@ can write a matching sidecar, so it says nothing about who sealed the bytes.
 ## Verify before act
 
 ```console
-$ arcaeon envelope verify FILE --audience ME --signer did:key:z6Mk... [--deal ID] [--purpose TEXT] [--require-witness]
+$ arcaeon envelope verify FILE --audience ME --signer did:key:z6Mk... [--deal ID] [--purpose TEXT] [--require-witness] [--pins DIR]
 ```
 
 `verify` prints a JSON report on stdout and one line on stderr: the word,
@@ -206,7 +206,10 @@ carries the same report under `report`.
 - `not_after` has passed (expired), or is not a time with a zone;
 - `--audience`, `--deal` or `--purpose` was given and the envelope was sealed
   for another;
-- a `pin_ref`, `witness_ref` or `chain` is recorded in the wrong shape.
+- a `pin_ref`, `witness_ref` or `chain` is recorded in the wrong shape;
+- with `--pins DIR`: the pin folder the `witness_ref` names is in the clone
+  and its statement digest is not the `pin_ref` (with or without
+  `--require-witness`).
 
 **Expired and wrong-audience are BROKEN, not COULD NOT LOOK.** The check ran
 and the answer is no: this envelope is not good for you, now.
@@ -227,7 +230,10 @@ the answer could be checked):
   receiver is the replay this design exists to stop;
 - this install has no Ed25519 backend (`missing`);
 - with `--require-witness`: the pin and witness refs are not resolved, or none
-  was recorded (`network`).
+  was recorded (`network`); with `--pins DIR` too, the pin is not in the
+  clone (`missing`), the clone holds no pin folder (`empty`), it or a
+  statement cannot be read (`unreadable`), or several same-named pins and none
+  matches (`bounded`).
 
 Without `--deal` or `--purpose` the verdict can still be VERIFIED; the report
 names each one under `not_checked` with the value it was sealed with. A
@@ -237,7 +243,7 @@ action an unbound check allows. `act`, `pay` and `irreversible` without
 `--deal` and `--purpose` are COULD NOT LOOK there (refuse, exit 3), so an
 envelope sealed for one exchange cannot be replayed into another.
 
-### Pin and witness refs: recorded, not resolved
+### Pin and witness refs: recorded, resolved only against a local clone
 
 `pin_ref` and `witness_ref` are recorded in the signed Statement and checked
 for shape. They are **not resolved**: fetching the pin, checking its proof
@@ -246,7 +252,33 @@ scope for this version. When either is present, the `witness` step reads
 COULD NOT LOOK and `not_checked` says why; it never reads VERIFIED. When
 neither is present the step reads NOT CLAIMED. The overall verdict leaves the
 witness step out unless you pass `--require-witness`, which turns it into
-COULD NOT LOOK until a later version can resolve the refs.
+COULD NOT LOOK unless `--pins` resolves the pin.
+
+**`--pins DIR`** (library `verify(pins=DIR)`, `resolve_pin`) resolves the
+`pin_ref` offline against a local clone of a pins repo laid out as
+`tips/<chain>/<YYYY-MM-DD>T<HHMM>Z/statement.json` (the statement's canonical
+bytes, exactly as hashed). DIR may be the clone root, `tips/`, a `<chain>/`
+folder or one pin folder; nothing is fetched. The digest compared is sha256
+of the `statement.json` bytes (`sha256:` and `sha256:raw-bytes:v1:` refs) or
+of its json-c14n:v1 form (`sha256:json-c14n:v1:` refs). The first
+`<YYYY-MM-DD>T<HHMM>Z` segment of the `witness_ref` (URL or urn) names the
+pin folder; the segment before it picks between same-named folders.
+
+| what the clone shows | `witness` step |
+|---|---|
+| the named pin (or, with no stamp in the `witness_ref`, any pin) has the `pin_ref` digest | VERIFIED |
+| the named pin is there with another digest | BROKEN |
+| the named pin is not there; no stamp named and no pin has the digest; DIR missing, not a folder, holds no pin, or a statement unreadable | COULD NOT LOOK |
+
+With no stamp in the `witness_ref`, a digest the clone does not hold is
+COULD NOT LOOK, never BROKEN: a clone older than the pin cannot be told from
+a pin never made. A VERIFIED witness step says the clone holds a pin statement
+with the sealed digest. It does not check the pin's `.ots` proofs, that the
+clone is a faithful copy of the public pins, or anything at the `witness_ref`
+URL; `not_checked` names these. A `witness_ref` with no `pin_ref` stays COULD
+NOT LOOK. Without `--pins` nothing changes. The report adds `pin` (`folder`,
+`statement_sha256`, `pin_ref`, or null) only when `--pins` is given.
+
 
 ## What VERIFIED proves
 
