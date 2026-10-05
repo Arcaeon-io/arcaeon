@@ -538,7 +538,12 @@ def latest_heads(side: dict) -> dict[str, dict]:
     return out
 
 
-def _account_note(acct: str, other: str, shared) -> str:
+def _account_note(acct: str, other: str, shared, dropped=None) -> str:
+    x = (dropped or {}).get(other, {}).get(acct)
+    if x is not None:
+        return (f"; log {other} binds {acct} by a signed binding row, but the account "
+                f"service {x['verdict']}: {x['reason']}; the pairing is dropped, so which "
+                f"key it binds is not resolved")
     if acct in shared:
         return (f"; more than one log binds {acct}, so it is not resolved to any key: "
                 f"which key it binds is not checked here ({V.COULD_NOT_LOOK})")
@@ -556,10 +561,11 @@ def _summary(r: dict | None) -> dict | None:
 
 def pair_exchange(eid: str, a: dict | None, b: dict | None, own_a, own_b,
                    broken_a: list, broken_b: list, ids_a=None, ids_b=None,
-                   shared=()) -> dict:
+                   shared=(), dropped=None) -> dict:
     """Line one exchange up. ids_a / ids_b: the IDs that name each party (its key,
     plus accounts its log binds by a valid binding row); default its key only.
-    shared: accounts both logs bind (resolved to neither)."""
+    shared: accounts both logs bind (resolved to neither). dropped: {log name:
+    {account: account service answer}} for bindings the service did not confirm."""
     ids_a = {own_a} if ids_a is None else set(ids_a)
     ids_b = {own_b} if ids_b is None else set(ids_b)
     ex: dict[str, Any] = {"exchange_id": eid, "status": None, "differs": [],
@@ -595,7 +601,7 @@ def pair_exchange(eid: str, a: dict | None, b: dict | None, own_a, own_b,
             if row["counterparty"] not in ids:
                 cp = row["counterparty"]
                 ex["findings"].append(f"counterparty: {nm} names {cp}, log {other} is owned "
-                                      f"by {own}" + (_account_note(cp, other, shared)
+                                      f"by {own}" + (_account_note(cp, other, shared, dropped)
                                                      if is_account_id(cp) else ""))
     if ex["differs"]:
         ex["status"] = "mismatch"
@@ -608,13 +614,16 @@ def pair_exchange(eid: str, a: dict | None, b: dict | None, own_a, own_b,
 
 
 def _hold_to_accounts(r: dict, svc: dict, sa: dict, sb: dict, acc_a: set, acc_b: set,
-                      broken: list) -> tuple[set, set]:
+                      broken: list, dropped: dict) -> tuple[set, set]:
     """L3-02: an account a log binds pairs only if the account service confirms it."""
     from arcaeon.prove import account_id as A
     res = A.consult_pairings(svc, [(acct, s["owner"], [s["log"]])
                                    for s, accs in ((sa, acc_a), (sb, acc_b)) for acct in sorted(accs)])
     r["account_service"] = A.service_report(svc, res)
     keep = {(x["account"], x["key"]) for x in res if x["verdict"] == V.VERIFIED}
+    for nm, s, accs in (("a", sa, acc_a), ("b", sb, acc_b)):
+        dropped[nm] = {x["account"]: x for x in res if x["verdict"] != V.VERIFIED
+                       and x["account"] in accs and x["key"] == s["owner"]}
     broken += [f"binding {x['account']} -> {x['key']}: {x['reason']}" for x in res
                if x["verdict"] == V.BROKEN]
     return ({a for a in acc_a if (a, sa["owner"]) in keep},
@@ -697,13 +706,16 @@ def _pair(r: dict, pa: Path, pb: Path, owner_a, owner_b, svc=None) -> dict:
                     dst.setdefault(br["exchange_id"], []).append(br)
         acc_a, acc_b = set(sa["accounts"]), set(sb["accounts"])
         shared = acc_a & acc_b
+        dropped: dict[str, dict] = {}
         if svc is not None:
-            acc_a, acc_b = _hold_to_accounts(r, svc, sa, sb, acc_a - shared, acc_b - shared, broken)
+            acc_a, acc_b = _hold_to_accounts(r, svc, sa, sb, acc_a - shared, acc_b - shared,
+                                             broken, dropped)
         ids_a, ids_b = {sa["owner"]} | (acc_a - shared), {sb["owner"]} | (acc_b - shared)
         ids = sorted(set(ha) | set(hb) | set(ba) | set(bb))
         for eid in ids:
             ex = pair_exchange(eid, ha.get(eid), hb.get(eid), sa["owner"], sb["owner"],
-                                ba.get(eid, []), bb.get(eid, []), ids_a, ids_b, shared)
+                                ba.get(eid, []), bb.get(eid, []), ids_a, ids_b, shared,
+                                dropped)
             r["exchanges"].append(ex)
             r["counts"][ex["status"]] += 1
             r["retracted"] += len(ex["retracted"])

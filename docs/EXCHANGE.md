@@ -108,6 +108,12 @@ agent's possession proof is read at the issue time):
 | revoked or rotated out at or before the row's time; bound to another owner or another account; a service row whose signature fails or is by a key you did not name | BROKEN (the pair reads BROKEN, the reason named) | dropped |
 | no record for the key; no trusted key named; a key that is not an Ed25519 `did:key` (length checked before any decode) | COULD NOT LOOK | dropped |
 
+A dropped pairing reads `mismatch` on counterparty, and its finding says the
+log binds the account by a signed binding row and names the account
+service's word and reason (not "holds no signed binding row", which is kept
+for a log with no binding row at all). A COULD NOT LOOK drop does not move
+the pair's verdict; a BROKEN one does.
+
 A FILE that is missing, over the size cap or not JSON makes the pair COULD
 NOT LOOK. Each binding's answer is listed under `account_service.bindings`.
 Without `--accounts`, nothing changes: `account_service.consulted` is false
