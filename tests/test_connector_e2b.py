@@ -49,7 +49,7 @@ def _sealed(r):
     assert r["signed_by_vendor"] is False
     assert r["standing"] == "reported_by_sender"
     assert r["attestation"] == {"status": "NONE", "checked_by_us": False, "claimed": None}
-    assert r["vendor"] == {"name": "e2b", "adapter_version": "1"}
+    assert r["vendor"] == {"name": "e2b", "adapter_version": "2"}
     assert r["kind"] == ROW_KIND and r["relayed"] is True and r["checked_by_us"] is False
     assert "verdict" not in r
     assert r["relayed_verdict"] in (VERIFIED, BROKEN, COULD_NOT_LOOK)
@@ -184,6 +184,24 @@ def test_execution_to_json_shape_without_error_is_verified():
                        "error": None}).encode()
     r = _one(body)
     assert r["relayed_verdict"] == VERIFIED and r["run"]["stdout_sha256"] == _sha(b"a")
+
+
+@pytest.mark.parametrize("err", ["null", " null\n"])
+def test_execution_to_json_error_string_null_is_no_error(err):
+    """Review F-R8: to_json writes `error` as a JSON-encoded string, so "no error"
+    can arrive as the string "null"; that decoded to None and read BROKEN. It is
+    the same as a real null: execution_no_error."""
+    body = json.dumps({"results": [], "logs": json.dumps({"stdout": ["a"], "stderr": []}),
+                       "error": err}).encode()
+    r = _one(body)
+    assert r["vendor_word"] == "execution_no_error" and r["relayed_verdict"] == VERIFIED
+    assert r["run"]["error_present"] is False and r["run"]["error_digest"] is None
+
+
+@pytest.mark.parametrize("err", ['"null"', "nul", "Null", "[]", "0", "false"])
+def test_execution_error_strings_that_are_not_json_null_still_read_as_errors(err):
+    r = _doc(results=[], logs={"stdout": [], "stderr": []}, error=err)
+    assert r["relayed_verdict"] == BROKEN and r["vendor_word"] == "execution_error"
 
 
 def test_execution_that_does_not_say_whether_it_errored_is_could_not_look():

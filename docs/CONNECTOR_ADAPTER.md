@@ -868,7 +868,7 @@ E2B writes no verdict word, so the adapter writes its own:
 | adapter word | relayed as | when |
 |---|---|---|
 | `command_exit_zero` | VERIFIED | `exit_code` 0 and `error` null or empty |
-| `execution_no_error` | VERIFIED | an Execution whose `error` key is null |
+| `execution_no_error` | VERIFIED | an Execution whose `error` key is null, or a string that decodes as JSON null (what `to_json` writes for no error) |
 | `command_exit_nonzero` | BROKEN | `exit_code` is an integer other than 0 |
 | `command_error` | BROKEN | `exit_code` 0 or missing, but a non-empty `error` string |
 | `execution_error` | BROKEN | an Execution with an error (object or string) |

@@ -35,7 +35,8 @@ THE BODY: one run object, or a JSON array of them (at most MAX_ROWS).
 THE WORD. E2B writes no verdict word, so the adapter writes its own:
 
     command_exit_zero      exit_code 0, error null or ""              -> VERIFIED
-    execution_no_error     an Execution whose `error` key is null     -> VERIFIED
+    execution_no_error     an Execution whose `error` key is null, or
+                           a string that decodes as JSON null (to_json) -> VERIFIED
     command_exit_nonzero   exit_code an int other than 0              -> BROKEN
     command_error          exit_code 0 but a non-empty error string   -> BROKEN
     execution_error        an Execution with an error (object/string) -> BROKEN
@@ -92,7 +93,7 @@ __all__ = ["VENDOR", "ADAPTER_VERSION", "TABLE", "MAX_PAYLOAD_BYTES", "MAX_DEPTH
            "STANDING", "E2BRunAdapter", "E2B", "ingest", "standing_verdict", "rollup"]
 
 VENDOR = "e2b"
-ADAPTER_VERSION = "1"
+ADAPTER_VERSION = "2"  # 2: an error string that decodes as JSON null is no error
 #: A body over this is digested, never read (stdout can be large).
 MAX_PAYLOAD_BYTES = 8 << 20
 #: Results can carry chart and JSON data; room for that, refused past it.
@@ -297,6 +298,11 @@ def _execution(doc: dict, run: dict, problems: list) -> str:
         return "execution_no_error"
     if isinstance(err, str):
         ok, parsed = _maybe_json(err)
+        if ok and parsed is None:
+            # to_json writes `error` as a JSON string: "null" is no error, the
+            # same as a real null (review F-R8)
+            run["error_present"] = False
+            return "execution_no_error"
         if ok and isinstance(parsed, dict):
             err = parsed
         else:
