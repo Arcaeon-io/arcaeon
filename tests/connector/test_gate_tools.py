@@ -264,3 +264,99 @@ def test_every_call_is_recorded_refusals_included(tmp_path):
             .read_text(encoding="utf-8").splitlines() if x.strip()]
     assert [(r["tool"], r["ok"]) for r in rows] == [("verify_bundle", True),
                                                      ("gate_decide", False)]
+
+
+# --- enforce: block (default-on) or warn (L4-01) ---------------------------------------
+
+WOULD = "would refuse in block mode"
+
+
+def test_gate_decide_default_is_block_and_says_so(tmp_path, monkeypatch):
+    monkeypatch.delenv("ARCAEON_GATE_MODE", raising=False)
+    f, did = _make(tmp_path, V.BROKEN)
+    err, got = _call("gate_decide", {"file": str(f), "action": "pay",
+                                     "audience": "instructor-1", "signers": [did]})
+    assert not err and got["decision"] == "refuse" and got["exit_code"] == 1, got
+    assert (got["enforce_mode"], got["enforce_source"]) == ("block", "default")
+
+
+def test_gate_decide_enforce_warn_lets_it_through_loudly(tmp_path):
+    f, did = _make(tmp_path, V.COULD_NOT_LOOK)
+    err, got = _call("gate_decide", {"file": str(f), "action": "act", "enforce": "warn",
+                                     "audience": "instructor-1", "signers": [did]})
+    assert not err, got
+    assert got["decision"] == "allow" and got["exit_code"] == 0
+    assert got["would_refuse"] is True and got["would_exit_code"] == 3
+    assert WOULD in got["warning"]
+    assert (got["enforce_mode"], got["enforce_source"]) == ("warn", "flag")
+
+
+def test_gate_decide_env_warn_and_argument_beats_it(tmp_path, monkeypatch):
+    monkeypatch.setenv("ARCAEON_GATE_MODE", "warn")
+    f, did = _make(tmp_path, V.BROKEN)
+    args = {"file": str(f), "action": "pay", "audience": "instructor-1", "signers": [did]}
+    err, got = _call("gate_decide", args)
+    assert not err and (got["decision"], got["enforce_source"]) == ("allow", "env"), got
+    err, got = _call("gate_decide", {**args, "enforce": "block"})
+    assert not err and (got["decision"], got["enforce_mode"]) == ("refuse", "block"), got
+
+
+def test_gate_decide_unknown_enforce_is_a_tool_error(tmp_path, monkeypatch):
+    f, did = _make(tmp_path, V.VERIFIED)
+    err, got = _call("gate_decide", {"file": str(f), "action": "read", "enforce": "maybe",
+                                     "audience": "instructor-1", "signers": [did]})
+    assert err, got
+    monkeypatch.setenv("ARCAEON_GATE_MODE", "maybe")
+    err, got = _call("gate_decide", {"file": str(f), "action": "read",
+                                     "audience": "instructor-1", "signers": [did]})
+    assert err and "ARCAEON_GATE_MODE" in str(got), got
+
+
+def test_verify_bundle_alone_stays_a_report(tmp_path):
+    f, did = _make(tmp_path, V.BROKEN)
+    err, got = _call("verify_bundle", {"file": str(f), "audience": "instructor-1",
+                                       "signers": [did]})
+    assert not err and got["verdict"] == V.BROKEN
+    assert "decision" not in got and "enforce_mode" not in got
+
+
+@pytest.mark.parametrize("enforce,want", [("block", "refuse"), ("warn", "allow")])
+def test_verify_bundle_with_an_action_answers_allow_or_refuse(tmp_path, enforce, want):
+    f, did = _make(tmp_path, V.BROKEN)
+    err, got = _call("verify_bundle", {"file": str(f), "audience": "instructor-1",
+                                       "signers": [did], "action": "pay", "enforce": enforce})
+    assert not err, got
+    assert got["verdict"] == V.BROKEN and got["exit_code"] == 1      # the report, unchanged
+    assert got["action"] == "pay" and got["decision"] == want
+    assert got["would_refuse"] is True
+    assert (got["enforce_mode"], got["enforce_source"]) == (enforce, "flag")
+    assert (WOULD in (got["warning"] or "")) == (enforce == "warn")
+
+
+def test_verify_bundle_with_an_action_matches_gate_decide(tmp_path):
+    f, did = _make(tmp_path, V.VERIFIED)
+    for action in G.ACTIONS:
+        args = {"file": str(f), "audience": "instructor-1", "signers": [did], "action": action,
+                "deal": "d-7f3a", "purpose": "grading"}
+        _, v = _call("verify_bundle", args)
+        _, g = _call("gate_decide", args)
+        assert v["decision"] == g["decision"] == "allow", (action, v, g)
+    _, v = _call("verify_bundle", {"file": str(f), "audience": "instructor-1",
+                                   "signers": [did], "action": "pay"})     # unbound pay
+    assert v["decision"] == "refuse" and v["verdict"] == V.VERIFIED, v
+
+
+def test_verify_bundle_with_an_action_writes_nothing(tmp_path):
+    f, did = _make(tmp_path, V.BROKEN)
+    err, got = _call("verify_bundle", {"file": str(f), "audience": "instructor-1",
+                                       "signers": [did], "action": "pay", "deal": "d-7f3a",
+                                       "purpose": "grading"})
+    assert not err and got["decision"] == "refuse", got
+    assert not (tmp_path / "state").exists() or not any((tmp_path / "state").rglob("evidence.json"))
+
+
+def test_verify_bundle_bad_action_or_enforce_is_a_tool_error(tmp_path):
+    f, did = _make(tmp_path, V.VERIFIED)
+    base = {"file": str(f), "audience": "instructor-1", "signers": [did]}
+    assert _call("verify_bundle", {**base, "action": "delete"})[0]
+    assert _call("verify_bundle", {**base, "action": "read", "enforce": "maybe"})[0]
