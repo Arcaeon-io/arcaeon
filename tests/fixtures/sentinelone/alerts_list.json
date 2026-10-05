@@ -1,0 +1,77 @@
+{
+  "data": {
+    "alerts": {
+      "edges": [
+        {
+          "node": {
+            "id": "synthetic-alert-0001",
+            "externalId": "synthetic-ext-0001",
+            "severity": "HIGH",
+            "status": "RESOLVED",
+            "name": "Synthetic malware detection",
+            "description": "synthetic description, not a live capture",
+            "detectedAt": "2026-10-05T10:00:00Z",
+            "firstSeenAt": "2026-10-05T09:59:00Z",
+            "lastSeenAt": "2026-10-05T10:00:00Z",
+            "analystVerdict": "TRUE_POSITIVE_MALWARE",
+            "classification": "MALWARE",
+            "confidenceLevel": "MALICIOUS",
+            "dataSources": ["synthetic-source"],
+            "detectionSource": {"product": "EDR", "vendor": "SentinelOne"},
+            "asset": {"id": "synthetic-asset-01", "name": "synthetic-host-01", "type": "SERVER"},
+            "noteExists": false,
+            "result": "synthetic result text",
+            "storylineId": "synthetic-storyline-01",
+            "ticketId": null
+          },
+          "cursor": "c1"
+        },
+        {
+          "node": {
+            "id": "synthetic-alert-0002",
+            "severity": "LOW",
+            "status": "FALSE_POSITIVE",
+            "name": "Synthetic benign tool",
+            "detectedAt": "2026-10-05T10:05:00Z",
+            "analystVerdict": "FALSE_POSITIVE_BENIGN",
+            "asset": {"id": "synthetic-asset-02", "type": "WORKSTATION"}
+          },
+          "cursor": "c2"
+        },
+        {
+          "node": {
+            "id": "synthetic-alert-0003",
+            "severity": "MEDIUM",
+            "status": "NEW",
+            "name": "Synthetic untriaged alert",
+            "detectedAt": "2026-10-05T10:10:00Z",
+            "analystVerdict": null
+          },
+          "cursor": "c3"
+        },
+        {
+          "node": {
+            "id": "synthetic-alert-0004",
+            "severity": "MEDIUM",
+            "status": "IN_PROGRESS",
+            "name": "Synthetic alert under review",
+            "analystVerdict": "UNDEFINED"
+          },
+          "cursor": "c4"
+        },
+        {
+          "node": {
+            "id": "synthetic-alert-0005",
+            "severity": "CRITICAL",
+            "status": "FALSE_POSITIVE",
+            "name": "Synthetic alert whose verdict and status disagree",
+            "analystVerdict": "TRUE_POSITIVE_RANSOMWARE"
+          },
+          "cursor": "c5"
+        }
+      ],
+      "pageInfo": {"hasNextPage": false, "hasPreviousPage": false, "startCursor": "c1", "endCursor": "c5"},
+      "totalCount": 5
+    }
+  }
+}

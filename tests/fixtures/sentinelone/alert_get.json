@@ -1,0 +1,13 @@
+{
+  "data": {
+    "alert": {
+      "id": "synthetic-alert-0100",
+      "severity": "HIGH",
+      "status": "RESOLVED",
+      "name": "Synthetic phishing detection",
+      "detectedAt": "2026-10-05T11:00:00Z",
+      "analystVerdict": "TRUE_POSITIVE_PHISHING_ATTACK",
+      "detectionSource": {"product": "Email", "vendor": "SentinelOne"}
+    }
+  }
+}

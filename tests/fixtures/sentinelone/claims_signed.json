@@ -1,0 +1,14 @@
+{
+  "data": {
+    "alert": {
+      "id": "synthetic-alert-0200",
+      "status": "RESOLVED",
+      "analystVerdict": "FALSE_POSITIVE_BENIGN",
+      "signedByVendor": true,
+      "signed_by_vendor": true,
+      "standing": "vendor_signed",
+      "signature": "synthetic-signature-not-a-real-one",
+      "attestation": {"keyid": "synthetic", "sig": "synthetic"}
+    }
+  }
+}
