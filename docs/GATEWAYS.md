@@ -86,34 +86,80 @@ and `purpose` name the exchange. `enforce` is `"warn"`, `"block"` or null
 unknown `enforce` word is a config error. The gateway is refused at load,
 never quietly at call time.
 
-## Lasso mcp-gateway (L4-02)
+## Lasso mcp-gateway (L4-02, L4-04)
 
-Lasso's plugins subclass `GuardrailPlugin` and register by name. Enable this
-one with `-p arcaeon`:
+Lasso's plugins subclass `GuardrailPlugin` and register with
+`@register_plugin`. Lasso only discovers plugins in its own packages, so
+arcaeon's module has to be imported before the gateway starts. Then enable it
+with `-p arcaeon`:
 
 ```
 pip install arcaeon[sign] mcp-gateway
 export ARCAEON_GATEWAY_CONFIG=/path/to/arcaeon-gateway.json
-mcp-gateway --mcp-json-path ~/.cursor/mcp.json -p arcaeon
+python -c "import sys, arcaeon.connect.lasso; from mcp_gateway.server import main; sys.exit(main())" --mcp-json-path ~/.cursor/mcp.json -p arcaeon
 ```
+
+These hooks were read from github.com/lasso-security/mcp-gateway at commit
+`7e7f1f6e5314819b3d0928128bb88eaea874b600` (version 1.2.1):
+
+| what | where |
+|---|---|
+| `PluginContext(server_name, capability_type, capability_name, arguments=None, response=None, mcp_context=None)` | `mcp_gateway/plugins/base.py` l.8-25 |
+| `Plugin` ABC: `load(config=None) -> None`, `process_request(context) -> Optional[dict]` (None blocks), `process_response(context) -> Any` | `mcp_gateway/plugins/base.py` l.48-87 |
+| `GuardrailPlugin(Plugin)`, `plugin_type = "guardrail"` | `mcp_gateway/plugins/base.py` l.93-107 |
+| `register_plugin(cls)`, keyed by class name and `plugin_name` | `mcp_gateway/plugins/manager.py` l.30-71 |
+| discovery imports only Lasso's own plugin packages | `mcp_gateway/plugins/manager.py` l.74-96 |
+| `load({})`: the config is always empty | `mcp_gateway/plugins/manager.py` l.197-198 |
+| a plugin exception is logged and **the response is kept** | `mcp_gateway/plugins/manager.py` l.283-314 |
+| tool: a non-`CallToolResult` answer gives back the original | `mcp_gateway/sanitizers.py` l.192-222 |
+| prompt: a non-`GetPromptResult` answer gives back the original | `mcp_gateway/server.py` l.221-254 |
+| resource: `(bytes, mime_type)`, name = URI; anything else gives back the original | `mcp_gateway/sanitizers.py` l.138-170 |
 
 The plugin is `arcaeon.connect.lasso.ArcaeonGuardrailPlugin` (plugin_name
 `arcaeon`). `load(config)` reads the file named by `ARCAEON_GATEWAY_CONFIG`
-and lays the dict Lasso passes over it, key by key. `process_request` passes
-the arguments through unchanged. `process_response` runs the check above on
-tool results; prompts and resources pass untouched. Lasso is not a dependency:
-if it is not installed, a local shim stands in so the module still imports.
+and lays the dict Lasso passes over it, key by key. Lasso passes `{}`, so in
+practice the file is the config. `process_request` passes the arguments
+through unchanged.
 
-Not yet confirmed: how Lasso discovers a plugin from an installed package, and
-whether it passes per-plugin config to `load`. The plugin was tested against
-fixture responses in the hook shapes Lasso's plugins README documents. It has
-not been run inside Lasso. Lasso's last release predates MCP 2026-07-28.
+`process_response` never raises. An exception inside the check becomes a
+COULD NOT LOOK refusal, because Lasso would keep the original response if the
+plugin raised. Every answer goes back in the type it came in, because Lasso
+lets the original through on a wrong type.
+
+**Tools, prompts and resources all go through the check.**
+
+| kind | what is checked | `tools` key | a refusal |
+|---|---|---|---|
+| tool | the `CallToolResult` | `"server/tool"`, then `"tool"` | an `isError` result, as above |
+| prompt | every message's content block. The prompt's `description` counts as one more block, and no seal can cover it | `"server/prompt:<name>"`, then `"prompt:<name>"` | a `GetPromptResult` with one assistant message `REFUSED by arcaeon: ...` |
+| resource | the bytes. They carry no `_meta`, so they always read COULD NOT LOOK | `"server/resource:<uri>"`, then `"resource:<uri>"` | `(b"REFUSED by arcaeon: ...", "text/plain")` |
+
+With the default `act`, unsealed prompts and every resource are refused. The
+opt-outs are the same as for tools: warn mode, or list the name as `read`, for
+example `"prompt:greet": "read"`. A `tools` entry for `greet` does not cover
+the prompt `greet`. In this Lasso commit the gateway does not expose resources
+at all (`mcp_gateway/gateway.py` l.302-305), so the resource path is ready but
+not reachable yet.
+
+Lasso is not a dependency. If it is not installed, a local shim stands in, so
+the module still imports. The tests use a stub `mcp_gateway` that mirrors the
+cited signatures and the cited fail-open behaviour.
+
+A config that `load` cannot read raises `ValueError`. Lasso logs that and
+skips the plugin (`manager.py` l.203-207), which means the gateway runs with
+**no** arcaeon gate. Check the gateway log for "Failed to load plugin" after
+any config change. Read from the code, the plain
+`mcp-gateway --mcp-json-path ~/.cursor/mcp.json -p arcaeon` would log
+"Unknown plugin: arcaeon" and start without the gate (`gateway.py`
+l.335-359), because nothing imported arcaeon first. Use the launcher above.
+The plugin has not been run inside a real Lasso. Lasso's last release
+predates MCP 2026-07-28.
 
 ## Docker MCP Gateway (L4-03)
 
-Docker MCP Gateway runs `after:` interceptors on every tool call. An `exec`
-interceptor gets the tool-call response JSON on stdin, and whatever it prints
-on stdout becomes the response:
+Docker MCP Gateway runs `after:` interceptors on every `tools/call`. An `exec`
+interceptor gets the call's `CallToolResult` as JSON on stdin. Whatever JSON it
+prints on stdout becomes the result:
 
 ```
 docker mcp gateway run --interceptor 'after:exec:arcaeon gate mcp-after --config /cfg/arcaeon-gateway.json'
@@ -127,26 +173,51 @@ arcaeon.connect.docker_after`. Options:
 - `--tool NAME`: which tool's entry in `tools` applies.
 - `--action WORD` and `--enforce warn|block`: override the config.
 
-It accepts these on stdin:
+The contract below was read from github.com/docker/mcp-gateway at commit
+`a34df45d4ec0e941a9853ad768c4f6cd818966b3`, in
+`pkg/interceptors/interceptors.go`:
+
+| what the gateway does | where |
+|---|---|
+| intercepts only `tools/call` | l.94 |
+| `after`: writes `json.Marshal(response)` to stdin. That is a bare `CallToolResult`, with no JSON-RPC envelope, no request and no tool name. It is `null` when the call itself failed | l.119-122 |
+| splits `after:exec:<cmd>` on the first two colons, then runs `/bin/sh -c <cmd>` | l.61-65, l.160-165 |
+| non-empty stdout is unmarshalled into `mcp.CallToolResult` and replaces the result | l.133-139 |
+| **empty stdout keeps the original result** | l.142 |
+| a non-zero exit fails the call ("executing interceptor"), and stdout is dropped | l.127-130 |
+
+The `CallToolResult` is go-sdk v1.4.1's
+(`vendor/github.com/modelcontextprotocol/go-sdk/mcp/protocol.go` l.76-120):
+`_meta`, `content`, `structuredContent`, `isError`. It has no `resultType`,
+so the gateway drops that key. A content block's `_meta` survives
+(`content.go` l.28-48), so a per-block `dev.arcaeon/bundle` reaches the
+interceptor. The test sample is `tests/fixtures/docker_mcp_gateway/`. It is
+built field for field from that struct, not captured live, and its README
+gives the sources.
 
 | stdin | what happens |
 |---|---|
-| a CallToolResult | checked, printed back (passed or replaced) |
-| a JSON-RPC response `{"jsonrpc", "id", "result"}` | its `result` checked and replaced in place; `jsonrpc` and `id` kept |
-| `{"request": ..., "response": ...}` | `response` checked; the tool name read from `request.params.name` |
-| a JSON-RPC error `{"jsonrpc", "id", "error"}` | passed through unchanged: there is no tool result to check |
+| a `CallToolResult` (has `content`) | checked, printed back (passed or replaced) |
+| `null` (the call failed) | prints nothing, exit 0: the gateway returns its own error unchanged |
+| anything without `content` (a JSON-RPC envelope, `{"request", "response"}`, `{}`) | a COULD NOT LOOK refusal result, whatever the action: Docker never sends these |
 | empty, not UTF-8, not JSON, a duplicate key, not an object, over 32 MiB | a COULD NOT LOOK refusal result |
 
-The gateway always gets JSON back. For any stdin the exit code is 0. Bad
-arguments or an unreadable config still print a refusal result, but exit 2,
-with the reason on stderr. Each call writes one line to stderr naming the
-verdict, the decision, the action and the mode, for the gateway's log.
+The earlier guessed shapes (a JSON-RPC response rewritten in place, a
+`{"request", "response"}` pair, a JSON-RPC error passed through) are gone.
+Docker never sends them. A wrapper echoed back would unmarshal as an empty
+result.
 
-The tool name comes from `--tool`, or from the input when it carries the
-request. If the gateway hands neither, every result is held to
-`default_action`. Not yet confirmed: the exact JSON Docker's gateway puts on
-stdin, whether it includes the tool name, and how it splits the `exec:`
-command line. This was tested with a subprocess against fixture JSON, not
+For a result, the gateway always gets non-empty JSON back, because empty
+stdout would let the original through. For any stdin the exit code is 0. Bad
+arguments or an unreadable config still print a refusal result, but exit 2.
+The gateway then fails the call, which is fail closed, and the reason goes to
+stderr. Each call writes one line to stderr naming the verdict, the decision,
+the action and the mode, for the gateway's log.
+
+The tool name comes only from `--tool`. Docker does not send it, and a name
+inside the result is the server's word, so it is never read. One interceptor
+runs for every tool, so without `--tool` every result is held to
+`default_action`. This was tested with a subprocess against the fixture, not
 inside Docker.
 
 ## What this cannot tell you
@@ -156,8 +227,10 @@ inside Docker.
   the content is true or safe. A server can seal a lie honestly.
 - A server that seals nothing always reads COULD NOT LOOK. This kit adds no
   seal of its own and cannot make an unsealed server's output VERIFIED.
-- A JSON-RPC error carries no tool result, so the Docker interceptor passes it
-  through unchanged. Its message text is the server's own and is not checked.
+- A failed tool call carries no tool result. The Docker interceptor lets the
+  gateway's error through unchanged. Its message text is not checked.
+- Docker's interceptors see only `tools/call`. Prompts and resources through
+  Docker MCP Gateway are not checked by this kit at all.
 - Only the key's word counts. A server's self-reported name (`serverInfo`)
   is not checked and does not count.
 - Some gateways may strip `_meta` keys they do not know. In that case the

@@ -69,7 +69,7 @@ from arcaeon.prove import gate_mode as GM
 from arcaeon.record.row import loads_strict
 
 __all__ = ["BUNDLE_KEY", "VERDICT_KEY", "DEFAULT_ACTION", "GatewayConfig", "verify_tool_result",
-           "refusal_result", "HONEST_LIMITS"]
+           "refusal_result", "could_not_look_summary", "HONEST_LIMITS"]
 
 BUNDLE_KEY = "dev.arcaeon/bundle"
 VERDICT_KEY = "dev.arcaeon/verdict"
@@ -362,6 +362,18 @@ def _summary(d: G.GateDecision, tool, parts: list) -> dict:
         out["parts"] = [{"where": p.file, "verdict": p.verdict, "decision": p.decision}
                         for p in parts]
     return out
+
+
+def could_not_look_summary(reason: str, looked_for: str, word: str,
+                           where: str = "stdin") -> dict:
+    """A refuse-in-block COULD NOT LOOK decision for when there was nothing
+    the check could even start on (unreadable input, a crashed check)."""
+    return {"verdict": V.COULD_NOT_LOOK, "decision": "refuse", "action": None, "tool": None,
+            "reason": f"refuse: COULD NOT LOOK: {reason}", "reasons": [reason],
+            "could_not_check": {"looked_for": looked_for, "where": where,
+                                "reason_word": word},
+            "would_refuse": True, "warning": None, "enforce_mode": "block",
+            "enforce_source": "default", "enforce_detail": "nothing to check: block"}
 
 
 def refusal_result(summary: dict, original: dict | None = None) -> dict:

@@ -8,29 +8,46 @@
                            [--action {read,act,pay,irreversible}] [--enforce {warn,block}]
     python -m arcaeon.connect.docker_after ...          (the same)
 
-Docker MCP Gateway hands an `after:` interceptor the tool-call response JSON
-on stdin and takes what it prints on stdout as the response. This reads it,
-runs arcaeon.connect.mcp_result.verify_tool_result on the tool result and
-prints the result back: unchanged but for _meta["dev.arcaeon/verdict"] when
-allowed, replaced by an isError REFUSED result when refused (block mode).
-One line naming the verdict goes to stderr for the gateway's log.
+THE REAL CONTRACT (L4-05), read from github.com/docker/mcp-gateway at
+a34df45d4ec0e941a9853ad768c4f6cd818966b3, pkg/interceptors/interceptors.go:
 
-WHAT IT READS on stdin, one JSON object:
+  * Only tools/call is intercepted (l.94).
+  * stdin is json.Marshal of the *mcp.CallToolResult (l.119-122): a bare
+    CallToolResult {"_meta"?, "content", "structuredContent"?, "isError"?}
+    (go-sdk v1.4.1 protocol.go l.76-120). There is no JSON-RPC envelope, no
+    request and no tool name. When the call itself failed, the response is
+    nil and stdin is `null`.
+  * The command runs as `/bin/sh -c <everything after "after:exec:">`
+    (l.61-65, l.160-165).
+  * Non-empty stdout is unmarshalled into mcp.CallToolResult and replaces the
+    response (l.133-139). EMPTY stdout keeps the original response (l.142),
+    so a refusal must never be empty.
+  * A non-zero exit fails the call with "executing interceptor" (l.127-130),
+    and stdout is dropped. That is fail closed, but the client sees a gateway
+    error, not our REFUSED text.
 
-    a CallToolResult                       checked and rewritten
-    a JSON-RPC response {"result": ...}    its result checked and rewritten in place
-    a JSON-RPC error    {"error": ...}     passed through unchanged (no tool result)
-    {"request": ..., "response": ...}      the response checked; the tool name read
-                                           from request.params.name
+WHAT THIS DOES: it runs arcaeon.connect.mcp_result.verify_tool_result on the
+CallToolResult and prints a CallToolResult back. The result is unchanged
+except for _meta["dev.arcaeon/verdict"] when allowed. It is replaced by an
+isError REFUSED result when refused (block mode). One line naming the verdict
+goes to stderr for the gateway's log.
 
-ALWAYS JSON BACK. Exit 0 for any stdin: empty, not JSON, not UTF-8, a
-duplicate key, not an object, over MAX_STDIN_BYTES: each is a COULD NOT LOOK
-refusal result, never a traceback. Bad arguments or a config that cannot be
-read print a refusal result too, and exit 2, with the reason on stderr.
+    a CallToolResult (has "content")     checked and rewritten
+    null                                 the gateway's own error: prints nothing,
+                                         so the gateway returns that error unchanged
+    anything else (a JSON-RPC envelope,  COULD NOT LOOK refusal: Docker never
+    {"request","response"}, no content)  sends it (the old guessed shapes are gone)
 
-THE TOOL NAME picks the action from the config's `tools`. It is --tool, else
-request.params.name / params.name in the input. When the gateway hands
-neither, every result is held to default_action (default act).
+ALWAYS JSON BACK for a result. Exit 0 for any stdin: empty, not JSON, not
+UTF-8, a duplicate key, not an object, over MAX_STDIN_BYTES. Each one is a
+COULD NOT LOOK refusal result, never a traceback. Bad arguments or a config
+that cannot be read print a refusal result too, and exit 2 (the gateway
+then fails the call), with the reason on stderr.
+
+THE TOOL NAME picks the action from the config's `tools`. Only --tool sets
+it. Docker does not send the name, and a name inside the result is the
+server's word, so it is never read. One interceptor runs for every tool, so
+without --tool every result is held to default_action (default act).
 """
 from __future__ import annotations
 
@@ -40,7 +57,12 @@ import sys
 from typing import Any
 
 from arcaeon import verdict as V
-from arcaeon.connect.mcp_result import GatewayConfig, refusal_result, verify_tool_result
+from arcaeon.connect.mcp_result import (
+    GatewayConfig,
+    could_not_look_summary,
+    refusal_result,
+    verify_tool_result,
+)
 from arcaeon.record.row import loads_strict
 
 __all__ = ["main", "MAX_STDIN_BYTES", "CONFIG_ENV", "USAGE", "rewrite"]
@@ -75,39 +97,20 @@ def _parse(argv: list[str]) -> dict:
     return out
 
 
-def _cnl_summary(reason: str, looked_for: str, word: str) -> dict:
-    return {"verdict": V.COULD_NOT_LOOK, "decision": "refuse", "action": None, "tool": None,
-            "reason": f"refuse: COULD NOT LOOK: {reason}", "reasons": [reason],
-            "could_not_check": {"looked_for": looked_for, "where": "stdin",
-                                "reason_word": word},
-            "would_refuse": True, "warning": None, "enforce_mode": "block",
-            "enforce_source": "default", "enforce_detail": "nothing to check: block"}
-
-
-def _tool_name(obj: dict) -> str | None:
-    for holder in (obj.get("request"), obj):
-        params = holder.get("params") if isinstance(holder, dict) else None
-        name = params.get("name") if isinstance(params, dict) else None
-        if isinstance(name, str):
-            return name
-    return None
+_cnl_summary = could_not_look_summary
 
 
 def rewrite(obj: Any, *, config: GatewayConfig, tool: str | None = None,
-            action: str | None = None, enforce: str | None = None,
-            _depth: int = 0) -> tuple[Any, dict | None]:
-    """(the object to print, the decision or None when passed through untouched)."""
-    if not isinstance(obj, dict):
-        return verify_tool_result(obj, config=config, tool=tool, action=action,
-                                  enforce=enforce)
-    tool = tool or _tool_name(obj)
-    for slot in ("result", "response"):
-        if _depth < 2 and isinstance(obj.get(slot), dict):
-            new, d = rewrite(obj[slot], config=config, tool=tool, action=action,
-                             enforce=enforce, _depth=_depth + 1)
-            return {**obj, slot: new}, d
-    if "error" in obj and "jsonrpc" in obj:
-        return obj, None                         # a JSON-RPC error: no tool result to check
+            action: str | None = None, enforce: str | None = None) -> tuple[dict, dict]:
+    """(the CallToolResult to print, the decision). `obj` must be the bare
+    CallToolResult Docker writes. Go marshals `content` with no omitempty, so
+    the key is always there. Anything without it is not that shape and is a
+    COULD NOT LOOK refusal, whatever the action."""
+    if not isinstance(obj, dict) or "content" not in obj:
+        why = ("the input is not a CallToolResult (no `content`); Docker MCP Gateway writes "
+               "a bare CallToolResult, never a JSON-RPC envelope or a request/response pair")
+        summary = _cnl_summary(why, "a CallToolResult on stdin", "unreadable")
+        return refusal_result(summary), summary
     return verify_tool_result(obj, config=config, tool=tool, action=action, enforce=enforce)
 
 
@@ -159,6 +162,12 @@ def main(argv: list[str] | None = None, *, stdin=None, stdout=None, stderr=None)
         except (UnicodeDecodeError, ValueError) as e:
             why = (f"the response is not one JSON object ({str(e)[:120]}); a duplicate key "
                    f"counts, since two readers would see two responses")
+        if why is None and obj is None:
+            # interceptors.go l.119-122/l.142: the call failed, json.Marshal(nil) is
+            # `null`, and empty stdout hands the gateway's own error back unchanged.
+            print("arcaeon mcp-after: stdin null: the tool call returned an error; "
+                  "printed nothing, so the gateway's error passes through", file=stderr)
+            return V.EXIT_GOOD
         if why is None and not isinstance(obj, dict):
             why = "the response is not a JSON object"
     if why is not None:
@@ -175,14 +184,11 @@ def main(argv: list[str] | None = None, *, stdin=None, stdout=None, stderr=None)
         print(f"arcaeon mcp-after: {V.COULD_NOT_LOOK} refuse: {why}", file=stderr)
         return V.EXIT_GOOD
     _emit(stdout, out)
-    if d is None:
-        print("arcaeon mcp-after: a JSON-RPC error, passed through", file=stderr)
-    else:
-        print(f"arcaeon mcp-after: {d['verdict']} {d['decision']} {d['action']}"
-              + (f" (tool {d['tool']})" if d.get("tool") else "")
-              + (f" [{d['enforce_mode']} from {d['enforce_source']}]")
-              + (" WARNING: would refuse in block mode" if d.get("warning") else ""),
-              file=stderr)
+    print(f"arcaeon mcp-after: {d['verdict']} {d['decision']} {d['action']}"
+          + (f" (tool {d['tool']})" if d.get("tool") else "")
+          + (f" [{d['enforce_mode']} from {d['enforce_source']}]")
+          + (" WARNING: would refuse in block mode" if d.get("warning") else ""),
+          file=stderr)
     return V.EXIT_GOOD
 
 
