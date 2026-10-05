@@ -52,7 +52,7 @@ def test_adapter_is_on_the_one_base_and_registered():
     assert isinstance(L.LAKERA_GUARD, VendorAdapter)
     assert L.LAKERA_GUARD.one_row_per_payload is False
     assert adapter_for("lakera-guard") is L.LAKERA_GUARD
-    assert L.LAKERA_GUARD.version == "1"
+    assert L.LAKERA_GUARD.version == "2"
     assert L.MAX_PAYLOAD_BYTES == 8 << 20
 
 
@@ -60,7 +60,8 @@ def test_table_maps_only_into_our_three_words_and_only_not_flagged_is_verified()
     assert set(L.TABLE.values()) <= {VERIFIED, BROKEN, COULD_NOT_LOOK}
     assert [w for w, v in L.TABLE.items() if v == VERIFIED] == ["not_flagged"]
     assert sorted(w for w, v in L.TABLE.items() if v == BROKEN) == [
-        "detector_detected", "flagged", "payload_match"]
+        "detector_detected", "flagged", "payload_match", "tool_detector_detected",
+        "tools_flagged"]
 
 
 # ------------------------------------------------------------------ not flagged
@@ -71,7 +72,7 @@ def test_not_flagged_in_declared_enforce_mode_relays_verified_for_that_row():
     r = rows[0]
     assert r["kind"] == ROW_KIND and r["relayed"] is True and r["checked_by_us"] is False
     assert "verdict" not in r and "could_not_look" not in r
-    assert r["vendor"] == {"name": "lakera-guard", "adapter_version": "1"}
+    assert r["vendor"] == {"name": "lakera-guard", "adapter_version": "2"}
     assert r["received_at"] == AT
     f = r["finding"]
     assert f["part"] == "response" and f["flagged"] is False and f["policy_mode"] == "enforce"

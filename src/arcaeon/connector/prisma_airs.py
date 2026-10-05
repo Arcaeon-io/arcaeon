@@ -15,7 +15,8 @@ for Batch 200 research R15). Four response shapes are read:
                        (no verdict yet)
   scan-results         GET /v1/scan/results -> [{req_id, status, scan_id, result}]
                        where `result` is the sync shape
-  threat-scan-report   GET /v1/scan/reports -> [{report_id, scan_id,
+  threat-scan-report   GET /v1/scan/reports -> [{report_id, scan_id, req_id,
+                       transaction_id (read as tr_id),
                        detection_results: [{data_type, detection_service, verdict,
                                             action, result_detail}]}]
 
@@ -92,7 +93,7 @@ __all__ = ["VENDOR", "ADAPTER_VERSION", "TABLE", "MAX_PAYLOAD_BYTES", "MAX_DEPTH
            "refetch_request", "standing_verdict", "STATUS_COMPLETE"]
 
 VENDOR = "prisma-airs"
-ADAPTER_VERSION = "2"  # 2: scan-results status read (status_not_complete)
+ADAPTER_VERSION = "3"  # 2: scan-results status read (status_not_complete); 3: report req_id, transaction_id
 #: A response over this is digested, never read.
 MAX_PAYLOAD_BYTES = 8 << 20
 MAX_DEPTH = 64
@@ -333,7 +334,10 @@ class _Out:
 
 
 def _report(out: _Out, rep: dict, where: str) -> None:
-    ids = _ids(rep)
+    ids = _ids(rep, req_id=rep.get("req_id"))
+    if ids["tr_id"] is None:
+        # the pan.dev use-cases page's /v1/scan/reports example names it transaction_id
+        ids["tr_id"] = _id(rep.get("transaction_id"))
     dets = rep.get("detection_results")
     if not isinstance(dets, list) or not dets:
         out.add(_row(out.base, "pending", fmt=FORMAT_REPORT, index=None, where=where, ids=ids))

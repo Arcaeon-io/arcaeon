@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **L2-14 (383accb, branch b200-t7c-vendor-samples).** kyverno rows (adapter version 2) gain `kyverno.scope` and `kyverno.subject_from`, and a result with no `resources[]` now takes its subject from the report `scope`. lakera-guard rows (version 2) gain `finding.tool_id` and four words (`tools_flagged`, `tool_detector_detected` BROKEN; `tools_unreadable`, `not_flagged_mode_conflict` COULD NOT LOOK). prisma-airs report rows (version 3) fill `ids.req_id` and `ids.tr_id`. Rows read by the older versions re-check COULD NOT LOOK (re-run `ingest`). `seal_bundle` now seals a bundle whose `.manifest` revision is `""` instead of COULD NOT LOOK.
+
 - **L4-03 (4853cb0, branch b200-t6d-gateways).** New subcommand `arcaeon gate mcp-after`; nothing else changes. `arcaeon gate --help` gains its usage lines. A Docker interceptor that does not pass `--tool` and whose input carries no request holds every result to `default_action` (default act).
 
 - **L4-02 (9a52a02, branch b200-t6d-gateways).** New, nothing to change for existing users. A tool server that wants its results to pass an arcaeon gateway puts its envelope under `_meta["dev.arcaeon/bundle"]` on each content block (or on the result when there is one block). Results that pass gain `_meta["dev.arcaeon/verdict"]`. Refused results are `isError: true` with one text block. A gateway config without `deal` and `purpose` refuses act/pay/irreversible even on a good seal (the gate's exchange rule), and an unlisted tool is held to `act`.
@@ -49,9 +51,9 @@
 
 - **L3-05 (1079941, branch b200-t6f-scitt).** nothing required: two new `tally` subcommands (`scitt-export`, `scitt-verify`) and new modules; no existing output or field changed. A `.scitt` file is CBOR, not JSON. Its receipt carries a private-use protected header -65537 = [tree-size, leaf-index] that other SCITT verifiers ignore. Do not cite these files as RFC 9943 / RFC 9942 conformant until the scitt-cose vectors pass.
 
-- **L3-06 (branch b200-t7a-account-e2e).** nothing required: a new module, no change to the stub or the verbs.
+- **L3-06 (70308dc, branch b200-t7a-account-e2e).** nothing required: a new module, no change to the stub or the verbs.
 
-- **L3-07 (branch b200-t7a-account-e2e).** nothing required: a tally page without withdraw rows and a register page without --pin-log are byte-identical to before.
+- **L3-07 (70308dc + 87568f3, branch b200-t7a-account-e2e).** nothing required: a tally page without withdraw rows and a register page without --pin-log are byte-identical to before.
 
 - **Exchange pair: a named owner closes trust on first use (A08).** Each log in `exchange pair --json` (and `read_side()`) adds `owner_refused`: null, or `{"named": DID, "first_row": DID}` when `--owner-a` / `--owner-b` names a key and the log's first row that verifies is signed by another. Such a log is refused whole: its verdict is BROKEN, its reason starts `refused:`, no row of it is read, and `exchanges` is empty with all `counts` 0 (exit 1, as before for a wrong owner). Without a named owner nothing changes.
 

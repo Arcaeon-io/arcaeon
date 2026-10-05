@@ -1,0 +1,50 @@
+{
+  "flagged": true,
+  "action": "enforce",
+  "payload": [
+    {
+      "start": 1,
+      "end": 1,
+      "text": "string",
+      "detector_type": "string",
+      "labels": [
+        "string"
+      ],
+      "message_id": 1
+    }
+  ],
+  "breakdown": [
+    {
+      "project_id": "string",
+      "policy_id": "string",
+      "detector_id": "string",
+      "detector_type": "string",
+      "detected": true,
+      "result": "string",
+      "message_id": 1
+    }
+  ],
+  "tools": {
+    "flagged": true,
+    "breakdown": [
+      {
+        "project_id": "string",
+        "policy_id": "string",
+        "detector_id": "string",
+        "detector_type": "string",
+        "detected": true,
+        "result": "string",
+        "tool_id": 1
+      }
+    ]
+  },
+  "dev_info": {
+    "git_revision": "string",
+    "git_timestamp": "string",
+    "model_version": "string",
+    "version": "string"
+  },
+  "metadata": {
+    "request_uuid": "string"
+  }
+}

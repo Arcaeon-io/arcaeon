@@ -25,9 +25,10 @@ was copied, and every name, namespace and uid is synthetic.
 - The `resources[]` entry shape (`apiVersion`, `kind`, `namespace`, `name`,
   `uid`): it is a Kubernetes ObjectReference by convention; R14 names the field
   only.
-- Newer Kyverno releases may put the checked resource in a report-level `scope`
-  instead of per-result `resources[]`. R14 does not document `scope`, so the
-  adapter does not read it.
+- Newer Kyverno releases put the checked resource in a report-level `scope`
+  instead of per-result `resources[]`. R14 did not document `scope`; Kyverno's
+  own reports guide does (`vendor_public/`), and since adapter version 2 the
+  adapter reads it for the subject when a result names no resource.
 - The `openreports.io/v1alpha1` group is named in R14 as alpha; its kind names
   are not, so only `PolicyReport` and `ClusterPolicyReport` are read under it.
 - The kyverno CLI `apply` / `test` text and table output is not documented in

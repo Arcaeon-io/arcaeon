@@ -295,8 +295,9 @@ given as an HMAC secret) is COULD NOT LOOK.
 
 The tarball is never extracted to disk: it is read in memory, and a member
 named with `..`, a backslash, a drive letter, a link or device member, or a name
-twice makes the whole bundle COULD NOT LOOK (`seal` and `revision` say so). A
-malformed or missing `.manifest`, bytes that are not a gzipped tarball, and a
+twice makes the whole bundle COULD NOT LOOK (`seal` and `revision` say so). An
+empty revision (the `opa build` default) is kept as `""` and the bundle is still
+read; the join never matches it. A malformed or missing `.manifest`, bytes that are not a gzipped tarball, and a
 tarball over 16 MiB (digested, not read), inflating past 64 MiB or holding over
 10000 members are COULD NOT LOOK too.
 
@@ -433,8 +434,11 @@ Every row carries, besides the base keys:
 | `finding` | which part (response, breakdown or payload) and its index; for the response `flagged`, `action`, the declared policy mode, detector and match counts, model version; for a detector its project, policy and detector ids, `detector_type`, `result`, `message_id`; for a match span `detector_type`, labels, offsets and a digest of the matched text |
 
 `flagged` is always false in Detect mode; only an Enforce-mode policy flags.
-The response does not document which mode ran, so the caller declares it in
-`policy_mode` (`"enforce"` or `"detect"`). "Not flagged" relays VERIFIED for its
+The caller declares the mode in `policy_mode` (`"enforce"` or `"detect"`). The
+API reference (read 2026-10-05) documents the response's `action` as the
+project's mode (`enforce` or `detect`); it is not taken as the mode on its own,
+but a response whose `action` names the other mode makes "not flagged" COULD
+NOT LOOK. "Not flagged" relays VERIFIED for its
 one row only when the caller declared `"enforce"` and nothing else in the
 response points the other way. Lakera writes a boolean, not a word, so the
 adapter writes its own:
@@ -444,10 +448,14 @@ adapter writes its own:
 | `flagged` | BROKEN | `flagged` is true, whatever mode was declared |
 | `detector_detected` | BROKEN | a breakdown entry says `detected: true` |
 | `payload_match` | BROKEN | a payload match span |
+| `tools_flagged` | BROKEN | the `tools` block (screening of the request's tool definitions) says `flagged: true` |
+| `tool_detector_detected` | BROKEN | a `tools.breakdown` entry says `detected: true` |
 | `not_flagged` | VERIFIED | `flagged` is false, no detector hit, no match span, nothing unreadable, and the caller declared `"enforce"` |
 | `not_flagged_detect_mode` | COULD NOT LOOK | `flagged` is false and the caller declared `"detect"` |
 | `not_flagged_mode_undeclared` | COULD NOT LOOK | `flagged` is false and no mode was declared |
-| `not_flagged_unsettled` | COULD NOT LOOK | `flagged` is false but a detector hit, a match span or an unreadable entry points the other way |
+| `not_flagged_unsettled` | COULD NOT LOOK | `flagged` is false but a detector hit, a match span, a `tools` hit or an unreadable entry points the other way |
+| `not_flagged_mode_conflict` | COULD NOT LOOK | `flagged` is false and the response's `action` (`enforce` or `detect`) is not the mode the caller declared |
+| `tools_unreadable` | COULD NOT LOOK | a `tools` block that is not an object with a boolean `flagged`, or a `tools.breakdown` entry with no boolean `detected` |
 | `flagged_unreadable` | COULD NOT LOOK | `flagged` is missing or not a boolean |
 | `detector_unreadable` | COULD NOT LOOK | a breakdown entry that is not an object or has no boolean `detected` |
 | `payload_unreadable` | COULD NOT LOOK | a payload entry that is not an object |
@@ -469,8 +477,9 @@ rollup" above: no bare `verdict` key, per-word `counts`.
 - **That a not-flagged request is safe.** `not_flagged` relays what Lakera
   reported, under a policy mode the caller declared; on its own it never makes a
   VERIFIED.
-- **Which policy mode ran.** The response does not say; the caller's
-  `policy_mode` is the caller's word, not Lakera's.
+- **Which policy mode ran.** The response's `action` names it, but that is
+  the sender's word as much as `flagged` is; the caller's `policy_mode` is the
+  caller's word, not Lakera's.
 - **Which request was screened.** `request_uuid` names the call, but Lakera
   offers no lookup by it: `/v2/guard/results` screens again rather than
   returning the earlier answer. `request_sha256` is only as good as the bytes the
@@ -501,7 +510,7 @@ Every row carries, besides the base keys:
 | `standing` | always `reported_by_sender` |
 | `input_sha256` | hex SHA-256 of the exact bytes read |
 | `vendor_request_id` | the `scan_id`, else the `report_id`, as Prisma wrote it; else null |
-| `ids` | `scan_id`, `report_id`, `tr_id` and `req_id` |
+| `ids` | `scan_id`, `report_id`, `tr_id` and `req_id` (a report's `transaction_id` is read as `tr_id`) |
 | `refetch` | the re-fetch description below for this row's id, or null when no id has the documented shape |
 | `finding` | format, status, action, category, profile name, the names of detection flags that are true, and for a report the data type, detection service, verdict and a digest of `result_detail` |
 
@@ -557,10 +566,12 @@ rollup" above: no bare `verdict` key, per-word `counts`.
 `ClusterPolicyReport` (`wgpolicyk8s.io/v1alpha2`; also `reports.x-k8s.io/v1beta2`
 and `openreports.io/v1alpha1`), or a Kubernetes `List` of them, into one row per
 entry in `results[]`. `vendor_id` is the report's `metadata.uid`; `subject` is
-`kyverno:<namespace>/<kind>/<name>` when the result names exactly one resource.
+`kyverno:<namespace>/<kind>/<name>` when the result names exactly one resource,
+or names none and the report's `scope` names one (how Kyverno writes one report
+per resource; `kyverno.subject_from` says which).
 One adapter key `kyverno` holds the report identity (name, namespace, uid,
 resourceVersion), policy, rule, source, scored, severity, category, message,
-timestamp, up to 32 resources, a digest of `properties` and `summary_check`.
+timestamp, up to 32 resources, the `scope`, a digest of `properties` and `summary_check`.
 The kyverno CLI's text or table output is not read: it is one COULD NOT LOOK row.
 
 | Kyverno `result` | `relayed_verdict` | why |
@@ -598,9 +609,11 @@ these rows; re-run `ingest`.
   ClusterPolicy spec seen at the time is a separate row, not built here.
 - **That the report is complete.** Reports are merged from admission and
   background scans on Kyverno's schedule; a missing result is not a pass.
-- **That the shape matches a live cluster.** The fixtures were written from
-  Kyverno's and the wg-policy API documentation, not captured; see
-  `tests/fixtures/kyverno/README.md` for what is unverified.
+- **That the shape matches a live cluster.** The hand-made fixtures were written
+  from Kyverno's and the wg-policy API documentation, not captured; see
+  `tests/fixtures/kyverno/README.md` for what is unverified. The `kubectl get
+  polr -o yaml` output in Kyverno's reports guide is also read, in
+  `tests/fixtures/kyverno/vendor_public/`.
 
 ## Cedar
 

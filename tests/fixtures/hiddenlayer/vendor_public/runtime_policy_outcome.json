@@ -1,0 +1,26 @@
+{
+  "manifest": {
+    "tenant_id": "b2774567-7610-437a-1111-da6ec36cc347",
+    "correlation_id": "12f6708f-88bf-455e-b7fb-c6485d6a93d1",
+    "event_id": "0c7fe87b-9bc6-4651-bf2c-80f8376817d1",
+    "event_at": "2026-06-04T18:23:11.482Z",
+    "project_id": "a6478cdd-62d2-4e6c-2222-8c11e8663777",
+    "configuration_rule_set_version_id": "019cc576-c1d5-7828-939a-07601c7c43f4",
+    "schema_name": "com.hiddenlayer.runtime_security.runtime_policy_outcome_v1",
+    "tags": {}
+  },
+  "policy_id": "b0596848-b7a6-4453-ad23-2b3136b1d8ff",
+  "session_id": "7af8d1a8-742b-4400-b152-5ee702885b2f",
+  "interaction_id": "b53bc9c8-e5cc-4bd8-a3bf-98576de4cb71",
+  "external_session_ids": [
+    { "id": "sess-abc-123", "source": "my-app" }
+  ],
+  "requester_id": "gpburdell",
+  "evaluation": {
+    "action": "BLOCK",
+    "highest_threat_level": "HIGH"
+  },
+  "detections": [
+    { "name": "prompt_injection" }
+  ]
+}

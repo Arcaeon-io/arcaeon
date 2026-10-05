@@ -52,7 +52,7 @@ def _sha(raw: bytes) -> str:
 def test_adapter_is_on_the_one_base_and_registered():
     assert isinstance(K.KYVERNO, VendorAdapter) and K.KYVERNO.one_row_per_payload is False
     assert adapter_for("kyverno") is K.KYVERNO
-    assert K.KYVERNO.name == "kyverno" and K.KYVERNO.version == "1"
+    assert K.KYVERNO.name == "kyverno" and K.KYVERNO.version == "2"
 
 
 def test_the_table_is_pass_verified_fail_broken_the_rest_could_not_look():
@@ -69,7 +69,7 @@ def test_one_row_per_result_in_order_with_the_documented_fields():
     for i, (r, e) in enumerate(zip(rows, res)):
         assert r["kind"] == ROW_KIND and r["relayed"] is True and r["checked_by_us"] is False
         assert "verdict" not in r
-        assert r["vendor"] == {"name": "kyverno", "adapter_version": "1"}
+        assert r["vendor"] == {"name": "kyverno", "adapter_version": "2"}
         assert r["vendor_id"] == "00000000-0000-4000-8000-000000000001"
         assert r["received_at"] == AT
         k = r["kyverno"]

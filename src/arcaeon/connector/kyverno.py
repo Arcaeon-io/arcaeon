@@ -16,6 +16,10 @@ API doc describe it (no live capture was read for this adapter):
                  properties (map of string to string), resources[] (object refs).
                  Every result field is optional.
     summary      {pass, fail, warn, error, skip} counts
+    scope        one object ref {apiVersion, kind, namespace, name, uid}: the resource
+                 the whole report is about. Kyverno 1.11+ writes one report per
+                 resource and names it here, not in results[].resources[] (the
+                 Kyverno reports guide's own `kubectl get polr -o yaml` example)
 
 A Kubernetes list body ({"kind": "List", "items": [report, ...]}) is read report by
 report. The kyverno CLI's text or table output is not read.
@@ -38,8 +42,10 @@ THE ROW. The check.verdict.relayed row of arcaeon.connector.core, plus:
                  report_index, result_index, policy, rule, source, scored, severity,
                  category, message, timestamp {seconds, nanos}, resources[] (at most
                  MAX_RESOURCES, each {api_version, kind, namespace, name, uid}),
-                 resources_total, properties_digest (sha256:jcs:v1, the map itself
-                 is not copied), summary_check ("agrees" | "disagrees" | "absent")
+                 resources_total, scope (the report's scope ref, or None),
+                 subject_from ("resources" | "scope" | None), properties_digest
+                 (sha256:jcs:v1, the map itself is not copied), summary_check
+                 ("agrees" | "disagrees" | "absent")
     policy_ref   {policy, rule, version: None, join: COULD NOT LOOK, note}: a report
                  names the policy and rule only, so the row cannot be tied to a
                  sealed policy
@@ -49,7 +55,8 @@ THE ROW. The check.verdict.relayed row of arcaeon.connector.core, plus:
 
     vendor_id    the report's metadata.uid
     subject      {"name": "kyverno:<namespace>/<kind>/<name>", "sha256": None} when the
-                 result names exactly one resource, else None
+                 result names exactly one resource, or names none and the report's
+                 `scope` names one; else None
     attestation  always NONE: Kyverno does not sign reports; a field in the payload
                  that looks like a signature is not read
 
@@ -78,7 +85,7 @@ __all__ = ["VENDOR", "ADAPTER_VERSION", "TABLE", "API_VERSIONS", "REPORT_KINDS",
            "KyvernoReportAdapter", "KYVERNO", "ingest", "rollup"]
 
 VENDOR = "kyverno"
-ADAPTER_VERSION = "1"
+ADAPTER_VERSION = "2"
 #: A body over this is digested, never read.
 MAX_PAYLOAD_BYTES = 8 << 20
 #: Reports nest shallowly; leave room for properties and lists.
@@ -188,7 +195,7 @@ def _summary_check(rep: dict, results: list) -> tuple[str, str | None]:
 
 
 def _result_row(base: dict, info: dict, ri: int, j: int, res: Any,
-                check: str, why: str | None) -> dict:
+                check: str, why: str | None, scope: dict | None = None) -> dict:
     row = _copy(base)
     row["vendor_id"] = info["uid"]
     if not isinstance(res, dict):
@@ -206,6 +213,7 @@ def _result_row(base: dict, info: dict, ri: int, j: int, res: Any,
          "severity": _safe_str(res.get("severity")), "category": _safe_str(res.get("category")),
          "message": _safe_str(res.get("message")), "timestamp": _timestamp(res.get("timestamp")),
          "resources": resources, "resources_total": len(rs) if isinstance(rs, list) else None,
+         "scope": scope, "subject_from": None,
          "properties_digest": _digest(res["properties"]) if "properties" in res else None,
          "summary_check": check}
     row["kyverno"] = k
@@ -216,8 +224,12 @@ def _result_row(base: dict, info: dict, ri: int, j: int, res: Any,
     row["vendor_word"] = _safe_str(word)
     row["mapping"] = {"rule": rule}
     row["relayed_verdict"] = ours
+    r0 = None
     if len(rlist) == 1 and resources[0] and resources[0]["name"]:
-        r0 = resources[0]
+        r0, k["subject_from"] = resources[0], "resources"
+    elif not rlist and scope and scope["name"]:
+        r0, k["subject_from"] = scope, "scope"
+    if r0 is not None:
         row["subject"] = {"name": "kyverno:" + "/".join(
             p for p in (r0["namespace"], r0["kind"], r0["name"]) if p), "sha256": None}
     where = f"{_WHERE}[{ri}].results[{j}]"
@@ -270,7 +282,7 @@ def _report_rows(base: dict, ri: int, rep: Any, rows: list) -> bool:
             rows.append(_cnl(_copy(base), "every result in the body", _WHERE, "bounded",
                              f"more than {MAX_ROWS} results; the rest were not read"))
             return True
-        rows.append(_result_row(base, info, ri, j, res, check, why))
+        rows.append(_result_row(base, info, ri, j, res, check, why, _resource(rep.get("scope"))))
     return False
 
 
