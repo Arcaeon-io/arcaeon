@@ -388,7 +388,8 @@ def from_decision_file(path: str | Path, *, hash_file: bool = True) -> dict:
 # --- the pair: one exchange read from both logs (L3-RECON) ---------------------
 
 _SIDE_KEEP = ("reaction", "file_sha256", "counterparty", "signer", "at", "disputed", "reason",
-              "supersedes", "line", "row_digest", "note", "retracted", "retracted_at")
+              "supersedes", "line", "row_digest", "note", "retracted", "retracted_at",
+              "withdrawn", "withdrawn_at")
 
 
 def from_pair(log_a: str | Path, log_b: str | Path, exchange_id: str, *,
@@ -425,6 +426,7 @@ def from_pair(log_a: str | Path, log_b: str | Path, exchange_id: str, *,
                      "log_reason": s.get("reason"),
                      "record": {k: rec[k] for k in _SIDE_KEEP if k in rec} if rec else None,
                      "retracted": nm in ex["retracted"],
+                     "withdrawn": nm in ex.get("withdrawn", []),
                      "broken_rows": [b for b in s.get("broken_rows", [])
                                      if b.get("exchange_id") == exchange_id]}
     p = {"kind": PAIR_KIND, "source": "both exchange logs", "exchange_id": exchange_id,
@@ -444,7 +446,11 @@ def _side_block(s: dict) -> str:
     rows = [("Log", _code(s.get("log"))),
             ("Owner key", f"{_code(s.get('owner'))} ({_text(s.get('owner_from') or 'not read')})"),
             ("The log reads", f"**{s.get('log_verdict')}**: {_text(s.get('log_reason'))}")]
-    if rec is None:
+    if rec is None and s.get("withdrawn"):
+        rows.append(("Its row for this exchange", "withdrawn: this log withdrew its reaction "
+                                                  "by a signed withdraw row and holds no "
+                                                  "current one (the withdrawn row stays)"))
+    elif rec is None:
         rows.append(("Its row for this exchange", "no record: this log holds no row for it"))
     else:
         rows += [("Reaction", f"**{rec.get('reaction')}**"),
@@ -457,6 +463,9 @@ def _side_block(s: dict) -> str:
         if s.get("retracted"):
             rows.append(("Retracted", f"{rec.get('retracted')} earlier BROKEN row(s), latest "
                                       f"at {_code(rec.get('retracted_at'))}"))
+        if rec.get("withdrawn"):
+            rows.append(("Withdrawn", f"this log withdrew {rec.get('withdrawn')} earlier "
+                                      f"reaction(s), latest at {_code(rec.get('withdrawn_at'))}"))
     for b in s.get("broken_rows") or []:
         rows.append((f"BROKEN row, line {b.get('line')}", _text(b.get("finding"))))
     return _rows(rows)

@@ -20,6 +20,13 @@ receipt on its own ledger. Then each side runs the release rule.
 Every step is a deal row each side can check. Everything is written under a
 throwaway directory, and ARCAEON_HOME points there too, so the real home is
 never touched. Exit 0 when both runs end the way they should.
+
+One side or both. A seal shows one side's record: what that party wrote down, and a
+way for anyone to check whether it changed since. An exchange holds only when both
+parties' logs reconcile: each party signs its own reaction in its own log, and
+`arcaeon exchange pair A.jsonl B.jsonl` reads the two logs and lines them up. A
+one-sided record cannot prove that the other party saw the same bytes, agreed with
+them, or answered at all.
 """
 from __future__ import annotations
 

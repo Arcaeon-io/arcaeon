@@ -985,14 +985,18 @@ looked up), the file's sha256, your reaction in the verifier's three words, the 
 `did:key`, signed with Ed25519 over a canonical encoding of those fields.
 `--disputed REASON` adds a signed DISPUTED claim, never a verdict. Rows are
 append-only: a change is a new row with `--supersedes` naming the old row's
-digest. `pair` verifies both chains and every row signature against each
+digest. `withdraw --row DIGEST` takes your own current reaction back entirely
+with a signed withdraw row (the old row stays; a withdraw is final, and a new
+reaction is a new row); `pair` and `tally` read it as `withdrawn`. `pair` verifies both chains and every row signature against each
 log's key, reads the latest non-superseded row per party per exchange and
 reports `clean`, `mismatch` (naming the field), `not_verified`, `missing` or
 `broken`, with DISPUTED claims listed apart. An account id and a `did:key`
 are distinct IDs to `pair` and `tally`: a row naming an account reads
 `mismatch` on counterparty, because which key an account binds is checked
 on the account side, not here (COULD NOT LOOK here). `--strict` makes a
-`mismatch` or `missing` exchange exit 1. Two clean rows mean both said
+`mismatch` or `missing` exchange exit 1. `pair --pin FILE` also writes a v2
+pin statement over the pair result (a dry run: nothing is sent, no witness
+is contacted). Two clean rows mean both said
 VERIFIED about the same bytes, not that the file is true, and two colluding
 parties write two clean rows. The row, the signature encoding and the limits
 are [EXCHANGE.md](EXCHANGE.md); the library is `arcaeon.prove.exchange_log`.
@@ -1006,10 +1010,14 @@ usage: arcaeon exchange react --exchange ID --counterparty ID --file PATH
                               [--supersedes ROWDIGEST] [--log PATH]
        arcaeon exchange bind --account acct:NAME@arcaeon.io --key SEEDFILE
                               [--log PATH]
+       arcaeon exchange withdraw --row ROWDIGEST --key SEEDFILE
+                              [--reason TEXT] [--log PATH]
        arcaeon exchange pair A.jsonl B.jsonl [--owner-a DID] [--owner-b DID]
                               [--json] [--strict]
                               [--accounts FILE --account-key DID...]
                               [--late-after SECONDS]
+                              [--pin FILE [--stated-at T]
+                              [--prev-pin-sha256 HEX]]
        arcaeon exchange packet A.jsonl B.jsonl --exchange ID
                               [--owner-a DID] [--owner-b DID]
                               [--late-after SECONDS] [--json] [--out DIR]
@@ -1018,7 +1026,9 @@ usage: arcaeon exchange react --exchange ID --counterparty ID --file PATH
 **Exit codes:** `react`: 0 written, 2 refused or bad usage (a missing flag, a
 reaction that is not one of the three words, a counterparty that is neither
 a `did:key` nor `acct:NAME@arcaeon.io`, a key that does not own the log, a `--supersedes` digest not in the
-log), 3 the file is not there. `pair`: 0 VERIFIED (both logs check; read the
+log), 3 the file is not there. `withdraw`: 0 written, 2 refused or bad usage
+(the row is not this log's current reaction, or is already withdrawn).
+`pair`: 0 VERIFIED (both logs check; read the
 per-exchange statuses), 1 BROKEN (a chain or a row), 3 COULD NOT LOOK (a log
 missing, empty, unreadable or not a chained ledger, or no Ed25519 backend), 2
 bad usage. `pair --strict`: also 1 when both logs check but any exchange is

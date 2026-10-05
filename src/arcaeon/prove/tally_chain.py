@@ -50,7 +50,7 @@ from arcaeon.record.row import canon_json, loads_strict
 
 __all__ = ["SNAPSHOT_KIND", "SNAPSHOT_VERSION", "VERIFY_KIND", "PIN_STATEMENT_FIELDS",
            "DEFAULT_CHAIN_ID", "TallyChainError", "seal", "relativize", "pin_statement",
-           "statement_canonical", "statement_sha256", "verify", "main"]
+           "statement_canonical", "statement_sha256", "statement_v2", "verify", "main"]
 
 SNAPSHOT_KIND = "tally.snapshot"
 SNAPSHOT_VERSION = 1
@@ -344,6 +344,16 @@ def pin_statement(log, *, chain_id: str = DEFAULT_CHAIN_ID, prev_pin_sha256: str
     except TallyChainError as e:
         raise TallyChainError(f"the tally chain does not verify ({e}); no statement over it") \
             from None
+    return statement_v2(chain_id, vals, lf, prev_pin_sha256=prev_pin_sha256,
+                        stated_at=stated_at)
+
+
+def statement_v2(chain_id: str, vals: list[str], lf: bytes, *,
+                 prev_pin_sha256: str | None = None, stated_at: str | None = None) -> dict:
+    """The v2 pin statement over chain values `vals` (rows 1..N, in order) and
+    the LF-canonical file bytes `lf` they come from. The one builder:
+    pin_statement uses it for the tally chain, and `arcaeon exchange pair
+    --pin` for a pair result. The caller checks its inputs."""
     return {"chain": chain_id, "chain_values_sha256": _values_sha(vals),
             "file_sha256": hashlib.sha256(lf).hexdigest(), "file_sha256_of": SHA256_OF,
             "prev_pin_sha256": prev_pin_sha256, "rows": len(vals),

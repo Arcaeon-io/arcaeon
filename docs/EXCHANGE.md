@@ -185,18 +185,20 @@ class word in `disagreement` and one plain sentence in
 `disagreement_reason`. An exchange where they agree carries `null` in both;
 so does a `broken` one (its record does not check, so no disagreement is read
 from it). `disagreements` counts each word, and the text output's first line
-ends with the four counts. `status` and its values are unchanged.
+ends with the five counts. `status` and its values are unchanged.
 
 | word | what it means | what it cannot prove |
 |---|---|---|
 | `missing` | one log has no record of the exchange; the other does | that the silent party never saw it, or that a row was not dropped by truncating the log (pin each head) |
 | `mismatched` | both logs have it, and a field differs: `reaction`, `file_sha256` or `counterparty`, named in the reason and in `differs` | which side is right |
+| `withdrawn` | a side took its reaction back by a signed withdraw row (below); with no current row its status is `missing`, and when it wrote a new row after, the current rows are compared as usual | why it took it back: the reason, if given, is its own sentence |
 | `retracted` | a side superseded an earlier BROKEN for this exchange with another word (the retraction above); the old row stays in its log | why it changed its word |
 | `late` | both agree, but one row's `at` trails the other's by more than `--late-after SECONDS` | when either row was really written: `at` is each writer's own clock, signed, not witnessed |
 
-One word per exchange, in this order: `missing`, `mismatched`, `retracted`,
-`late`. A retracted exchange that is also mismatched reads `mismatched`; the
-side still shows under `retracted`.
+One word per exchange, in this order: `missing`, `mismatched`, `withdrawn`,
+`retracted`, `late`. A retracted exchange that is also mismatched reads
+`mismatched`; the side still shows under `retracted`. The reasons for where
+`withdrawn` sits are under "Withdraw" below.
 
 **The late window** defaults to 86400 seconds (one day): `at` is each
 writer's own clock and a reaction is often written by a scheduled job after
@@ -207,12 +209,14 @@ signed `at`, so the class is always readable; if two rows ever carried no
 comparable time, the exchange could not be `late` and its findings would say
 so.
 
-**Retraction** is the existing one: a BROKEN superseded by another word. There
-is no separate withdraw row; a party that wants to take a reaction back writes
-a new row that supersedes it.
+**Retraction** is the existing one: a BROKEN superseded by another word. To
+take a whole reaction back, not change its word, a party writes a withdraw
+row (below).
 
-**`--strict`** marks `mismatched` and `missing` only (exit 1), as before.
+**`--strict`** marks status `mismatch` and `missing` only (exit 1), as before.
 `late` and `retracted` are not marks under `--strict`: the current rows agree.
+A withdrawal that leaves a side with no current row has status `missing`, so
+`--strict` marks it; one followed by a new agreeing row does not.
 
 **The dispute packet from the pair.** `arcaeon exchange packet A.jsonl
 B.jsonl --exchange ID` reads both logs with the same reader and puts one
@@ -233,6 +237,125 @@ on the connector it leaves one call-record row.
 **What the classes cannot prove.** A class says how the two records differ,
 not which party is right or at fault, and not that either record is true.
 Everything under "What it does not prove" below still holds.
+
+## Withdraw
+
+```console
+$ arcaeon exchange withdraw --row sha256:json-c14n:v1:<hex> --key a.key --log a.jsonl     --reason "reacted to the wrong exchange"
+```
+
+A party takes one of its own reactions back entirely by appending a signed
+row of kind `exchange.withdraw` (v 1) to its own log:
+
+```json
+{"kind": "exchange.withdraw", "v": 1, "exchange_id": "deal-2026-0412",
+ "withdraws": "sha256:json-c14n:v1:<the reaction row's digest>",
+ "reason": "reacted to the wrong exchange", "at": "2026-10-05T09:00:00Z",
+ "signer": "did:key:z6Mk...", "sig": "<base64 Ed25519>"}
+```
+
+Every field but `sig` (and the ledger's `ts` and `chain`) is signed: Ed25519
+over PAE(`application/vnd.arcaeon.exchange.withdraw.v1+json`, json-c14n of the
+seven fields). `reason` is optional (`null`). The row's own digest is
+digest_json of those seven fields.
+
+The rules, each one a BROKEN row when broken (the exchange it names reads
+`broken`, and the log reads BROKEN):
+
+- **Append-only.** The withdrawn row stays in the log, unchanged; the withdraw
+  row names it by digest.
+- **The same party.** The withdraw row is signed by the key that owns the log,
+  and it names a reaction row earlier in that same log, for the same
+  exchange. A withdraw signed by the other party or by a stranger is BROKEN; so
+  is one that names the other party's row (it is not in this log).
+- **The current reaction.** The named row is not superseded and not already
+  withdrawn.
+- **Final.** A withdraw row cannot be withdrawn, and a row that supersedes a
+  withdrawn reaction or a withdraw row is BROKEN: a withdrawn reaction is not
+  re-instated. To react again, write a new reaction row (no `--supersedes`).
+  `arcaeon exchange withdraw` and `react --supersedes` refuse all of these
+  before writing (exit 2).
+
+**In `pair`.** A withdrawn row is never the current row. A side whose only
+reaction is withdrawn has no current row: the exchange's status is `missing`
+(as before, so `--strict` marks it), the side is listed under `withdrawn`,
+and its class is `withdrawn`, not `missing`: the record was taken back, it
+did not fail to exist. A side that wrote a new reaction after withdrawing is
+compared on the new row, which carries `withdrawn` and `withdrawn_at`; if the
+current rows agree the class is `withdrawn`. `withdrawn` (top level) counts
+the sides, a DISPUTED claim on a withdrawn row says `(withdrawn)`, and the
+dispute packet shows the side as withdrawn.
+
+**The precedence**, `missing` > `mismatched` > `withdrawn` > `retracted` >
+`late`:
+
+- `missing` first: if the other log has no record at all, that is the bigger
+  gap; a side that withdrew is still named in `withdrawn` and the findings.
+- `mismatched` next: it can only meet `withdrawn` when the withdrawing side
+  wrote a new row, and then the current rows really differ.
+- `withdrawn` before `retracted`: a withdrawal with no current row means the
+  current records do not reconcile, while a retraction is read on current
+  rows that agree; and a withdrawal takes the whole reaction back, where a
+  retraction replaces one word. The retracting side still shows under
+  `retracted`.
+- `late` last: it is only clock distance between two agreeing rows.
+
+**In the tally.** A withdrawn reaction is not counted as a reaction: it is
+not in `said`, `said_unpaired` or `received` (a new row written after it is).
+It is counted as a withdrawal, in each window's `withdrawn` (`said` by the
+withdrawing ID, `received` by the counterparty, dated by the withdraw row),
+and printed as `withdrawn said` and `withdrawn received`. A paired exchange
+where one side withdrew reads `missing`, as in `pair`. These keys, the
+`withdrawn` definition and the two text rows appear only when an input chain
+holds a withdraw row: a tally without one is byte for byte what it was, so
+sealed snapshots still rebuild. (`tally html` does not show the withdrawn
+rows yet.)
+
+**What a withdraw cannot prove.** It shows the party took its reaction back
+and when, by its own clock; it cannot prove why, that the withdrawn reaction
+was wrong, or that the other party agreed. The withdrawn row is still
+readable and still says what it said.
+
+## Pinning a pair result
+
+```console
+$ arcaeon exchange pair a.jsonl b.jsonl --pin pair.statement.json --stated-at 2026-10-05T10:00:00Z
+```
+
+`--pin FILE` is a dry run. It reads the two logs as `pair` always does,
+prints the usual output, and writes one more file: a v2 pin statement over
+the pair result, built by the same builder as `arcaeon tally pin --dry-run`
+(`tally_chain.statement_v2`, see docs/TALLY.md):
+
+- `chain` is `arcaeon-exchange-pair`; `rows` is 1.
+- The pinned bytes are the pair result (the JSON `pair --json` prints) in
+  json-c14n v1, with every spelling of the two log paths replaced by the
+  file's name. `tip` is the sha256 of those bytes, `chain_values_sha256` is
+  the sha256 of `tip` and one LF, and `file_sha256` is the sha256 of those
+  bytes and one LF (`file_sha256_of` is `lf`).
+- `stated_at` is `--stated-at` (UTC, `Z` or `+00:00`), else now: the same
+  pair result with the same `--stated-at` gives the same statement digest,
+  from any folder that holds the same two logs. `--prev-pin-sha256 HEX`
+  chains it to an earlier statement; else `null`.
+
+On stderr it prints the statement, its sha256 and the pair result's sha256.
+stdout is unchanged, so `--json` output still parses. The file is never
+overwritten (exit 2 if it exists). A pair that reads COULD NOT LOOK gets no
+statement (exit 3); a BROKEN pair gets one (the result it commits to says
+BROKEN) and keeps exit 1. `--stated-at` and `--prev-pin-sha256` need
+`--pin`.
+
+**Nothing is pinned.** No witness is contacted, nothing is sent, no
+`witness_pins` file is read or written, and no network connection is
+opened. Pinning the statement outside your control is the operator's own
+step, as with the tally chain.
+
+**What a pair pin cannot prove.** Once pinned, it shows this pair result
+existed by the witness's time. It cannot prove the two logs were complete
+when read (pin each log's head too), that the result is right about the
+exchange, or anything the pair result itself cannot prove (below). Until it
+is pinned somewhere you do not control, the statement file proves nothing
+by itself.
 
 ## What it proves
 

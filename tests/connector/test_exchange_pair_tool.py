@@ -111,7 +111,7 @@ def test_answers_what_pair_returns_with_classes(monkeypatch, tmp_path, logs):
     lib = X.pair(la, lb)
     assert got["verdict"] == lib["verdict"] == V.VERIFIED and got["exit"] == 0
     assert got["disagreements"] == lib["disagreements"] == {
-        "missing": 1, "mismatched": 1, "late": 0, "retracted": 0}
+        "missing": 1, "mismatched": 1, "late": 0, "retracted": 0, "withdrawn": 0}
     assert [e["disagreement"] for e in got["exchanges"]] == ["mismatched", None, "missing"]
     assert got["late_after"] == X.DEFAULT_LATE_AFTER
 
@@ -125,7 +125,7 @@ def test_one_exchange_and_a_window(monkeypatch, tmp_path, logs):
     assert [e["exchange_id"] for e in got["exchanges"]] == ["ex-2"]
     assert got["exchanges"][0]["disagreement"] == "late"
     assert got["exchange"] == "ex-2" and got["exchange_found"] is True
-    assert got["disagreements"] == {"missing": 0, "mismatched": 0, "late": 1, "retracted": 0}
+    assert got["disagreements"] == {"missing": 0, "mismatched": 0, "late": 1, "retracted": 0, "withdrawn": 0}
     err, got = _one("exchange_pair_reconcile", {"log_a": str(la), "log_b": str(lb),
                                                 "exchange": "ex-404"})
     assert not err and got["exchange_found"] is False and got["exchanges"] == []

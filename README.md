@@ -103,6 +103,13 @@ gate can use the exit code alone.
 What it did not catch: someone deleting the last rows. See Limits below, and
 `arcaeon pin`, which is the fix.
 
+One side or both. A seal shows one side's record: what that party wrote down, and a
+way for anyone to check whether it changed since. An exchange holds only when both
+parties' logs reconcile: each party signs its own reaction in its own log, and
+`arcaeon exchange pair A.jsonl B.jsonl` reads the two logs and lines them up. A
+one-sided record cannot prove that the other party saw the same bytes, agreed with
+them, or answered at all.
+
 ## The verbs
 
 Three families. The full reference, with usage lines and examples, is

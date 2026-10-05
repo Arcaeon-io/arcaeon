@@ -13,6 +13,11 @@ Read this part first. It is short.
 - It does not tell you what your agent did was right. It tells you every row still hashes to the next, and, with a pin, that the rows up to the pinned head have not changed since the pin.
 - Anyone who can write the file can still change it. What they cannot do is change it without the check naming the line.
 - Cutting the newest lines off the end needs a pin to catch. The five minutes here make no pin.
+- One side or both. A seal shows one side's record: what that party wrote down, and a way
+  for anyone to check whether it changed since. An exchange holds only when both parties'
+  logs reconcile: each party signs its own reaction in its own log, and `arcaeon exchange
+  pair A.jsonl B.jsonl` reads the two logs and lines them up. A one-sided record cannot
+  prove that the other party saw the same bytes, agreed with them, or answered at all.
 - The full list is in [What it can and cannot prove](WHAT_IT_CAN_AND_CANNOT_PROVE.md).
 
 ## Minute one: run the installer

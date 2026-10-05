@@ -623,7 +623,7 @@ def _evidence_pack_verify(args: dict) -> dict:
 
 # --- the exchange pair reader (L3-RECON) -----------------------------------
 # Import only: the answer is arcaeon.prove.exchange_log.pair, the function
-# `arcaeon exchange pair` runs, with the four disagreement classes. Reads the
+# `arcaeon exchange pair` runs, with the five disagreement classes. Reads the
 # two caller-named logs; writes nothing but the call record.
 
 def _exchange_pair_reconcile(args: dict) -> dict:
@@ -1060,7 +1060,8 @@ def build_server():
             "NOT LOOK with exit 0, 1 or 3; per exchange the status (clean, mismatch, "
             "not_verified, missing, broken) and, when the two sides disagree, one "
             "class word with a one-sentence reason: missing (one log has no record), "
-            "mismatched (a field differs, named), retracted (a side superseded an "
+            "mismatched (a field differs, named), withdrawn (a side took its reaction "
+            "back by a signed withdraw row), retracted (a side superseded an "
             "earlier BROKEN), late (both agree but one row's time trails the other's "
             "by more than late_after seconds, default 86400). disagreements counts "
             "them. Optional: exchange (one exchange id only), owner_a / owner_b (the "
