@@ -1,0 +1,9 @@
+{
+  "decision": "Deny",
+  "diagnostics": {"reason": ["forbid-all"], "errors": []},
+  "signature": "MEUCIQsyntheticSignatureBlobNotARealSignatureAtAll0000000000000000000000",
+  "signed_by_vendor": true,
+  "standing": "VERIFIED",
+  "attestation": {"status": "VERIFIED", "checked_by_us": true, "keyid": "synthetic-key"},
+  "relayed_verdict": "VERIFIED"
+}

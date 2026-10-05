@@ -1,0 +1,1 @@
+{"decision": "Allow", "diagnostics": {"reason": ["policy1"], "errors": [{"policy": "policy3", "message": "synthetic: attribute not found"}]}}

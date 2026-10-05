@@ -523,6 +523,64 @@ these rows; re-run `ingest`.
   Kyverno's and the wg-policy API documentation, not captured; see
   `tests/fixtures/kyverno/README.md` for what is unverified.
 
+## Cedar
+
+`arcaeon.connector.cedar.ingest(body, policy_store_id=None)` reads one of three
+shapes into relayed rows: a Cedar `is_authorized` response
+(`{"decision", "diagnostics": {"reason": [policy ids], "errors": [...]}}`), an
+Amazon Verified Permissions `IsAuthorized` response
+(`{"decision", "determiningPolicies": [{"policyId"}], "errors": [...]}`), or one
+CloudTrail data event for `IsAuthorized` / `BatchIsAuthorized` (the decision in
+`additionalEventData.decision`, or one row per entry of
+`additionalEventData.results[]` for a batch). One adapter key `cedar` holds the
+shape, the item index, the adapter's reading (`outcome`), up to 64 policy ids,
+whether the decision was an implicit deny, whether an errors list was reported,
+its count and a digest (the error text is not copied), and for CloudTrail the
+event name, event id and a digest of the request (principal, action and resource
+are not copied). `vendor_id` is the CloudTrail `requestID`; the responses carry
+no id.
+
+| decision (case ignored) | errors | `relayed_verdict` | why |
+|---|---|---|---|
+| `Allow` / `ALLOW` | present and empty | VERIFIED | Cedar allowed, no policy errored, as Cedar says |
+| `Deny` / `DENY` | present and empty | BROKEN | Cedar denied (an empty policy list is an implicit deny) |
+| `Allow` or `Deny` | one or more | COULD NOT LOOK | Cedar skips a policy that errors, so the decision was reached without it |
+| `Allow` or `Deny` | not reported (CloudTrail, or the key is missing) | COULD NOT LOOK | a clean decision cannot be told from one reached with policies skipped |
+| any other word, or not a string | any | COULD NOT LOOK | not in the table |
+| any | policy or error list not readable | COULD NOT LOOK | the decision cannot be read |
+
+Every row carries `signed_by_vendor: false`, `standing: "reported_by_sender"`
+and `input_sha256` (hex SHA-256 of the exact bytes given to `ingest`), written
+by one final step over every row; `ingest` takes no argument that changes them,
+and a field in the body that looks like a signature is not read. After that step
+only an Allow with an empty errors list can relay as VERIFIED; a Deny never can.
+`rollup(rows)` is never VERIFIED: BROKEN if any row is a relayed Deny, otherwise
+COULD NOT LOOK. Each row's `policy_ref` records the policy store id (from the
+CloudTrail event, or the caller's `policy_store_id`, marked as such; the two
+disagreeing is COULD NOT LOOK) and the determining policy ids, with
+`version: null` and `join: COULD NOT LOOK`.
+
+An empty body, one over 8 MiB (digested, not read), not UTF-8, not JSON, with a
+duplicate key, nested past 64, a JSON array, or an object of no shape or two
+shapes is one COULD NOT LOOK row. More than 10000 batch results stop with one
+`bounded` row. `recheck` says COULD NOT LOOK for these rows; re-run `ingest`.
+
+### What this cannot prove
+
+- **That Cedar or AWS said it.** Cedar and Verified Permissions do not sign
+  decisions. The row proves which bytes arrived, not who wrote them; anyone who
+  can hand us a body can write an `Allow`.
+- **Which signed policy made the decision.** The ids name policies; they do not
+  pin policy text or a version. Tying a row to a policy needs the policy set
+  sealed too, and that join is not built: `policy_ref.join` says COULD NOT LOOK.
+- **Which policy, from CloudTrail.** A CloudTrail event carries the decision and
+  the policy store only: no determining policies and no errors, so its rows are
+  COULD NOT LOOK even for an ALLOW. CloudTrail data events are also off by
+  default, so a missing event is not a missing decision.
+- **That the shape matches a live service.** The fixtures were written from the
+  cedar-policy and AWS documentation, not captured; see
+  `tests/fixtures/cedar/README.md` for what is unverified.
+
 ## The sha256:jcs:v1 digest
 
 This is the one place the scheme is defined. `arcaeon.connector.core.jcs_digest`
