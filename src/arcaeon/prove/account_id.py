@@ -477,8 +477,9 @@ def binding_statement(store: dict, did: Any) -> dict | None:
 
 
 def control_cluster(store: dict, ident: Any) -> str | None:
-    """The minimum control cluster for Sybil counting: the owner account. A
-    tally counts exchanges between two IDs of one cluster as self-trades."""
+    """The minimum control cluster for Sybil counting: the owner account. The
+    tally reads the same owner from consult_binding (`owner`) and, with
+    --accounts, counts trades between two keys of one owner as self-trades."""
     if isinstance(ident, str) and ident.startswith("did:"):
         if not _did_shape_ok(ident):
             return None
@@ -692,10 +693,13 @@ def consult_binding(service: dict, did: Any, account: Any, rows: Any,
     that does not verify), or the key was revoked or rotated out at or before
     its newest reaction row; COULD NOT LOOK when the service has no record or
     cannot be trusted. A row the service wraps as its agent_proof is read at
-    the issue time. `through` (on VERIFIED) is the latest time the pairing was
-    held at: the newest binding row or reaction row. Never raises."""
+    the issue time. On VERIFIED, `through` is the latest time the pairing was
+    held at (the newest binding row or reaction row) and `owner` is the owner
+    account the verified statement names: the control cluster (TE-44a) a
+    tally folds into one group; else both are None. Never raises."""
     out = {"verdict": None, "reason": None, "account": account,
-           "key": did if _did_shape_ok(did) else None, "at": None, "through": None}
+           "key": did if _did_shape_ok(did) else None, "owner": None, "at": None,
+           "through": None}
 
     def done(word, why, at=None):
         out.update(verdict=word, reason=why, at=at)
@@ -746,6 +750,7 @@ def consult_binding(service: dict, did: Any, account: Any, rows: Any,
                                             f"confirmed: {rep['reason']}", _utc(newest))
         last = max(_parse(s[2]) for s in seen)
         out["through"] = _utc(max(newest, last) if newest is not None else last)
+        out["owner"] = rep["owner"]          # R3: the control cluster, from signed rows
         return done(*seen[0])
     except Exception as e:  # noqa: BLE001  hostile input is an answer, not a crash
         return done(V.COULD_NOT_LOOK, f"the account service record could not be read "

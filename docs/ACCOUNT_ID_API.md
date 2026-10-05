@@ -251,9 +251,19 @@ the issue). Without `--accounts`, nothing changes and the pair report says
 - **Keys per owner.** At most `MAX_AGENTS_PER_OWNER` agent accounts per owner
   (100 in the stub; a placeholder, not a decision). Revoked accounts count,
   so churning accounts does not reset the cap. One active key per account.
-- **Control cluster.** `control_cluster()` returns the owner account. It is
-  the minimum cluster: the tally counts trades between two agents of one
-  owner as self-trades (TE-44a). R11 says a cluster should also merge shared
+- **Control cluster.** `control_cluster()` returns the owner account, and
+  `consult_binding` carries the same owner (`owner`, from the verified
+  statement) on a VERIFIED answer. It is the minimum cluster: `tally build
+  --accounts FILE --account-key DID` folds the keys whose bindings the
+  account service confirms under one owner into one group, so a trade
+  between two of them is a self-trade (TE-44a): left out of every count and
+  listed in `excluded` with the reason "self-trade: both keys are agents of
+  one owner, OWNER (account service)". It needs both keys' bindings to stand:
+  a key with no binding row, or one the service does not confirm, has no
+  owner here and its trades still count. Without `--accounts` the tally
+  does not know owners and two agents of one owner look like two parties.
+  `exchange pair` reads two logs and does not count, so it does not apply
+  the cluster. R11 says a cluster should also merge shared
   funding, shared billing and shared register entries; that wider merge needs
   billing data this stub does not have, and the tally should print the
   cluster-adjusted counts beside the raw ones, not silently.

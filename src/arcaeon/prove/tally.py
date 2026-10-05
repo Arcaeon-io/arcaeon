@@ -295,8 +295,9 @@ def _cnl(r: dict, looked_for: str, where: str, word: str, why: str) -> dict:
 
 
 def _hold_to_accounts(r: dict, svc: dict, acct_key: dict, record_broken: dict,
-                      broken_top: list) -> None:
-    """L3-02: an applied binding stands only if the account service confirms it."""
+                      broken_top: list) -> dict:
+    """L3-02: an applied binding stands only if the account service confirms it.
+    Returns {key: owner account} for each binding that stands (R3, TE-44a)."""
     from arcaeon.prove import account_id as A
     logs: dict[str, list[str]] = {}
     for c in r["chains"]:
@@ -318,7 +319,12 @@ def _hold_to_accounts(r: dict, svc: dict, acct_key: dict, record_broken: dict,
             record_broken.setdefault(b["key"], []).append(why)
     r["account_service"] = A.service_report(svc, res)
     r["limits"] = [s.replace("arcaeon.io's record is not consulted", "the account service "
-                             "named in account_service was consulted") for s in r["limits"]]
+                             "named in account_service was consulted")
+                    .replace("or are in one declared group;", "are in one declared group, or "
+                             "are both bound (confirmed by the account service) to agent "
+                             "accounts of one owner;") for s in r["limits"]]
+    return {x["key"]: x["owner"] for x in res if x["verdict"] == V.VERIFIED and x.get("owner")
+            and acct_key.get(x["account"]) == x["key"]}
 
 
 def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_src,
@@ -459,8 +465,9 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
             r["bindings"].append({"account": acct, "key": k, "applied": False, "finding":
                                   f"{V.COULD_NOT_LOOK}: {len(keys)} chains among the inputs "
                                   f"bind {acct}; not resolved"})
+    owner_of: dict[str, str] = {}
     if svc is not None:
-        _hold_to_accounts(r, svc, acct_key, record_broken, broken_top)
+        owner_of = _hold_to_accounts(r, svc, acct_key, record_broken, broken_top)
     shared = {a for a, ks in bound.items() if len(ks) > 1}
     ids_of: dict[str, set[str]] = {k: {k} for k in owners}
     for acct, k in acct_key.items():
@@ -482,6 +489,9 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
         shared = sorted(group_of.get(ca, set()) & group_of.get(cb, set()))
         if shared:
             return f"self-trade: both IDs are in the declared group {shared[0]!r}"
+        if owner_of.get(a) and owner_of.get(a) == owner_of.get(b):
+            return (f"self-trade: both keys are agents of one owner, {owner_of[a]} "
+                    f"(account service)")
         return None
 
     ids: dict[str, dict] = {}
@@ -807,7 +817,8 @@ counterparties with their own records, disagreements, DISPUTED claims, account
 age. Every share is printed with its count ("9 of 10"). No score, no weight,
 no ranking. An ID with any broken record or BROKEN reaction about it shows
 BROKEN first; under 10 exchanges or 14 days it is unrated. Self-trades (one
-key, one ID by alias, one --groups group) are listed and not counted.
+key, one ID by alias, one --groups group, or with --accounts two agents of one
+owner) are listed and not counted.
 --accounts FILE (an account store or binding statements, docs/ACCOUNT_ID_API.md)
 with --account-key DID (the binding key you trust; repeatable) holds each
 account binding to the account service at the binding row's time and at the

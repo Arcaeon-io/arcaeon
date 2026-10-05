@@ -522,3 +522,62 @@ def test_without_service_the_exchange_notes_are_unchanged(w):
     assert f"log a holds no signed binding row for {ACCT}: which key it binds is not " \
            f"checked here ({V.COULD_NOT_LOOK})" in _cp_note(p)
     assert p["account_service"] == A.service_report(None)
+
+
+# --- R3: two agents of one owner trading are self-trades (TE-44a) ---------------------
+
+ACCT2 = "acct:bot2.owner-a@arcaeon.io"
+
+
+def _sibling_trade(w, owner_b=OWNER):
+    """owner-a's bot1 (key a) and bot2 (key b) bind and react to each other."""
+    a, b = w["a"], w["b"]
+    _issue(w, a, NOW - timedelta(days=5))
+    _issue(w, b, NOW - timedelta(days=5), owner=owner_b, agent="bot2")
+    acct_b = A.agent_account("bot2", owner_b)
+    X.bind(a.log, key_file=a.key, account=ACCT, at=NOW - timedelta(days=3))
+    X.bind(b.log, key_file=b.key, account=acct_b, at=NOW - timedelta(days=3))
+    X.react(a.log, key_file=a.key, exchange_id="ex-1", counterparty=acct_b, file=w["file"],
+            reaction=V.VERIFIED, at=NOW - timedelta(days=1))
+    X.react(b.log, key_file=b.key, exchange_id="ex-1", counterparty=ACCT, file=w["file"],
+            reaction=V.VERIFIED, at=NOW - timedelta(days=1))
+
+
+def test_consult_carries_the_owner(w):
+    _issue(w, w["a"], NOW - timedelta(days=5))
+    _exchange(w)
+    svc, _ = A.load_service(w["store"], [w["srv"].did])
+    res = A.consult_pairings(svc, [(ACCT, w["a"].did, [w["a"].log])])
+    assert res[0]["verdict"] == V.VERIFIED and res[0]["owner"] == OWNER
+
+
+def test_two_agents_of_one_owner_trading_are_self_trades(w):
+    _sibling_trade(w)
+    r = _tally(w, accounts=w["store"])
+    assert r["verdict"] == V.VERIFIED, r["reason"]
+    assert all(b["applied"] for b in r["bindings"])
+    for k in (w["a"].did, w["b"].did):
+        win = _ib(r, k)
+        assert win["excluded"] == 2, win          # said and received, as for any self-trade
+        assert win["paired"]["clean"] == 0 and win["exchanges"] == 0, win
+    ex = [i for i in r["ids"] if i["id"] == w["a"].did][0]["excluded"]
+    assert ex and all(OWNER in e["reason"] and "self-trade" in e["reason"] for e in ex), ex
+    assert "account service" in ex[0]["reason"]
+    assert any("agent accounts of one owner" in x for x in r["limits"])
+
+
+def test_agents_of_two_owners_still_count(w):
+    _sibling_trade(w, owner_b=OTHER)
+    r = _tally(w, accounts=w["store"])
+    assert _ib(r, w["a"].did)["excluded"] == 0
+    assert _ib(r, w["a"].did)["paired"]["clean"] == 1
+
+
+def test_sibling_trade_without_accounts_is_unchanged(w):
+    """No --accounts: the owner is never read; the tally is what it was."""
+    _sibling_trade(w)
+    r = T.build([w["a"].log, w["b"].log], now=NOW)
+    assert _ib(r, w["a"].did)["excluded"] == 0
+    assert _ib(r, w["a"].did)["paired"]["clean"] == 1
+    assert "account_service" not in r
+    assert not any("agent accounts of one owner" in x for x in r["limits"])
