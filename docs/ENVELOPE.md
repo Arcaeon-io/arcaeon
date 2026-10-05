@@ -178,7 +178,10 @@ $ arcaeon envelope verify FILE --audience ME --signer did:key:z6Mk... [--deal ID
 `verify` prints a JSON report on stdout and one line on stderr: the word,
 then the reason. The report lists each step's own word (`envelope`,
 `signature`, `file`, `binding`, `witness`), the sealed fields, the findings,
-and what was not checked.
+what was not checked, and `file_sha256`: the hex sha256 of the handed file as
+read now, on every word (on BROKEN it is the changed bytes, not the sealed
+digest), null only when the file cannot be read. `gate decide --json`
+carries the same report under `report`.
 
 | word | exit | what the receiver does |
 |---|---|---|

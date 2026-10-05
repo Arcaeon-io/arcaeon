@@ -451,3 +451,14 @@ def test_cli_usage_errors_are_2(tmp_path, capsys):
     assert cli.main(["gate", "decide", "--envelope", str(f), "--nope"]) == 2
     assert cli.main(["gate", "--help"]) == 0
     assert "irreversible" in capsys.readouterr().out
+
+
+# --- the file sha256 in decide --json (D054 gap: the OCSF export reads it) ----------
+
+@pytest.mark.parametrize("verdict", [V.VERIFIED, V.BROKEN, V.COULD_NOT_LOOK])
+def test_decide_json_report_carries_the_file_sha256(tmp_path, capsys, verdict):
+    f, did = _make(tmp_path, verdict)
+    _cli(f, did, "--action", "read", "--json")
+    j = json.loads(capsys.readouterr().out)
+    assert j["verdict"] == verdict
+    assert j["report"]["file_sha256"] == hashlib.sha256(f.read_bytes()).hexdigest()
