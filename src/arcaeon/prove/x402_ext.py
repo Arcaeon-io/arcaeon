@@ -313,8 +313,9 @@ def check(response: Any, file_bytes: bytes, audience: str | None, action: str, *
             packet, packet_error = made.get("packet") or _dispute(d)
     settled = isinstance(obj, dict) and obj.get("success") is True
     # R3-1: a release moves escrowed money whatever the action word, so it needs
-    # the exchange named, as pay does (F2): the gate allows `act` unbound, and an
-    # envelope sealed for another deal must not come back RELEASE.
+    # the exchange named, as pay does (F2): the gate allows `read` unbound (and
+    # held `act` to the same rule only later), and an envelope sealed for another
+    # deal must not come back RELEASE.
     bound = bool(deal) and bool(purpose)
     release = bool(d.allowed and d.verdict == V.VERIFIED and settled and state == "present"
                    and bound)

@@ -313,11 +313,43 @@ def test_deal_and_purpose_named_still_allows(tmp_path, action):
     assert d.decision == "refuse" and d.verdict == V.BROKEN       # the other deal: BROKEN
 
 
-@pytest.mark.parametrize("action", ["read", "act"])
-def test_read_and_act_unchanged_without_deal(tmp_path, action):
+def test_read_is_the_only_action_allowed_unbound(tmp_path):
     f, did = _sealed_for(tmp_path)
-    d = G.decide(f, action=action, audience="instructor-1", signers=[did])
+    d = G.decide(f, action="read", audience="instructor-1", signers=[did])
     assert d.decision == "allow" and d.verdict == V.VERIFIED and d.reasons == []
+    for action in ("act", "pay", "irreversible"):
+        d = G.decide(f, action=action, audience="instructor-1", signers=[did])
+        assert d.decision == "refuse" and d.verdict == V.COULD_NOT_LOOK and d.exit_code == 3
+
+
+NEED_BOTH = "pass --deal and --purpose so the envelope is held to this exchange"
+
+
+@pytest.mark.parametrize("given", ["neither", "purpose_only", "deal_only"])
+def test_act_without_deal_or_purpose_is_could_not_look(tmp_path, given):
+    """R3 lead decision: act names the exchange too, so an envelope sealed for one
+    deal cannot be replayed into an act that names none."""
+    f, did = _sealed_for(tmp_path)
+    kw = {"neither": {}, "purpose_only": {"purpose": "preview"},
+          "deal_only": {"deal": "d-1", "ledger": tmp_path / "tape.jsonl",
+                        "record_dir": tmp_path / "rec"}}[given]
+    d = G.decide(f, action="act", audience="instructor-1", signers=[did], **kw)
+    _assert_needs(d, "act", NEED_BOTH, packed=given == "deal_only")
+    assert d.report["verify_verdict"] == V.VERIFIED
+    d = G.decide(f, action="act", audience="instructor-1", signers=[did], deal="d-1",
+                 purpose="preview", ledger=tmp_path / "tape.jsonl")
+    assert d.decision == "allow" and d.verdict == V.VERIFIED
+
+
+def test_cli_act_without_deal_or_purpose_refuses_3(tmp_path, capsys):
+    f, did = _sealed_for(tmp_path)
+    assert _cli(f, did, "--action", "act") == 3
+    out = capsys.readouterr().out
+    assert out.startswith(f"refuse act: {V.COULD_NOT_LOOK}") and NEED_BOTH in out
+    led = ("--ledger", str(tmp_path / "tape.jsonl"), "--record-dir", str(tmp_path / "rec"))
+    assert _cli(f, did, "--action", "act", "--deal", "d-1", "--purpose", "preview",
+                *led) == 0
+    assert capsys.readouterr().out.startswith("allow act: VERIFIED")
 
 
 @pytest.mark.parametrize("action", ["pay", "irreversible"])
@@ -389,7 +421,7 @@ def test_cli_exit_codes_and_output(tmp_path, capsys):
     assert j["decision"] == "allow" and j["exit_code"] == 0 and j["verdict"] == V.VERIFIED
     # the handed file itself, sidecar beside it
     assert cli.main(["gate", "decide", "--envelope", str(f), "--audience", "instructor-1",
-                     "--signer", did, "--action", "act"]) == 0
+                     "--signer", did, "--action", "act", *ex]) == 0
     capsys.readouterr()
     f.write_bytes(b"changed")
     assert _cli(f, did, "--action", "read", "--deal", "d-7f3a",

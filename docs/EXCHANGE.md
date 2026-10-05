@@ -162,6 +162,9 @@ each other.
 - **What either party meant.** A DISPUTED reason is the disputer's sentence.
 - **Who holds a key.** A `did:key` is a key, not a person or a company.
 - **That a log was not truncated or re-minted.** Drop the newest rows, or
-  re-mint a whole log under the same key, and what remains verifies. Pin each
+  re-mint a whole log, and what remains verifies. The re-minter need not hold
+  the key: the hash chain carries no signature, so a third party holding a
+  party's log can rebuild one from a subset of that party's signed rows, and
+  each row still verifies under the party's key. Pin each
   log's head outside your own control (`arcaeon pin`).
 - **The `at` time.** It is the writer's clock, signed, not witnessed.

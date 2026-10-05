@@ -73,7 +73,7 @@ def _check(tmp_path: Path, name: str, key: Path | None, row: dict | None = None,
 
 def _decide(f, did, action="pay", **kw):
     kw.setdefault("record_dir", f.parent.parent / "rec")
-    if action in G.NEEDS_EXCHANGE:                 # F2: pay / irreversible name the exchange
+    if action in G.NEEDS_EXCHANGE:                 # F2/R3: act, pay, irreversible name the exchange
         kw.setdefault("deal", DEAL)
         kw.setdefault("purpose", "grading")
     if kw.get("deal") is not None:                # D066: a deal id needs the party's ledger
@@ -121,6 +121,7 @@ def test_over_cap_with_a_check_signed_by_the_audience_refuses(tmp_path):
     c, signer = _check(tmp_path, "mine", rk, audience=me)     # the receiver vouches itself
     assert signer == me
     d = G.decide(f, action="act", audience=me, signers=[did], record_dir=tmp_path / "rec",
+                 deal=DEAL, purpose="grading", ledger=tmp_path / "ledger.jsonl",
                  require_nonparty_check_above=1, amount=2, check_files=[c])
     assert d.verdict == V.VERIFIED and d.decision == "refuse" and d.exit_code == 3
     assert "signed only by a party" in d.reason
@@ -210,8 +211,7 @@ def test_deal_record_amount_is_read_and_the_larger_wins(tmp_path):
     rec = tmp_path / "rec" / f"DEAL-{DEAL}"
     rec.mkdir(parents=True)
     rows = [{"kind": "deal.commit", "deal": DEAL, "shared": {"terms": {"total": "5000.00"}}},
-            {"kind": "deal.pay", "deal": "d-other", "shared": {"amount": "999999"}},
-            "not json {"]
+            {"kind": "deal.pay", "deal": "d-other", "shared": {"amount": "999999"}}]
     (rec / "buyer.deal.jsonl").write_text(
         "\n".join(r if isinstance(r, str) else json.dumps(r) for r in rows) + "\n",
         encoding="utf-8")
@@ -225,6 +225,35 @@ def test_deal_record_amount_is_read_and_the_larger_wins(tmp_path):
     assert d.nonparty_check["amount_source"] == "--amount"
     d = _decide(f, did, **kw)                                # no --amount: the record alone
     assert d.nonparty_check["amount"] == "5000.00" and d.decision == "refuse"
+
+
+@pytest.mark.parametrize("bad", ["not json {", '{"kind": "deal.pay", "kind": "x"}',
+                                 '{"kind": "deal.pay", "shared": {"amount": "999999"'],
+                         ids=["garbage", "dup-key", "cut-off-amount"])
+def test_deal_record_line_not_json_refuses_could_not_look(tmp_path, bad):
+    """R3 lead decision (reverses the old skip-as-a-note): a deal-record line
+    that is not valid JSON could hide an amount over the cap, so the rule
+    refuses (exit 3) and names the line, even with every readable amount under
+    the cap and a counting check given."""
+    f, did, _ = _handed(tmp_path)
+    c, _ = _check(tmp_path, "good", _key(tmp_path, "checker"))
+    rec = tmp_path / "rec" / f"DEAL-{DEAL}"
+    rec.mkdir(parents=True)
+    good = json.dumps({"kind": "deal.commit", "deal": DEAL,
+                       "shared": {"terms": {"total": "50"}}})
+    (rec / "seller.deal.jsonl").write_text(f"{good}\n{bad}\n", encoding="utf-8")
+    for checks in ([], [c]):
+        d = _decide(f, did, "act", require_nonparty_check_above="1000", amount="10",
+                    deal=DEAL, record_dir=tmp_path / "rec", check_files=checks)
+        assert d.verdict == V.VERIFIED and d.decision == "refuse" and d.exit_code == 3
+        assert d.nonparty_check["applies"] is None
+        assert d.nonparty_check["veto"] == G.NONPARTY_VETO
+        assert "seller.deal.jsonl line 2" in d.reason
+        assert d.could_not_check["reason_word"] == "unreadable"
+    (rec / "seller.deal.jsonl").write_text(f"{good}\n\n", encoding="utf-8")   # blank: fine
+    d = _decide(f, did, "act", require_nonparty_check_above="1000", amount="10",
+                deal=DEAL, record_dir=tmp_path / "rec")
+    assert d.decision == "allow" and d.nonparty_check["applies"] is False
 
 
 @pytest.mark.parametrize("content", [
@@ -362,7 +391,8 @@ def test_checks_flag_counts_for_the_nonparty_rule_with_checker_pins(tmp_path, ca
     f, did, _ = _handed(tmp_path)
     c, checker = _check(tmp_path, "good", _key(tmp_path, "checker"))
     rule = ["--action", "act", "--require-nonparty-check-above", "1", "--amount", "2",
-            "--checks", str(c)]
+            "--checks", str(c), "--deal", DEAL, "--purpose", "grading",
+            "--ledger", str(tmp_path / "ledger.jsonl"), "--record-dir", str(tmp_path / "rec")]
     assert _cli(f, did, *rule) == 0
     assert _cli(f, did, *rule, "--checker", "did:key:z6MkOther", "--checker", checker) == 0
     assert _cli(f, did, *rule, "--checker", "did:key:z6MkOther") == 3

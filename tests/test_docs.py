@@ -1222,3 +1222,24 @@ def test_gate_states_its_raise_rule_once():
                {"action": "read", "require_nonparty_check_above": "lots"}):
         with pytest.raises(ValueError):
             G.decide(f, audience="a", **kw)
+
+
+@pytest.mark.parametrize("doc", ["docs/ENVELOPE.md", "docs/A2A.md", "docs/VERBS.md"])
+def test_docs_state_one_binding_rule_read_only_unbound(doc):
+    """R3 lead decision: act is held to the exchange like pay and irreversible;
+    each doc states the one rule in the same words."""
+    text = " ".join((ROOT / doc).read_text(encoding="utf-8").split())
+    assert "is the only action an unbound check allows" in text
+    assert "read and act are unchanged" not in text
+
+
+def test_exchange_doc_re_mint_limit_covers_a_third_party():
+    """R3: a third party holding a party's signed rows can rebuild a log from a
+    subset of them (the hash chain carries no signature); the limit says so and
+    keeps the remedy, pinning the log's head."""
+    text = " ".join((ROOT / "docs" / "EXCHANGE.md").read_text(encoding="utf-8").split())
+    i = text.index("That a log was not truncated or re-minted.")
+    limit = text[i:text.index("- **", i)]
+    assert "under the same key" not in limit
+    assert "third party" in limit and "subset" in limit and "signed rows" in limit
+    assert "Pin each log's head outside your own control (`arcaeon pin`)." in limit

@@ -677,10 +677,13 @@ Answers: may I take this action on the file I was handed? `gate decide` runs
 `envelope verify` (the same verifier, not a second one) and turns its word
 into allow or refuse for one of four actions: VERIFIED allows `read`, `act`,
 `pay` and `irreversible`; BROKEN refuses all four; COULD NOT LOOK allows
-`read` only and refuses the rest, naming what could not be checked. `pay`
-and `irreversible` need `--deal` and `--purpose`: without either the answer
-is COULD NOT LOOK ("pass --deal so the envelope is held to this exchange"),
-so an envelope sealed for one deal cannot be replayed into another. On any
+`read` only and refuses the rest, naming what could not be checked. `read`
+is the only action an unbound check allows: `act`, `pay` and `irreversible`
+need `--deal` and `--purpose`, and without either the answer is COULD NOT
+LOOK, exit 3 ("pass --deal and --purpose so the envelope is held to this
+exchange" for `act`; "pass --deal ..." or "pass --purpose ..." for `pay` and
+`irreversible`), so an envelope sealed for one deal cannot be replayed into
+another. On any
 refusal with `--deal` (BROKEN, or COULD NOT LOOK on `act`, `pay` or
 `irreversible`), it writes an evidence pack into the deal's record:
 `DIR/DEAL-<deal>/gate/<UTC stamp>-<sha256 prefix>/` holding `bundle/` (copies
@@ -744,7 +747,9 @@ the same sha256 that says `BROKEN` vetoes. The amount is the larger of
 `--amount N` and every commit total and pay amount in the deal record
 (`DIR/DEAL-<deal>/buyer.deal.jsonl` and `seller.deal.jsonl`, with `--deal`),
 so neither source can lower it below the other. With no amount at all, those
-three actions are refused, exit 3, naming the missing amount. A missing,
+three actions are refused, exit 3, naming the missing amount; a deal-record
+line that is not valid JSON could hide an amount, so it refuses them too,
+exit 3, naming the file and line number (it is never skipped). A missing,
 unreadable or hostile check file is refused with its reason, never a
 traceback. `read`, any verdict that already refuses, and any amount at or
 under AMOUNT follow the table above unchanged; without the option nothing

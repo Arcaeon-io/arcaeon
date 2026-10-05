@@ -20,11 +20,12 @@ into allow or refuse:
     BROKEN           refuse  refuse  refuse  refuse
     COULD NOT LOOK   allow   refuse  refuse  refuse
 
-pay and irreversible need the exchange named: without `deal` (or without
+act, pay and irreversible need the exchange named: without `deal` (or without
 `purpose`) the verdict is COULD NOT LOOK before the table is read, with the
 reason "pass --deal so the envelope is held to this exchange" (or "pass
---purpose ..."), so an envelope sealed for one deal cannot be replayed into a
-pay that names none. A BROKEN verdict stays BROKEN. read and act are unchanged.
+--purpose ...", and for act "pass --deal and --purpose ..."), so an envelope
+sealed for one deal cannot be replayed into an act or a pay that names none. A
+BROKEN verdict stays BROKEN. read is the only action an unbound check allows.
 
 Allow means: the bytes are unchanged since the key you named sealed them, and
 they were labeled for you, for this deal when you gave one, and are in date.
@@ -129,7 +130,9 @@ gate.evidence row; its reason and exit 3 stand when a --checks file would
 also veto (that answer is kept under `checks.would_veto`). The amount is the LARGER of
 `amount` and every commit total / pay amount in the deal record
 (record_dir/DEAL-<deal>/{buyer,seller}.deal.jsonl), so neither source can
-lower it below the other. Limit: this raises the cost of collusion between
+lower it below the other. A deal-record line that is not valid JSON could
+hide an amount, so it refuses those three actions as could-not-look too,
+naming the line; it is never skipped. Limit: this raises the cost of collusion between
 the two parties; it does not prove the checker is independent of them.
 
 Stdlib only (verify loads the [sign] backend itself). `decide` raises only on
@@ -166,10 +169,12 @@ ALLOW, REFUSE = "allow", "refuse"
 RULES = {V.VERIFIED: frozenset(ACTIONS), V.BROKEN: frozenset(),
          V.COULD_NOT_LOOK: frozenset({"read"})}
 EVIDENCE_KIND = "arcaeon.gate.evidence/v1"
-#: actions that need the exchange named (deal and purpose) before any allow.
-NEEDS_EXCHANGE = frozenset({"pay", "irreversible"})
+#: actions that need the exchange named (deal and purpose) before any allow:
+#: every action but read (read is the only action an unbound check allows).
+NEEDS_EXCHANGE = frozenset({"act", "pay", "irreversible"})
 NEED_DEAL = "pass --deal so the envelope is held to this exchange"
 NEED_PURPOSE = "pass --purpose so the envelope is held to this exchange"
+NEED_BOTH = "pass --deal and --purpose so the envelope is held to this exchange"
 #: The ledger row kind a refusal's evidence pack is chained under (D056).
 CHAIN_KIND = "gate.evidence"
 #: Names the pack digest rule (module docstring, docs/VERBS.md `gate`). v2
@@ -640,10 +645,14 @@ def _apply_checks(d: GateDecision, info: dict) -> None:
 
 def _unbound(action: str, deal, purpose) -> dict | None:
     """The could-not-look keys when `action` needs the exchange named and it
-    is not: pay and irreversible need both `deal` and `purpose`, so an envelope
-    sealed for one exchange cannot be replayed into another. None otherwise."""
+    is not: act, pay and irreversible need both `deal` and `purpose`, so an
+    envelope sealed for one exchange cannot be replayed into another. read is
+    the only action an unbound check allows. None otherwise."""
     if action not in NEEDS_EXCHANGE:
         return None
+    if action == "act" and not (deal and purpose):
+        return V.could_not_look("the deal and purpose this exchange is for "
+                                "(--deal and --purpose)", "the gate call", "missing", NEED_BOTH)
     if not deal:
         return V.could_not_look("the deal this exchange is for (--deal)", "the gate call",
                                 "missing", NEED_DEAL)
@@ -688,7 +697,9 @@ def _decimal(v: Any) -> Decimal | None:
 def _deal_amounts(record_dir: Path, deal: str) -> tuple[list, str, list, list]:
     """Every readable commit total and pay amount for `deal` in its record
     (DEAL-<deal>/{buyer,seller}.deal.jsonl). Returns (amounts, where, notes,
-    unreadable): unreadable names each matching row whose amount is not one."""
+    unreadable): `unreadable` names, by file and line, each line that is not
+    valid JSON and each matching row whose amount is not one; either could
+    hide an amount over the cap, so the rule refuses on it (R3), never skips it."""
     base = record_dir / _deal_dir_name(deal)
     amounts, notes, unreadable = [], [], []
     for name in ("buyer.deal.jsonl", "seller.deal.jsonl"):
@@ -709,7 +720,7 @@ def _deal_amounts(record_dir: Path, deal: str) -> tuple[list, str, list, list]:
             try:
                 row = loads_strict(line)
             except ValueError:
-                notes.append(f"{name} line {n}: not one JSON object, skipped")
+                unreadable.append(f"{name} line {n}: not valid JSON")
                 continue
             if not isinstance(row, dict) or row.get("deal", deal) != deal:
                 continue
@@ -832,9 +843,11 @@ def _nonparty_rule(*, cap: Decimal, amount, checks, checkers, file: Path, r: dic
         info["amount_notes"].extend(notes + unreadable)
         if unreadable:
             info["could_not_check"] = V.could_not_look(
-                "every commit total and pay amount in the deal record", where, "unreadable",
-                f"{len(unreadable)} amount(s) in the deal record cannot be read "
-                f"({unreadable[0]}), so whether the cap applies cannot be checked")
+                "every line of the deal record (an amount could be on any)", where,
+                "unreadable",
+                f"{'; '.join(unreadable[:5])}{' and more' if len(unreadable) > 5 else ''}: "
+                f"a line or amount the rule cannot read could hide an amount over the cap, "
+                f"so whether the cap applies cannot be checked")
             return info
         if found:
             sources.append(("deal record", max(found)))
@@ -1051,9 +1064,10 @@ action you are about to take:
   COULD NOT LOOK  allows read only; refuses act, pay and irreversible,
                   naming what could not be checked
 
-pay and irreversible need --deal and --purpose: without either the answer is
-COULD NOT LOOK (refuse, exit 3), so an envelope sealed for one exchange cannot
-be replayed into another.
+act, pay and irreversible need --deal and --purpose: without either the answer
+is COULD NOT LOOK (refuse, exit 3), so an envelope sealed for one exchange
+cannot be replayed into another. read is the only action an unbound check
+allows.
 
 Every refusal with --deal writes an evidence pack (the file and envelope
 bytes, their sha256, the verdict, the reasons, the UTC time) to

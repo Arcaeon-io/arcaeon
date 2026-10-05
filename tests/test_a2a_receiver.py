@@ -70,7 +70,7 @@ def _b(o) -> bytes:
 
 
 def _ex(tmp_path: Path) -> dict:
-    """pay and irreversible need the exchange named (F2); a deal needs a ledger (D066)."""
+    """act, pay and irreversible need the exchange named (F2, R3); a deal needs a ledger (D066)."""
     return {"deal": "d-7f3a", "purpose": "grading", "ledger": tmp_path / "ledger.jsonl",
             "record_dir": tmp_path / "rec"}
 
@@ -140,7 +140,8 @@ def test_stripped_metadata_is_could_not_look_read_only(tmp_path, strip):
     if strip == "both":
         del a["extensions"]
     msg = _b(_task(a))
-    got = {act: A.receive(msg, BODY, action=act, audience=ME, signers=[did]) for act in G.ACTIONS}
+    got = {act: A.receive(msg, BODY, action=act, audience=ME, signers=[did], **_ex(tmp_path))
+           for act in G.ACTIONS}
     assert {a_: d.decision for a_, d in got.items()} == {
         "read": "allow", "act": "refuse", "pay": "refuse", "irreversible": "refuse"}
     d = got["pay"]
@@ -164,7 +165,7 @@ def test_wrong_signer_and_no_signer(tmp_path):
     other = "did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"
     msg = _b(_task(_artifact(env)))
     assert A.receive(msg, BODY, action="read", audience=ME, signers=[other]).verdict == V.BROKEN
-    d = A.receive(msg, BODY, action="act", audience=ME, signers=[])
+    d = A.receive(msg, BODY, action="act", audience=ME, signers=[], **_ex(tmp_path))
     assert d.verdict == V.COULD_NOT_LOOK and not d.allowed
 
 
@@ -202,7 +203,8 @@ def test_declared_but_not_activated_still_gates(tmp_path):
     assert A.declares(card) and not A.declares({"capabilities": {"extensions": [{"uri": "x"}]}})
     _, did = _sealed(tmp_path)
     msg = _b(_task(_artifact(None)))
-    d = A.receive(msg, BODY, action="act", audience=ME, signers=[did], activated=[])
+    d = A.receive(msg, BODY, action="act", audience=ME, signers=[did], activated=[],
+                  **_ex(tmp_path))
     assert d.verdict == V.COULD_NOT_LOOK and not d.allowed and d.a2a["activated"] is False
     assert A.receive(msg, BODY, action="read", audience=ME, signers=[did]).allowed
 
@@ -248,7 +250,7 @@ def test_two_carriers_need_an_artifact_id(tmp_path):
 def test_url_part_is_never_fetched(tmp_path):
     env, did = _sealed(tmp_path)
     d = A.receive(_b(_task(_artifact(env, inline=False))), None, action="act", audience=ME,
-                  signers=[did])
+                  signers=[did], **_ex(tmp_path))
     assert d.verdict == V.COULD_NOT_LOOK and "never fetched" in d.reason
 
 
@@ -279,8 +281,9 @@ HOSTILE = [b"", b"not json", b"\xff\xfe", b"[]", b"null", b"[" * 100000, b'{"a":
 
 
 @pytest.mark.parametrize("raw", HOSTILE, ids=range(len(HOSTILE)))
-def test_hostile_message_never_raises_never_allows_act(raw):
-    d = A.receive(raw, BODY, action="act", audience=ME, signers=["did:key:z6Mk"])
+def test_hostile_message_never_raises_never_allows_act(tmp_path, raw):
+    d = A.receive(raw, BODY, action="act", audience=ME, signers=["did:key:z6Mk"],
+                  **_ex(tmp_path))
     assert d.verdict in (V.COULD_NOT_LOOK, V.BROKEN) and not d.allowed
     json.dumps(d.to_dict())
 
@@ -338,7 +341,7 @@ def test_cli_gate_a2a(tmp_path, capsys):
     assert cli.main(base + ["--action", "read", "--file", str(f), "--json"]) == 1
     assert json.loads(capsys.readouterr().out)["verdict"] == V.BROKEN
     m.write_bytes(_b(_task(_artifact(None))))
-    assert cli.main(base + ["--action", "act", "--file", str(f)]) == 3
+    assert cli.main(base + ["--action", "act", "--file", str(f), *_ex_cli(tmp_path)]) == 3
     assert cli.main(base + ["--action", "read", "--file", str(f)]) == 0
     assert cli.main(["gate", "a2a", "--message", str(tmp_path / "gone.json"), "--audience", ME,
                      "--signer", did, "--action", "pay"]) == 3

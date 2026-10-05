@@ -228,7 +228,11 @@ the answer could be checked):
 
 Without `--deal` or `--purpose` the verdict can still be VERIFIED; the report
 names each one under `not_checked` with the value it was sealed with. A
-receiver that holds a deal id should pass it.
+receiver that holds a deal id should pass it. The gate (`arcaeon gate
+decide`, VERBS.md) holds one rule on top of this word: `read` is the only
+action an unbound check allows. `act`, `pay` and `irreversible` without
+`--deal` and `--purpose` are COULD NOT LOOK there (refuse, exit 3), so an
+envelope sealed for one exchange cannot be replayed into another.
 
 ### Pin and witness refs: recorded, not resolved
 
