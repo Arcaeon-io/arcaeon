@@ -8,6 +8,14 @@
 
 - **L3-02 (abde8ff, branch b200-l302-binding-vs-account).** nothing required; without --accounts the tally output is unchanged byte for byte, and the pair report gains an `account_service` block with consulted=false.
 
+- **L2-10 (ad0b331, branch b200-l210-ocsf13-compat).** no new field; default output unchanged. With --ocsf-version 1.3.0 the event has metadata.version "1.3.0" and no is_alert key; read BROKEN from status_code or severity_id 4. An unknown --ocsf-version is bad usage (exit 2).
+
+- **L2-12 (b341f6d, branch b200-l212-checks-end-to-end).** new optional predicate key `checks` (absent unless seal --checks); seal JSON adds `carried_checks`; verify report adds `sealed.checks` when present; gate --json `checks` adds `carried` {where, rows} and `broken[].source` ("envelope" or "--checks"); `checks` now appears when the envelope carries rows even without --checks.
+
+- **L2-12b (73e6eb0, branch b200-l212b-predicate-v2).** envelopes sealed with --checks by L2-12 builds (version 1 plus checks) now verify BROKEN, so re-seal them; a predicate version that is not exactly the integer 1 or 2 (including true or 1.0) is COULD NOT LOOK, where it was BROKEN; older verifiers read a version 2 envelope as BROKEN.
+
+- **L2-CONF (21e109f, branch b200-l2conf-adapter-conformance).** import_verdict rows gain signed_by_vendor (always false); Lakera/Prisma/Snyk refusal rows gain finding: null.
+
 - **Exchange pair: a named owner closes trust on first use (A08).** Each log in `exchange pair --json` (and `read_side()`) adds `owner_refused`: null, or `{"named": DID, "first_row": DID}` when `--owner-a` / `--owner-b` names a key and the log's first row that verifies is signed by another. Such a log is refused whole: its verdict is BROKEN, its reason starts `refused:`, no row of it is read, and `exchanges` is empty with all `counts` 0 (exit 1, as before for a wrong owner). Without a named owner nothing changes.
 
 - **Envelope pins resolved offline (`envelope verify --pins DIR`, A10).** New option `--pins DIR` and library parameter `verify(pins=)`, plus `resolve_pin(pins, pin_ref, witness_ref)`; without `--pins` nothing changes, the report included. With it the report adds one key, `pin`: `folder`, `statement_sha256`, `pin_ref` when the pin resolved, else null; the `witness` step reads VERIFIED, BROKEN or COULD NOT LOOK from the clone (docs/ENVELOPE.md). A BROKEN pin makes the verdict BROKEN with or without `--require-witness`; a pin that could not be looked at decides the verdict only under `--require-witness`, with reason words `missing`, `empty`, `unreadable` or `bounded` instead of `network`.
