@@ -40,6 +40,15 @@ deliveries hold; they are refunded on a dispute outcome or at the declared
 timeout, never by the look itself. Each step is a deal row
 both sides can check, and `arcaeon deal dispute` compares the two tapes.
 
+Open policy choice: the disputed-hold timer. As coded, there is no package
+default: every hold must declare `timeout_at` (`--timeout-at`, required), and
+when `settle` runs at or after it, any look but MATCHED (ALTERED, MISSING or
+COULD NOT LOOK) refunds the hold with cause `timeout`, while a MATCHED look
+still releases. Whether an unresolved dispute should end in a refund, a
+release, or stay held until a dispute outcome is recorded, and how long the
+window should be, is pending the maintainer's decision; this page does not
+recommend one.
+
 What it does not prove: a receipt is delivery evidence, not quality evidence.
 A release says the named call happened as recorded, not that its answer was
 right.
