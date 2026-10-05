@@ -29,7 +29,9 @@ does not verify against one of them (bad signature, unknown key, edited
 payload, malformed file) is IGNORED: no line, and the agent block says why.
 Ed25519 runs on `cryptography` when it is installed, else on a small
 pure-Python verifier (RFC 8032 section 6, verify only), so the base install
-needs no extra.
+needs no extra. That verifier stays only while it passes the RFC 8032 section
+7.1 vectors and refuses S >= L and non-canonical points
+(tests/test_checkin_ed25519_rfc8032.py).
 
 THE FALLBACK. Only when arcaeon.io cannot be reached at all, PyPI's JSON for
 the project is asked instead. It is unsigned: it can only ever produce
