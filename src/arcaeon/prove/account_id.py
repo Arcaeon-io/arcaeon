@@ -13,6 +13,17 @@ endpoints, the auth model and the limits, is docs/ACCOUNT_ID_API.md.
     list_agents(store, caller)                                     -> [summary]
     binding_statement(store, DID)                                  -> statement | None
     verify_binding(statement, DID, server_keys=[DID], at=, now=)   -> report
+    load_service(STORE|STATEMENTS|PATH, server_keys=[DID])         -> (service, why)
+    consult_binding(service, DID, ACCOUNT, [exchange.binding rows]) -> report
+
+THE EXCHANGE PAIRING (L3-02, D077). `arcaeon exchange pair` and `arcaeon
+tally build` pair an account id only through the key's own exchange.binding
+row. Given an account service (--accounts FILE, --account-key DID), each such
+pairing is held to it at the binding row's time: confirmed is VERIFIED (the
+pairing stands); revoked or rotated out by then, bound to another owner or
+account, or a service row that does not verify is BROKEN (the pairing is
+dropped, the report reads BROKEN); no record, or no trusted key, is COULD NOT
+LOOK (the pairing is dropped). Without one, nothing changes.
 
 KEYS ARE MADE ON THE AGENT'S SIDE. The agent generates its own Ed25519 seed
 and signs a possession proof: an `exchange.binding` row (docs/EXCHANGE.md)
@@ -69,7 +80,9 @@ __all__ = ["BIND_KIND", "PAYLOAD_TYPE", "STATEMENT_TYPE", "ROW_VERSION", "SIGNED
            "MAX_AGENTS_PER_OWNER", "PROOF_MAX_AGE", "AccountError", "new_store",
            "load_store", "save_store", "agent_account", "possession_proof", "jwk_thumbprint",
            "row_digest", "issue", "rotate", "revoke", "attach_external", "list_agents",
-           "binding_statement", "control_cluster", "verify_binding", "handle"]
+           "binding_statement", "control_cluster", "verify_binding", "handle",
+           "NOT_CONSULTED", "load_service", "consult_binding", "log_binding_rows",
+           "consult_pairings", "service_report"]
 
 BIND_KIND = "account.binding"
 PAYLOAD_TYPE = "application/vnd.arcaeon.account.binding.v1+json"
@@ -592,6 +605,167 @@ def verify_binding(statement: Any, did: Any, *, server_keys: Any = (),
         return done(V.VERIFIED, f"bound to {account} under {owner} from {bound_at}{note}")
     except Exception as e:  # noqa: BLE001  hostile input is an answer, not a crash
         return done(V.COULD_NOT_LOOK, f"the statement could not be read ({type(e).__name__})")
+
+
+# --- the exchange pairing, held to the account service (L3-02, D077) ---------------------
+
+#: What a report says when no account service was given (today's behavior).
+NOT_CONSULTED = ("account service not consulted: a binding row is the key holder's own "
+                 "claim (pass --accounts FILE and --account-key DID to hold it to the "
+                 "account service)")
+_AMBIGUOUS = object()
+
+
+def load_service(src: Any, server_keys: Any = ()) -> tuple[dict | None, str | None]:
+    """(service, None) or (None, why). `src` is an account store (new_store /
+    save_store shape), {"statements": [binding statement, ...]} (what GET
+    /v1/keys/{did}/binding answers), a list of statements, or a path to one
+    as JSON. `server_keys` are the binding keys the reader trusts; they are
+    never taken from the file. Never raises."""
+    name = "the account service"
+    try:
+        if isinstance(src, (dict, list)):
+            data = src
+        else:
+            from arcaeon.record.row import loads_strict
+            p = Path(src)
+            name = f"accounts file {p.name}"
+            if not p.is_file():
+                return None, f"{name} is not there"
+            if p.stat().st_size > MAX_STORE_BYTES:
+                return None, f"{name} is over {MAX_STORE_BYTES} bytes; not read"
+            data = loads_strict(p.read_bytes().decode("utf-8"))
+    except (OSError, UnicodeDecodeError, ValueError, TypeError) as e:
+        return None, f"{name} is not JSON ({type(e).__name__})"
+    keys = [server_keys] if isinstance(server_keys, str) else list(server_keys or ())
+    if any(_pub(k) is None for k in keys):
+        return None, ("an --account-key is not an Ed25519 did:key (the length is checked "
+                      "before any decode)")
+    if isinstance(data, dict) and isinstance(data.get("accounts"), dict) \
+            and isinstance(data.get("keys"), dict):
+        def lookup(did, store=data):
+            return binding_statement(store, did)
+    else:
+        items = data.get("statements") if isinstance(data, dict) else data
+        if not isinstance(items, list):
+            return None, f"{name} is not an account store or a list of binding statements"
+        index: dict = {}
+        for st in items:
+            did = st.get("did") if isinstance(st, dict) else None
+            if _did_shape_ok(did):
+                index[did] = _AMBIGUOUS if did in index else st
+
+        def lookup(did, index=index):
+            return index.get(did) if _did_shape_ok(did) else None
+    return {"source": name, "lookup": lookup, "server_keys": sorted(set(keys))}, None
+
+
+def _other_account(claimed: str, rep: dict) -> str:
+    m = X.ACCOUNT_ID_RE.fullmatch(claimed)
+    o = X.ACCOUNT_ID_RE.fullmatch(rep["owner"] or "")
+    if m and o and (claimed == rep["owner"]
+                    or m.group("name").split(".")[-1] != o.group("name")):
+        return (f"the account service binds this key to {rep['account']} under "
+                f"{rep['owner']}: a different owner than {claimed}")
+    return (f"the account service binds this key to {rep['account']}, not {claimed}: a "
+            f"different account")
+
+
+def consult_binding(service: dict, did: Any, account: Any, rows: Any) -> dict:
+    """Does the account service confirm that `did` held `account` at each
+    exchange.binding row's time? {verdict, reason, account, key, at}. BROKEN
+    when any row is not confirmed for a BROKEN reason (revoked or rotated out
+    by then, another owner or account, a service row that does not verify);
+    COULD NOT LOOK when the service has no record or cannot be trusted. A row
+    the service wraps as its agent_proof is read at the issue time. Never raises."""
+    out = {"verdict": None, "reason": None, "account": account,
+           "key": did if _did_shape_ok(did) else None, "at": None}
+
+    def done(word, why, at=None):
+        out.update(verdict=word, reason=why, at=at)
+        return out
+    try:
+        if _pub(did) is None:
+            return done(V.COULD_NOT_LOOK, "the key is not an Ed25519 did:key (the length is "
+                                          "checked before any decode)")
+        st = service["lookup"](did)
+        if st is _AMBIGUOUS:
+            return done(V.COULD_NOT_LOOK, "the account service holds two statements for this key")
+        if st is None:
+            return done(V.COULD_NOT_LOOK, "the account service has no record for this key")
+        vouched = {}
+        signed = X.BIND_SIGNED + ("sig",)
+        for sr in st.get("rows") or ():
+            ap = sr.get("agent_proof") if isinstance(sr, dict) else None
+            if isinstance(ap, dict) and sr.get("event") in ("issue", "rotate") \
+                    and sr.get("key") == did and _parse(sr.get("at")):
+                vouched[canon_json({k: ap.get(k) for k in signed})] = _parse(sr["at"])
+        seen = []
+        for row in rows or ():
+            t = _parse(row.get("at")) if isinstance(row, dict) else None
+            if t is None:
+                continue
+            own = {k: row.get(k) for k in signed}
+            t = max(t, vouched.get(canon_json(own), t))
+            rep = verify_binding(st, did, server_keys=service["server_keys"], at=t)
+            word, why = rep["verdict"], rep["reason"]
+            if word == V.VERIFIED and rep["account"] != account:
+                word, why = V.BROKEN, _other_account(account, rep)
+            seen.append((word, why, _utc(t)))
+        if not seen:
+            return done(V.COULD_NOT_LOOK, "no dated binding row to hold to the account service")
+        for word in (V.BROKEN, V.COULD_NOT_LOOK, V.VERIFIED):
+            hits = [s for s in seen if s[0] == word]
+            if hits:
+                return done(*hits[0])
+    except Exception as e:  # noqa: BLE001  hostile input is an answer, not a crash
+        return done(V.COULD_NOT_LOOK, f"the account service record could not be read "
+                                      f"({type(e).__name__})")
+    return done(V.COULD_NOT_LOOK, "nothing to check")
+
+
+def log_binding_rows(path: Any, owner: Any) -> dict:
+    """{account: [exchange.binding row, ...]}: the rows in one exchange log that
+    check under their signature and are signed by the log's owner. {} when the
+    log cannot be read (the log reader has already said so)."""
+    from arcaeon.record.row import loads_strict
+    out: dict = {}
+    try:
+        p = Path(path)
+        if p.stat().st_size > X.MAX_LOG_BYTES:
+            return out
+        text = p.read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError, TypeError, ValueError):
+        return out
+    for raw in text.splitlines():
+        try:
+            o = loads_strict(raw) if raw.strip() else None
+        except ValueError:
+            continue
+        if isinstance(o, dict) and o.get("kind") == X.BIND_KIND and o.get("signer") == owner \
+                and X.check_binding(o) is None:
+            out.setdefault(o["account"], []).append(o)
+    return out
+
+
+def consult_pairings(service: dict, pairs: Any) -> list:
+    """For each (account, key, [log paths]) an exchange reader paired through a
+    binding row: consult_binding over that key's binding rows for the account."""
+    res = []
+    for account, key, logs in pairs:
+        rows = [r for lg in logs for r in log_binding_rows(lg, key).get(account, [])]
+        res.append(consult_binding(service, key, account, rows))
+    return res
+
+
+def service_report(service: dict | None, results: Any = ()) -> dict:
+    """The `account_service` block a report carries."""
+    if service is None:
+        return {"consulted": False, "reason": NOT_CONSULTED, "bindings": []}
+    return {"consulted": True, "source": service["source"],
+            "server_keys": list(service["server_keys"]), "bindings": list(results),
+            "reason": (f"each binding row was held to {service['source']}, read with the "
+                       f"binding key(s) named")}
 
 
 # --- the thin handler ------------------------------------------------------------------

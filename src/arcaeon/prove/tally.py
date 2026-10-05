@@ -257,8 +257,10 @@ def _skeleton(now: datetime, span: timedelta, window: str, settled: bool, checke
 
 def build(paths, *, window: str = DEFAULT_WINDOW, settled_only: bool = False,
           checked_only: bool = False, groups: Any = None, aliases: Any = None,
-          now: Any = None) -> dict:
+          now: Any = None, accounts: Any = None, account_keys: Any = ()) -> dict:
     """The tally of exchange reaction chains as facts per ID (kind arcaeon.tally/v1).
+    accounts / account_keys: hold each account binding to the account service
+    (arcaeon.prove.account_id.load_service); None leaves the tally as it was.
 
     verdict: BROKEN if a chain does not verify or holds a BROKEN row, or an
     alias entry's signature fails; else COULD NOT LOOK if a chain, the groups
@@ -270,9 +272,15 @@ def build(paths, *, window: str = DEFAULT_WINDOW, settled_only: bool = False,
     when = parse_now(now) if now is not None else \
         datetime.now(timezone.utc).replace(microsecond=0)
     r = _skeleton(when, span, str(window).strip(), bool(settled_only), bool(checked_only))
+    svc = None
+    if accounts is not None:
+        from arcaeon.prove import account_id as A
+        svc, why = A.load_service(accounts, account_keys)
+        if why:
+            return _cnl(r, "the accounts file", str(accounts), "unreadable", why)
     try:
         return _build(r, [Path(p) for p in paths], when, span, groups, aliases,
-                      bool(settled_only), bool(checked_only))
+                      bool(settled_only), bool(checked_only), svc)
     except Exception as e:  # noqa: BLE001  never a traceback, never a green
         why = f"the tally could not finish ({type(e).__name__})"
         r.update({"verdict": V.COULD_NOT_LOOK, "ids": [], "reason": why,
@@ -286,8 +294,35 @@ def _cnl(r: dict, looked_for: str, where: str, word: str, why: str) -> dict:
     return r
 
 
+def _hold_to_accounts(r: dict, svc: dict, acct_key: dict, record_broken: dict,
+                      broken_top: list) -> None:
+    """L3-02: an applied binding stands only if the account service confirms it."""
+    from arcaeon.prove import account_id as A
+    logs: dict[str, list[str]] = {}
+    for c in r["chains"]:
+        if c.get("owner") and c.get("verdict") in (V.VERIFIED, V.BROKEN):
+            logs.setdefault(c["owner"], []).append(c["log"])
+    res = A.consult_pairings(svc, [(a, k, logs.get(k, [])) for a, k in sorted(acct_key.items())])
+    by = {x["account"]: x for x in res}
+    for b in r["bindings"]:
+        x = by.get(b["account"]) if b["applied"] else None
+        if x is None:
+            continue
+        b["account_service"] = {k: x[k] for k in ("verdict", "reason", "at")}
+        if x["verdict"] != V.VERIFIED:
+            b["applied"], b["finding"] = False, f"{x['verdict']}: account service: {x['reason']}"
+            acct_key.pop(b["account"], None)
+        if x["verdict"] == V.BROKEN:
+            why = f"binding {b['account']} -> {b['key']}: {x['reason']}"
+            broken_top.append(why)
+            record_broken.setdefault(b["key"], []).append(why)
+    r["account_service"] = A.service_report(svc, res)
+    r["limits"] = [s.replace("arcaeon.io's record is not consulted", "the account service "
+                             "named in account_service was consulted") for s in r["limits"]]
+
+
 def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_src,
-           aliases_src, settled_only: bool, checked_only: bool) -> dict:
+           aliases_src, settled_only: bool, checked_only: bool, svc=None) -> dict:
     try:
         from arcaeon.prove.vet import receipts as R
         R._require_backend()
@@ -424,6 +459,8 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
             r["bindings"].append({"account": acct, "key": k, "applied": False, "finding":
                                   f"{V.COULD_NOT_LOOK}: {len(keys)} chains among the inputs "
                                   f"bind {acct}; not resolved"})
+    if svc is not None:
+        _hold_to_accounts(r, svc, acct_key, record_broken, broken_top)
     shared = {a for a, ks in bound.items() if len(ks) > 1}
     ids_of: dict[str, set[str]] = {k: {k} for k in owners}
     for acct, k in acct_key.items():
@@ -699,7 +736,10 @@ def render(r: dict) -> str:
                      + (f" ({c['reason']})" if c.get("verdict") != V.VERIFIED else ""))
     for b in r.get("bindings", []):
         lines.append(f"binding {b['account']} -> {b['key']}: "
-                     + ("applied (signed binding row)" if b["applied"] else b["finding"]))
+                     + ((f"applied (signed binding row"
+                         + (f"; account service {b['account_service']['verdict']}: "
+                            f"{b['account_service']['reason']}" if "account_service" in b else "")
+                         + ")") if b["applied"] else b["finding"]))
     for a in r["aliases"]:
         lines.append(f"alias {a['new']} -> {a['old']}: "
                      + ("applied (signed by both keys)" if a["applied"] else a["finding"]))
@@ -746,6 +786,7 @@ def render(r: dict) -> str:
 USAGE = """usage: arcaeon tally build CHAIN.jsonl... [--json] [--settled-only]
                            [--checked-only] [--window 30d] [--groups FILE]
                            [--aliases FILE] [--now T]
+                           [--accounts FILE --account-key DID...]
        arcaeon tally alias --old-key SEEDFILE --new-key SEEDFILE [--at T]
        arcaeon tally seal CHAIN.jsonl... --log TALLY_CHAIN.jsonl [--out FILE]
                           [--json] [build options]
@@ -767,6 +808,11 @@ age. Every share is printed with its count ("9 of 10"). No score, no weight,
 no ranking. An ID with any broken record or BROKEN reaction about it shows
 BROKEN first; under 10 exchanges or 14 days it is unrated. Self-trades (one
 key, one ID by alias, one --groups group) are listed and not counted.
+--accounts FILE (an account store or binding statements, docs/ACCOUNT_ID_API.md)
+with --account-key DID (the binding key you trust; repeatable) holds each
+account binding to the account service at the binding row's time: confirmed
+pairs, revoked or another owner is BROKEN, no record is COULD NOT LOOK (both
+unpaired). Without it the binding is the key holder's claim, not consulted.
 
 alias prints an alias entry for --aliases: the new key inherits the old key's
 record. Both keys sign it. A fresh key with no alias is a new, unrated ID.
@@ -803,7 +849,8 @@ class _Usage(Exception):
 
 
 _BUILD_SPEC = {"--json": "bool", "--settled-only": "bool", "--checked-only": "bool",
-               "--window": "value", "--groups": "value", "--aliases": "value", "--now": "value"}
+               "--window": "value", "--groups": "value", "--aliases": "value", "--now": "value",
+               "--accounts": "value", "--account-key": "list"}
 _ALIAS_SPEC = {"--old-key": "value", "--new-key": "value", "--at": "value"}
 
 
@@ -819,11 +866,14 @@ def _build_cli(argv: list[str]) -> int:
     pos, o = _parse(argv, _BUILD_SPEC)
     if not pos:
         raise _Usage("build takes one or more chains")
+    if ("--accounts" in o) != ("--account-key" in o):
+        raise _Usage("--accounts and --account-key go together")
     try:
         r = build(pos, window=o.get("--window", DEFAULT_WINDOW),
                   settled_only=bool(o.get("--settled-only")),
                   checked_only=bool(o.get("--checked-only")), groups=o.get("--groups"),
-                  aliases=o.get("--aliases"), now=o.get("--now"))
+                  aliases=o.get("--aliases"), now=o.get("--now"),
+                  accounts=o.get("--accounts"), account_keys=o.get("--account-key", ()))
     except TallyError as e:
         raise _Usage(str(e)) from None
     print(json.dumps(r, indent=1, ensure_ascii=False) if o.get("--json") else render(r))
