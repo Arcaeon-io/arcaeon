@@ -9,8 +9,9 @@ can then be exported as an in-toto Statement that tools outside Arcaeon can read
 
 This is not the MCP connector (`arcaeon mcp`, the `arcaeon.mcp` package). It is
 the library `arcaeon.connector`, phase 1: the adapter shape, one mock vendor
-(`mockscan`), the mcp-scan adapter, the OPA decision-log adapter, the Snyk
-agent-scan adapter and the Lakera Guard adapter on the same base class, and no
+(`mockscan`), the mcp-scan adapter, and the OPA, Snyk agent-scan, Lakera Guard,
+Prisma AIRS, Kyverno, Cedar, generic reported-by-sender, HiddenLayer,
+SentinelOne and E2B run receipt adapters on the same base class, and no
 command-line verb yet.
 
 ## What a relayed row says
@@ -155,9 +156,10 @@ adapter (`arcaeon.connector.lakera_guard`, below), the Prisma AIRS adapter
 (`arcaeon.connector.prisma_airs`, below), the Kyverno PolicyReport adapter
 (`arcaeon.connector.kyverno`, below), the Cedar / Verified Permissions adapter
 (`arcaeon.connector.cedar`, below), the generic reported-by-sender adapter
-(`arcaeon.connector.reported`, below) the HiddenLayer alert adapter
-(`arcaeon.connector.hiddenlayer`, below) and the SentinelOne alert adapter
-(`arcaeon.connector.sentinelone`, below). The base owns what they share:
+(`arcaeon.connector.reported`, below), the HiddenLayer alert adapter
+(`arcaeon.connector.hiddenlayer`, below), the SentinelOne alert adapter
+(`arcaeon.connector.sentinelone`, below) and the E2B run receipt adapter
+(`arcaeon.connector.e2b`, below). The base owns what they share:
 
 - the row skeleton (`base_row`), relayed, `checked_by_us: false`, attestation
   `NONE` unless the payload claims a signature, and COULD NOT LOOK until a
@@ -761,6 +763,77 @@ alerts came from SentinelOne, that the export is complete, that an analyst
 verdict is right, or that a threat was mitigated. A missing alert is not a
 clean machine. The shape was read from a public client library, not from a live
 tenant; a field the real export writes differently reads COULD NOT LOOK.
+
+## E2B sandbox runs
+
+`arcaeon.connector.e2b.ingest(body)` reads an E2B sandbox run that the caller
+has serialised to JSON: one run object, or a JSON array of them (at most 1000).
+Each run becomes one row. It is a receipt that a run happened as the sender
+reports it, not a check that the code is correct.
+
+The shapes come from E2B's public SDK source (read 2026-10-05; no sandbox was
+run, nothing was sent):
+
+- `commands.run` returns a `CommandResult` with `stdout`, `stderr`, `exit_code`
+  and `error`
+  ([command_handle.py](https://raw.githubusercontent.com/e2b-dev/E2B/main/packages/python-sdk/e2b/sandbox/commands/command_handle.py)).
+- The code interpreter's `run_code` returns an `Execution` with `results`,
+  `logs` (`stdout` and `stderr` as lists of strings), `error` (`name`, `value`,
+  `traceback`, or null) and `execution_count`
+  ([models.py](https://raw.githubusercontent.com/e2b-dev/E2B/main/packages/code-interpreter-python/e2b_code_interpreter/models.py)).
+  `Execution.to_json()` writes `logs` and `error` as JSON-encoded strings and
+  leaves out `execution_count`; both forms are read.
+- Neither result carries the sandbox id. The caller may add `sandbox_id`,
+  `template_id` and `metadata` (an object of strings) at the top level, the
+  names `SandboxInfo` uses
+  ([sandbox_api.py](https://raw.githubusercontent.com/e2b-dev/E2B/main/packages/python-sdk/e2b/sandbox/sandbox_api.py)).
+
+E2B writes no verdict word, so the adapter writes its own:
+
+| adapter word | relayed as | when |
+|---|---|---|
+| `command_exit_zero` | VERIFIED | `exit_code` 0 and `error` null or empty |
+| `execution_no_error` | VERIFIED | an Execution whose `error` key is null |
+| `command_exit_nonzero` | BROKEN | `exit_code` is an integer other than 0 |
+| `command_error` | BROKEN | `exit_code` 0 or missing, but a non-empty `error` string |
+| `execution_error` | BROKEN | an Execution with an error (object or string) |
+| `no_exit_code` | COULD NOT LOOK | a command row with no `exit_code` (the JavaScript name `exitCode` is not read) |
+| `unreadable_exit_code` | COULD NOT LOOK | `exit_code` is not an integer (`true`, `"0"`, `0.0`) |
+| `error_not_stated` | COULD NOT LOOK | an Execution with no `error` key at all |
+| `unreadable_error` | COULD NOT LOOK | an Execution `error` that is not null, a string or an object |
+| `ambiguous_shape` | COULD NOT LOOK | both command and Execution keys |
+| `unknown_shape` | COULD NOT LOOK | neither |
+
+A success word also needs every field it carries to read: a key the adapter does
+not know, or a known key of the wrong type, turns a VERIFIED into COULD NOT
+LOOK, named in `run.problems`. A BROKEN stays BROKEN whatever else the row holds.
+A body that is empty, not UTF-8 JSON, carries a duplicate key, nests deeper than
+64 or is over 8 MiB is one COULD NOT LOOK row; `ingest` never raises.
+
+Every row carries `signed_by_vendor: false`, `standing: "reported_by_sender"`,
+`input_sha256` (the SHA-256 of the exact body bytes) and `run`: the shape, the
+sandbox and template ids, the metadata's key count and `sha256:jcs:v1` digest,
+the exit code, whether an error was reported, the error's `name` for an
+Execution, and a digest of the error. `stdout` and `stderr` are kept as SHA-256
+of their UTF-8 bytes (an Execution's lines joined with nothing between them)
+with their lengths, never copied; error messages and tracebacks are kept by
+digest only. No signature on a run result was found in the sources read, so
+nothing here is signed; a row claiming one changes nothing.
+`standing_verdict(rows)` (also `rollup`) is BROKEN when any row is a relayed
+BROKEN, otherwise COULD NOT LOOK, never VERIFIED.
+
+### What this cannot prove
+
+- **That the sandbox ran this code.** The row does not carry the code, and
+  nothing ties the output to it. Anyone can write this JSON by hand.
+- **That the output is unaltered.** The stdout and stderr digests are over what
+  the sender handed us, not over anything E2B signed.
+- **That the run happened in E2B at all.** A `sandbox_id` is the caller's
+  word; this adapter never asks E2B to confirm it.
+- **That a success is correct.** Exit code 0 or a null error says the run did
+  not report a failure, not that it did the right thing.
+- **That the shape is current.** The fixtures are shaped from the SDK source,
+  not a live capture.
 
 ## The sha256:jcs:v1 digest
 

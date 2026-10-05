@@ -1,0 +1,1 @@
+{"results": [], "logs": "{\"stdout\": [\"before the error\\n\"], \"stderr\": []}", "error": "{\"name\": \"ZeroDivisionError\", \"value\": \"division by zero\", \"traceback\": \"synthetic traceback\"}"}
