@@ -326,3 +326,79 @@ def test_cli_gate_reads_carried_checks(tmp_path, capsys):
                  str(tmp_path / "rec"), "--json"])
     out = json.loads(capsys.readouterr().out)
     assert rc == V.EXIT_BAD and out["checks"]["veto"] == G.CHECKER_BROKEN
+
+
+# --- verify: the carried rows are counted in the report (F-R9) --------------------------
+
+def _carried_line(r: dict) -> list[str]:
+    return [s for s in r["findings"] if s.startswith("the envelope carries ")]
+
+
+def test_verify_counts_carried_broken_rows_without_changing_the_verdict(tmp_path):
+    f = _file(tmp_path)
+    rows = [_row(verdict=V.BROKEN), _row(verdict=V.BROKEN, vendor="snyk-agent-scan"),
+            _row(verdict=V.COULD_NOT_LOOK, vendor="kyverno"), _row(verdict=V.VERIFIED)]
+    _, did = _seal(tmp_path, f, checks=rows)
+    r = E.verify(f, audience=AUD, signers=[did])
+    assert r["verdict"] == V.VERIFIED and r["reason"] == E.PROVES
+    [line] = _carried_line(r)
+    assert "carries 4 check rows, 2 say BROKEN" in line
+    assert "1 says COULD NOT LOOK" in line
+    assert "mcp-scan" in line and "snyk-agent-scan" in line and "kyverno" not in line
+    assert "`gate decide`" in line
+    assert any("checks[]" in s for s in r["not_checked"])     # the not_checked line stays
+
+
+def test_verify_says_zero_broken_too(tmp_path):
+    f = _file(tmp_path)
+    _, did = _seal(tmp_path, f, checks=[_row(verdict=V.VERIFIED), _row(verdict=V.VERIFIED)])
+    r = E.verify(f, audience=AUD, signers=[did])
+    assert r["verdict"] == V.VERIFIED
+    [line] = _carried_line(r)
+    assert "carries 2 check rows, 0 say BROKEN" in line
+
+
+def test_verify_broken_checker_names_are_capped(tmp_path):
+    f = _file(tmp_path)
+    rows = [_row(verdict=V.BROKEN, vendor=f"checker-{i:02d}") for i in range(12)]
+    _, did = _seal(tmp_path, f, checks=rows)
+    [line] = _carried_line(E.verify(f, audience=AUD, signers=[did]))
+    assert "carries 12 check rows, 12 say BROKEN" in line
+    assert "checker-00" in line and "checker-11" not in line and "more" in line
+
+
+def test_verify_no_checks_no_carried_line(tmp_path):
+    f = _file(tmp_path)
+    _, did = _seal(tmp_path, f)
+    assert _carried_line(E.verify(f, audience=AUD, signers=[did])) == []
+
+
+def test_verify_could_not_look_envelope_still_counts_rows(tmp_path):
+    f = _file(tmp_path)
+    _seal(tmp_path, f, checks=[_row(verdict=V.BROKEN)])
+    r = E.verify(f)                                        # no --audience, no --signer
+    assert r["verdict"] == V.COULD_NOT_LOOK
+    [line] = _carried_line(r)
+    assert "carries 1 check row, 1 says BROKEN" in line
+    assert "carries" not in r["reason"]
+
+
+def test_cli_verify_shows_carried_broken_rows_in_json_and_text(tmp_path, capsys):
+    f = _file(tmp_path)
+    _, did = _seal(tmp_path, f, checks=[_row(verdict=V.BROKEN), _row(verdict=V.VERIFIED)])
+    rc = E.main(["verify", str(f), "--audience", AUD, "--signer", did])
+    cap = capsys.readouterr()
+    assert rc == V.EXIT_GOOD
+    out = json.loads(cap.out)
+    assert out["verdict"] == V.VERIFIED
+    assert any("carries 2 check rows, 1 says BROKEN" in s for s in out["findings"])
+    assert cap.err.startswith(f"{V.VERIFIED}: ")
+    assert "carries 2 check rows, 1 says BROKEN" in cap.err and "mcp-scan" in cap.err
+
+
+def test_broken_envelope_reason_and_findings_hold_no_carried_line(tmp_path):
+    f = _file(tmp_path)
+    _, did = _seal(tmp_path, f, checks=[_row(verdict=V.BROKEN)])
+    r = E.verify(f, audience="someone-else", signers=[did])
+    assert r["verdict"] == V.BROKEN
+    assert _carried_line(r) == [] and "carries" not in r["reason"]

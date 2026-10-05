@@ -697,9 +697,17 @@ read or holds no rows, more than 64 rows, a row over 16 KiB or all of them
 over 256 KiB refuses the seal (exit 2, nothing written), naming the file and
 line or item of each. No row is dropped quietly. A carried row is the
 sender's report of a checker's word: `verify` lists it under `sealed.checks`
-and `not_checked` and its verdict does not change; `gate decide` reads it
-like a `--checks` row. Without `--checks` the envelope is byte-identical to
-one sealed before `checks[]` existed.
+and `not_checked` and its verdict and exit code do not change; `gate decide`
+reads it like a `--checks` row. On a VERIFIED or COULD NOT LOOK envelope
+whose `checks[]` is a list of rows, `verify` also adds one finding that
+counts them, in the JSON `findings` and as a `finding:` line under the
+verdict on stderr: "the envelope carries 3 check rows, 1 says BROKEN
+(mcp-scan), 1 says COULD NOT LOOK: ... run `gate decide` on the file ...".
+Zero is said too ("carries 2 check rows, 0 say BROKEN"); at most 8 BROKEN
+checker names are listed, then "and N more". On a BROKEN envelope the line
+is left out: there `findings` are the reasons it is BROKEN. Without
+`--checks` the envelope is byte-identical to one sealed before `checks[]`
+existed.
 
 **Usage**
 
