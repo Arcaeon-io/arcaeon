@@ -343,6 +343,7 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
     # read every chain
     rows_by_key: dict[str, list[dict]] = {}
     broken_rows_by_key: dict[str, list[dict]] = {}
+    chains_by_key: dict[str, list[tuple[str, list, list]]] = {}
     record_broken: dict[str, list[str]] = {}
     bound: dict[str, set[str]] = {}
     cnl_chains: list[str] = []
@@ -379,8 +380,28 @@ def _build(r: dict, paths: list[Path], now: datetime, span: timedelta, groups_sr
             continue
         for acct in side.get("accounts", []):
             bound.setdefault(acct, set()).add(own)
-        rows_by_key.setdefault(own, []).extend(rows)
-        broken_rows_by_key.setdefault(own, []).extend(side["broken_rows"])
+        chains_by_key.setdefault(own, []).append((p.name, rows, side["broken_rows"]))
+
+    # R3-2: one key, more than one chain. Concatenating them let argument order
+    # pick the head (a BROKEN or a VERIFIED). A copy, or an earlier prefix, of
+    # one chain is one history: read the longest once. Chains that diverge are
+    # a fork: BROKEN for that key, which then credits nothing (F10).
+    for own, chs in chains_by_key.items():
+        chs = sorted(chs, key=lambda c: -len(c[1]))
+        longest = [x["row_digest"] for x in chs[0][1]]
+        diverge = [c[0] for c in chs[1:]
+                   if [x["row_digest"] for x in c[1]] != longest[:len(c[1])]]
+        if diverge:
+            names = ", ".join(sorted(c[0] for c in chs))
+            why = (f"fork: key {own} owns {len(chs)} chains among the inputs ({names}) that "
+                   f"diverge; which reaction is current cannot be read from them")
+            broken_top.append(why)
+            record_broken.setdefault(own, []).append(why)
+            rows_by_key[own] = [x for c in chs for x in c[1]]
+            broken_rows_by_key[own] = [x for c in chs for x in c[2]]
+        else:
+            rows_by_key[own] = list(chs[0][1])
+            broken_rows_by_key[own] = list(chs[0][2])
 
     owners = set(rows_by_key)
     broken_owners = set(record_broken) | {k for k, v in broken_rows_by_key.items() if v}

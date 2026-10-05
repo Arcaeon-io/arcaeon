@@ -577,3 +577,44 @@ def test_account_bound_by_two_chains_is_not_applied(w):
     assert {x["applied"] for x in r["bindings"]} == {False}
     assert all(V.COULD_NOT_LOOK in x["finding"] for x in r["bindings"])
     assert by_id(r, b.did)["windows"]["all"]["said_unpaired"]["total"] == 1
+
+
+# --- R3-2: one key, two chains among the inputs -------------------------------------
+
+def test_two_diverging_chains_for_one_key_are_a_fork_not_an_order_choice(w):
+    """Outside red team round 3 (R3-2): the rows of every chain a key owns were
+    concatenated and the last head won, so argument order chose between a
+    BROKEN + DISPUTED reaction and a VERIFIED one, with no finding. A key with
+    two diverging chains is a fork: BROKEN, credits nothing, either order."""
+    a, b = w["a"], w["b"]
+    fork = w["tmp"] / "a-fork.jsonl"
+    react(w, a, b, "e1", V.BROKEN, disputed="the bytes are wrong")
+    X.react(fork, key_file=a.key, exchange_id="e1", counterparty=b.did, file=w["file"],
+            reaction=V.VERIFIED, at=NOW - timedelta(days=1))
+    react(w, b, a, "e1", V.VERIFIED)
+    for order in ((a.log, fork, b.log), (fork, a.log, b.log)):
+        r = tally(*order)
+        assert r["verdict"] == V.BROKEN, order
+        assert any("fork" in f for f in r["findings"]), r["findings"]
+        ia = by_id(r, a.did)
+        assert "BROKEN" in ia["flags"] and any("fork" in x for x in ia["record_broken"])
+        assert by_id(r, b.did)["windows"]["all"]["received"]["total"] == 0   # nothing credited
+
+
+def test_a_copy_or_older_prefix_of_one_chain_is_read_once(w):
+    """A second file that is the same chain, or an earlier prefix of it, is one
+    history: read once (the longest), never double counted, not a fork."""
+    a, b = w["a"], w["b"]
+    both(w, a, b, "e1")
+    old = w["tmp"] / "a-old.jsonl"
+    old.write_bytes(a.log.read_bytes())
+    react(w, a, b, "e2", V.BROKEN, days_ago=0.5)
+    react(w, b, a, "e2", V.BROKEN, days_ago=0.5)
+    copy = w["tmp"] / "a-copy.jsonl"
+    copy.write_bytes(a.log.read_bytes())
+    want = tally(a, b)
+    for order in ((old, a.log, copy, b.log), (copy, b.log, a.log, old)):
+        r = tally(*order)
+        assert r["verdict"] == V.VERIFIED, r["findings"]
+        assert by_id(r, a.did)["windows"] == by_id(want, a.did)["windows"]
+        assert by_id(r, b.did)["windows"] == by_id(want, b.did)["windows"]

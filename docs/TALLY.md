@@ -285,6 +285,11 @@ on its own; only a pin of its tip held outside your control closes that gap.
   among the inputs is not counted, and a truncated or re-minted chain still
   verifies (see EXCHANGE.md).
 - **A key is not a person.** An ID is a `did:key`.
+- **One key, one history.** When a key owns more than one chain among the
+  inputs, a copy or an earlier prefix of the longest is read once (never
+  double counted). Chains that diverge are a fork: the tally is BROKEN, the
+  key carries the finding under `record_broken`, and it credits nothing, in
+  any argument order.
 - **An account id pairs only through a binding row.** `acct:NAME@arcaeon.io`
   is the confirmed account form (EXCHANGE.md). A row naming an account
   resolves to a key ONLY when exactly one chain among the inputs holds a
