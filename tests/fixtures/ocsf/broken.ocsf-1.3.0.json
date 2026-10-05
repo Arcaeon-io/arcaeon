@@ -1,0 +1,111 @@
+{
+ "activity_id": 1,
+ "activity_name": "Create",
+ "category_name": "Findings",
+ "category_uid": 2,
+ "class_name": "Detection Finding",
+ "class_uid": 2004,
+ "evidences": [
+  {
+   "file": {
+    "hashes": [
+     {
+      "algorithm": "SHA-256",
+      "algorithm_id": 3,
+      "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+     }
+    ],
+    "name": "grades.csv",
+    "size": 23,
+    "type": "Regular File",
+    "type_id": 1
+   }
+  },
+  {
+   "file": {
+    "name": "grades.csv.envelope.json",
+    "type": "Regular File",
+    "type_id": 1
+   }
+  }
+ ],
+ "finding_info": {
+  "created_time": 1791115200123,
+  "desc": "BROKEN: the file's sha256 is aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, the envelope sealed bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb: the bytes changed after sealing. Limits: VERIFIED means the bytes are unchanged since the named key sealed them and are labeled for this receiver; it never means the content is true or safe. BROKEN means a check came out wrong, not who is at fault. COULD NOT LOOK means something was not checked; it vouches for nothing.",
+  "title": "BROKEN: grades.csv failed its arcaeon check",
+  "types": [
+   "arcaeon verify report"
+  ],
+  "uid": "arcaeon-2a295ba9b8df18bc2329ea7f7d0df14e"
+ },
+ "message": "BROKEN: grades.csv",
+ "metadata": {
+  "product": {
+   "name": "arcaeon",
+   "vendor_name": "arcaeon",
+   "version": "0.0.0+fixture"
+  },
+  "profiles": [],
+  "version": "1.3.0"
+ },
+ "severity": "High",
+ "severity_id": 4,
+ "status": "New",
+ "status_code": "BROKEN",
+ "status_detail": "the file's sha256 is aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, the envelope sealed bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb: the bytes changed after sealing",
+ "status_id": 1,
+ "time": 1791115200123,
+ "timezone_offset": 0,
+ "type_name": "Detection Finding: Create",
+ "type_uid": 200401,
+ "unmapped": {
+  "arcaeon": {
+   "action": null,
+   "audience_checked": null,
+   "checked_at": null,
+   "could_not_check": null,
+   "deal_checked": null,
+   "decision": null,
+   "envelope": "grades.csv.envelope.json",
+   "envelope_sha256": null,
+   "evidence": null,
+   "file": "grades.csv",
+   "file_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "file_sha256_of": "the verify report",
+   "gate_reason": null,
+   "label": "week 3 grades",
+   "limits": "Limits: VERIFIED means the bytes are unchanged since the named key sealed them and are labeled for this receiver; it never means the content is true or safe. BROKEN means a check came out wrong, not who is at fault. COULD NOT LOOK means something was not checked; it vouches for nothing.",
+   "not_checked": [],
+   "note": null,
+   "purpose_checked": null,
+   "reason": "the file's sha256 is aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, the envelope sealed bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb: the bytes changed after sealing",
+   "reasons": [
+    "the file's sha256 is aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, the envelope sealed bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb: the bytes changed after sealing"
+   ],
+   "sealed_at": "2026-10-04T11:00:00Z",
+   "sealed_by": {
+    "key": "did:key:z6MkTEST",
+    "name": null
+   },
+   "sealed_for": {
+    "audience": "instructor-1",
+    "deal": "d-7f3a",
+    "not_after": "2026-10-11T11:00:00Z",
+    "purpose": "grading"
+   },
+   "signers_named": null,
+   "signers_valid": [
+    "did:key:z6MkTEST"
+   ],
+   "source": "verify report",
+   "steps": {
+    "binding": "VERIFIED",
+    "envelope": "VERIFIED",
+    "file": "BROKEN",
+    "signature": "VERIFIED",
+    "witness": "NOT CLAIMED"
+   },
+   "verdict": "BROKEN"
+  }
+ }
+}

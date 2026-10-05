@@ -1,0 +1,117 @@
+{
+ "activity_id": 1,
+ "activity_name": "Create",
+ "category_name": "Findings",
+ "category_uid": 2,
+ "class_name": "Detection Finding",
+ "class_uid": 2004,
+ "evidences": [
+  {
+   "file": {
+    "hashes": [
+     {
+      "algorithm": "SHA-256",
+      "algorithm_id": 3,
+      "value": "0118bfc2ce8e45041635c93b9d59389d8958d0bae1f38618da4bde00a57ac4fe"
+     }
+    ],
+    "name": "grades.csv",
+    "size": 23,
+    "type": "Regular File",
+    "type_id": 1
+   }
+  },
+  {
+   "file": {
+    "name": "grades.csv.envelope.json",
+    "type": "Regular File",
+    "type_id": 1
+   }
+  }
+ ],
+ "finding_info": {
+  "created_time": 1791115200123,
+  "desc": "COULD NOT LOOK: could not check a signature on the envelope (missing): the envelope is UNSIGNED. Not checked: deal (recorded as 'd-7f3a'; pass --deal to hold the envelope to it). Limits: VERIFIED means the bytes are unchanged since the named key sealed them and are labeled for this receiver; it never means the content is true or safe. BROKEN means a check came out wrong, not who is at fault. COULD NOT LOOK means something was not checked; it vouches for nothing.",
+  "title": "COULD NOT LOOK: grades.csv could not be fully checked",
+  "types": [
+   "arcaeon verify report"
+  ],
+  "uid": "arcaeon-c2d60aae74a81ee7a6624638a0d961a3"
+ },
+ "message": "COULD NOT LOOK: grades.csv",
+ "metadata": {
+  "product": {
+   "name": "arcaeon",
+   "vendor_name": "arcaeon",
+   "version": "0.0.0+fixture"
+  },
+  "profiles": [],
+  "version": "1.3.0"
+ },
+ "severity": "Low",
+ "severity_id": 2,
+ "status": "New",
+ "status_code": "COULD NOT LOOK",
+ "status_detail": "the envelope is UNSIGNED",
+ "status_id": 1,
+ "time": 1791115200123,
+ "timezone_offset": 0,
+ "type_name": "Detection Finding: Create",
+ "type_uid": 200401,
+ "unmapped": {
+  "arcaeon": {
+   "action": null,
+   "audience_checked": null,
+   "checked_at": null,
+   "could_not_check": {
+    "looked_for": "a signature on the envelope",
+    "reason_word": "missing",
+    "where": "grades.csv.envelope.json"
+   },
+   "deal_checked": null,
+   "decision": null,
+   "envelope": "grades.csv.envelope.json",
+   "envelope_sha256": null,
+   "evidence": null,
+   "file": "grades.csv",
+   "file_sha256": "0118bfc2ce8e45041635c93b9d59389d8958d0bae1f38618da4bde00a57ac4fe",
+   "file_sha256_of": "the verify report",
+   "gate_reason": null,
+   "label": "week 3 grades",
+   "limits": "Limits: VERIFIED means the bytes are unchanged since the named key sealed them and are labeled for this receiver; it never means the content is true or safe. BROKEN means a check came out wrong, not who is at fault. COULD NOT LOOK means something was not checked; it vouches for nothing.",
+   "not_checked": [
+    "deal (recorded as 'd-7f3a'; pass --deal to hold the envelope to it)"
+   ],
+   "note": null,
+   "purpose_checked": null,
+   "reason": "the envelope is UNSIGNED",
+   "reasons": [
+    "the envelope is UNSIGNED"
+   ],
+   "sealed_at": "2026-10-04T11:00:00Z",
+   "sealed_by": {
+    "key": "did:key:z6MkTEST",
+    "name": null
+   },
+   "sealed_for": {
+    "audience": "instructor-1",
+    "deal": "d-7f3a",
+    "not_after": "2026-10-11T11:00:00Z",
+    "purpose": "grading"
+   },
+   "signers_named": null,
+   "signers_valid": [
+    "did:key:z6MkTEST"
+   ],
+   "source": "verify report",
+   "steps": {
+    "binding": "VERIFIED",
+    "envelope": "VERIFIED",
+    "file": "VERIFIED",
+    "signature": "COULD NOT LOOK",
+    "witness": "NOT CLAIMED"
+   },
+   "verdict": "COULD NOT LOOK"
+  }
+ }
+}
