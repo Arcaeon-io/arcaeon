@@ -6,6 +6,8 @@
 
 - **Envelope pins resolved offline (`envelope verify --pins DIR`, A10).** New option `--pins DIR` and library parameter `verify(pins=)`, plus `resolve_pin(pins, pin_ref, witness_ref)`; without `--pins` nothing changes, the report included. With it the report adds one key, `pin`: `folder`, `statement_sha256`, `pin_ref` when the pin resolved, else null; the `witness` step reads VERIFIED, BROKEN or COULD NOT LOOK from the clone (docs/ENVELOPE.md). A BROKEN pin makes the verdict BROKEN with or without `--require-witness`; a pin that could not be looked at decides the verdict only under `--require-witness`, with reason words `missing`, `empty`, `unreadable` or `bounded` instead of `network`.
 
+- **The tally page (`arcaeon tally html`, `arcaeon.prove.tally_html`, A14).** A new subcommand; `build`, `alias`, `seal`, `pin` and `verify` are unchanged, and no JSON field changed. What it is: renders a tally JSON as one static HTML page, facts columns only, the sentence on every row, no score. Flags: `html TALLY.json [--out FILE]`. Files written: with `--out`, one new HTML file (an existing file is never overwritten); without it, the page goes to stdout. Exit codes: 0 written, 3 the input is not a tally of kind `arcaeon.tally/v1` (unreadable, not JSON, no `ids` or `windows` list; nothing written), 2 bad usage or `--out` exists. Library: `render_html(tally) -> str` (raises `TallyHtmlError` on a dict that is not a tally), `load(path) -> dict`, `COLUMNS`.
+
 Everything on stack-2026-10-04c since 0.10.0, newest first. The first items
 are changes to verbs that are themselves new since 0.10.0; a script written
 against an earlier commit of this stack must act on them. Each says before

@@ -275,6 +275,38 @@ what counts. `at` and `ts` are the sealer's clock: going backwards is caught,
 a wrong clock is not. And a truncated or re-minted tally chain still verifies
 on its own; only a pin of its tip held outside your control closes that gap.
 
+## The page (`tally html`, A14)
+
+```console
+$ arcaeon tally build a.jsonl b.jsonl --json > tally.json
+$ arcaeon tally html tally.json --out tally.html
+wrote tally.html
+```
+
+`tally html TALLY.json [--out FILE]` (library
+`arcaeon.prove.tally_html.render_html(tally)`) reads a tally of kind
+`arcaeon.tally/v1` (from `build --json`, `seal --out` or `tally.build`) and
+writes one self-contained HTML file: inline CSS, no script, no link, no
+image, nothing fetched. It shows the sentence, the verdict and reason as
+text (`tally VERIFIED: ...`), now, the order note, the windows, filters,
+thresholds, chains, bindings and aliases, then one table: **one row per ID
+per window, in the order the tally emits them** (no sorting). The columns
+are `id`, `window`, `unrated` (as text: `unrated: <reasons>` or `no`),
+`keys`, `first row at`, `age days`, then the same fact columns and values
+as the text render (`flags`, `broken`, `said VERIFIED` "9 of 10", ...,
+`from broken chain paired`), and last `sentence`: every row ends with
+"clean means unchanged and labeled, never true". Below the table: each ID's
+BROKEN record, DISPUTED claims, excluded rows and notes, the tally's
+findings, definitions, proves, does not prove and limits. No score, rank,
+grade, or colour for good or bad. Every value is HTML-escaped. Same tally in,
+same bytes out.
+
+The page is a view of the JSON, not a check of it: a hand-edited tally JSON
+renders as edited. `tally verify` checks a sealed tally. Input that is not a
+tally (not JSON, another kind, no `ids` list) is COULD NOT LOOK, exit 3,
+nothing written; `--out` never overwrites (exit 2); without `--out` the page
+goes to stdout.
+
 ## Limits
 
 - **Clean means unchanged and labeled, never true.** The tally counts what
