@@ -1,0 +1,10 @@
+{"scan_path_responses": [
+  {"client": "cursor", "path": "~/.cursor/mcp.json", "error": null,
+   "server_risks": [
+     {"name": "files", "entities": [{"type": "tool", "name": "read_file"}], "risk_indexes": {}, "error": null},
+     {"name": "notes", "entities": [{"type": "tool", "name": "add_note"}], "risk_indexes": {}, "error": null}
+   ],
+   "skill_risks": [
+     {"name": "summarize", "files": ["SKILL.md"], "risk_indexes": {}, "error": null}
+   ]}
+]}

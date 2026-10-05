@@ -1,0 +1,19 @@
+{"scan_path_responses": [
+  {"client": "cursor", "path": "~/.cursor/mcp.json", "error": null,
+   "server_risks": [
+     {"name": "weather", "entities": [{"type": "tool", "name": "get_forecast"}, {"type": "tool", "name": "send_report"}, {"type": "tool", "name": "lookup"}],
+      "risk_indexes": {
+        "prompt_injection_tool_desc": {"score": 870, "evidence": "synthetic evidence text", "affected_tools": [2]},
+        "untrusted_content": {"score": 120, "evidence": "synthetic low score", "affected_tools": [0]}
+      }, "error": null},
+     {"name": "files", "entities": [{"type": "tool", "name": "read_file"}], "risk_indexes": {}, "error": null},
+     {"name": "broken-server", "entities": [], "risk_indexes": null, "error": {"message": "synthetic: could not start server"}}
+   ],
+   "skill_risks": [
+     {"name": "deploy", "files": ["SKILL.md", "run.sh"], "risk_indexes": {
+        "malicious_code_patterns": {"score": 640, "evidence": "synthetic", "locations": [{"file": "run.sh", "line": 3}]},
+        "hidden_unicode": {"score": "high"}
+      }, "error": null}
+   ]},
+  {"client": "vscode", "path": "~/.vscode/mcp.json", "error": {"message": "synthetic: file not found"}, "server_risks": null, "skill_risks": null}
+]}

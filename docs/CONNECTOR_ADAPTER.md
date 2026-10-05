@@ -9,8 +9,8 @@ can then be exported as an in-toto Statement that tools outside Arcaeon can read
 
 This is not the MCP connector (`arcaeon mcp`, the `arcaeon.mcp` package). It is
 the library `arcaeon.connector`, phase 1: the adapter shape, one mock vendor
-(`mockscan`), the mcp-scan adapter and the OPA decision-log adapter on the same
-base class, and no command-line verb yet.
+(`mockscan`), the mcp-scan adapter, the OPA decision-log adapter and the Snyk
+agent-scan adapter on the same base class, and no command-line verb yet.
 
 ## What a relayed row says
 
@@ -148,8 +148,9 @@ a key twice, or a value outside our three words raises `TypeError`.
 Every adapter subclasses `VendorAdapter` in `arcaeon.connector.core`: the mock
 vendor (`arcaeon.connector.mockscan`), the mcp-scan tool-hash adapter
 (`arcaeon.prove.mcp_scan`, see [MCP_SCAN.md](MCP_SCAN.md)) and the OPA
-decision-log adapter (`arcaeon.connector.opa`, below). The base owns what
-they share:
+decision-log adapter (`arcaeon.connector.opa`, below) and the Snyk agent-scan
+adapter (`arcaeon.connector.snyk_agent_scan`, below). The base owns what they
+share:
 
 - the row skeleton (`base_row`), relayed, `checked_by_us: false`, attestation
   `NONE` unless the payload claims a signature, and COULD NOT LOOK until a
@@ -181,6 +182,69 @@ undefined decision (no result) and an erased or masked result all read COULD NOT
 LOOK. A gzip body that is truncated, has trailing bytes or inflates past 32 MiB
 is one COULD NOT LOOK row. Decision logs are unsigned: every row is reported by
 the sender. `recheck` says COULD NOT LOOK for these rows; re-run `ingest`.
+
+## Snyk agent-scan
+
+`arcaeon.connector.snyk_agent_scan.ingest(output_bytes, broken_at_score=...)`
+reads the `--json` output of Snyk agent-scan (formerly Invariant mcp-scan), in
+either published shape: v0.6+ `{"scan_path_responses": [...]}` with scored
+`server_risks` and `skill_risks`, or the v0.5.x object keyed by config path with
+`servers` and coded `issues`. It writes one row per finding, plus one row per
+target that came back clean, errored or was never analysed. This is not the
+mcp-scan adapter in [MCP_SCAN.md](MCP_SCAN.md): that one writes one row per tool
+and pins tool definitions; this one writes one row per finding.
+
+Every row carries, besides the base keys:
+
+| key | what it holds |
+|---|---|
+| `signed_by_vendor` | always `false`. agent-scan does not sign its output; no argument, flag or payload field can set it |
+| `standing` | always `reported_by_sender` |
+| `input_sha256` | hex SHA-256 of the exact bytes read |
+| `vendor_request_id` | an id the caller passes from the transport, else null. agent-scan's JSON carries no request or scan id, and nothing in it is read as one |
+| `finding` | format, scan path, client, target kind and name, issue code and severity (v0.5) or risk name, score and threshold (v0.6), affected tool indexes, and a digest of the evidence text |
+
+agent-scan writes no per-finding verdict word, so the adapter writes its own.
+A v0.6 score runs from 0 to 1000 and agent-scan documents no cut-off, so the
+caller declares one in `broken_at_score`; without it no score maps. A v0.5 code's
+first letter is its class: E and W are findings, X means the scan itself failed.
+
+| adapter word | relayed as | when |
+|---|---|---|
+| `no_findings` | VERIFIED | the target was analysed and nothing points at it |
+| `issue_error` | BROKEN | a v0.5 E code |
+| `issue_warning` | BROKEN | a v0.5 W code |
+| `risk_at_or_over_threshold` | BROKEN | a v0.6 score at or over `broken_at_score` |
+| `scan_failure` | COULD NOT LOOK | a v0.5 X code |
+| `unknown_code` | COULD NOT LOOK | a v0.5 code not shaped like E, W or X and three digits |
+| `risk_below_threshold` | COULD NOT LOOK | a v0.6 score under `broken_at_score`; a low score is not a pass |
+| `risk_no_threshold` | COULD NOT LOOK | a v0.6 score with no `broken_at_score` declared |
+| `risk_unscored` | COULD NOT LOOK | a v0.6 risk with no number score from 0 to 1000 |
+| `error` | COULD NOT LOOK | a path or target error |
+| `not_analyzed` | COULD NOT LOOK | the target was listed but never analysed |
+
+Output that is empty, not UTF-8 JSON, carries a duplicate key, nests deeper than
+64, is over 8 MiB, or has neither shape is one COULD NOT LOOK row, still with its
+`input_sha256`. `ingest` never raises on scanner output.
+
+`standing_verdict(rows)` says what these rows can say on their own: BROKEN when
+any row relays BROKEN, otherwise COULD NOT LOOK. It never says VERIFIED, and a
+relayed BROKEN stays BROKEN whatever else the row claims.
+
+### What this cannot prove
+
+- **That the scan happened.** The rows are reported by the sender with
+  `signed_by_vendor: false`. Anyone can write this JSON by hand.
+- **That a clean target is safe.** `no_findings` relays that agent-scan reported
+  nothing; on its own it never makes a VERIFIED.
+- **Which scan this was.** agent-scan returns no request or scan id and no
+  service offers a lookup, so a receiver cannot ask Snyk to confirm it.
+- **What a score means.** The cut-off is the caller's, not the vendor's.
+- **That the output shape is current.** The fixtures are shaped from the
+  published notes, not a live capture; v0.5 and v0.6 already differ.
+- **Privacy of the scan.** agent-scan sends tool names, descriptions and skill
+  files to Snyk for analysis. This adapter sends nothing; it reads output you
+  already hold.
 
 ## The sha256:jcs:v1 digest
 
