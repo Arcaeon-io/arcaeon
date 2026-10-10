@@ -89,3 +89,17 @@ def test_a_row_the_chain_rule_cannot_hash_is_a_break_not_a_green(tmp_path, monke
     r = L.verify_file(p)
     assert r.ok is False and r.breaks == 1
     assert r.first_break == "line 2: unhashable row (TypeError)"
+
+
+# --- Ledger.head ----------------------------------------------------------------
+
+def test_head_of_a_bounded_log_carries_none_not_a_green(tmp_path):
+    """L22: a log whose first row carries no chain verifies bounded (ok=None);
+    its head must say the same, never ok=True. It still pins (bounded is not
+    broken)."""
+    p = tmp_path / "a.jsonl"
+    p.write_text(json.dumps({"legacy": "row with no chain"}) + "\n", encoding="utf-8")
+    Ledger(p).append({"op": 1})
+    h = Ledger(p).head()
+    assert h.ok is None and h.rows == 2
+    assert "rows=2" in h.as_pin()
