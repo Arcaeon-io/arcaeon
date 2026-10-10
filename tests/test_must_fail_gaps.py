@@ -494,3 +494,24 @@ def test_compact_with_unreadable_content_could_not_look_exit_3(tmp_path, capsys)
     pre.write_text("not json", encoding="utf-8")
     assert cli.main(["compact", str(f), "--pre", str(pre)]) == 3
     assert json.loads(capsys.readouterr().out)["verdict"] == "COULD NOT LOOK"
+
+
+def test_pin_refuses_to_append_to_a_pin_file_whose_own_chain_is_broken(tmp_path, capsys):
+    """X18: a pin file whose lines are all pin-shaped but whose pin chain breaks
+    (a middle pin's rows edited) is refused before a byte is written: COULD NOT
+    LOOK, exit 3, the file unchanged."""
+    from arcaeon import cli
+    p, w = tmp_path / "a.jsonl", tmp_path / "pins.jsonl"
+    Ledger(p).append({"op": 0})
+    for i in (1, 2):
+        Ledger(p).append({"op": i})
+        assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 0
+    lines = w.read_text(encoding="utf-8").splitlines()
+    first = json.loads(lines[0])
+    first["rows"] = 1
+    w.write_text(json.dumps(first) + "\n" + lines[1] + "\n", encoding="utf-8")
+    before = w.read_bytes()
+    Ledger(p).append({"op": 3})
+    capsys.readouterr()
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 3
+    assert w.read_bytes() == before
