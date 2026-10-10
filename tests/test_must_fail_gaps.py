@@ -423,3 +423,15 @@ def test_batch_receipt_whose_anchor_proof_fails_is_fail_not_undetermined(tmp_pat
     monkeypatch.setattr(core, "ots_verify", lambda receipt: {"status": "failed", "detail": "bad"})
     row = VB.verify_one(p, ots=True)
     assert row["verdict"] == VB.FAIL and row["reason"] == "anchor verification failed"
+
+
+# --- the arcaeon front door -----------------------------------------------------
+
+def test_verify_a_ledger_whose_only_line_is_garbage_is_broken_exit_1(tmp_path, capsys):
+    """X03: a readable file whose only line does not parse has zero rows, but it
+    was read and it is damaged: BROKEN, exit 1, not COULD NOT LOOK."""
+    from arcaeon import cli
+    p = tmp_path / "a.jsonl"
+    p.write_text('{"op": 1, "chain": \n', encoding="utf-8")
+    assert cli.main(["verify", str(p)]) == 1
+    assert json.loads(capsys.readouterr().out)["verdict"] == "BROKEN"
