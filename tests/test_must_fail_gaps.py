@@ -566,3 +566,24 @@ def test_vet_verify_a_grade_of_different_source_bytes_exits_2(tmp_path, capsys):
     assert vet_main(["verify", str(g), str(src)]) == 2
     assert json.loads(capsys.readouterr().out)["reproduced"] is False
     assert cli.main(["vet", "verify", str(g), str(src)]) == 1
+
+
+# --- compaction receipts --------------------------------------------------------
+
+def _redigest(row):
+    from arcaeon.prove.compact import _core_body
+    from arcaeon.record.row import digest_json
+    row["receipt_digest"] = digest_json(_core_body(row))
+    return row
+
+
+def test_compaction_counts_that_fall_short_do_not_reconcile(tmp_path):
+    """P03: post.count - introduced.count must EQUAL pre.count - dropped.count.
+    A row (re-digested, so only the arithmetic can catch it) claiming one kept
+    item fewer than it kept is not self-consistent."""
+    from arcaeon.prove.compact import verify_receipt
+    row = _compaction_row(tmp_path)
+    assert verify_receipt(row)["ok"] is True
+    row["post"]["count"] -= 1
+    out = verify_receipt(_redigest(row))
+    assert out["self_consistent"] is False and out["ok"] is False
