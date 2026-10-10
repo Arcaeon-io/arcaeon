@@ -103,3 +103,16 @@ def test_head_of_a_bounded_log_carries_none_not_a_green(tmp_path):
     h = Ledger(p).head()
     assert h.ok is None and h.rows == 2
     assert "rows=2" in h.as_pin()
+
+
+def test_head_of_a_path_that_cannot_be_read_is_red_not_a_fresh_genesis(tmp_path):
+    """L24: only FileNotFoundError is the never-written state. A path under a
+    regular file (stat raises NotADirectoryError) cannot be read; its head is
+    red and refuses to pin instead of pinning a fresh genesis."""
+    from arcaeon.record.ledger import UnverifiedLedgerError
+    f = tmp_path / "a-file"
+    f.write_text("not a directory", encoding="utf-8")
+    h = Ledger(f / "ledger.jsonl").head()
+    assert h.ok is False
+    with pytest.raises(UnverifiedLedgerError):
+        h.as_pin()
