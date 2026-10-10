@@ -11,6 +11,7 @@ import json
 import pytest
 
 from arcaeon.record.adapter import _ledger as adapter_ledger
+from arcaeon.record.ledger import Ledger
 
 
 # --- the adapter's FALLBACK verifier (no arcaeon-ledger importable) -------------
@@ -65,3 +66,26 @@ def test_fallback_unreadable_seam_log_is_not_verified(tmp_path, fallback):
     """F05: a path that cannot be read (here a directory) is never ok."""
     v = fallback.verify_seam_log(str(tmp_path))
     assert v.ok is False and not v
+
+
+# --- verify_file ----------------------------------------------------------------
+
+def test_a_row_the_chain_rule_cannot_hash_is_a_break_not_a_green(tmp_path, monkeypatch):
+    """L07: the unhashable-row branch. On CPython 3.13 no file reaches it (every
+    line json parses also hashes), so the fault is injected: when the chain rule
+    raises on a row, the verdict is red and names the line, never ok."""
+    import arcaeon.record.ledger as L
+    p = tmp_path / "a.jsonl"
+    for i in range(3):
+        Ledger(p).append({"op": i})
+    real = L._chain
+
+    def chain(prev, obj):
+        if obj.get("op") == 1:
+            raise TypeError("planted: this row cannot be hashed")
+        return real(prev, obj)
+
+    monkeypatch.setattr(L, "_chain", chain)
+    r = L.verify_file(p)
+    assert r.ok is False and r.breaks == 1
+    assert r.first_break == "line 2: unhashable row (TypeError)"
