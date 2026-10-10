@@ -515,3 +515,34 @@ def test_pin_refuses_to_append_to_a_pin_file_whose_own_chain_is_broken(tmp_path,
     capsys.readouterr()
     assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 3
     assert w.read_bytes() == before
+
+
+# --- the hosted answers ---------------------------------------------------------
+
+def test_an_unreachable_witness_is_status_0_never_a_stamp(monkeypatch):
+    """M02: a request that never completes is status 0 and ok False; `arcaeon
+    stamp` turns that into COULD NOT LOOK, never a recorded stamp."""
+    import urllib.error
+    import urllib.request
+    import arcaeon.remote as R
+
+    def down(*a, **k):
+        raise urllib.error.URLError("planted: no route")
+
+    monkeypatch.setattr(urllib.request, "urlopen", down)
+    out = R.stamp("ab" * 32, 3)
+    assert out["status"] == 0 and out["ok"] is False
+
+
+def test_an_unreachable_witness_never_reads_as_a_recorded_pin(monkeypatch):
+    """M04: the hosted pin's own transport: a URLError is status 0, ok False."""
+    import urllib.error
+    import urllib.request
+    import arcaeon.remote.witness as RW
+
+    def down(*a, **k):
+        raise urllib.error.URLError("planted: no route")
+
+    monkeypatch.setattr(urllib.request, "urlopen", down)
+    out = RW.pin("ns", 1, "c" * 32, "key")
+    assert out["status"] == 0 and out["ok"] is False
