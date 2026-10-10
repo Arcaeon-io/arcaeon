@@ -463,3 +463,34 @@ def test_pin_witness_refuses_a_broken_ledger_exit_1(tmp_path, capsys):
     assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 1
     assert json.loads(capsys.readouterr().out)["ok"] is False
     assert not w.exists() or w.read_text(encoding="utf-8") == ""
+
+
+def _compaction_row(tmp_path):
+    from arcaeon.prove.compact import CompactionReceipt
+    r = CompactionReceipt.open(["a", "b", "c"])
+    r.record_kept(["a", "summary"])
+    return r.seal(tmp_path / "receipts.jsonl", compactor="t", method="m")
+
+
+def test_compact_a_tampered_receipt_is_broken_exit_1(tmp_path, capsys):
+    """X14: `arcaeon compact` on a receipt row whose counts were edited is
+    BROKEN, exit 1, never VERIFIED."""
+    from arcaeon import cli
+    row = _compaction_row(tmp_path)
+    row["dropped"]["count"] += 1
+    f = tmp_path / "row.json"
+    f.write_text(json.dumps(row), encoding="utf-8")
+    assert cli.main(["compact", str(f)]) == 1
+    assert json.loads(capsys.readouterr().out)["verdict"] == "BROKEN"
+
+
+def test_compact_with_unreadable_content_could_not_look_exit_3(tmp_path, capsys):
+    """X15: a --pre file that is not JSON: nothing was recomputed, COULD NOT
+    LOOK, exit 3."""
+    from arcaeon import cli
+    f = tmp_path / "row.json"
+    f.write_text(json.dumps(_compaction_row(tmp_path)), encoding="utf-8")
+    pre = tmp_path / "pre.json"
+    pre.write_text("not json", encoding="utf-8")
+    assert cli.main(["compact", str(f), "--pre", str(pre)]) == 3
+    assert json.loads(capsys.readouterr().out)["verdict"] == "COULD NOT LOOK"
