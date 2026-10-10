@@ -435,3 +435,31 @@ def test_verify_a_ledger_whose_only_line_is_garbage_is_broken_exit_1(tmp_path, c
     p.write_text('{"op": 1, "chain": \n', encoding="utf-8")
     assert cli.main(["verify", str(p)]) == 1
     assert json.loads(capsys.readouterr().out)["verdict"] == "BROKEN"
+
+
+def test_pin_remote_refuses_a_broken_ledger_and_sends_nothing(tmp_path, monkeypatch, capsys):
+    """X07: `pin --remote` over a ledger that does not verify exits 1 and never
+    reaches the hosted witness."""
+    from arcaeon import cli, remote
+    sent = []
+    monkeypatch.setattr(remote, "pin", lambda *a, **k: sent.append(a) or {"ok": True})
+    monkeypatch.setattr(remote, "key", lambda: "k")
+    p = tmp_path / "a.jsonl"
+    for i in range(3):
+        Ledger(p).append({"op": i})
+    p.write_text(p.read_text(encoding="utf-8").replace('"op": 1', '"op": 9'), encoding="utf-8")
+    assert cli.main(["pin", str(p), "--remote", "--ns", "arcaeon-x"]) == 1
+    assert sent == [] and json.loads(capsys.readouterr().out)["ok"] is False
+
+
+def test_pin_witness_refuses_a_broken_ledger_exit_1(tmp_path, capsys):
+    """X08: `pin --witness` over a ledger that does not verify is refused by
+    publish_head; the verb exits 1 and the pin file gains nothing."""
+    from arcaeon import cli
+    p, w = tmp_path / "a.jsonl", tmp_path / "pins.jsonl"
+    for i in range(3):
+        Ledger(p).append({"op": i})
+    p.write_text(p.read_text(encoding="utf-8").replace('"op": 1', '"op": 9'), encoding="utf-8")
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 1
+    assert json.loads(capsys.readouterr().out)["ok"] is False
+    assert not w.exists() or w.read_text(encoding="utf-8") == ""
