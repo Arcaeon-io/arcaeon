@@ -375,3 +375,51 @@ def test_batch_receipt_with_an_inconsistent_witness_block_fails(tmp_path):
     p.write_text(json.dumps(rc), encoding="utf-8")
     row = VB.verify_one(p)
     assert row["verdict"] == VB.FAIL and "witness" in row["reason"]
+
+
+# --- signed vet receipts --------------------------------------------------------
+
+def _signed_vet_receipt():
+    receipts = pytest.importorskip("arcaeon.prove.vet.receipts")
+    if receipts.BACKEND is None:
+        pytest.skip("no Ed25519 backend")
+    grade = {"source_sha256": "ab" * 32, "verdict": "clean", "checks_run": ["parse"],
+             "tool_version": "t", "target": "x.py"}
+    return receipts, receipts.sign_grade(grade, bytes(range(32)), nonce="n", ts=1), grade
+
+
+def test_signed_receipt_with_non_alphabet_bytes_in_its_signature_does_not_verify():
+    """S10: signature_b64 is read strictly: a signature carrying a character
+    outside the base64 alphabet is refused, not silently cleaned and verified."""
+    receipts, rc, grade = _signed_vet_receipt()
+    assert receipts.verify_receipt(rc, grade) is True
+    sig = rc["signature_b64"]
+    rc["signature_b64"] = sig[:10] + "!" + sig[10:]
+    d = receipts.verify_receipt_detail(rc, grade)
+    assert d["verified"] is False and "base64" in " ".join(d["reasons"])
+
+
+def test_a_payload_that_cannot_be_canonicalized_never_verifies():
+    """S12: a payload carrying a float cannot be put in canonical form, so nothing
+    was signed that this verifier can name. Even with a valid signature by the
+    named key over the empty message, it does not verify."""
+    import base64
+    receipts, rc, grade = _signed_vet_receipt()
+    seed = bytes(range(32))
+    rc["payload"]["score"] = 0.5
+    rc["signature_b64"] = base64.b64encode(receipts._sign_bytes(seed, b"")).decode("ascii")
+    d = receipts.verify_receipt_detail(rc)
+    assert d["verified"] is False and "canonicalizable" in " ".join(d["reasons"])
+
+
+def test_batch_receipt_whose_anchor_proof_fails_is_fail_not_undetermined(tmp_path, monkeypatch):
+    """B11: with --ots, an OpenTimestamps proof that runs and FAILS is a determined
+    answer: the batch row is FAIL, not undetermined."""
+    from arcaeon.record.receipt import core
+    from arcaeon.record.receipt import verify_batch as VB
+    rc = _receipt(tmp_path, tmp_path / "receipts.jsonl")
+    p = tmp_path / "r.receipt.json"
+    p.write_text(json.dumps(rc), encoding="utf-8")
+    monkeypatch.setattr(core, "ots_verify", lambda receipt: {"status": "failed", "detail": "bad"})
+    row = VB.verify_one(p, ots=True)
+    assert row["verdict"] == VB.FAIL and row["reason"] == "anchor verification failed"
