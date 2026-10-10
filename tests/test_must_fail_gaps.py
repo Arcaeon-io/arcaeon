@@ -587,3 +587,97 @@ def test_compaction_counts_that_fall_short_do_not_reconcile(tmp_path):
     row["post"]["count"] -= 1
     out = verify_receipt(_redigest(row))
     assert out["self_consistent"] is False and out["ok"] is False
+
+
+# --- evidence packs -------------------------------------------------------------
+
+def _pack_ledger(tmp_path, legacy=False):
+    p = tmp_path / "ledger.jsonl"
+    if legacy:
+        p.write_text(json.dumps({"ts": "2026-09-01T09:00:00Z", "agent": "agent-a",
+                                 "event": "legacy, no chain"}) + "\n", encoding="utf-8")
+    for i, ev in enumerate(("system_start", "tool_call", "system_stop")):
+        Ledger(p).append({"ts": f"2026-09-0{i + 1}T10:00:00Z", "agent": "agent-a", "event": ev})
+    return p
+
+
+def test_pack_manifest_hash_is_compared_in_full(tmp_path):
+    """E04: manifest.sha256 differing from the manifest's real hash only in its
+    last hex character is BROKEN."""
+    from arcaeon.prove.evidence_pack import build_pack
+    from arcaeon.prove.evidence_pack_verify import verify_pack
+    out = tmp_path / "pack"
+    build_pack(_pack_ledger(tmp_path), out, agent="agent-a")
+    assert verify_pack(out)["verdict"] == "VERIFIED"
+    side = out / "manifest.sha256"
+    want, _, name = side.read_text(encoding="ascii").strip().partition("  ")
+    side.write_text(want[:-1] + ("0" if want[-1] != "0" else "1") + "  " + name + "\n",
+                    encoding="ascii")
+    res = verify_pack(out)
+    step = next(c for c in res["checks"] if c["check"] == "manifest hash")
+    assert step["verdict"] == "BROKEN" and res["verdict"] == "BROKEN"
+
+
+def test_pack_whose_records_chain_is_bounded_is_not_verified(tmp_path):
+    """E05: records.jsonl with a row the chain cannot speak for (verify ok=None):
+    the chain step is COULD NOT LOOK and the pack is not VERIFIED."""
+    from arcaeon.prove.evidence_pack import build_pack
+    from arcaeon.prove.evidence_pack_verify import verify_pack
+    out = tmp_path / "pack"
+    build_pack(_pack_ledger(tmp_path, legacy=True), out, agent="agent-a")
+    res = verify_pack(out)
+    step = next(c for c in res["checks"] if c["check"] == "records chain and head")
+    assert step["verdict"] == "COULD NOT LOOK" and res["verdict"] != "VERIFIED"
+
+
+def test_pack_remote_pin_answer_that_does_not_say_witnessed_could_not_look(tmp_path, monkeypatch):
+    """E09: a public witness answer that is ok but carries no `witnessed` field
+    says nothing about this head: COULD NOT LOOK, not VERIFIED."""
+    import arcaeon.remote as R
+    from arcaeon.prove import evidence_pack_verify as EV
+    monkeypatch.setattr(R, "check_head", lambda ns, rows, chain: {"ok": True, "status": 200})
+    out = EV._check_remote({"namespace": "ns", "rows": 3, "chain": "c" * 32}, True)
+    assert out["verdict"] == "COULD NOT LOOK"
+
+
+def _pins_for(tmp_path, n=3):
+    from arcaeon.record.ledger import WitnessStore, publish_head
+    p = tmp_path / "ledger.jsonl"
+    store = WitnessStore(tmp_path / "pins.jsonl")
+    for i in range(n):
+        Ledger(p).append({"op": i})
+        publish_head(store, "ns", Ledger(p))
+    return p, store
+
+
+def test_pack_local_pin_in_a_pin_file_that_fails_its_own_chain_could_not_look(tmp_path):
+    """E10: the pin the pack names is in the pin file, but the file's own chain is
+    broken (an earlier pin edited): it vouches for nothing, COULD NOT LOOK."""
+    from arcaeon.prove import evidence_pack_verify as EV
+    _, store = _pins_for(tmp_path)
+    lines = store.path.read_text(encoding="utf-8").splitlines()
+    first = json.loads(lines[0])
+    first["as_of"] = "2000-01-01T00:00:00Z"
+    store.path.write_text("\n".join([json.dumps(first)] + lines[1:]) + "\n", encoding="utf-8")
+    pin = json.loads(lines[-1])
+    out = EV._check_local(tmp_path, pin, store.path)
+    assert out["verdict"] == "COULD NOT LOOK"
+
+
+def test_pack_local_pin_with_the_right_rows_and_the_wrong_chain_is_broken(tmp_path):
+    """E11: the pin file holds a pin at the pack's row count but with another
+    chain: the pack's pin is not in the file, BROKEN."""
+    from arcaeon.prove import evidence_pack_verify as EV
+    _, store = _pins_for(tmp_path)
+    pin = dict(store.latest("ns"), chain="0" * 32)
+    out = EV._check_local(tmp_path, pin, store.path)
+    assert out["verdict"] == "BROKEN"
+
+
+# --- RFC 8785 ---------------------------------------------------------------------
+
+def test_jcs_escapes_every_control_character_up_to_u001f():
+    """J04: U+0000..U+001F are all escaped; U+001F, the last of them, too."""
+    from arcaeon.prove.jcs import canonicalize
+    assert canonicalize("\x1f") == b'"\\u001f"'
+    assert canonicalize("\x1e\x1f ") == b'"\\u001e\\u001f "'
