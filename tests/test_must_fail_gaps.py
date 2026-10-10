@@ -349,3 +349,16 @@ def test_batch_receipt_with_its_ledger_block_stripped_names_what_is_missing(tmp_
     row = VB.verify_one(p)
     assert row["verdict"] == VB.UNDETERMINED
     assert row["looked_for"] == "ledger.chain" and row["reason_word"] == "name_not_found"
+
+
+def test_batch_receipt_with_a_foreign_attestation_signature_fails(tmp_path):
+    """B08: an attestation signature made over a different body digest does not
+    belong to the receipt: the batch row is FAIL, not undetermined."""
+    from arcaeon.record.receipt import verify_batch as VB
+    from arcaeon.record.receipt.core import attach_attestation_signature
+    rc = attach_attestation_signature(_receipt(tmp_path, tmp_path / "receipts.jsonl"), "sig")
+    rc["attestation_signature"]["body_digest"] = "sha256:json-c14n:v1:" + "0" * 64
+    p = tmp_path / "r.receipt.json"
+    p.write_text(json.dumps(rc), encoding="utf-8")
+    row = VB.verify_one(p)
+    assert row["verdict"] == VB.FAIL and "attestation" in row["reason"]
