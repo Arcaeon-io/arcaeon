@@ -681,3 +681,15 @@ def test_jcs_escapes_every_control_character_up_to_u001f():
     from arcaeon.prove.jcs import canonicalize
     assert canonicalize("\x1f") == b'"\\u001f"'
     assert canonicalize("\x1e\x1f ") == b'"\\u001e\\u001f "'
+
+
+# --- mandate check --------------------------------------------------------------
+
+def test_mandate_forbidden_wildcard_pattern_puts_a_matching_call_outside():
+    """N04: forbidden_acts are patterns matched against the tool name: "delete_*"
+    forbids delete_file. The call is outside, never inside."""
+    from arcaeon.record.adapter import mandate_gate
+    gate = mandate_gate.MandateGate.from_dict({"forbidden_acts": ["delete_*"]})
+    verdict, reason = gate.evaluate({"name": "delete_file", "arguments": {}},
+                                    "2026-09-01T10:00:00Z")
+    assert verdict == "outside" and "delete_*" in reason
