@@ -546,3 +546,23 @@ def test_an_unreachable_witness_never_reads_as_a_recorded_pin(monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", down)
     out = RW.pin("ns", 1, "c" * 32, "key")
     assert out["status"] == 0 and out["ok"] is False
+
+
+# --- vet front door -------------------------------------------------------------
+
+def test_vet_verify_a_grade_of_different_source_bytes_exits_2(tmp_path, capsys):
+    """G04: `vet verify grade.json file` where the file is not the one graded
+    does not reproduce: exit 2 (arcaeon vet verify: 1, BROKEN), never 0."""
+    from arcaeon import cli
+    from arcaeon.prove.vet.__main__ import main as vet_main
+    src = tmp_path / "server.py"
+    src.write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+    vet_main(["grade", str(src)])
+    g = tmp_path / "grade.json"
+    g.write_text(capsys.readouterr().out, encoding="utf-8")
+    assert vet_main(["verify", str(g), str(src)]) == 0
+    src.write_text("def add(a, b):\n    return a - b\n", encoding="utf-8")
+    capsys.readouterr()
+    assert vet_main(["verify", str(g), str(src)]) == 2
+    assert json.loads(capsys.readouterr().out)["reproduced"] is False
+    assert cli.main(["vet", "verify", str(g), str(src)]) == 1
