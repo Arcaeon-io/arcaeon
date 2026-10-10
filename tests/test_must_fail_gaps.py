@@ -316,3 +316,22 @@ def test_ots_output_needs_both_a_bitcoin_block_and_success_to_be_attested(tmp_pa
                             subprocess.CompletedProcess(args, 0, out, ""))
         assert core.ots_verify(rc)["status"] == want
         assert core.verify_receipt(rc, ots=True)["ok"] is False
+
+
+def test_witness_pin_disagreeing_with_its_own_block_is_inconsistent(tmp_path, monkeypatch):
+    """K19: a pin with no self digest (the hosted shape) whose rows disagree with
+    the witness block around it makes the block inconsistent, and the receipt
+    not ok."""
+    from arcaeon.record.receipt.core import build_receipt, verify_receipt
+    monkeypatch.delenv("ARCAEON_WITNESS_URL", raising=False)
+    led = tmp_path / "receipts.jsonl"
+    rc = build_receipt("test", {"what": "x"}, [{"name": "c", "status": "pass"}],
+                       {"proves": ["p"], "does_not_prove": ["q"]},
+                       ledger_path=led, namespace="ns", witness=True, anchor=False)
+    pin = rc["witness"]["pin"]
+    pin.pop("self")
+    pin.pop("prev")
+    assert verify_receipt(rc, ledger_path=led)["ok"] is True
+    pin["rows"] = pin["rows"] + 7
+    res = verify_receipt(rc, ledger_path=led)
+    assert res["witness"]["verdict"] == "inconsistent" and res["ok"] is False
