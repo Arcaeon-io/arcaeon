@@ -273,3 +273,16 @@ def test_receipt_against_a_bounded_ledger_is_not_ok(tmp_path):
     res = verify_receipt(rc, ledger_path=led)
     assert res["body_digest_ok"] is True
     assert res["ledger"]["status"] != "consistent" and res["ok"] is False
+
+
+def test_receipt_file_with_a_duplicate_key_is_never_ok(tmp_path):
+    """K07: the receipt file carries a key twice. Even when the last-wins parse
+    recomputes to its digest, verify_receipt(source_text=...) is not ok."""
+    from arcaeon.record.receipt.core import verify_receipt
+    rc = _receipt(tmp_path, tmp_path / "receipts.jsonl")
+    text = json.dumps(rc)
+    dup = text.replace('"kind": "test"', '"kind": "other", "kind": "test"', 1)
+    assert dup != text
+    res = verify_receipt(json.loads(dup), source_text=dup)
+    assert res["body_digest_ok"] is True and res.get("duplicate_keys")
+    assert res["ok"] is False
