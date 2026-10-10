@@ -211,3 +211,44 @@ def test_reconcile_with_a_missing_pin_file_could_not_look(tmp_path):
     assert R.reconcile(a, t).verdict == R.MATCHED
     r = R.reconcile(a, t, pin_path=tmp_path / "no-such-pin.json")
     assert r.verdict == R.COULD_NOT_LOOK and r.reason_word == "missing"
+
+
+def test_reconcile_side_pin_is_held_against_a_tape_emptied_after_the_pin(tmp_path):
+    """C19: both tapes emptied after the agent side pinned 3 calls. An empty tape
+    names no side, so the agent pin is held against it: MISSING (the pin is the
+    proof calls were removed), not COULD NOT LOOK over two empty tapes."""
+    import arcaeon.prove.reconcile as R
+    from arcaeon.record.ledger import chain_at
+    a, t = _tape_pair(tmp_path)
+    pin = tmp_path / "pin.json"
+    pin.write_text(json.dumps({"side": "agent", "rows": 3, "chain": chain_at(a, 3)}),
+                   encoding="utf-8")
+    a.write_text("", encoding="utf-8")
+    t.write_text("", encoding="utf-8")
+    r = R.reconcile(a, t, pin_path=pin)
+    assert r.verdict == R.MISSING
+
+
+def test_reconcile_a_tape_that_mixes_sides_could_not_look(tmp_path):
+    """C20: a chained tape whose rows say two different sides is refused (COULD
+    NOT LOOK), never lined up as if it were one side's record."""
+    import arcaeon.prove.reconcile as R
+    a, t = _tape_pair(tmp_path)
+    rows = [json.loads(x) for x in a.read_text(encoding="utf-8").splitlines()]
+    a.unlink()
+    for k, row in enumerate(rows):
+        row.pop("chain")
+        row.pop("ts")
+        if k == 1:
+            row["side"] = "tool"
+        Ledger(a).append(row)
+    r = R.reconcile(a, t)
+    assert r.verdict == R.COULD_NOT_LOOK and "mixes sides" in r.reason
+
+
+def test_reconcile_main_pin_with_no_path_exits_could_not_look(tmp_path, capsys):
+    """C21: `reconcile a b --pin` with no path prints COULD_NOT_LOOK and exits 3."""
+    import arcaeon.prove.reconcile as R
+    a, t = _tape_pair(tmp_path)
+    assert R.main([str(a), str(t), "--pin"]) == 3
+    assert json.loads(capsys.readouterr().out)["verdict"] == R.COULD_NOT_LOOK
