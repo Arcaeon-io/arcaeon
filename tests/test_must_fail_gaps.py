@@ -153,3 +153,18 @@ def test_an_edited_only_pin_is_witness_broken_not_consistent(tmp_path):
     pins.write_text(json.dumps(pin) + "\n", encoding="utf-8")
     v = verify_against_witness(store, "ns", Ledger(p))
     assert v.verdict == "witness_broken" and not v
+
+
+def test_a_pin_differing_only_in_its_last_hex_char_is_rewritten(tmp_path):
+    """W19: the witnessed chain is compared in full. A properly recorded pin whose
+    chain differs from the log's only in the final hex character is rewritten."""
+    from arcaeon.record.ledger import Head, WitnessStore, verify_against_witness
+    p = tmp_path / "a.jsonl"
+    for i in range(3):
+        Ledger(p).append({"op": i})
+    real = Ledger(p).head()
+    last = "0" if real.chain[-1] != "0" else "1"
+    store = WitnessStore(tmp_path / "pins.jsonl")
+    store.record("ns", Head(chain=real.chain[:-1] + last, rows=real.rows, as_of=real.as_of))
+    assert store.verify()["ok"] is True
+    assert verify_against_witness(store, "ns", Ledger(p)).verdict == "rewritten"
