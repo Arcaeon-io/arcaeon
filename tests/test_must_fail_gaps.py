@@ -168,3 +168,46 @@ def test_a_pin_differing_only_in_its_last_hex_char_is_rewritten(tmp_path):
     store.record("ns", Head(chain=real.chain[:-1] + last, rows=real.rows, as_of=real.as_of))
     assert store.verify()["ok"] is True
     assert verify_against_witness(store, "ns", Ledger(p)).verdict == "rewritten"
+
+
+# --- reconcile ------------------------------------------------------------------
+
+def _tape_pair(tmp_path, n=3):
+    import arcaeon.prove.reconcile as R
+    from arcaeon.record.ledger import digest_json
+    paths = {}
+    for side in ("agent", "tool"):
+        p = tmp_path / f"{side}.tape.jsonl"
+        lg = Ledger(p)
+        for k in range(1, n + 1):
+            lg.append({"evt": "tape_call", "tape": R.TAPE_FORMAT, "side": side,
+                       "ns": f"demo-{side}", "idx": k, "tool": "echo",
+                       "req": digest_json({"name": "echo", "arguments": {"n": k}}),
+                       "resp": digest_json({"result": k}), "status": "ok"})
+        paths[side] = p
+    return paths["agent"], paths["tool"]
+
+
+def test_reconcile_pin_head_is_compared_in_full(tmp_path):
+    """C15: a pin whose chain differs from the tape's head only in its last hex
+    character is ALTERED (head_differs), not an agreeing pin."""
+    import arcaeon.prove.reconcile as R
+    from arcaeon.record.ledger import chain_at
+    a, t = _tape_pair(tmp_path)
+    real = chain_at(a, 3)
+    pin = tmp_path / "pin.json"
+    pin.write_text(json.dumps({"side": "agent", "rows": 3,
+                               "chain": real[:-1] + ("0" if real[-1] != "0" else "1")}),
+                   encoding="utf-8")
+    r = R.reconcile(a, t, pin_path=pin)
+    assert r.verdict == R.ALTERED and r.pins_checked[0]["result"] == "head_differs"
+
+
+def test_reconcile_with_a_missing_pin_file_could_not_look(tmp_path):
+    """C17: --pin naming a file that is not there is COULD NOT LOOK (missing),
+    never MATCHED over two agreeing tapes."""
+    import arcaeon.prove.reconcile as R
+    a, t = _tape_pair(tmp_path)
+    assert R.reconcile(a, t).verdict == R.MATCHED
+    r = R.reconcile(a, t, pin_path=tmp_path / "no-such-pin.json")
+    assert r.verdict == R.COULD_NOT_LOOK and r.reason_word == "missing"
