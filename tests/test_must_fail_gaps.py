@@ -133,3 +133,23 @@ def test_witness_refuses_a_pin_one_row_below_its_high_water(tmp_path):
     with pytest.raises(ValueError, match="monotonic violation"):
         publish_head(store, "ns", Ledger(p))
     assert store.latest("ns")["rows"] == 5
+
+
+def test_an_edited_only_pin_is_witness_broken_not_consistent(tmp_path):
+    """W14: one pin in the file, edited to match a truncated log without
+    recomputing its self digest: the witness fails its own chain, so no
+    comparison runs and the verdict is witness_broken, never consistent."""
+    from arcaeon.record.ledger import (WitnessStore, chain_at, publish_head,
+                                       verify_against_witness)
+    p, pins = tmp_path / "a.jsonl", tmp_path / "pins.jsonl"
+    store = WitnessStore(pins)
+    for i in range(5):
+        Ledger(p).append({"op": i})
+    publish_head(store, "ns", Ledger(p))
+    lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
+    p.write_text("".join(lines[:3]), encoding="utf-8")       # truncate to 3 rows
+    pin = json.loads(pins.read_text(encoding="utf-8"))
+    pin.update(rows=3, chain=chain_at(p, 3))                 # edit the pin to agree
+    pins.write_text(json.dumps(pin) + "\n", encoding="utf-8")
+    v = verify_against_witness(store, "ns", Ledger(p))
+    assert v.verdict == "witness_broken" and not v
