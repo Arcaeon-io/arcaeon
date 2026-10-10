@@ -335,3 +335,17 @@ def test_witness_pin_disagreeing_with_its_own_block_is_inconsistent(tmp_path, mo
     pin["rows"] = pin["rows"] + 7
     res = verify_receipt(rc, ledger_path=led)
     assert res["witness"]["verdict"] == "inconsistent" and res["ok"] is False
+
+
+def test_batch_receipt_with_its_ledger_block_stripped_names_what_is_missing(tmp_path):
+    """B05: deleting the ledger block (it sits outside the body digest) never
+    raises a verdict: the row is COULD NOT LOOK and names ledger.chain as the
+    thing it looked for (name_not_found), not a ledger file that went missing."""
+    from arcaeon.record.receipt import verify_batch as VB
+    rc = _receipt(tmp_path, tmp_path / "receipts.jsonl")
+    del rc["ledger"]
+    p = tmp_path / "r.receipt.json"
+    p.write_text(json.dumps(rc), encoding="utf-8")
+    row = VB.verify_one(p)
+    assert row["verdict"] == VB.UNDETERMINED
+    assert row["looked_for"] == "ledger.chain" and row["reason_word"] == "name_not_found"
