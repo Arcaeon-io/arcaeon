@@ -286,3 +286,33 @@ def test_receipt_file_with_a_duplicate_key_is_never_ok(tmp_path):
     res = verify_receipt(json.loads(dup), source_text=dup)
     assert res["body_digest_ok"] is True and res.get("duplicate_keys")
     assert res["ok"] is False
+
+
+def test_attestation_signature_over_anything_but_the_body_digest_is_a_mismatch(tmp_path):
+    """K15: a detached signature that says it was made over something other than
+    body_digest does not belong to this receipt: mismatch, and not ok."""
+    from arcaeon.record.receipt.core import attach_attestation_signature, verify_receipt
+    rc = attach_attestation_signature(_receipt(tmp_path, tmp_path / "receipts.jsonl"), "sig")
+    assert verify_receipt(rc)["ok"] is True
+    rc["attestation_signature"]["signed_over"] = "the issuer's say-so"
+    res = verify_receipt(rc)
+    assert res["attestation_signature"]["verdict"] == "mismatch" and res["ok"] is False
+
+
+def test_ots_output_needs_both_a_bitcoin_block_and_success_to_be_attested(tmp_path, monkeypatch):
+    """K16: 'bitcoin-attested' needs both a Bitcoin block and success in the
+    client's output. A Litecoin attestation is not a Bitcoin one, and a Bitcoin
+    block line that ends in failure is a failure; --ots over either is not ok."""
+    import subprocess
+    from arcaeon.record.receipt import core
+    rc = _receipt(tmp_path, tmp_path / "receipts.jsonl")
+    rc["anchor"] = {"kind": "opentimestamps", "ots_b64": "AAAA", "status": "pending"}
+    monkeypatch.setattr(core, "ots_exe", lambda: tmp_path / "ots")
+    for out, want in (("Success! Litecoin block 2650000 attests existence as of 2024-01-01\n",
+                       "unknown"),
+                      ("Bitcoin block 358391: merkle root does not match, verification failed\n",
+                       "failed")):
+        monkeypatch.setattr(core, "_run_ots", lambda args, timeout=180, out=out:
+                            subprocess.CompletedProcess(args, 0, out, ""))
+        assert core.ots_verify(rc)["status"] == want
+        assert core.verify_receipt(rc, ots=True)["ok"] is False
