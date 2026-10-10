@@ -362,3 +362,16 @@ def test_batch_receipt_with_a_foreign_attestation_signature_fails(tmp_path):
     p.write_text(json.dumps(rc), encoding="utf-8")
     row = VB.verify_one(p)
     assert row["verdict"] == VB.FAIL and "attestation" in row["reason"]
+
+
+def test_batch_receipt_with_an_inconsistent_witness_block_fails(tmp_path):
+    """B09: a witness block whose rows disagree with the receipt's own ledger
+    block is a determined contradiction: the batch row is FAIL."""
+    from arcaeon.record.receipt import verify_batch as VB
+    rc = _receipt(tmp_path, tmp_path / "receipts.jsonl")
+    rc["witness"] = {"kind": "local-file", "namespace": "ns",
+                     "rows": rc["ledger"]["rows"] + 1, "chain": rc["ledger"]["chain"]}
+    p = tmp_path / "r.receipt.json"
+    p.write_text(json.dumps(rc), encoding="utf-8")
+    row = VB.verify_one(p)
+    assert row["verdict"] == VB.FAIL and "witness" in row["reason"]
