@@ -252,3 +252,24 @@ def test_reconcile_main_pin_with_no_path_exits_could_not_look(tmp_path, capsys):
     a, t = _tape_pair(tmp_path)
     assert R.main([str(a), str(t), "--pin"]) == 3
     assert json.loads(capsys.readouterr().out)["verdict"] == R.COULD_NOT_LOOK
+
+
+# --- receipts -------------------------------------------------------------------
+
+def _receipt(tmp_path, ledger):
+    from arcaeon.record.receipt.core import build_receipt
+    return build_receipt("test", {"what": "x"}, [{"name": "c", "status": "pass"}],
+                         {"proves": ["p"], "does_not_prove": ["q"]},
+                         ledger_path=ledger, namespace="ns", witness=False, anchor=False)
+
+
+def test_receipt_against_a_bounded_ledger_is_not_ok(tmp_path):
+    """K05: the receipt's ledger has an unchained row the chain cannot speak for
+    (verify ok=None). The ledger check is not 'consistent' and the receipt is not ok."""
+    from arcaeon.record.receipt.core import verify_receipt
+    led = tmp_path / "receipts.jsonl"
+    led.write_text(json.dumps({"legacy": "no chain"}) + "\n", encoding="utf-8")
+    rc = _receipt(tmp_path, led)
+    res = verify_receipt(rc, ledger_path=led)
+    assert res["body_digest_ok"] is True
+    assert res["ledger"]["status"] != "consistent" and res["ok"] is False
