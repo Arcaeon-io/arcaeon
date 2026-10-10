@@ -116,3 +116,20 @@ def test_head_of_a_path_that_cannot_be_read_is_red_not_a_fresh_genesis(tmp_path)
     assert h.ok is False
     with pytest.raises(UnverifiedLedgerError):
         h.as_pin()
+
+
+# --- the witness pin file -------------------------------------------------------
+
+def test_witness_refuses_a_pin_one_row_below_its_high_water(tmp_path):
+    """W03: a witness never goes backward, not even by one row: cut the last row
+    off a pinned log and re-pin, and the pin is refused."""
+    from arcaeon.record.ledger import WitnessStore, publish_head
+    p, store = tmp_path / "a.jsonl", WitnessStore(tmp_path / "pins.jsonl")
+    for i in range(5):
+        Ledger(p).append({"op": i})
+    publish_head(store, "ns", Ledger(p))
+    lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
+    p.write_text("".join(lines[:4]), encoding="utf-8")
+    with pytest.raises(ValueError, match="monotonic violation"):
+        publish_head(store, "ns", Ledger(p))
+    assert store.latest("ns")["rows"] == 5
