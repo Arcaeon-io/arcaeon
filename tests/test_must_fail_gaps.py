@@ -693,3 +693,20 @@ def test_mandate_forbidden_wildcard_pattern_puts_a_matching_call_outside():
     verdict, reason = gate.evaluate({"name": "delete_file", "arguments": {}},
                                     "2026-09-01T10:00:00Z")
     assert verdict == "outside" and "delete_*" in reason
+
+
+def test_compaction_manifest_naming_the_wrong_dropped_item_is_a_content_mismatch(tmp_path):
+    """P05: with both contents held, the drop set is recomputed and compared BY
+    DIGEST. A receipt (re-digested) that says it dropped "aa" when it dropped
+    "bb", same count and same bytes, is a content mismatch and not ok."""
+    from arcaeon.prove.compact import CompactionReceipt, verify_receipt
+    from arcaeon.record.row import digest_bytes
+    pre, post = ["aa", "bb", "cc"], ["aa", "cc"]
+    r = CompactionReceipt.open(pre)
+    r.record_kept(post)
+    row = r.seal(tmp_path / "receipts.jsonl", compactor="t", method="m")
+    assert verify_receipt(row, pre, post)["ok"] is True
+    assert row["dropped"]["items"] == [digest_bytes(b"bb")]
+    row["dropped"]["items"] = [digest_bytes(b"aa")]
+    out = verify_receipt(_redigest(row), pre, post)
+    assert out["content"] == "mismatch" and out["ok"] is False
