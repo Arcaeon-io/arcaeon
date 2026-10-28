@@ -8,6 +8,8 @@
                           [--mandate FILE] [--readings RECEIPT [--readings-ledger L]]
                           [--zip] [--built-at TS] [--json]
     arcaeon evidence-pack verify PACK|PACK.zip [--json]
+    arcaeon evidence-pack verify PACK|PACK.zip --second-reader [--witness PINS]
+                                 [--json OUT.json] [--markdown OUT.md]
 
 Exit codes as every verb: 0 VERIFIED, 1 BROKEN, 2 bad usage, 3 COULD NOT LOOK.
 """

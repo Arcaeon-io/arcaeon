@@ -124,6 +124,7 @@ Three families. The full reference, with usage lines and examples, is
 - `seal`: the same badge, sealed by the hosted witness. Paid.
 - `baseline`: score a fixed probe set before a change and again after.
 - `compact`: check a receipt that says what a context compaction dropped.
+- `evidence-pack verify PACK --second-reader`: every claim a pack makes, recomputed from its bytes, one row each. See [docs/SECOND_READER.md](docs/SECOND_READER.md).
 
 ### Save: spend fewer tokens
 

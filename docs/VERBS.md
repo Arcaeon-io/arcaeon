@@ -583,6 +583,21 @@ local pins; `--remote` reads each remote pin from the public witness (the
 only part that uses the network, and only when asked; unread, a remote pin
 is not verified).
 
+`arcaeon evidence-pack verify PACK --second-reader [--witness PINS] [--json
+OUT.json] [--markdown OUT.md]` is the second reader: a program, not a model,
+built from the findings that a model called a mismatch VERIFIED and read the
+chain head off the stored field. It recomputes every claim the pack makes
+from the bytes, one row per claim, the recomputed value beside the claimed
+one, and each row carries one of three words: VERIFIED (recomputed and
+equal), MISMATCH (recomputed and not equal; the pack is BROKEN) or COULD NOT
+LOOK (the bytes are not in the pack, or the claim needs the witness itself,
+since it makes no network call). The chain head is recomputed link by link
+from genesis. The overall verdict is the worst of the rows and of plain
+verify on the same pack, so it is never less than what verify says. The
+table goes to stdout; `--json` and `--markdown` here take a path. Exit 0
+VERIFIED, 1 BROKEN, 2 bad usage (an output path that cannot be written), 3
+COULD NOT LOOK. See [SECOND_READER.md](SECOND_READER.md).
+
 **Usage**
 
 ```text
