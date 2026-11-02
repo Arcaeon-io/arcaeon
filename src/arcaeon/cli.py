@@ -10,7 +10,8 @@ NETWORK: `pin --remote`, `seal`, `stamp` and `credits` reach the hosted
 witness, through arcaeon.remote. Two more go online on request: `receipt cite`
 looks each citation up with CourtListener's API (unless --fixture), and
 `proxy --pin-witness URL` pins the tape head at that witness at session end.
-Every other verb works offline.
+`buy` makes one request to arcaeon.io for the price list, unless
+ARCAEON_OFFERS_OFFLINE=1. Every other verb works offline.
 
 THE 30-DAY FALLBACK. Before 0.9, `uvx arcaeon` (what an MCP registry client
 runs) started the MCP server, because the connector owned this name. Until the

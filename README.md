@@ -24,7 +24,8 @@ parser. Everything in the Record, Prove and Save lists below runs on the
 Python standard library. It also means no network on import. The hosted
 verbs open a connection when you run them, and so do a few options that say
 so: `proxy --pin-witness`, and `receipt cite`, which looks each citation up
-online. Everything else works offline.
+online. `buy` makes one request to arcaeon.io for the price list unless
+`ARCAEON_OFFERS_OFFLINE=1` is set. Everything else works offline.
 
 The heavy parts are extras. Add only what you use:
 
@@ -141,8 +142,11 @@ Three families. The full reference, with usage lines and examples, is
 ## The hosted door
 
 `stamp`, `pin --remote`, `seal` and `credits` talk to the hosted witness at
-witness.arcaeon.io, over HTTPS, and only when you run them. `buy` reads the
-offers file bundled with the package and makes no request.
+witness.arcaeon.io, over HTTPS, and only when you run them. `buy` makes one
+request to arcaeon.io, for the price list at
+https://arcaeon.io/.well-known/offers.json, unless `ARCAEON_OFFERS_OFFLINE=1`
+is set; with it set, `buy` makes no request and prints only the pricing page
+address.
 
 - `arcaeon stamp FILE`: sends the file's sha256 and size, never its bytes.
   Works without a key, inside a free daily allowance.
@@ -160,8 +164,10 @@ offers file bundled with the package and makes no request.
   prefix from the refusal (no credit spent) and pins under
   `<prefix>-sealed-scans`. `--ns` still picks one yourself.
 - `arcaeon credits`: shows your balance. Needs `ARCAEON_KEY`. Looking is free.
-- `arcaeon buy`: prints a checkout link. It opens nothing and takes no card.
-  Payment happens on Stripe's page.
+- `arcaeon buy`: prints the plans on sale and their checkout links, read from
+  arcaeon.io (one request, kept for 10 minutes; none with
+  `ARCAEON_OFFERS_OFFLINE=1`). It opens nothing and takes no card. Payment
+  happens on the checkout page.
 
 `ARCAEON_KEY` is the one setting. Treat it like a password: a leaked key can
 pin in your name. For plans and prices, see arcaeon.io/pricing.
