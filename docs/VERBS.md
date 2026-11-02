@@ -788,9 +788,14 @@ refused before sending: no ARCAEON_KEY. The witness key was empty or whitespace,
 
 ## `buy`
 
-Answers: where do I pay? Prints the checkout link for a plan, from the offers
-file bundled with the package. Opens no browser, takes no card, makes no
-request. With no plan name it lists every plan. Prices: arcaeon.io/pricing.
+Answers: where do I pay? Prints the plans on sale and their checkout links,
+read from https://arcaeon.io/.well-known/offers.json. That is one request to
+arcaeon.io (3 seconds at most), and a good answer is kept for 10 minutes, so a
+second `buy` inside that window makes none. With `ARCAEON_OFFERS_OFFLINE=1`
+set, no request is made. Only plans the price list marks live are printed. If
+the request fails, or the opt-out is set, the one line printed is `Prices and
+how to buy: https://arcaeon.io/pricing`. Opens no browser and takes no card.
+With a plan name it prints that plan's link only.
 
 **Usage**
 
@@ -798,8 +803,8 @@ request. With no plan name it lists every plan. Prices: arcaeon.io/pricing.
 usage: arcaeon buy [-h] [--offers OFFERS] [plan]
 ```
 
-**Exit codes:** 0 printed. 2 no such plan, or the offers file could not be
-read.
+**Exit codes:** 0 printed. 2 the price list was read and names no plan on
+sale by that name.
 
 ```console
 $ arcaeon buy witnessed
