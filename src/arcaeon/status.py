@@ -141,9 +141,8 @@ def balance_sentence(out: dict) -> str:
     """One plain sentence for a /api/balance answer.
 
     A key whose plan reports a monthly cap keeps the old monthly count. A plan
-    with no cap, or a payload with no plan field at all, shows credits only:
-    new keys get a one-time registration grant, not a monthly allowance
-    (decision 2026-09-27 8:47 AM PT).
+    with no cap, or a payload with no plan field at all, shows credits only.
+    Every number comes from the witness's answer; none is typed here.
     """
     credits = out.get("credit_balance", out.get("balance"))
     has_credits = isinstance(credits, (int, float))

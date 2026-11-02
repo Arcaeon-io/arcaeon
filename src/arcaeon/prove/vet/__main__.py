@@ -5,7 +5,7 @@
     python -m arcaeon.prove.vet grade-target <path>      # grade a whole server (file OR dir)
     python -m arcaeon.prove.vet badge <path> [--receipt] [--sealed]  # free Markdown badge
                                                 # + JSON report; --sealed is
-                                                # PAID (ARCAEON_KEY, one credit)
+                                                # PAID (ARCAEON_KEY, draws on its balance)
     python -m arcaeon.prove.vet verify <grade.json> <file>   # confirm a grade reproduces
     python -m arcaeon.prove.vet serve                    # run as an MCP server over stdio
     python -m arcaeon.prove.vet audit-verify [ledger]    # check the server's own call record
@@ -67,7 +67,8 @@ def main(argv=None, prog: str = "arcaeon vet") -> int:
     bd.add_argument("--sealed", action="store_true",
                     help="PAID (needs ARCAEON_KEY, nothing else): witness the "
                          "badge through the arcaeon connector's existing "
-                         "credit lane, one credit per scan. The witness's pin "
+                         "paid lane, drawing on your key's balance. The "
+                         "witness's pin "
                          "is the seal; the badge is also signed (implies "
                          "--receipt) when a signing key is present, and is "
                          "recorded UNSIGNED otherwise. Refuses with a plain "
