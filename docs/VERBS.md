@@ -802,8 +802,8 @@ usage: arcaeon buy [-h] [--offers OFFERS] [plan]
 read.
 
 ```console
-$ arcaeon buy witnessed
-https://buy.stripe.com/6oUaEYd987LP3xy21b0RG04
+$ ARCAEON_OFFERS_OFFLINE=1 arcaeon buy
+Prices and how to buy: https://arcaeon.io/pricing
 ```
 
 ## `mcp`

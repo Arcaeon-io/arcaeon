@@ -1,38 +1,38 @@
-"""The bundled offers.json is a mirror of the site's, byte for byte.
+"""The package carries no copy of the price catalog and no payment link.
 
-The package cannot read the site at runtime, so `src/arcaeon/remote/offers.json`
-ships as a copy. A copy that drifts quotes an offer the catalog no longer makes.
-Where the site copy is named by ARCAEON_SITE_OFFERS (a path to its
-offers.json), the two must be byte-identical; unset or missing (an end-user
-install), this skips.
+The one place of record is https://arcaeon.io/.well-known/offers.json, read
+live by `arcaeon buy`. A bundled copy quoted links after the site retired them,
+so there is none, and these tests keep it that way.
 """
-import os
+import re
 from pathlib import Path
-
-import pytest
 
 from arcaeon.remote import offers
 
-BUNDLED = Path(offers.__file__).with_name("offers.json")
+SRC = Path(offers.__file__).resolve().parents[1]
 
 
-def test_bundled_offers_is_byte_identical_to_the_site_copy():
-    raw = os.environ.get("ARCAEON_SITE_OFFERS")
-    if not raw:
-        pytest.skip("ARCAEON_SITE_OFFERS is not set; no site offers.json to compare")
-    site = Path(raw)
-    if not site.is_file():
-        pytest.skip("ARCAEON_SITE_OFFERS does not name a file")
-    assert BUNDLED.read_bytes() == site.read_bytes(), (
-        f"{BUNDLED} has drifted from {site}; copy the site file over, do not hand-edit")
+def test_no_bundled_catalog():
+    assert not Path(offers.__file__).with_name("offers.json").exists()
+    assert list(SRC.rglob("offers.json")) == []
 
 
-def test_upgrade_message_names_the_registration_grant_not_a_monthly_tier():
-    g = offers.REGISTRATION_GRANT
-    assert g and g["credits"] == 500 and g["once"] is True
+def test_no_payment_link_anywhere_in_the_package():
+    hits = []
+    for f in SRC.rglob("*"):
+        if f.is_file() and f.suffix in {".py", ".json", ".md", ".txt", ".html", ".js", ".toml"}:
+            if "buy.stripe.com/" in f.read_text(encoding="utf-8", errors="replace").replace(
+                    "buy.stripe.com/test", ""):
+                hits.append(str(f.relative_to(SRC)))
+    assert hits == []
+
+
+def test_upgrade_message_names_no_price_and_no_link():
     msg = offers.upgrade_message("witness_pin")
-    assert ("Every new key comes with 500 credits, one time, per verified email; "
-            "registration is at https://arcaeon.io/pricing.") in msg
-    assert "pins/month" not in msg and "no card" not in msg
-    assert not hasattr(offers, "FREE_TIER")
+    assert "Prices and how to buy: https://arcaeon.io/pricing" in msg
+    assert "ARCAEON_KEY" in msg
+    assert "$" not in msg and "buy.stripe.com" not in msg
+    assert not re.search(r"\bcredits?\b", msg)
+    assert not hasattr(offers, "MINI_PACK")
+    assert not hasattr(offers, "REGISTRATION_GRANT")
     msg.encode("ascii")

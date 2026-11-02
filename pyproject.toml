@@ -59,7 +59,6 @@ dev = ["pytest>=7", "hypothesis>=6", "pyyaml>=6"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-"arcaeon.remote" = ["offers.json"]
 "arcaeon.prove.continuity" = ["calibration_fixtures.jsonl"]
 "arcaeon.prove.baseline" = ["probes/*.jsonl"]
 "arcaeon.serve" = ["static/*"]

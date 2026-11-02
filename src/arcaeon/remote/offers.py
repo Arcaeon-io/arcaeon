@@ -1,73 +1,25 @@
-"""What Arcaeon charges for, snapshotted from the one place of record.
+"""Where Arcaeon's prices live, and the refusal a paid tool gives without a key.
 
-The source of truth is the site's `.well-known/offers.json`, whose own honesty
-contract says: "This file is the single source of truth for what Arcaeon
-charges for ... A charge that does not correspond to an offer in this file is
-not ours." A pip-installed package cannot read that file, so the two facts the
-upgrade message needs -- the entry pack and the witness endpoint -- are copied
-here, and `test_offers_drift.py` fails on the workstation if the copy stops
-matching the catalog. Snapshot date: 2026-08-30.
+The one place of record for what Arcaeon charges for is the site's
+`.well-known/offers.json` (CATALOG_URL). This package carries no copy of it
+and no payment link: `arcaeon buy` reads the live file (arcaeon.remote.catalog),
+and everything else points at PRICING_URL. A price or a link typed here would
+outlive the day it was retired.
 
-Everything else in this connector is free, permanently, and says so.
+Everything else in this package is free, permanently, and says so.
 """
 from __future__ import annotations
 
 import os
 
-# hosted-witness, tier plan="mini": the smallest honest batch above the card-fee
-# floor. Same per-pin price as Starter ($0.005); it exists so the entry price is
-# five dollars and not fifteen.
-MINI_PACK = {
-    "plan": "mini",
-    "price_usd": 5,
-    "pins": 1000,
-    "price_per_pin_usd": 0.005,
-    "checkout": "https://buy.stripe.com/aFa4gAb10ead3xy35f0RG08",
-}
-
-# The registration grant (decision 2026-09-27 8:47 AM PT) replaced the old
-# "100 pins a month" free tier for new keys: every new key comes with a one-time
-# grant of credits per verified email. It is read from the bundled offers.json
-# (hosted-witness -> registration_grant), not retyped here, so the number lives
-# in one place. It is named in the upgrade message on purpose -- a paywall that
-# hides the free door is selling something the catalog says is free.
-PRICING_URL = "https://arcaeon.io/pricing"
-
-
-def _load_registration_grant() -> dict | None:
-    import json
-    from pathlib import Path
-
-    try:
-        cat = json.loads(Path(__file__).with_name("offers.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    for prod in cat.get("products", []):
-        if prod.get("id") == "hosted-witness":
-            grant = prod.get("registration_grant")
-            return dict(grant) if isinstance(grant, dict) else None
-    return None
-
-
-REGISTRATION_GRANT = _load_registration_grant()
-
-
-def registration_sentence() -> str:
-    """The one sentence naming the free door, ASCII only, no dashes."""
-    if REGISTRATION_GRANT and REGISTRATION_GRANT.get("statement"):
-        return (f"Every new key comes with {REGISTRATION_GRANT['statement']}; "
-                f"registration is at {PRICING_URL}.")
-    return f"Registration and the current offer: {PRICING_URL}."
-
+from .catalog import CATALOG_URL, FALLBACK_LINE, PRICING_URL  # noqa: F401 (re-exported)
 
 WITNESS_ENDPOINT = "https://witness.arcaeon.io"
-
-CATALOG_URL = "https://arcaeon.io/.well-known/offers.json"
 
 # --- the sealed-scan SKU (board item 84, 2026-09-05) ------------------------
 #
 # A DOCUMENTED STOREFRONT SKU, not a live one. A sealed scan spends exactly one
-# ordinary credit from the SAME balance MINI_PACK already tops up -- no second
+# ordinary credit from the SAME balance the credit packs top up -- no second
 # ledger, no new billing rail -- but a dedicated $5-for-50 page prices that unit
 # on its own terms ($0.10/scan) rather than the generic $0.005/pin rate, the
 # same way a retailer can sell the same bolt of cloth by the yard on one shelf
@@ -122,8 +74,9 @@ def upgrade_message(tool: str, free_tools: list[str] | None = None) -> str:
     """The plain sentence a caller gets instead of an error when a paid tool is
     invoked with no key.
 
-    Deliberately plain text and deliberately complete: what it costs, where the
-    free door is, what to set, and what still works for free right now. An
+    Deliberately plain text and deliberately complete: where prices are, what
+    to set, and what still works for free right now. It names no price and no
+    payment link: those live on the site and change there. An
     agent reading this should be able to act on it without a second call, and a
     human reading it should not have to guess whether they just hit a bug.
     """
@@ -137,12 +90,9 @@ def upgrade_message(tool: str, free_tools: list[str] | None = None) -> str:
         f"It pins your ledger head with the hosted witness ({WITNESS_ENDPOINT}): a party "
         "you cannot advance, which is the only thing that catches truncation.",
         "",
-        registration_sentence(),
-        f"Entry pack: ${MINI_PACK['price_usd']} for {MINI_PACK['pins']:,} pins "
-        f"(${MINI_PACK['price_per_pin_usd']}/pin): {MINI_PACK['checkout']}",
+        FALLBACK_LINE,
         "",
         "Then set ARCAEON_KEY=<your witness key> in this server's environment and call again.",
-        f"Full price list: {CATALOG_URL}",
     ]
     if free_tools:
         lines += [
@@ -150,63 +100,3 @@ def upgrade_message(tool: str, free_tools: list[str] | None = None) -> str:
             "Free in this same install, no key needed: " + ", ".join(sorted(free_tools)) + ".",
         ]
     return "\n".join(lines)
-
-
-# --- `arcaeon buy evidence-pack` (K128, 2026-09-27) ---------------------------
-#
-# The sealed pack has no checkout of its own: it is paid in credits (K125,
-# 50 credits), and credits are bought in the hosted-witness packs. So the one
-# link this prints is the smallest credit pack's checkout, read from the
-# offers.json it was handed (not from MINI_PACK above), next to the pack's own
-# status and the registration grant (K125b: credits, one time, on
-# registration; no free window by calendar). It opens nothing and charges nothing.
-
-EVIDENCE_PACK_ID = "arcaeon-evidence-pack"
-
-
-def evidence_pack_lines(offers: dict, today=None) -> list[str]:
-    """Plain ASCII lines describing the sealed pack's offer, from `offers`.
-
-    Raises ValueError when offers.json has no evidence-pack entry, so a caller
-    never prints a price nobody wrote down.
-    """
-    import datetime as _dt
-
-    entry = next((p for p in offers.get("products", [])
-                  if p.get("id") == EVIDENCE_PACK_ID), None)
-    if entry is None:
-        raise ValueError(f"offers.json has no {EVIDENCE_PACK_ID!r} entry")
-    pricing = entry.get("pricing") or {}
-    credits = pricing.get("credits")
-    each = pricing.get("credit_usd_at_mini_rate")
-    on_registration = pricing.get("on_registration")
-    del today  # kept for callers; the price no longer depends on the date (K125b)
-
-    price = f"{credits} credits"
-    if each is not None:
-        price += f" (${each:.2f} at the mini rate)"
-
-    mini = None
-    for product in offers.get("products", []):
-        for tier in product.get("tiers", []) or []:
-            if tier.get("plan") == "mini" and tier.get("checkout"):
-                mini = tier
-                break
-        if mini:
-            break
-
-    lines = [
-        f"{entry['id']}: {entry.get('name', entry['id'])}",
-        f"status: {entry.get('status', 'unknown')}. {entry.get('status_note', '')}".rstrip(),
-        f"price: {price}",
-        "the local pack is free forever, on your own machine, with no account.",
-    ]
-    if on_registration:
-        lines.append(f"every new key: {on_registration}.")
-    if mini:
-        lines.append(f"credits are bought in packs; the smallest is mini, "
-                     f"${mini.get('price_usd')}: {mini['checkout']}")
-    else:
-        lines.append(f"no credit-pack checkout is listed; see {CATALOG_URL}")
-    lines.append("nothing was opened and nothing was charged.")
-    return lines
