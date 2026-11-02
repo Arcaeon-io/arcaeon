@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.10.1 (not released)
+
+- **`arcaeon buy` reads the live price list.** It makes one request to https://arcaeon.io/.well-known/offers.json unless `ARCAEON_OFFERS_OFFLINE=1` is set, and prints only tiers marked live with an https buy.stripe.com link. On any failure it prints only `Prices and how to buy: https://arcaeon.io/pricing` and exits 0. Exit 2 now means only: the list was read and names no plan on sale by that name. `buy evidence-pack` is removed. `--offers FILE` and `ARCAEON_OFFERS_FILE` still read a local file, under the same rules.
+- **Removed from `arcaeon.remote`:** the bundled `offers.json`, `OFFERS_SNAPSHOT`, and from `arcaeon.remote.offers`: `MINI_PACK`, `REGISTRATION_GRANT`, `registration_sentence`, `evidence_pack_lines`, `EVIDENCE_PACK_ID`. `load_offers()` with no path reads the live list and raises ValueError when it cannot. `checkout_links()` returns only live tiers and an empty list when the list cannot be read. New: `arcaeon.remote.catalog`.
+- **The no-key refusal text changed.** `upgrade_message()` (MCP `witness_pin`, `witness_renew`, the HTTP paid lane, `seal`) names no price or link; it says `Prices and how to buy: https://arcaeon.io/pricing`. A caller matching on `buy.stripe.com` or `$5` in it should match on `arcaeon.io/pricing`.
 - **Bearer classes.** A pack's manifest now reads `pack_schema` 2 and the pack holds `README.json` (`bearer_schema`, `page`, `classes`, `counts`, and `sentences`: `id`, `line`, `sha256`, `class`, and `falsifier` on an `asserted` one), hashed in `files`. Each sentence line of README.md ends in `[bytes]`, `[order]` or `[asserted; falsifier: ...]`, and page one gains a legend line. `evidence-pack verify --json` adds `bearer` (the class counts, `null` for a schema 1 pack). A schema 1 pack with no README.json and no brackets verifies as before and prints `bearer classes: not present (pack schema 1)`.
 
 ## 0.10.0 (2026-09-27)

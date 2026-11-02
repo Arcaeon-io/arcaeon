@@ -6,6 +6,18 @@ that adds a JSON field or a verb.
 
 ## Unreleased
 
+Nothing yet.
+
+## 0.10.1 (not released)
+
+A patch release. `arcaeon buy` reads the live price list, and the package
+stops stating prices of its own. Nothing was renamed; the changed behaviour
+is below.
+
+- **Buy reads the live price list.** `arcaeon buy` reads https://arcaeon.io/.well-known/offers.json (one request, 3 seconds at most, 1 MB at most, a good answer kept 10 minutes) and prints only the tiers that list marks live whose checkout link is https on buy.stripe.com, plus the free pins a month line when the list states one. On any failure, or with `ARCAEON_OFFERS_OFFLINE=1`, it prints only `Prices and how to buy: https://arcaeon.io/pricing` and makes no request. The bundled `arcaeon/remote/offers.json` and every payment link typed in the code are gone; `buy evidence-pack` is gone with them (that pack is not on sale). `arcaeon.remote.OFFERS_SNAPSHOT` is removed; `load_offers()` with no path now reads the live list and raises ValueError when it cannot.
+- **No prices outside buy.** The no-key refusal of `witness_pin`, `witness_renew`, `seal` and the MCP status notes name no price, credit count, grant or plan; they point at https://arcaeon.io/pricing.
+- **Privacy wording.** README and docs/VERBS.md say `buy` makes one request to arcaeon.io unless `ARCAEON_OFFERS_OFFLINE=1`.
+- **Tests offline.** The suite sets `ARCAEON_OFFERS_OFFLINE=1` for itself and every subprocess it starts; the buy tests stub the one fetch.
 - **Bearer classes (branch bearer-class-2026-09-27).** Every sentence on an evidence pack's README.md ends in `[bytes]`, `[order]` or `[asserted]` (an `[asserted]` one names its falsifier), and a new `README.json` twin lists each sentence id, its sha256, line and class. `evidence-pack verify` breaks an untagged, misclassed or falsifier-less sentence naming its id and reports the counts under `bearer`. `pack_schema` is now 2; a schema 1 pack with no README.json and no brackets still verifies and prints "bearer classes: not present (pack schema 1)".
 
 ## 0.10.0 (2026-09-27)
