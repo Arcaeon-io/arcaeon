@@ -18,14 +18,14 @@ hosted witness's `/api/pin`, gated on `ARCAEON_KEY`, over the SAME balance
 those two tools already draw from (arcaeon-witness's `_balance.js`,
 `decrementCredit` -- one pin, once the free monthly cap is spent). No pack, no
 price, no Stripe product is created here. `offers.SEALED_SCAN_PACK` documents
-the storefront framing for a future dedicated $5-for-50 page; nothing in this
+a storefront idea that is not on sale; nothing in this
 module reads or trusts it, and it has no live checkout to point at yet.
 
 THE DEBIT IS THE PIN, AND IT RUNS LAST. `seal()` does, in order:
   1. refuse before touching anything if there is no usable ARCAEON_KEY;
   2. append `record` to the ledger (free -- this is the tamper-evidence);
   3. read the ledger's new head (rows, chain);
-  4. spend ONE credit witnessing that head (`witness.pin`) -- this is the paid
+  4. spend one pin witnessing that head (`witness.pin`) -- this is the paid
      step. It can SPEND at most once per `seal()` call. With no --ns it may
      be called twice: a 403 on the default namespace (which the witness
      answers before any metering, so it spends nothing) that names the key's
@@ -213,8 +213,9 @@ def seal(record: dict[str, Any], *, key: str | None = None,
             reason = (
                 "sealed scan refused: credit balance is zero. The badge "
                 "record above was appended to the ledger (true, but "
-                "unwitnessed); top up at the connector's existing $5 pack "
-                "and re-run --sealed to witness it. %s"
+                "unwitnessed); add credits (prices and how to buy: "
+                "https://arcaeon.io/pricing) and re-run --sealed to witness "
+                "it. %s"
                 % (result.get("error") or ""))
         elif result.get("status") == 403:
             if prefix:

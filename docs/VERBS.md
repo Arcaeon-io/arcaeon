@@ -432,7 +432,7 @@ $ arcaeon badge server.py
 
 Answers: can the badge carry a mark from someone other than me? Grades the
 server, then seals the report with the hosted witness. Paid: needs
-`ARCAEON_KEY` and uses one credit. That key is the only thing it needs.
+`ARCAEON_KEY` and draws on that key's balance. That key is the only thing it needs.
 Without it nothing is sent.
 
 The witness's pin is the seal. The report is appended to a local ledger and
@@ -447,7 +447,7 @@ A key pins only under its own namespace prefix, and you do not need to know
 yours. Without `--ns`, `seal` tries `mcp-vet-sealed-scans`; if the witness
 refuses that and names your key's prefix, it retries once under
 `<prefix>-sealed-scans` and remembers the prefix for the rest of the process.
-The refusal costs no credit, so it is still one credit per seal. The JSON's
+The refusal spends nothing, so a retry costs no more than one seal. The JSON's
 `sealed_scan.namespace` says where the pin landed. `--ns` picks the namespace
 yourself and is never retried; if the witness refuses it, the message names
 the namespace it tried and the exact `--ns` your key needs.
@@ -764,9 +764,10 @@ $ ARCAEON_WITNESS_URL=http://127.0.0.1:9 arcaeon stamp notes.txt
 ## `credits`
 
 Answers: how many credits are left on my key? Reads `ARCAEON_KEY`. Looking
-never uses a credit. Prints one sentence, such as `500 credits on the key`; a
-key on an older plan with a monthly cap also shows its count, such as `1000
-credits left, 7 of 100 free pins used this month`. `--json` prints the
+never uses a credit. Prints one sentence with your key's own numbers, such as
+`42 credits on the key`; a key with a monthly cap also shows how much of it is
+used, such as `42 credits left, 7 of 50 free pins used this month`. The
+numbers are made up here; yours come from the witness. `--json` prints the
 witness's raw answer.
 
 **Usage**

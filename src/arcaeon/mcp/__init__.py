@@ -22,8 +22,8 @@ too many; the same rule applies to two copies of a tool.
 
 FREE by default, and the free part is the large part. The gate covers exactly
 the two tools that spend money on our side (a hosted pin is a GitHub commit
-somebody pays for), and when it fires it hands back a plain sentence with the
-price and the link — never a stack trace, never a silent nothing.
+somebody pays for), and when it fires it hands back a plain sentence naming
+the pricing page — never a stack trace, never a silent nothing.
 """
 # serverInfo.version is the PACKAGE version (qa-fixes 2026-09-24: it said
 # 0.1.4, the connector's last standalone release, on a 0.9.0 install).

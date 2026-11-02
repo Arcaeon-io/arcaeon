@@ -173,7 +173,7 @@ def seal_badge(badge_json: dict[str, Any], *,
                namespace: str | None = None) -> dict[str, Any]:
     """The paid half of `--sealed` (batch-100 item 84): witness the badge
     through the EXISTING ARCAEON_KEY credit lane
-    (`arcaeon.remote.sealed_scan.seal`) -- one credit, no new billing rail.
+    (`arcaeon.remote.sealed_scan.seal`) -- one pin, no new billing rail.
 
     THE WITNESS'S PIN IS THE SEAL (seal-for-strangers, 2026-09-24). The hosted
     witness's POST /api/pin accepts {namespace, rows, chain} and nothing else

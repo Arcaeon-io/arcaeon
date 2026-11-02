@@ -149,8 +149,8 @@ offers file bundled with the package and makes no request.
 - `arcaeon pin LEDGER --ns NAME --remote`: records your ledger's head with
   the hosted witness. Needs `ARCAEON_KEY`.
 - `arcaeon seal PATH`: grades an MCP server,
-  then seals the report. Needs `ARCAEON_KEY` and nothing else, and uses one
-  credit. The witness's pin is the seal: it records your ledger's head and
+  then seals the report. Needs `ARCAEON_KEY` and nothing else, and draws on
+  that key's balance. The witness's pin is the seal: it records your ledger's head and
   checks no signature from your machine. With the `arcaeon[sign]` extra and a
   signing key in `MCP_VET_RECEIPT_KEY` the report is also signed and the seal
   says `SIGNED`; on the base install it says `UNSIGNED` and is sealed all the

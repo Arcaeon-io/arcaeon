@@ -784,14 +784,14 @@ def _seal(argv) -> int:
             del rest[i:i + 2]
     if _wants_help(argv) or len([a for a in rest if not a.startswith("-")]) != 1:
         print("usage: arcaeon seal <path-to-mcp-server> [--ns NAMESPACE]\n"
-              "PAID: grades the server, then seals the report with the hosted witness "
-              "(one credit). Needs ARCAEON_KEY and nothing else: the witness's pin is "
+              "PAID: grades the server, then seals the report with the hosted witness, "
+              "drawing on your key's balance. Needs ARCAEON_KEY and nothing else: the witness's pin is "
               "the seal. With the [sign] extra and MCP_VET_RECEIPT_KEY the report is "
               "also signed (SIGNED); without them it is sealed UNSIGNED. --ns picks the "
               "namespace, which must start with your key's prefix. Without --ns it tries "
               "mcp-vet-sealed-scans, and if the witness refuses that and names your "
               "key's prefix, retries once under <prefix>-sealed-scans (the refusal "
-              "costs no credit). Without a key nothing is sent.")
+              "spends nothing). Without a key nothing is sent.")
         return V.EXIT_GOOD if _wants_help(argv) else V.EXIT_USAGE
     return _badge([*rest, "--sealed", *(["--ns", ns] if ns else [])])
 
