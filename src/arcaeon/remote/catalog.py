@@ -160,7 +160,9 @@ def _number(v) -> bool:
 
 
 def _money(v) -> str:
-    return f"${v:,.2f}".replace(".00", "") if isinstance(v, float) else f"${v:,}"
+    if v == int(v):
+        return f"${int(v):,}"
+    return f"${v:,.2f}" if round(v, 2) == v else f"${v:g}"
 
 
 def _text(v) -> str:

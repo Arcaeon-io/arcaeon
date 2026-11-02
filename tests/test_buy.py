@@ -257,3 +257,9 @@ def test_a_catalog_file_follows_the_same_rules(tmp_path, monkeypatch, capsys):
     out = _buy(capsys, "--offers", str(f))[1]
     assert "test_pack_a" not in out and "test_monthly" in out
     assert _buy(capsys, "--offers", str(tmp_path / "missing.json")) == (0, PRICING + "\n")
+
+
+@pytest.mark.parametrize("value,shown", [(5, "$5"), (5.0, "$5"), (4.5, "$4.50"),
+                                         (0.0042, "$0.0042"), (1500, "$1,500")])
+def test_prices_are_shown_as_written(value, shown):
+    assert catalog._money(value) == shown
