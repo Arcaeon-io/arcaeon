@@ -798,9 +798,18 @@ request. With no plan name it lists every plan. Prices: arcaeon.io/pricing.
 usage: arcaeon buy [-h] [--offers OFFERS] [plan]
 ```
 
-**Exit codes:** 0 printed. 2 the price list was read and names no plan on
-sale by that name. 3 a plan was asked for and the price list could not be
-read: one COULD NOT LOOK line saying why, ending with the pricing page.
+**Exit codes:** 0 printed. 2 bad usage, or the price list was read and
+names no plan on sale by that name. 3 a plan was asked for and the price
+list could not be read: one COULD NOT LOOK line saying why, ending with the
+pricing page.
+
+**Time limit.** The request for the price list is given 3 seconds in all,
+counting the name lookup, any proxy, the secure connection and the answer
+together. It runs on a background thread; at 3 seconds `buy` stops waiting
+and treats the list as not read. The abandoned request is not cut off: it
+carries on in the background until its connection ends or one step of it
+waits 3 seconds, prints nothing, is never kept, and never stops the process
+from exiting.
 
 ```console
 $ ARCAEON_OFFERS_OFFLINE=1 arcaeon buy

@@ -273,15 +273,27 @@ def test_prices_are_shown_as_written(value, shown):
 def test_the_whole_request_stops_at_the_deadline(monkeypatch):
     """urllib's timeout is per socket step; a server that drips one byte at a
     time must still be cut off at TIMEOUT_S overall."""
+    import threading
+
+    release = threading.Event()
+
     def drip(req, timeout=None):
-        time.sleep(30)  # never answers in time; each step would be within `timeout`
-        raise AssertionError("unreachable")
+        # never answers in time; released by the test so no thread is left behind
+        release.wait(30)
+        raise OSError("released")
 
     monkeypatch.setattr(urllib.request, "urlopen", drip)
     monkeypatch.setattr(catalog, "TIMEOUT_S", 0.3)
     t0 = time.monotonic()
-    assert catalog._fetch() is None
-    assert time.monotonic() - t0 < 2
+    try:
+        assert catalog._fetch() is None
+        assert time.monotonic() - t0 < 2
+    finally:
+        release.set()
+    for t in threading.enumerate():
+        if t.name == "arcaeon-offers-fetch":
+            t.join(5)
+    assert not [t for t in threading.enumerate() if t.name == "arcaeon-offers-fetch"]
 
 
 # --- P8: the four buyer-review findings -------------------------------------
@@ -378,7 +390,7 @@ def test_the_no_key_refusal_says_what_a_key_is_in_two_sentences_with_no_link():
     s = offers.KEY_SENTENCES
     assert len(re.findall(r"[.!?](?:\s|$)", s)) == 2, s
     assert "http" not in s and "www." not in s and "$" not in s
-    assert "secret" in s and "after paying gives you the key" in s
+    assert "secret" in s and "made for you free" in s
     msg = offers.upgrade_message("witness_pin")
     assert s in msg and "http" not in msg
     msg.encode("ascii")

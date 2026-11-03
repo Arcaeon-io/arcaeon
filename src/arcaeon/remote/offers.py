@@ -20,8 +20,8 @@ WITNESS_ENDPOINT = "https://witness.arcaeon.io"
 KEY_SENTENCES = (
     "An Arcaeon key (ARCAEON_KEY) is a secret that lets the hosted witness record "
     "pins in your name and counts each pin against that key's plan. "
-    "You get one by buying a plan: `arcaeon buy` lists what is on sale, and the "
-    "page you reach after paying gives you the key.")
+    "A key is made for you free, with no purchase, and comes with free pins; a "
+    "plan you buy (`arcaeon buy` lists them) adds pins to it.")
 
 # --- the sealed-scan SKU (board item 84, 2026-09-05) ------------------------
 #

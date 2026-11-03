@@ -146,7 +146,7 @@ witness_pin is a paid Arcaeon tool and no ARCAEON_KEY is set, so nothing was sen
 
 It pins your ledger head with the hosted witness: a party you cannot advance, which is the only thing that catches truncation.
 
-An Arcaeon key (ARCAEON_KEY) is a secret that lets the hosted witness record pins in your name and counts each pin against that key's plan. You get one by buying a plan: `arcaeon buy` lists what is on sale, and the page you reach after paying gives you the key.
+An Arcaeon key (ARCAEON_KEY) is a secret that lets the hosted witness record pins in your name and counts each pin against that key's plan. A key is made for you free, with no purchase, and comes with free pins; a plan you buy (`arcaeon buy` lists them) adds pins to it.
 
 Then set ARCAEON_KEY=<your witness key> in the environment this runs in and call again.
 ...
