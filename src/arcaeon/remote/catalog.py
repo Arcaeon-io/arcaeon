@@ -45,18 +45,36 @@ def offline() -> bool:
     return os.environ.get(OFFLINE_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _fetch(url: str = CATALOG_URL) -> bytes | None:
-    """One GET of the catalog. Returns the body, or None on any failure or
-    when the body is larger than MAX_BYTES. Tests stub exactly this."""
+def _get(url: str, out: list) -> None:
     req = urllib.request.Request(url, headers={"User-Agent": "arcaeon",
                                                "Accept": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT_S) as resp:
             if getattr(resp, "status", 200) != 200:
-                return None
-            body = resp.read(MAX_BYTES + 1)
+                return
+            out.append(resp.read(MAX_BYTES + 1))
     except Exception:  # noqa: BLE001 - every failure means "print the pricing line"
+        return
+
+
+def _fetch(url: str = CATALOG_URL) -> bytes | None:
+    """One GET of the catalog. Returns the body, or None on any failure, when
+    the body is larger than MAX_BYTES, or when the whole request (name lookup,
+    proxy, TLS, headers and body together) takes longer than TIMEOUT_S.
+
+    urllib's own timeout applies to each socket step, so a server sending one
+    byte at a time could hold it far past TIMEOUT_S; the request runs on a
+    daemon thread and is abandoned at the deadline. Tests stub exactly this."""
+    import threading
+
+    out: list = []
+    t = threading.Thread(target=_get, args=(url, out), daemon=True,
+                         name="arcaeon-offers-fetch")
+    t.start()
+    t.join(TIMEOUT_S)
+    if t.is_alive() or not out:
         return None
+    body = out[0]
     if len(body) > MAX_BYTES:
         return None
     return body
