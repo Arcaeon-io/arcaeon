@@ -263,3 +263,17 @@ def test_a_catalog_file_follows_the_same_rules(tmp_path, monkeypatch, capsys):
                                          (0.0042, "$0.0042"), (1500, "$1,500")])
 def test_prices_are_shown_as_written(value, shown):
     assert catalog._money(value) == shown
+
+
+def test_the_whole_request_stops_at_the_deadline(monkeypatch):
+    """urllib's timeout is per socket step; a server that drips one byte at a
+    time must still be cut off at TIMEOUT_S overall."""
+    def drip(req, timeout=None):
+        time.sleep(30)  # never answers in time; each step would be within `timeout`
+        raise AssertionError("unreachable")
+
+    monkeypatch.setattr(urllib.request, "urlopen", drip)
+    monkeypatch.setattr(catalog, "TIMEOUT_S", 0.3)
+    t0 = time.monotonic()
+    assert catalog._fetch() is None
+    assert time.monotonic() - t0 < 2

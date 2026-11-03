@@ -25,8 +25,7 @@ WITNESS_ENDPOINT = "https://witness.arcaeon.io"
 # same way a retailer can sell the same bolt of cloth by the yard on one shelf
 # and pre-cut on another. Until Daniel sets the checkout env var below AND
 # wires a real Stripe Payment Link, this SKU is not purchasable anywhere: there
-# is no `checkout` key here (contrast MINI_PACK, which has a live URL because
-# it IS live), and `resolve_sealed_scan_sku()` is built so a missing var can
+# is no `checkout` key here, and `resolve_sealed_scan_sku()` is built so a missing var can
 # never be read as a granted purchase.
 SEALED_SCAN_PACK = {
     "sku": "sealed_scan_50",
