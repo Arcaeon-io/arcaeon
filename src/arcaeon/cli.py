@@ -56,7 +56,7 @@ VERBS = {
     "meter":     ("save",   "keyed usage metering: keys, usage, export"),
     "stamp":     ("remote", "stamp a file's sha256 with the hosted witness"),
     "credits":   ("remote", "show your witness balance (needs ARCAEON_KEY)"),
-    "buy":       ("remote", "print the checkout link for a plan (opens nothing)"),
+    "buy":       ("remote", "print the plans on sale from arcaeon.io (opens nothing)"),
     "mcp":       ("serve",  "start the MCP connector server on stdio (needs arcaeon[mcp])"),
     "serve":     ("serve",  "start the local HTTP/JSON API on 127.0.0.1 (loopback only)"),
     "connect":   ("serve",  "print (or, with --write, apply) the config an AI client needs"),
@@ -1003,36 +1003,33 @@ def _credits(argv) -> int:
 def _buy(argv) -> int:
     import argparse
     ap = argparse.ArgumentParser(prog="arcaeon buy", description=(
-        "Print the checkout link for a plan, read from offers.json. Opens no "
-        "browser and takes no card: payment happens on Stripe's page."))
-    ap.add_argument("plan", nargs="?", help="plan name (omit to list every plan)")
-    ap.add_argument("--offers", help="offers.json to read (default: the bundled snapshot)")
+        "Print the plans on sale and their checkout links, read from the live "
+        "catalog at https://arcaeon.io/.well-known/offers.json (one request, "
+        "3 seconds at most, kept 10 minutes; none with ARCAEON_OFFERS_OFFLINE=1). "
+        "Opens no browser and takes no card: payment happens on the checkout page."))
+    ap.add_argument("plan", nargs="?", help="plan name (omit to list every plan on sale)")
+    ap.add_argument("--offers", help="read this catalog file instead of the live one")
     try:
         a = ap.parse_args(argv)
     except SystemExit as e:
         return e.code if isinstance(e.code, int) else V.EXIT_USAGE
-    from arcaeon import remote
-    if a.plan == "evidence-pack":  # K128: the sealed pack is paid in credits
-        from arcaeon.remote import offers as _offers
-        try:
-            lines = _offers.evidence_pack_lines(remote.load_offers(a.offers))
-        except (OSError, ValueError) as e:
-            return _usage(f"could not read the evidence-pack offer: {e}")
-        print("\n".join(lines))
-        return V.EXIT_GOOD
-    try:
-        links = remote.checkout_links(remote.load_offers(a.offers))
-    except (OSError, ValueError) as e:
-        return _usage(f"could not read offers.json: {e}")
+    from arcaeon.remote import catalog
+    if a.offers or os.environ.get("ARCAEON_OFFERS_FILE"):
+        cat = catalog.load_file(a.offers or os.environ["ARCAEON_OFFERS_FILE"])
+    else:
+        cat = catalog.load()
     if a.plan:
-        hits = [x for x in links if x["plan"] == a.plan]
-        if not hits:
-            return _usage(f"no plan named {a.plan!r}; plans: "
-                          + ", ".join(x["plan"] for x in links))
-        print(hits[0]["checkout"])
-        return V.EXIT_GOOD
-    for x in links:
-        print(f"{x['plan']:<10} {x['price']:<10} {x['cap']:<18} {x['checkout']}")
+        hits = [t for t in catalog.live_tiers(cat) if t["plan"] == a.plan]
+        if hits:
+            print(hits[0]["checkout"])
+            return V.EXIT_GOOD
+        if cat is None:
+            print(catalog.FALLBACK_LINE)
+            return V.EXIT_GOOD
+        print(catalog.FALLBACK_LINE)
+        return _usage(f"no plan named {a.plan!r} is on sale; plans: "
+                      + (", ".join(t["plan"] for t in catalog.live_tiers(cat)) or "none"))
+    print("\n".join(catalog.buy_lines(cat)))
     return V.EXIT_GOOD
 
 

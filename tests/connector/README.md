@@ -147,18 +147,16 @@ witness_pin is a paid Arcaeon tool and no ARCAEON_KEY is set, so nothing was sen
 It pins your ledger head with the hosted witness (https://witness.arcaeon.io): a
 party you cannot advance, which is the only thing that catches truncation.
 
-Free tier: 100 pins/month, no card. To get one: email hello@arcaeon.io or ask
-Nora for a key.
-Entry pack: $5 for 1,000 pins ($0.005/pin): https://buy.stripe.com/aFa4gAb10ead3xy35f0RG08
+Prices and how to buy: https://arcaeon.io/pricing
+
+Then set ARCAEON_KEY=<your witness key> in this server's environment and call again.
 ...
 ```
 
-No stack trace, no silent nothing, and the free door named before the paid one —
-the witness free tier is 100 pins/month with no card, and the witness library
-itself is self-hostable free forever (point `ARCAEON_WITNESS_URL` at your own
-deployment and the same two tools work). The catalog those numbers come from is
-[`/.well-known/offers.json`](https://arcaeon.io/.well-known/offers.json), and a
-test in this repo fails if the copy in the code drifts from it.
+No stack trace and no silent nothing. The message names no price and no
+payment link: those live on the site and change there, so a copy in the code
+would go stale. The witness library itself is self-hostable free forever (point
+`ARCAEON_WITNESS_URL` at your own deployment and the same two tools work).
 
 ## Environment
 

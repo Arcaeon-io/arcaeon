@@ -233,13 +233,12 @@ def test_sealed_scan_refusal_is_none_for_a_real_key():
 
 # --- offers.SEALED_SCAN_PACK: documented SKU, never a live grant ------------
 
-def test_sealed_scan_pack_has_no_live_checkout_unlike_mini_pack():
-    """MINI_PACK is real and carries a `checkout` URL. SEALED_SCAN_PACK is
-    documentation for a page that does not exist yet and must not pretend
-    otherwise."""
+def test_sealed_scan_pack_has_no_checkout_link():
+    """SEALED_SCAN_PACK is documentation for a page that does not exist yet and
+    must not pretend otherwise; the package carries no payment link at all."""
     assert "checkout" not in offers.SEALED_SCAN_PACK
     assert offers.SEALED_SCAN_PACK["checkout_env"] == "STRIPE_PAYMENT_LINK_SEALED_SCAN_50"
-    assert "checkout" in offers.MINI_PACK
+    assert not hasattr(offers, "MINI_PACK")
 
 
 def test_resolve_sealed_scan_sku_is_none_with_no_purchase(monkeypatch):
