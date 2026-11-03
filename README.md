@@ -172,6 +172,74 @@ address.
 `ARCAEON_KEY` is the one setting. Treat it like a password: a leaked key can
 pin in your name. For plans and prices, see arcaeon.io/pricing.
 
+### Buy and your key, in bash and PowerShell
+
+See what is on sale. One request to arcaeon.io; if it fails you get one line
+naming the pricing page.
+
+```bash
+arcaeon buy
+```
+
+```powershell
+arcaeon buy
+```
+
+The checkout link for one plan, by the name `arcaeon buy` printed:
+
+```bash
+arcaeon buy <plan>
+```
+
+```powershell
+arcaeon buy <plan>
+```
+
+The same, with no request at all (prints only the pricing page line):
+
+```bash
+ARCAEON_OFFERS_OFFLINE=1 arcaeon buy
+```
+
+```powershell
+$env:ARCAEON_OFFERS_OFFLINE = "1"; arcaeon buy; Remove-Item Env:ARCAEON_OFFERS_OFFLINE
+```
+
+Set your key for this shell only, typed at a hidden prompt so it stays out of
+your shell history:
+
+```bash
+read -rsp "ARCAEON_KEY: " ARCAEON_KEY && export ARCAEON_KEY && echo
+```
+
+```powershell
+$env:ARCAEON_KEY = Read-Host -Prompt "ARCAEON_KEY" -MaskInput
+```
+
+(`-MaskInput` needs PowerShell 7.1 or newer.)
+
+Check the key works and see its balance. Looking spends nothing:
+
+```bash
+arcaeon credits
+```
+
+```powershell
+arcaeon credits
+```
+
+Forget the key when you are done:
+
+```bash
+unset ARCAEON_KEY
+```
+
+```powershell
+Remove-Item Env:ARCAEON_KEY
+```
+
+QUICKSTART.md has the same steps from install onward.
+
 ## The AI door
 
 ```console
