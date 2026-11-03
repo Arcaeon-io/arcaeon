@@ -217,7 +217,7 @@ def test_a_paid_tool_refusal_is_a_recorded_success(monkeypatch, tmp_path):
     rec = _isolate(monkeypatch, tmp_path)
     args = {"namespace": "acme", "rows": 3, "chain": "abcd"}
     err, payload = _call("witness_pin", args)
-    assert not err and "arcaeon.io/pricing" in json.dumps(payload), payload
+    assert not err and "made for you free" in json.dumps(payload), payload
 
     row = _rows(rec)[0]
     assert row["tool"] == "witness_pin" and row["ok"] is True, row

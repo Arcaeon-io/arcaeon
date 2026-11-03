@@ -3,9 +3,13 @@
 The rule under test: no price, no checkout link and no plan name is printed
 unless the price list at arcaeon.io answered. When it did not answer (no
 network, a refused connection, a connection that never answers, or
-ARCAEON_OFFERS_OFFLINE=1) the whole output is one line:
+ARCAEON_OFFERS_OFFLINE=1) the whole output is one line. For bare `arcaeon
+buy` that line is, with exit 0:
 
     Prices and how to buy: https://arcaeon.io/pricing
+
+For `arcaeon buy <plan>` it is a COULD NOT LOOK line saying why, ending in
+that same pricing sentence, with exit 3.
 
 The wheel is built from this checkout (`pip wheel --no-deps
 --no-build-isolation --no-index`, so the build itself needs no network) and
@@ -128,25 +132,34 @@ def _buy(exe: Path, env: dict, *args) -> tuple[str, float]:
     cp = subprocess.run([str(exe), "buy", *args], capture_output=True, text=True,
                         timeout=60, env=env, cwd=env["HOME"])
     took = time.monotonic() - t0
-    assert cp.returncode == 0, (cp.returncode, cp.stdout, cp.stderr)
+    # bare `buy` with no answer still answers (exit 0); `buy <plan>` could not look (exit 3)
+    want = 3 if args else 0
+    assert cp.returncode == want, (cp.returncode, cp.stdout, cp.stderr)
     return cp.stdout, took
 
 
-def _assert_no_offer(out: str):
-    assert out == PRICING + "\n", out
+def _assert_no_offer(out: str, plan: bool = False):
+    if plan:
+        assert out.startswith("COULD NOT LOOK: ") and out.endswith(f"; no plan link to give. "
+                                                                   f"{PRICING}\n"), out
+        assert out.count("\n") == 1, out
+    else:
+        assert out == PRICING + "\n", out
     assert not NO_OFFER.search(out.replace(PRICING, "")), out
     low = out.lower()
     assert not any(re.search(rf"\b{w}\b", low) for w in PLAN_WORDS), out
 
 
 @pytest.mark.parametrize("args", [(), ("mini",), ("witnessed",)])
-def test_no_network_prints_only_the_pricing_line(arcaeon_exe, tmp_path, args):
+def test_no_network_prints_only_one_line(arcaeon_exe, tmp_path, args):
     sink = Sink()
     try:
         out, _ = _buy(arcaeon_exe, _env(tmp_path / "home", proxy=sink.url), *args)
     finally:
         sink.close()
-    _assert_no_offer(out)
+    _assert_no_offer(out, plan=bool(args))
+    if args:
+        assert "did not answer" in out
     assert sink.count == 1, "buy should try the price list exactly once"
 
 
@@ -168,7 +181,9 @@ def test_the_opt_out_makes_no_request_at_all(arcaeon_exe, tmp_path, args):
         out, _ = _buy(arcaeon_exe, _env(tmp_path / "home", proxy=sink.url, offline=True), *args)
     finally:
         sink.close()
-    _assert_no_offer(out)
+    _assert_no_offer(out, plan=bool(args))
+    if args:
+        assert "ARCAEON_OFFERS_OFFLINE=1 is set" in out
     assert sink.count == 0
 
 

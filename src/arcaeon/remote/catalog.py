@@ -31,6 +31,8 @@ PRICING_URL = "https://arcaeon.io/pricing"
 FALLBACK_LINE = f"Prices and how to buy: {PRICING_URL}"
 
 OFFLINE_ENV = "ARCAEON_OFFERS_OFFLINE"
+FILE_ENV = "ARCAEON_OFFERS_FILE"
+FILE_TEST_ENV = "ARCAEON_OFFERS_FILE_IS_A_TEST"
 TIMEOUT_S = 3.0
 MAX_BYTES = 1024 * 1024
 TTL_S = 600.0
@@ -45,18 +47,70 @@ def offline() -> bool:
     return os.environ.get(OFFLINE_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _fetch(url: str = CATALOG_URL) -> bytes | None:
-    """One GET of the catalog. Returns the body, or None on any failure or
-    when the body is larger than MAX_BYTES. Tests stub exactly this."""
+def _get(url: str, out: list) -> None:
     req = urllib.request.Request(url, headers={"User-Agent": "arcaeon",
                                                "Accept": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT_S) as resp:
             if getattr(resp, "status", 200) != 200:
-                return None
-            body = resp.read(MAX_BYTES + 1)
+                return
+            out.append(resp.read(MAX_BYTES + 1))
     except Exception:  # noqa: BLE001 - every failure means "print the pricing line"
+        return
+
+
+def test_file() -> str | None:
+    """The local price list named by ARCAEON_OFFERS_FILE, honoured only when
+    ARCAEON_OFFERS_FILE_IS_A_TEST=1 is also set. A leftover variable alone
+    must never put an old list in front of a buyer."""
+    named = os.environ.get(FILE_ENV, "").strip()
+    if named and os.environ.get(FILE_TEST_ENV, "").strip() == "1":
+        return named
+    return None
+
+
+def file_ignored() -> bool:
+    """True when ARCAEON_OFFERS_FILE is set but not honoured."""
+    return bool(os.environ.get(FILE_ENV, "").strip()) and test_file() is None
+
+
+def local_line(path) -> str:
+    return f"Using a local price list ({path}), not the one at arcaeon.io."
+
+
+IGNORED_LINE = (f"{FILE_ENV} is set but ignored: it is read only when "
+                f"{FILE_TEST_ENV}=1 is also set.")
+
+
+def could_not_look_line(path=None) -> str:
+    """The one line `arcaeon buy <plan>` prints when it could not read a list."""
+    if path is not None:
+        why = f"the local price list {path} could not be read"
+    elif offline():
+        why = f"{OFFLINE_ENV}=1 is set, so the price list was not read"
+    else:
+        why = "the price list at arcaeon.io did not answer"
+    return f"COULD NOT LOOK: {why}; no plan link to give. {FALLBACK_LINE}"
+
+
+def _fetch(url: str = CATALOG_URL) -> bytes | None:
+    """One GET of the catalog. Returns the body, or None on any failure, when
+    the body is larger than MAX_BYTES, or when the whole request (name lookup,
+    proxy, TLS, headers and body together) takes longer than TIMEOUT_S.
+
+    urllib's own timeout applies to each socket step, so a server sending one
+    byte at a time could hold it far past TIMEOUT_S; the request runs on a
+    daemon thread and is abandoned at the deadline. Tests stub exactly this."""
+    import threading
+
+    out: list = []
+    t = threading.Thread(target=_get, args=(url, out), daemon=True,
+                         name="arcaeon-offers-fetch")
+    t.start()
+    t.join(TIMEOUT_S)
+    if t.is_alive() or not out:
         return None
+    body = out[0]
     if len(body) > MAX_BYTES:
         return None
     return body

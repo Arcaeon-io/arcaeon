@@ -138,14 +138,15 @@ def reconcile_tapes(agent_tape: str, tool_tape: str) -> dict:
 
 
 def load_offers(path: str | os.PathLike | None = None) -> dict:
-    """The price catalog: the file at `path`, else $ARCAEON_OFFERS_FILE, else the
-    live arcaeon.io/.well-known/offers.json (arcaeon.remote.catalog.load).
+    """The price catalog: the file at `path`, else $ARCAEON_OFFERS_FILE when
+    ARCAEON_OFFERS_FILE_IS_A_TEST=1 is also set, else the live
+    arcaeon.io/.well-known/offers.json (arcaeon.remote.catalog.load).
 
     Raises ValueError when none of those yields a catalog of the right shape.
     The package carries no copy of its own."""
     from . import catalog
 
-    named = path or os.environ.get(OFFERS_ENV)
+    named = path or catalog.test_file()
     cat = catalog.load_file(named) if named else catalog.load()
     if cat is None:
         where = str(named) if named else catalog.CATALOG_URL
