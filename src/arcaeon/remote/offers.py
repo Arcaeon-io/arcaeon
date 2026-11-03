@@ -3,7 +3,7 @@
 The one place of record for what Arcaeon charges for is the site's
 `.well-known/offers.json` (CATALOG_URL). This package carries no copy of it
 and no payment link: `arcaeon buy` reads the live file (arcaeon.remote.catalog),
-and everything else points at PRICING_URL. A price or a link typed here would
+and everything else names no price either. A price or a link typed here would
 outlive the day it was retired.
 
 Everything else in this package is free, permanently, and says so.
@@ -15,6 +15,13 @@ import os
 from .catalog import CATALOG_URL, FALLBACK_LINE, PRICING_URL  # noqa: F401 (re-exported)
 
 WITNESS_ENDPOINT = "https://witness.arcaeon.io"
+
+# What a key is and where it comes from: two sentences, no link, no price.
+KEY_SENTENCES = (
+    "An Arcaeon key (ARCAEON_KEY) is a secret that lets the hosted witness record "
+    "pins in your name and counts each pin against that key's plan. "
+    "A key is made for you free, with no purchase, and comes with free pins; a "
+    "plan you buy (`arcaeon buy` lists them) adds pins to it.")
 
 # --- the sealed-scan SKU (board item 84, 2026-09-05) ------------------------
 #
@@ -73,9 +80,9 @@ def upgrade_message(tool: str, free_tools: list[str] | None = None) -> str:
     """The plain sentence a caller gets instead of an error when a paid tool is
     invoked with no key.
 
-    Deliberately plain text and deliberately complete: where prices are, what
-    to set, and what still works for free right now. It names no price and no
-    payment link: those live on the site and change there. An
+    Deliberately plain text and deliberately complete: what a key is, where it
+    comes from, what to set, and what still works for free right now. It names
+    no price and no link: those live on the site and change there. An
     agent reading this should be able to act on it without a second call, and a
     human reading it should not have to guess whether they just hit a bug.
     """
@@ -86,12 +93,13 @@ def upgrade_message(tool: str, free_tools: list[str] | None = None) -> str:
     lines = [
         f"{tool} is a paid Arcaeon tool and no ARCAEON_KEY is set, so nothing was sent.",
         "",
-        f"It pins your ledger head with the hosted witness ({WITNESS_ENDPOINT}): a party "
+        "It pins your ledger head with the hosted witness: a party "
         "you cannot advance, which is the only thing that catches truncation.",
         "",
-        FALLBACK_LINE,
+        KEY_SENTENCES,
         "",
-        "Then set ARCAEON_KEY=<your witness key> in this server's environment and call again.",
+        "Then set ARCAEON_KEY=<your witness key> in the environment this runs in and "
+        "call again.",
     ]
     if free_tools:
         lines += [
