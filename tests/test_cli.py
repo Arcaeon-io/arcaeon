@@ -284,14 +284,16 @@ def test_buy_offline_prints_only_the_pricing_line(capsys):
     """The suite runs with ARCAEON_OFFERS_OFFLINE=1 (root conftest)."""
     assert cli.main(["buy"]) == 0
     assert capsys.readouterr().out == "Prices and how to buy: https://arcaeon.io/pricing\n"
-    assert cli.main(["buy", "mini"]) == 0
-    assert capsys.readouterr().out == "Prices and how to buy: https://arcaeon.io/pricing\n"
+    assert cli.main(["buy", "mini"]) == 3
+    assert capsys.readouterr().out == (
+        "COULD NOT LOOK: ARCAEON_OFFERS_OFFLINE=1 is set, so the price list was not read; "
+        "no plan link to give. Prices and how to buy: https://arcaeon.io/pricing\n")
 
 
 def test_buy_never_opens_a_browser(monkeypatch, capsys):
     import webbrowser
     monkeypatch.setattr(webbrowser, "open", lambda *a, **k: pytest.fail("opened a browser"))
-    assert cli.main(["buy", "mini"]) == 0
+    assert cli.main(["buy", "mini"]) == 3
     capsys.readouterr()
 
 

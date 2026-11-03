@@ -120,7 +120,7 @@ def test_the_blank_key_refusal_is_the_same_product_surface_as_the_unset_one(
     blank = _text(_call("witness_pin", HEAD))
 
     assert blank == unset, "a blank key must not get a different answer than unset"
-    assert "arcaeon.io/pricing" in blank and "ARCAEON_KEY" in blank, blank
+    assert "after paying gives you the key" in blank and "ARCAEON_KEY" in blank, blank
     for leak in ("Traceback", 'File "', "urllib", "Exception"):
         assert leak not in blank, f"stack-trace leak in the refusal: {blank}"
 

@@ -29,8 +29,9 @@ def test_no_payment_link_anywhere_in_the_package():
 
 def test_upgrade_message_names_no_price_and_no_link():
     msg = offers.upgrade_message("witness_pin")
-    assert "Prices and how to buy: https://arcaeon.io/pricing" in msg
+    assert offers.KEY_SENTENCES in msg
     assert "ARCAEON_KEY" in msg
+    assert "http" not in msg and "server's environment" not in msg
     assert "$" not in msg and "buy.stripe.com" not in msg
     assert not re.search(r"\bcredits?\b", msg)
     assert not hasattr(offers, "MINI_PACK")

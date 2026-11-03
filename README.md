@@ -183,6 +183,29 @@ server. It still does for 30 days after this release, when there is no verb
 and stdin is not a terminal. Point your client at `arcaeon mcp` now. The
 fallback is removed in 1.0.0.
 
+## What arcaeon writes on your machine
+
+Two files, both in `ARCAEON_HOME` if you set it, else in `~/.arcaeon`
+(on Windows, `%USERPROFILE%\.arcaeon`).
+
+- `offers-cache.json`, written by `arcaeon buy` after the price list at
+  arcaeon.io answers. It holds the time it was fetched (`fetched_at`, in
+  seconds since 1970), the address it came from (`source`), and the whole
+  price list as the site sent it (`catalog`). A copy younger than 10 minutes
+  is used in place of a new request; an older one is ignored and replaced on
+  the next good answer. It is never deleted for you; delete it whenever you
+  like. A failed or malformed answer is never written. With
+  `ARCAEON_OFFERS_OFFLINE=1` set, `buy` neither reads nor writes it.
+- `activity.jsonl`, one line appended per `arcaeon` run, for every verb
+  except `status`, `mcp` and `serve`, so `arcaeon status` can show what ran
+  last. Each line holds the time (`t`), the verb (`verb`), its result word
+  (`word`), the exit code (`exit`), and `target`: the sha256 of the first
+  argument read as a file path, or `null` when there is none. For
+  `arcaeon buy <plan>` that is the sha256 of the plan name joined to the
+  folder you ran it from, so someone holding the file and knowing that folder
+  could tell which plan you asked for. The file is never sent anywhere.
+  `ARCAEON_JOURNAL=0` turns it off.
+
 ## Exit codes
 
 One table for every verb. What each word means, in two sentences apiece, is

@@ -5,6 +5,7 @@ so nothing leaves the machine. The suite runs with ARCAEON_OFFERS_OFFLINE=1
 (root conftest); the fixture below clears it so the fetch path is exercised.
 """
 import json
+import re
 import time
 import urllib.request
 import webbrowser
@@ -15,6 +16,10 @@ from arcaeon import cli
 from arcaeon.remote import catalog
 
 PRICING = "Prices and how to buy: https://arcaeon.io/pricing"
+NO_ANSWER = ("COULD NOT LOOK: the price list at arcaeon.io did not answer; no plan link "
+             "to give. " + PRICING)
+OPTED_OUT = ("COULD NOT LOOK: ARCAEON_OFFERS_OFFLINE=1 is set, so the price list was not "
+             "read; no plan link to give. " + PRICING)
 
 
 def _cat(tiers, description="pin your ledger head; the live service gives 100 free pins a month"):
@@ -145,7 +150,7 @@ def test_fetch_failure_prints_only_the_pricing_line(monkeypatch, capsys, failure
     else:
         _stub(monkeypatch, failure)
     assert _buy(capsys) == (0, PRICING + "\n")
-    assert _buy(capsys, "pack-a") == (0, PRICING + "\n")
+    assert _buy(capsys, "pack-a") == (3, NO_ANSWER + "\n")
 
 
 def test_fetch_uses_the_timeout_and_the_size_cap(monkeypatch):
@@ -201,7 +206,7 @@ def test_the_opt_out_makes_no_request(monkeypatch, capsys):
     monkeypatch.setenv(catalog.OFFLINE_ENV, "1")
     monkeypatch.setattr(catalog, "_fetch", lambda *a, **k: pytest.fail("fetched while offline"))
     assert _buy(capsys) == (0, PRICING + "\n")
-    assert _buy(capsys, "pack-a") == (0, PRICING + "\n")
+    assert _buy(capsys, "pack-a") == (3, OPTED_OUT + "\n")
 
 
 def test_a_good_result_is_kept_ten_minutes(monkeypatch, capsys):
@@ -277,3 +282,114 @@ def test_the_whole_request_stops_at_the_deadline(monkeypatch):
     t0 = time.monotonic()
     assert catalog._fetch() is None
     assert time.monotonic() - t0 < 2
+
+
+# --- P8: the four buyer-review findings -------------------------------------
+
+def _buy_err(capsys, *args):
+    code = cli.main(["buy", *args])
+    cap = capsys.readouterr()
+    return code, cap.out, cap.err
+
+
+@pytest.mark.parametrize("body", [None, b"not json", json.dumps({"products": "x"}).encode()])
+def test_a_plan_that_cannot_be_looked_up_is_could_not_look(monkeypatch, capsys, body):
+    _stub(monkeypatch, body)
+    code, out, err = _buy_err(capsys, "pack-a")
+    assert code == 3
+    assert out == NO_ANSWER + "\n" and out.count("\n") == 1
+    assert "buy.stripe.com" not in out and "$" not in out
+    assert err == ""
+
+
+def test_a_missing_plan_in_a_list_that_answered_is_still_usage(monkeypatch, capsys):
+    _stub(monkeypatch, _cat(LIVE))
+    code, out, err = _buy_err(capsys, "no-such-plan")
+    assert code == 2
+    assert "no plan named 'no-such-plan' is on sale" in err
+
+
+def test_bare_buy_with_no_answer_still_exits_0(monkeypatch, capsys):
+    _stub(monkeypatch, None)
+    assert _buy_err(capsys) == (0, PRICING + "\n", "")
+
+
+def test_the_offers_file_variable_alone_is_ignored(monkeypatch, capsys, tmp_path):
+    old = tmp_path / "old.json"
+    old.write_text(json.dumps(_cat([{**LIVE[1], "checkout": "https://buy.stripe.com/test_OLD"}])),
+                   encoding="utf-8")
+    monkeypatch.setenv("ARCAEON_OFFERS_FILE", str(old))
+    monkeypatch.delenv("ARCAEON_OFFERS_FILE_IS_A_TEST", raising=False)
+    f = _stub(monkeypatch, _cat(LIVE))
+    code, out, err = _buy_err(capsys, "pack-a")
+    assert code == 0 and out == "https://buy.stripe.com/test_pack_a\n"
+    assert "test_OLD" not in out
+    assert err == catalog.IGNORED_LINE + "\n"
+    assert len(f.calls) == 1
+
+
+@pytest.mark.parametrize("value", ["0", "", "yes", "true"])
+def test_only_the_value_1_honours_the_file(monkeypatch, capsys, tmp_path, value):
+    old = tmp_path / "old.json"
+    old.write_text(json.dumps(_cat([LIVE[2]])), encoding="utf-8")
+    monkeypatch.setenv("ARCAEON_OFFERS_FILE", str(old))
+    monkeypatch.setenv("ARCAEON_OFFERS_FILE_IS_A_TEST", value)
+    _stub(monkeypatch, _cat([LIVE[1]]))
+    code, out, err = _buy_err(capsys)
+    assert "test_monthly" not in out and "test_pack_a" in out
+
+
+def test_the_offers_file_with_the_test_switch_is_used_and_said(monkeypatch, capsys, tmp_path):
+    local = tmp_path / "local.json"
+    local.write_text(json.dumps(_cat([LIVE[2]])), encoding="utf-8")
+    monkeypatch.setenv("ARCAEON_OFFERS_FILE", str(local))
+    monkeypatch.setenv("ARCAEON_OFFERS_FILE_IS_A_TEST", "1")
+    monkeypatch.setattr(catalog, "_fetch", lambda *a, **k: pytest.fail("fetched a local list"))
+    code, out, err = _buy_err(capsys, "monthly")
+    assert code == 0 and out == "https://buy.stripe.com/test_monthly\n"
+    assert err == f"Using a local price list ({local}), not the one at arcaeon.io.\n"
+    code, out, err = _buy_err(capsys)
+    assert "test_monthly" in out and err.count("\n") == 1 and "local price list" in err
+
+
+def test_an_unreadable_local_list_is_could_not_look_for_a_plan(monkeypatch, capsys, tmp_path):
+    missing = tmp_path / "missing.json"
+    code, out, err = _buy_err(capsys, "pack-a", "--offers", str(missing))
+    assert code == 3
+    assert out == (f"COULD NOT LOOK: the local price list {missing} could not be read; "
+                   f"no plan link to give. {PRICING}\n")
+    assert "local price list" in err
+
+
+def test_load_offers_follows_the_same_switch(monkeypatch, tmp_path):
+    from arcaeon import remote
+    local = tmp_path / "local.json"
+    local.write_text(json.dumps(_cat([LIVE[2]])), encoding="utf-8")
+    monkeypatch.setenv("ARCAEON_OFFERS_FILE", str(local))
+    _stub(monkeypatch, _cat([LIVE[1]]))
+    assert [t["plan"] for t in remote.checkout_links()] == ["pack-a"]
+    catalog._memo.clear()
+    monkeypatch.setenv("ARCAEON_OFFERS_FILE_IS_A_TEST", "1")
+    assert [t["plan"] for t in remote.checkout_links()] == ["monthly"]
+
+
+def test_the_no_key_refusal_says_what_a_key_is_in_two_sentences_with_no_link():
+    from arcaeon.remote import offers
+    s = offers.KEY_SENTENCES
+    assert len(re.findall(r"[.!?](?:\s|$)", s)) == 2, s
+    assert "http" not in s and "www." not in s and "$" not in s
+    assert "secret" in s and "after paying gives you the key" in s
+    msg = offers.upgrade_message("witness_pin")
+    assert s in msg and "http" not in msg
+    msg.encode("ascii")
+
+
+def test_readme_names_the_cache_file_and_the_activity_line():
+    from pathlib import Path
+
+    from arcaeon import journal
+    readme = (Path(__file__).resolve().parents[1] / "README.md").read_text(encoding="utf-8")
+    sec = readme.split("## What arcaeon writes on your machine", 1)[1].split("\n## ", 1)[0]
+    for must in (catalog.CACHE_NAME, journal.FILENAME, "ARCAEON_HOME", "~/.arcaeon",
+                 "ARCAEON_JOURNAL=0", "ARCAEON_OFFERS_OFFLINE=1", "10 minutes", "sha256"):
+        assert must in sec, must

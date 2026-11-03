@@ -1008,14 +1008,20 @@ def _buy(argv) -> int:
         "3 seconds at most, kept 10 minutes; none with ARCAEON_OFFERS_OFFLINE=1). "
         "Opens no browser and takes no card: payment happens on the checkout page."))
     ap.add_argument("plan", nargs="?", help="plan name (omit to list every plan on sale)")
-    ap.add_argument("--offers", help="read this catalog file instead of the live one")
+    ap.add_argument("--offers", help="read this local price list instead of the live one "
+                                     "(for tests; buy says so on stderr)")
     try:
         a = ap.parse_args(argv)
     except SystemExit as e:
         return e.code if isinstance(e.code, int) else V.EXIT_USAGE
     from arcaeon.remote import catalog
-    if a.offers or os.environ.get("ARCAEON_OFFERS_FILE"):
-        cat = catalog.load_file(a.offers or os.environ["ARCAEON_OFFERS_FILE"])
+    local = a.offers or catalog.test_file()
+    if catalog.file_ignored() and not a.offers:
+        print(catalog.IGNORED_LINE, file=sys.stderr)
+    if local:
+        # stderr, so `arcaeon buy <plan>` still prints the link alone on stdout
+        print(catalog.local_line(local), file=sys.stderr)
+        cat = catalog.load_file(local)
     else:
         cat = catalog.load()
     if a.plan:
@@ -1024,8 +1030,8 @@ def _buy(argv) -> int:
             print(hits[0]["checkout"])
             return V.EXIT_GOOD
         if cat is None:
-            print(catalog.FALLBACK_LINE)
-            return V.EXIT_GOOD
+            print(catalog.could_not_look_line(local))
+            return V.EXIT_COULD_NOT_LOOK
         print(catalog.FALLBACK_LINE)
         return _usage(f"no plan named {a.plan!r} is on sale; plans: "
                       + (", ".join(t["plan"] for t in catalog.live_tiers(cat)) or "none"))

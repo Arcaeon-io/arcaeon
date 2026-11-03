@@ -309,7 +309,8 @@ def test_paid_tool_without_key_returns_upgrade_message_not_a_traceback(monkeypat
     out = _call("witness_pin", {"namespace": "arcaeon-demo", "rows": 1, "chain": "abcd1234"})
     text = out if isinstance(out, str) else json.dumps(out)
 
-    assert "Prices and how to buy: https://arcaeon.io/pricing" in text, text
+    assert "An Arcaeon key (ARCAEON_KEY) is a secret" in text, text
+    assert "after paying gives you the key" in text and "http" not in text, text
     assert "buy.stripe.com" not in text and "$" not in text, text
     assert "ARCAEON_KEY" in text, text
     for leak in ("Traceback", 'File "', "urllib", "Exception"):
@@ -345,7 +346,8 @@ def test_renew_is_gated_and_routed_like_pin(monkeypatch, tmp_path):
     """Two paid tools, one gate — the second must not be a copy that forgot it."""
     _isolate(monkeypatch, tmp_path)
     ungated = _call("witness_renew", {"namespace": "arcaeon-demo", "rows": 1, "chain": "abcd1234"})
-    assert "arcaeon.io/pricing" in (ungated if isinstance(ungated, str) else json.dumps(ungated))
+    assert "after paying gives you the key" in (ungated if isinstance(ungated, str)
+                                                else json.dumps(ungated))
 
     monkeypatch.setenv("ARCAEON_KEY", "dummy-key-not-real")
     seen = {}
@@ -439,7 +441,7 @@ def test_the_installed_entry_point_serves_over_real_stdio(tmp_path):
 
     assert len(names) == len(LEDGER_TOOLS) + len(VET_TOOLS) + len(WITNESS_TOOLS) + len(DEAL_TOOLS) + len(MANDATE_TOOLS) + len(SECOND_READ_TOOLS) + len(EVIDENCE_TOOLS) + 1, names
     assert appended["ok"] is True, appended
-    assert "arcaeon.io/pricing" in gated_text, gated_text
+    assert "after paying gives you the key" in gated_text, gated_text
 
 
 def test_a_free_tool_never_asks_for_a_key(monkeypatch, tmp_path):
@@ -489,7 +491,7 @@ def test_the_license_gate_is_off_unless_asked_for(monkeypatch, tmp_path):
     out = _call("witness_pin", {"namespace": "acme-ledger", "rows": 1, "chain": "abcd1234"})
     text = out if isinstance(out, str) else json.dumps(out)
     assert "license" not in text.lower(), text
-    assert "arcaeon.io/pricing" in text, text
+    assert "after paying gives you the key" in text, text
 
     st = _call("arcaeon_status")
     assert st["license_gate"]["required"] is False

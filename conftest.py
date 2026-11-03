@@ -51,6 +51,7 @@ os.environ.pop("ARCAEON_JOURNAL", None)
 #     (arcaeon.remote.catalog._fetch).
 os.environ["ARCAEON_OFFERS_OFFLINE"] = "1"
 os.environ.pop("ARCAEON_OFFERS_FILE", None)
+os.environ.pop("ARCAEON_OFFERS_FILE_IS_A_TEST", None)
 
 # 5. The real home is never written (K14xR). mcp_vet's call record defaults to
 #    ~/.mcp_vet/audit.jsonl; it is pointed at the session's throwaway home too

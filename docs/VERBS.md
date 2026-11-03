@@ -798,8 +798,9 @@ request. With no plan name it lists every plan. Prices: arcaeon.io/pricing.
 usage: arcaeon buy [-h] [--offers OFFERS] [plan]
 ```
 
-**Exit codes:** 0 printed. 2 no such plan, or the offers file could not be
-read.
+**Exit codes:** 0 printed. 2 the price list was read and names no plan on
+sale by that name. 3 a plan was asked for and the price list could not be
+read: one COULD NOT LOOK line saying why, ending with the pricing page.
 
 ```console
 $ ARCAEON_OFFERS_OFFLINE=1 arcaeon buy
