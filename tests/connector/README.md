@@ -144,17 +144,16 @@ for. Called without a key they return a plain sentence:
 ```
 witness_pin is a paid Arcaeon tool and no ARCAEON_KEY is set, so nothing was sent.
 
-It pins your ledger head with the hosted witness (https://witness.arcaeon.io): a
-party you cannot advance, which is the only thing that catches truncation.
+It pins your ledger head with the hosted witness: a party you cannot advance, which is the only thing that catches truncation.
 
-Prices and how to buy: https://arcaeon.io/pricing
+An Arcaeon key (ARCAEON_KEY) is a secret that lets the hosted witness record pins in your name and counts each pin against that key's plan. You get one by buying a plan: `arcaeon buy` lists what is on sale, and the page you reach after paying gives you the key.
 
-Then set ARCAEON_KEY=<your witness key> in this server's environment and call again.
+Then set ARCAEON_KEY=<your witness key> in the environment this runs in and call again.
 ...
 ```
 
-No stack trace and no silent nothing. The message names no price and no
-payment link: those live on the site and change there, so a copy in the code
+No stack trace and no silent nothing. The message says what a key is and
+where it comes from, and names no price and no link: those live on the site and change there, so a copy in the code
 would go stale. The witness library itself is self-hostable free forever (point
 `ARCAEON_WITNESS_URL` at your own deployment and the same two tools work).
 
