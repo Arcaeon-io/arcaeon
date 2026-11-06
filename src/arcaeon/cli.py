@@ -387,9 +387,11 @@ def _verify(argv) -> int:
         print(usage)
         return V.EXIT_GOOD
     # The ledger's own report, with the verdict word added as the first key
-    # (the ledger CLI prints the same fields without it). The word comes from
-    # the same three-valued `ok` the old exit code came from, so the two
-    # cannot disagree: True VERIFIED 0, None COULD NOT LOOK 3, False BROKEN 1.
+    # (the ledger CLI prints the same fields without it). The word starts from
+    # the ledger's own three-valued `ok`: True VERIFIED 0, None COULD NOT LOOK
+    # 3, False BROKEN 1. It can then move away from `ok`: an unreadable file is
+    # COULD NOT LOOK, and a truncation or rewrite found against a --witness pin
+    # is BROKEN. The exit code follows the word, not `ok`.
     from arcaeon.record.ledger import verify_file
     strict, pins, ns, pos, i = False, None, None, [], 0
     while i < len(argv):
@@ -553,12 +555,19 @@ def _rows_since_pin_report(ledger: str, pins: str, ns: str | None) -> dict:
     # witness.verify_against_witness; chain_at counts rows as Head.rows (and
     # so the pin) does.
     from arcaeon.record.ledger import chain_at
+    from arcaeon.record.row import GENESIS
     here = chain_at(ledger, p_rows)
     out["chain_at_pin"] = here
+    if (not isinstance(here, str) or not here) and p_chain.lower() != GENESIS:
+        # The ledger's row at the pin carries no chain, but the pin recorded a
+        # real one: the row was chained when pinned and is not now. Stripping
+        # the chains is a rewrite (review round 4), not "not comparable".
+        out["chain_matches"] = False
+        return out
     if not isinstance(here, str) or not here:
-        # The ledger's row at the pin carries no chain (a bounded ledger, rows
-        # written before chaining; the library pins such a ledger at
-        # "genesis"). There is no chain here to set against the pin's: not
+        # The ledger's row at the pin carries no chain and the pin reads
+        # "genesis" (how the library pins a ledger whose rows were written
+        # before chaining). There is no chain on either side to compare: not
         # comparable, which is not the same as rewritten.
         out["chain_matches"] = None
         out["reason"] = (f"the ledger's row {p_rows} carries no chain, so its chain cannot "

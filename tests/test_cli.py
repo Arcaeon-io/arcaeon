@@ -1018,6 +1018,56 @@ def test_verify_witness_library_pin_of_an_unchained_ledger_is_not_a_rewrite(tmp_
     assert json.loads(capsys.readouterr().out)["since_pin"]["truncated"] is True
 
 
+def _strip_chains(p):
+    """Rewrite `p` with the `chain` key removed from every row."""
+    rows = [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines() if x.strip()]
+    for r in rows:
+        r.pop("chain", None)
+    p.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+
+
+def test_verify_witness_real_chain_pin_vs_stripped_chains_is_broken(tmp_path, capsys):
+    # Review round 4 blocker: a row with no chain was "not comparable" whatever
+    # the pin said, so a rewrite that stripped the chains read COULD NOT LOOK,
+    # exit 3. The pin recorded a real chain at that row: it is a mismatch.
+    p = tmp_path / "a.jsonl"
+    w = tmp_path / "pins.jsonl"
+    for i in range(3):
+        cli.main(["log", str(p), json.dumps({"op": i})])
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 0
+    _strip_chains(p)
+    capsys.readouterr()
+    assert cli.main(["verify", str(p)]) == 3                          # alone: bounded
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 1
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    sp = j["since_pin"]
+    assert j["verdict"] == "BROKEN"
+    assert sp["rows_since_pin"] == 0 and sp["chain_at_pin"] is None
+    assert sp["pinned_chain"] != "genesis"
+    assert sp["chain_matches"] is False and sp["rewritten"] is True
+    assert "rewritten" in cap.err
+
+
+def test_verify_witness_genesis_pin_vs_chainless_row_is_not_comparable(tmp_path, capsys):
+    # The other side of the round 4 rule: a pin at "genesis" against a row
+    # with no chain has no chain on either side, so it stays not comparable.
+    p = tmp_path / "a.jsonl"
+    w = tmp_path / "pins.jsonl"
+    p.write_text("".join(json.dumps({"a": i}) + "\n" for i in range(3)), encoding="utf-8")
+    _hand_pin(w, "demo", 3, "genesis")
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 3
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    sp = j["since_pin"]
+    assert j["verdict"] == "COULD NOT LOOK"
+    assert sp["rows_since_pin"] == 0 and sp["chain_matches"] is None
+    assert "carries no chain" in sp["reason"]
+    assert "rewritten" not in sp and "rewritten" not in cap.err
+
+
 def test_verify_witness_several_pins_compares_the_latest(tmp_path, capsys):
     p = tmp_path / "a.jsonl"
     w = tmp_path / "pins.jsonl"
