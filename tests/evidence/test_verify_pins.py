@@ -125,6 +125,61 @@ def test_later_pin_does_not_accuse_an_older_pack(local_pack, ledger, pins):
     assert st["pins"][0]["pin_file_latest_rows"] == 5
 
 
+class _LatestOnly(WitnessStore):
+    """A local pin file whose reader sees only the latest pin per namespace."""
+
+    def history(self, namespace):
+        h = super().history(namespace)
+        return h[-1:]
+
+    def latest(self, namespace):
+        h = super().history(namespace)
+        return h[-1] if h else None
+
+
+def test_repin_after_rewrite_does_not_launder_the_pack(ledger, tmp_path):
+    """Review round 6 (M1): pin P1 at 3 rows, rewrite all three rows with
+    every chain recomputed and add a 4th, pin P2 at 4 rows (accepted: rows
+    grew). A pack built from the rewrite lists P2, and records.jsonl holds
+    P2's head, so the named pin matches. P1, still in the pin file, is the
+    disproof: the pack is BROKEN. The every-pin result used to be stored as
+    `against_latest_pin` and never changed the verdict (exit 0).
+
+    An honest build reads every pin and lists P1 (rewritten), so the pack is
+    built through a writer that sees only `latest()` (the documented store
+    contract), the way a pack built by an older export, or by hand, lists P2."""
+    pins = tmp_path / "p.jsonl"
+    lines = ledger.read_bytes().splitlines(keepends=True)
+    ledger.write_bytes(b"".join(lines[:3]))
+    p1 = publish_head(WitnessStore(pins), NS, Ledger(ledger))
+    assert p1["rows"] == 3
+    ledger.unlink()
+    lg = Ledger(ledger)
+    for i in range(4):
+        lg.append({"ts": f"2026-09-0{i + 1}T10:00:00Z", "agent": "agent-a",
+                   "event": "rewritten", "n": i})
+    assert lg.verify().ok is True                      # clean on its own
+    p2 = publish_head(WitnessStore(pins), NS, lg)
+    assert p2["rows"] == 4 and p2["chain"] != p1["chain"]
+    out = tmp_path / "pack"
+    build_pack(ledger, out, agent="agent-a", witness=_LatestOnly(pins),
+               witness_namespace=NS)
+    assert [x["rows"] for x in _manifest(out)["pins"]] == [4]
+    res = verify_pack(out, witness=pins)
+    st = _step(res)
+    assert st["verdict"] == V.BROKEN and res["exit"] == 1
+    assert st["pins"][0]["against_every_pin"] == "rewritten"
+    assert "against_latest_pin" not in st["pins"][0]
+    assert "rewritten" in st["finding"] and "earlier pin" in st["finding"]
+
+
+def test_local_pin_ok_reports_every_pin_compared(local_pack, pins):
+    st = _step(verify_pack(local_pack, witness=pins))
+    pin = st["pins"][0]
+    assert pin["against_every_pin"] == "consistent" and pin["pins_compared"] == 1
+    assert pin["pins_past_head"] == 0
+
+
 def test_namespace_absent_from_pin_file_is_could_not_look(local_pack, tmp_path):
     empty = tmp_path / "elsewhere.jsonl"
     lg = Ledger(tmp_path / "x.jsonl")

@@ -1310,21 +1310,79 @@ def test_verify_witness_missing_ledger_is_not_truncation(tmp_path, capsys):
 
 
 def test_verify_rows_since_pin_absent_or_ambiguous(tmp_path, capsys):
+    # Review round 6 (B1): --witness given and no pin compared is COULD NOT
+    # LOOK, exit 3, never the ledger's own VERIFIED (these used to exit 0).
     p = tmp_path / "a.jsonl"
     cli.main(["log", str(p), '{"op": 1}'])
     capsys.readouterr()
-    assert cli.main(["verify", str(p), "--witness", str(tmp_path / "none.jsonl")]) == 0
-    j = json.loads(capsys.readouterr().out)
+    assert cli.main(["verify", str(p), "--witness", str(tmp_path / "none.jsonl")]) == 3
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    assert j["verdict"] == "COULD NOT LOOK" and j["reason_word"] == "missing"
     assert j["since_pin"]["rows_since_pin"] is None
+    assert "no pin file at" in cap.err
     w = tmp_path / "pins.jsonl"
     cli.main(["pin", str(p), "--ns", "one", "--witness", str(w)])
     cli.main(["pin", str(p), "--ns", "two", "--witness", str(w)])
     capsys.readouterr()
-    assert cli.main(["verify", str(p), "--witness", str(w)]) == 0
-    assert "pass --ns" in json.loads(capsys.readouterr().out)["since_pin"]["reason"]
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 3
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    assert j["verdict"] == "COULD NOT LOOK" and "pass --ns" in j["since_pin"]["reason"]
+    assert "pass --ns" in cap.err
+    assert cli.main(["verify", str(p), "--witness", str(w), "--ns", "one"]) == 0
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w), "--ns", "three"]) == 3
+    j = json.loads(capsys.readouterr().out)
+    assert j["verdict"] == "COULD NOT LOOK" and j["reason_word"] == "name_not_found"
     assert cli.main(["verify", str(p), "--ns", "one"]) == 2
     assert cli.main(["verify", str(p), "--witness"]) == 2
     capsys.readouterr()
+
+
+def test_verify_witness_second_namespace_pin_cannot_switch_the_check_off(tmp_path, capsys):
+    # Review round 6 blocker B1, the exact attack: pin under `demo`, rewrite
+    # the ledger with every chain recomputed, pin it again under ANOTHER
+    # namespace (accepted: a new namespace has no history), then verify
+    # --witness without --ns. The pin file now holds two namespaces, nothing
+    # was compared, and verify used to print the ledger's own VERIFIED, exit 0.
+    p = tmp_path / "a.jsonl"
+    w = tmp_path / "pins.jsonl"
+    for i in range(3):
+        cli.main(["log", str(p), json.dumps({"op": i})])
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 0
+    _rewrite_same_length(tmp_path, p, [{"op": 100 + i} for i in range(3)])
+    assert cli.main(["pin", str(p), "--ns", "other", "--witness", str(w)]) == 0
+    capsys.readouterr()
+    assert cli.main(["verify", str(p)]) == 0               # on its own: clean
+    capsys.readouterr()
+    rc = cli.main(["verify", str(p), "--witness", str(w)])
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    assert rc == 3 and j["verdict"] == "COULD NOT LOOK"
+    assert j["verdict"] != "VERIFIED" and "pass --ns" in cap.err
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w), "--ns", "demo"]) == 1
+
+
+def test_verify_witness_unreadable_or_empty_pin_is_could_not_look(tmp_path, capsys):
+    # Review round 6 (B1): an unreadable pin file and a pin that constrains
+    # nothing (zero rows) compare no pin either: COULD NOT LOOK, exit 3.
+    p = tmp_path / "a.jsonl"
+    for i in range(2):
+        cli.main(["log", str(p), json.dumps({"op": i})])
+    bad = tmp_path / "bad.jsonl"
+    bad.write_bytes(bytes([0xFF, 0xFE, 0]) + b"garbage" + bytes([10]))
+    capsys.readouterr()
+    rc = cli.main(["verify", str(p), "--witness", str(bad)])
+    j = json.loads(capsys.readouterr().out)
+    assert rc == 3 and j["verdict"] == "COULD NOT LOOK"
+    w = tmp_path / "pins.jsonl"
+    _hand_pin(w, "demo", 0, "genesis")
+    capsys.readouterr()
+    rc = cli.main(["verify", str(p), "--witness", str(w)])
+    j = json.loads(capsys.readouterr().out)
+    assert rc == 3 and j["verdict"] == "COULD NOT LOOK" and j["reason_word"] == "empty"
 
 
 def test_audit_verify_accepts_a_bundle_directory(tmp_path, capsys):

@@ -252,7 +252,10 @@ class WitnessStore:
         Python reference now matches. The bar is the HISTORY HIGH-WATER MARK,
         not `latest()`: a file that already contains a backward pin (written
         before this guard existed) must not anchor the guard to the low mark.
-        Equal rows re-pin stays allowed (idempotent heartbeat, same as JS).
+        Equal rows re-pin stays allowed only with the SAME chain (an idempotent
+        heartbeat; see ONE HEAD PER HEIGHT below). The hosted JS witness still
+        accepts an equal-rows re-pin with a DIFFERENT chain: this local store
+        is stricter than it, not the same.
         Honest limit, unchanged from the class docstring: this stops a
         backward pin arriving through the API. It cannot stop an actor who
         can rewrite the store file itself — that protection is, as ever, the
@@ -834,7 +837,9 @@ def verify_against_witness(store: WitnessStore, namespace: str,
                 f"cannot reach row {w_rows} in the log to compare against the witness",
                 witness_rows=w_rows, witness_chain=w_chain, local_rows=local_rows)
 
-        if local_chain_at != w_chain:
+        # Lower-cased on both sides, as record() stores a chain (review round
+        # 6): an honest pin written upper-case by another store is not a rewrite.
+        if str(local_chain_at).lower() != str(w_chain).lower():
             return _V(
                 "rewritten",
                 f"log's chain at the witnessed row {w_rows} differs from the pin: "
@@ -854,9 +859,9 @@ def verify_against_witness(store: WitnessStore, namespace: str,
     # The latest pin agrees (or constrains nothing): every earlier pin must
     # agree too. A detection against any of them is the verdict; an earlier
     # pin that constrains nothing (zero rows, no row count) is skipped.
-    done = {(pin.get("rows"), str(pin.get("chain")))}
+    done = {(pin.get("rows"), str(pin.get("chain")).lower())}
     for p in pins:
-        key = (p.get("rows"), str(p.get("chain")))
+        key = (p.get("rows"), str(p.get("chain")).lower())
         if key in done:
             continue
         done.add(key)

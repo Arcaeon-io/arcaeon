@@ -102,6 +102,44 @@ def test_witness_consistent_after_growth():
     print("PASS growth since the pin is consistent (not a false alarm)")
 
 
+class _UpperCaseStore:
+    """A store (another writer, the remote contract) that hands its pins back
+    with the chain in upper case: the same chain, written differently."""
+
+    def __init__(self, pins):
+        self._pins = [dict(p, chain=p["chain"].upper()) for p in pins]
+
+    def latest(self, namespace):
+        return self._pins[-1] if self._pins else None
+
+    def history(self, namespace):
+        return list(self._pins)
+
+
+def test_witness_upper_case_honest_chain_is_not_rewritten():
+    # Review round 6 (minor): record() lower-cases a chain, but the comparison
+    # and the every-pin dedupe compared case-sensitively, so an honest pin
+    # stored upper-case by another writer read "rewritten".
+    with tempfile.TemporaryDirectory() as d:
+        log = _log_with(d, "log.jsonl", 3)
+        store = WitnessStore(Path(d) / "w.jsonl")
+        publish_head(store, "ns", log)
+        for i in range(2):
+            log.append({"more": i})
+        publish_head(store, "ns", log)               # pins at 3 and 5 rows
+        up = _UpperCaseStore(store.history("ns"))
+        assert up.latest("ns")["chain"] != store.latest("ns")["chain"]
+        v = verify_against_witness(up, "ns", log)
+        assert v.verdict == "consistent", v
+        # and a real rewrite is still caught through the same upper-case store
+        p = Path(d) / "log.jsonl"
+        p.unlink()
+        rewritten = Ledger(p)
+        for i in range(5):
+            rewritten.append({"event": i + 100})
+        assert verify_against_witness(up, "ns", rewritten).verdict == "rewritten"
+
+
 def test_witness_catches_rewrite():
     with tempfile.TemporaryDirectory() as d:
         log = _log_with(d, "log.jsonl", 5)

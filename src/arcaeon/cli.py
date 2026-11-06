@@ -382,7 +382,9 @@ def _verify(argv) -> int:
              "for, or a file that could not be read). With --witness (a local pin file) "
              "it also says how many rows were added since the ledger's last pin there, "
              "and is BROKEN if rows were cut off or the chain at a pinned row differs "
-             "from the pin, for every pin of the namespace, not only the last.")
+             "from the pin, for every pin of the namespace, not only the last; with "
+             "--witness and no pin compared (no pin file, several namespaces and no --ns, "
+             "no pin for the namespace) it is COULD NOT LOOK, exit 3.")
     if _wants_help(argv):
         print(usage)
         return V.EXIT_GOOD
@@ -501,6 +503,23 @@ def _verify(argv) -> int:
             print(f"{V.BROKEN}: the pin file holds two different chains at row {eq['rows']} "
                   f"({sp['namespace']}: {eq['chains'][0]} and {eq['chains'][1]}): a witness "
                   f"never holds two heads at one height", file=sys.stderr)
+        # --witness was asked for and NO pin was compared (review round 6): an
+        # ambiguous pin file without --ns, no pin for the namespace, a missing
+        # or unreadable pin file, a pin that constrains nothing. The ledger's
+        # own VERIFIED does not answer the question that was asked; a second
+        # namespace pinned into the file must not switch the pin check off.
+        compared = (sp.get("rows_since_pin") is not None
+                    or sp.get("earlier_pins_checked", 0) > 0)
+        if word == V.VERIFIED and not compared:
+            word = report["verdict"] = V.COULD_NOT_LOOK
+            why = sp.get("reason") or "no pin was compared"
+            d = V.could_not_look("a witness pin to compare the ledger with", pins,
+                                 _no_pin_reason_word(sp, pins), why)
+            report.update(d)
+            cnl_keys = tuple(d)
+            print(f"{V.COULD_NOT_LOOK} ({d['reason_word']}): --witness was given but no pin "
+                  f"was compared, so the ledger's own VERIFIED does not stand: {why}",
+                  file=sys.stderr)
         if word == V.BROKEN:
             # The ledger alone may have read COULD NOT LOOK (bounded); the pin
             # turned that into BROKEN. Its looked_for / where / reason_word
@@ -512,6 +531,21 @@ def _verify(argv) -> int:
     if unread and legacy:
         return V.EXIT_BAD                      # 0.9.0 / arcaeon-ledger verify said 1
     return V.exit_for(word)
+
+
+def _no_pin_reason_word(sp: dict, pins: str) -> str:
+    """The COULD NOT LOOK reason word for a --witness check that compared no
+    pin: the pin file is missing, unreadable, holds no pin for the namespace
+    (or several namespaces and no --ns), or its pin constrains nothing."""
+    if sp.get("reason_word") in V.REASON_WORDS:
+        return sp["reason_word"]
+    if not Path(pins).exists():
+        return "missing"
+    if sp.get("pinned_rows") == 0:
+        return "empty"
+    if "malformed" in str(sp.get("reason", "")):
+        return "unreadable"
+    return "name_not_found"
 
 
 def _rows_since_pin_report(ledger: str, pins: str, ns: str | None) -> dict:
@@ -632,8 +666,10 @@ def _every_pin_report(ledger: str, history: list, latest: dict, out: dict) -> No
     latest let a re-pin launder a rewrite: rewrite every row, recompute every
     chain, pin again at the same or a higher row count, and the ledger agreed
     with the newest pin while the original one sat unread. Adds to `out`:
-    `pins_compared`; `earlier_pin` (the first earlier pin the ledger disagrees
-    with: truncated or rewritten); `equivocation` (two different chains at one
+    `pins_compared`; `earlier_pins_checked` (earlier pins whose row count, at
+    least, was actually set against the ledger); `earlier_pin` (the first
+    earlier pin the ledger disagrees with: truncated or rewritten);
+    `equivocation` (two different chains at one
     row count in the pin file). Pins that constrain nothing (zero or unusable
     rows) are skipped, as the latest is; a chainless pin still checks rows."""
     from arcaeon.record.ledger import Ledger, chain_at
@@ -671,6 +707,7 @@ def _every_pin_report(ledger: str, history: list, latest: dict, out: dict) -> No
         if not r_ok:
             continue
         r, c = p["rows"], p.get("chain")
+        out["earlier_pins_checked"] = out.get("earlier_pins_checked", 0) + 1
         found = {"pinned_rows": r, "pinned_chain": c, "rows_since_pin": ledger_rows - r}
         if ledger_rows < r:
             out["earlier_pin"] = dict(found, truncated=True)

@@ -1171,6 +1171,44 @@ def _check_remote(pin: dict, remote: bool) -> dict:
         "the answer did not say whether this head is witnessed")}
 
 
+def _int_rows(p) -> bool:
+    r = p.get("rows") if isinstance(p, dict) else None
+    return isinstance(r, int) and not isinstance(r, bool)
+
+
+def _equivocation(history: list):
+    """(rows, first chain, second chain) for the first row count at which the
+    pins hold two different chains, else None. Chains compare lower-cased."""
+    seen = {}
+    for p in history:
+        c = p.get("chain") if isinstance(p, dict) else None
+        if not (_int_rows(p) and p["rows"] > 0 and isinstance(c, str) and c):
+            continue
+        first = seen.setdefault(p["rows"], c)
+        if first.lower() != c.lower():
+            return p["rows"], first, c
+    return None
+
+
+class _PinsUpTo:
+    """A pin file seen only up to a row count: the pins a pack whose records
+    hold `rows` rows can be held to. Same verify() as the file itself."""
+
+    def __init__(self, store, rows: int):
+        self._store, self._rows = store, rows
+
+    def verify(self):
+        return self._store.verify()
+
+    def history(self, namespace):
+        return [p for p in self._store.history(namespace)
+                if _int_rows(p) and p["rows"] <= self._rows]
+
+    def latest(self, namespace):
+        h = self.history(namespace)
+        return h[-1] if h else None
+
+
 def _check_local(pack: Path, pin: dict, witness) -> dict:
     from arcaeon.record.ledger import Ledger
     from arcaeon.record.ledger.witness import WitnessStore, verify_against_witness
@@ -1205,10 +1243,41 @@ def _check_local(pack: Path, pin: dict, witness) -> dict:
     res = {**base, "pin_file_latest_rows": later}
     if hit is not None:
         # records.jsonl holding this head at this row was checked in the pack
-        # step; the pin file holding it is checked here.
-        via = verify_against_witness(store, ns, Ledger(pack / "records.jsonl"))
-        return {**res, "verdict": V.VERIFIED, "as_of": hit.get("as_of"),
-                "against_latest_pin": via.verdict}
+        # step; the pin file holding it is checked here. Then EVERY pin for the
+        # namespace at or below the pack's head (review round 6, M1): the named
+        # pin can be a re-pin taken after a rewrite, and an earlier pin, the
+        # standing disproof, must still be read. This result used to be stored
+        # as "against_latest_pin" and never changed the verdict. Pins past the
+        # head are left out: a pack built before a later pin is older, not
+        # truncated. Two heads at one height anywhere in the file is BROKEN.
+        records = Ledger(pack / "records.jsonl")
+        try:
+            head_rows = records.head().rows
+        except (ValueError, OSError) as e:
+            return {**res, "verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+                f"the head of records.jsonl to compare every pin for {ns!r} with",
+                str(pack / "records.jsonl"), "unreadable", str(e))}
+        eq = _equivocation(history)
+        if eq:
+            return {**res, "verdict": V.BROKEN, "against_every_pin": "witness_broken",
+                    "finding": (f"the pin file holds two different chains at row {eq[0]} "
+                                f"for {ns!r} ({eq[1]} and {eq[2]}): a witness never holds "
+                                "two heads at one height")}
+        view = _PinsUpTo(store, head_rows)
+        via = verify_against_witness(view, ns, records)
+        res.update({"as_of": hit.get("as_of"), "against_every_pin": via.verdict,
+                    "pins_compared": len(view.history(ns)),
+                    "pins_past_head": len(history) - len(view.history(ns))})
+        if via.verdict == "consistent":
+            return {**res, "verdict": V.VERIFIED}
+        if via.verdict in ("truncated", "rewritten", "witness_broken", "local_broken"):
+            return {**res, "verdict": V.BROKEN, "finding": (
+                f"records.jsonl holds the pin the pack names for {ns!r} (rows {rows}), "
+                f"but not every pin in the pin file: {via.verdict}: {via.detail}")}
+        return {**res, "verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            f"every pin for {ns!r} compared with records.jsonl", str(witness),
+            "name_not_found" if via.verdict == "no_record" else "unreadable",
+            f"the pins could not all be compared ({via.verdict}: {via.detail})")}
     return {**res, "verdict": V.BROKEN, "finding": (
         f"the pin file holds no pin for {ns!r} at rows {rows} with chain {chain}, "
         "the pin the pack says it was checked against")}
