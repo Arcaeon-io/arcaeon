@@ -742,7 +742,16 @@ def _a_zero_row_pin(d):
 def _a_non_int_rows_pin(d):
     log = _mint(d / "l.jsonl")
     store = W.WitnessStore(d / "w.jsonl")
-    store.record("ns", Head(chain=log.head().chain, rows="6", as_of="2026-09-22T00:00:00Z"))
+    # record() refuses it (strict_pin, review round 7); a hand-written,
+    # correctly chained file still reaches the reader.
+    with pytest.raises(W.PinShapeError):
+        store.record("ns", Head(chain=log.head().chain, rows="6",
+                                as_of="2026-09-22T00:00:00Z"))
+    rec = {"namespace": "ns", "rows": "6", "chain": log.head().chain,
+           "as_of": "2026-09-22T00:00:00Z", "received_at": None,
+           "prev": store._tail_digest()}
+    rec["self"] = store._digest_record(rec)
+    store.path.write_text(json.dumps(rec) + "\n", encoding="utf-8")
     return store, "ns", log
 
 

@@ -44,6 +44,13 @@ witnessed, which the README says in its does-not-show list. What no step can
 catch is a pack whose every file was rewritten together with no pin to hold
 it; only a witness the rewriter cannot reach does that.
 
+Review round 7 (verify-witness branch): every pin in the pin file must pass
+`witness.strict_pin` or the file is COULD NOT LOOK "unreadable" as a whole;
+a pin file holding several namespaces is COULD NOT LOOK unless `--namespace`
+names this ledger's (the pack's own listed namespace never does); a pin past
+the pack's head recorded BEFORE the pin the pack names is a truncation,
+BROKEN; and only a chain comparison counts as a pin compared.
+
 Review 2 (K06xR): verify re-derives what it can from the pack itself and
 never takes the manifest's word for it. `manifest.sha256` (beside the
 manifest, "<hex>  manifest.json") must match the manifest's bytes: missing is
@@ -1225,9 +1232,48 @@ class _PinsUpTo:
         return h[-1] if h else None
 
 
-def _check_local(pack: Path, pin: dict, witness) -> dict:
+def _strict_pin_file(store, where: str, looked: str) -> dict | None:
+    """COULD NOT LOOK when the pin file holds any pin failing
+    witness.strict_pin (review round 7), else None. One malformed pin makes
+    the whole file unreadable: skipping it is how earlier rounds were beaten,
+    because the skipped pin was always the disproof."""
+    problem = store.pin_problem()
+    if problem is None:
+        return None
+    return {"verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+        looked, where, "unreadable",
+        f"the pin file holds a pin that fails the strict pin rules ({problem}): rows "
+        "must be an integer >= 0, chain 'genesis' or hex of the chain's length, "
+        "namespace a non-empty string; no pin in the file is trusted")}
+
+
+def _pin_namespaces(store) -> list[str]:
+    """Every namespace in the pin file (each pin passed strict_pin)."""
+    return sorted({r["namespace"] for r in _pin_rows(store.path)
+                   if isinstance(r.get("namespace"), str)})
+
+
+def _chain_compared(records: Path, pins: list) -> int:
+    """How many of `pins` had their CHAIN set against records.jsonl's chain at
+    their row (review round 7: a row count alone is not a comparison). A
+    zero-row pin, and a genesis pin against a row with no chain, are not."""
+    from arcaeon.record.ledger import chain_at
+    from arcaeon.record.row import GENESIS
+    n = 0
+    for p in pins:
+        if p["rows"] < 1:
+            continue
+        here = chain_at(records, p["rows"])
+        if (not isinstance(here, str) or not here) and p["chain"] == GENESIS:
+            continue
+        n += 1
+    return n
+
+
+def _check_local(pack: Path, pin: dict, witness, namespace: str | None = None) -> dict:
     from arcaeon.record.ledger import Ledger
-    from arcaeon.record.ledger.witness import WitnessStore, verify_against_witness
+    from arcaeon.record.ledger.witness import (PinShapeError, WitnessStore, strict_pin,
+                                               verify_against_witness)
 
     ns, rows, chain = _ref(pin)
     base = {"namespace": ns, "rows": rows, "chain": chain, "where": "local"}
@@ -1246,64 +1292,129 @@ def _check_local(pack: Path, pin: dict, witness) -> dict:
             f"an intact pin file holding {ns!r}", str(witness), "unreadable",
             f"the pin file fails its own chain ({self_check.get('first_break')}), "
             "so no pin in it can vouch for anything")}
-    history = store.history(ns)
+    bad = _strict_pin_file(store, str(witness), f"strict pins in the pin file holding {ns!r}")
+    if bad:
+        return {**base, **bad}
+    try:
+        listed = strict_pin(pin)
+    except PinShapeError as e:
+        return {**base, "verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            f"the pin the pack lists for {ns!r}", "manifest.json", "unreadable",
+            f"the pack's own pin fails the strict pin rules ({e})")}
+    rows, chain = listed["rows"], listed["chain"]
+    # WHICH NAMESPACE IS THIS LEDGER'S (review round 6, B2). The pack's own
+    # listed namespace is the pack's word: pin the rewrite under a second
+    # namespace, export a pack naming it, and every pin in it agrees, while
+    # the honest pin under the first namespace goes unread. So a pin file
+    # holding more than one namespace is COULD NOT LOOK unless --namespace
+    # names this ledger's, and then that namespace's pins are compared too,
+    # whatever the pack lists.
+    names = _pin_namespaces(store)
+    if namespace is not None and namespace not in names:
+        return {**base, "verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            f"pins for {namespace!r} (--namespace)", str(witness), "name_not_found",
+            f"the pin file holds no pin for {namespace!r}; it holds {names}")}
+    if namespace is None and len(names) > 1:
+        return {**base, "verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            f"this ledger's namespace in the pin file", str(witness), "name_not_found",
+            f"the pin file holds {len(names)} namespaces {names}; the pack's own pin "
+            f"names {ns!r}, which is the pack's word, not the witness's: pass this "
+            f"ledger's namespace with --namespace")}
+    history = [strict_pin(h) for h in store.history(ns)]
     if not history:
         return {**base, "verdict": V.COULD_NOT_LOOK, **V.could_not_look(
             f"a pin for {ns!r}", str(witness), "name_not_found",
             "the pin file holds no pin for this namespace")}
     # The exact pin the pack names, not merely the latest: a pack exported
     # before a later pin is not truncated, it is older.
-    hit = next((h for h in history if h.get("rows") == rows and h.get("chain") == chain),
-               None)
-    later = history[-1].get("rows")
+    hit = next((h for h in history if h["rows"] == rows and h["chain"] == chain), None)
+    later = history[-1]["rows"]
     res = {**base, "pin_file_latest_rows": later}
-    if hit is not None:
-        # records.jsonl holding this head at this row was checked in the pack
-        # step; the pin file holding it is checked here. Then EVERY pin for the
-        # namespace at or below the pack's head (review round 6, M1): the named
-        # pin can be a re-pin taken after a rewrite, and an earlier pin, the
-        # standing disproof, must still be read. This result used to be stored
-        # as "against_latest_pin" and never changed the verdict. Pins past the
-        # head are left out: a pack built before a later pin is older, not
-        # truncated. Two heads at one height anywhere in the file is BROKEN.
-        records = Ledger(pack / "records.jsonl")
-        try:
-            head_rows = records.head().rows
-        except (ValueError, OSError) as e:
-            return {**res, "verdict": V.COULD_NOT_LOOK, **V.could_not_look(
-                f"the head of records.jsonl to compare every pin for {ns!r} with",
-                str(pack / "records.jsonl"), "unreadable", str(e))}
-        eq = _equivocation(history)
+    if hit is None:
+        return {**res, "verdict": V.BROKEN, "finding": (
+            f"the pin file holds no pin for {ns!r} at rows {rows} with chain {chain}, "
+            "the pin the pack says it was checked against")}
+    # records.jsonl holding this head at this row was checked in the pack
+    # step; the pin file holding it is checked here. Then EVERY pin for the
+    # namespace at or below the pack's head (review round 6, M1): the named
+    # pin can be a re-pin taken after a rewrite, and an earlier pin, the
+    # standing disproof, must still be read. This result used to be stored
+    # as "against_latest_pin" and never changed the verdict. Two heads at
+    # one height anywhere in the file is BROKEN.
+    records = Ledger(pack / "records.jsonl")
+    try:
+        head_rows = records.head().rows
+    except (ValueError, OSError) as e:
+        return {**res, "verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            f"the head of records.jsonl to compare every pin for {ns!r} with",
+            str(pack / "records.jsonl"), "unreadable", str(e))}
+    check_ns = [ns] + ([namespace] if namespace not in (None, ns) else [])
+    # FILE ORDER IS THE HIGH-WATER (review round 6, M1). A pin past the pack's
+    # head is left out only when the witness recorded it AFTER the pin the
+    # pack names: then the pack is older. Recorded BEFORE it, the witness had
+    # already seen more rows than this pack holds when it took the pack's
+    # pin: the pack's records are a truncation, not an older copy.
+    order = _pin_rows(store.path)
+    hit_at = max((i for i, r in enumerate(order)
+                  if r.get("namespace") == ns and r.get("rows") == rows
+                  and str(r.get("chain")).lower() == chain), default=0)
+    for i, r in enumerate(order[:hit_at]):
+        if r.get("namespace") in check_ns and r["rows"] > head_rows:
+            return {**res, "verdict": V.BROKEN, "against_every_pin": "truncated",
+                    "finding": (
+                        f"truncated: the witness pinned {r['namespace']!r} at row "
+                        f"{r['rows']} before it pinned the head this pack names "
+                        f"({ns!r}, row {rows}); records.jsonl holds {head_rows} rows, so "
+                        "the pack is a truncation of what the witness had seen, not an "
+                        "older copy")}
+    pins_compared = pins_past = 0
+    verdicts = []
+    for name in check_ns:
+        h = [strict_pin(p) for p in store.history(name)]
+        eq = _equivocation(h)
         if eq:
             return {**res, "verdict": V.BROKEN, "against_every_pin": "witness_broken",
                     "finding": (f"the pin file holds two different chains at row {eq[0]} "
-                                f"for {ns!r} ({eq[1]} and {eq[2]}): a witness never holds "
-                                "two heads at one height")}
+                                f"for {name!r} ({eq[1]} and {eq[2]}): this pin file holds "
+                                "two heads at one height; a local WitnessStore refuses that")}
         view = _PinsUpTo(store, head_rows)
-        via = verify_against_witness(view, ns, records)
+        via = verify_against_witness(view, name, records)
         verdict, detail = via.verdict, via.detail
+        upto = [strict_pin(p) for p in view.history(name)]
         if verdict == "local_broken":
             # records.jsonl fails its own chain: the chain step already says
             # BROKEN for that. This step still answers its own question, does
             # records.jsonl hold every pin's chain at that pin's row, read
             # straight off the rows (no self-check to stop at).
-            verdict, detail = _every_pin_by_rows(pack / "records.jsonl", view.history(ns))
-        res.update({"as_of": hit.get("as_of"), "against_every_pin": verdict,
-                    "pins_compared": len(view.history(ns)),
-                    "pins_past_head": len(history) - len(view.history(ns))})
-        if verdict == "consistent":
-            return {**res, "verdict": V.VERIFIED}
+            verdict, detail = _every_pin_by_rows(pack / "records.jsonl", upto)
+        pins_compared += _chain_compared(pack / "records.jsonl", upto)
+        pins_past += len(h) - len(upto)
+        verdicts.append((name, verdict, detail))
+    res.update({"as_of": hit.get("as_of"),
+                "against_every_pin": next((v for _, v, _ in verdicts if v != "consistent"),
+                                          "consistent"),
+                "pins_compared": pins_compared, "pins_past_head": pins_past})
+    if namespace not in (None, ns):
+        res["namespace_checked"] = namespace
+    for name, verdict, detail in verdicts:
         if verdict in ("truncated", "rewritten", "witness_broken"):
             return {**res, "verdict": V.BROKEN, "finding": (
                 f"records.jsonl holds the pin the pack names for {ns!r} (rows {rows}), "
-                f"but not every pin in the pin file: {verdict}: {detail}")}
+                f"but not every pin for {name!r} in the pin file: {verdict}: {detail}")}
+    for name, verdict, detail in verdicts:
+        if verdict != "consistent":
+            return {**res, "verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+                f"every pin for {name!r} compared with records.jsonl", str(witness),
+                "name_not_found" if verdict == "no_record" else "unreadable",
+                f"the pins could not all be compared ({verdict}: {detail})")}
+    if pins_compared == 0:
+        # "Compared" means a chain comparison happened (review round 7).
         return {**res, "verdict": V.COULD_NOT_LOOK, **V.could_not_look(
-            f"every pin for {ns!r} compared with records.jsonl", str(witness),
-            "name_not_found" if verdict == "no_record" else "unreadable",
-            f"the pins could not all be compared ({verdict}: {detail})")}
-    return {**res, "verdict": V.BROKEN, "finding": (
-        f"the pin file holds no pin for {ns!r} at rows {rows} with chain {chain}, "
-        "the pin the pack says it was checked against")}
+            f"a pin for {ns!r} whose chain can be compared with records.jsonl",
+            str(witness), "bounded",
+            "no pin's chain was compared with records.jsonl (every pin at or below the "
+            "pack's head constrains nothing, or meets a row with no chain)")}
+    return {**res, "verdict": V.VERIFIED}
 
 
 def _when(text):
@@ -1339,17 +1450,42 @@ def _unlisted_pins(pack: Path, manifest: dict, witness, namespace: str | None) -
         return {"verdict": V.COULD_NOT_LOOK, **V.could_not_look(
             f"an intact pin file", str(wp), "unreadable",
             "the pin file fails its own chain, so no pin in it can vouch for anything")}
+    bad = _strict_pin_file(store, str(wp), "strict pins in the pin file")
+    if bad:
+        return bad
+    from arcaeon.record.ledger.witness import strict_pin
     records = pack / "records.jsonl"
     head_rows = Ledger(records).head().rows if records.is_file() else 0
-    names = sorted({r.get("namespace") for r in _pin_rows(wp)
-                    if isinstance(r.get("namespace"), str)})
+    names = _pin_namespaces(store)
+
+    def _here(rows):
+        here = chain_at(records, rows)
+        return here.lower() if isinstance(here, str) else here
+
     if namespace is not None:
+        if namespace not in names:
+            # A --namespace the pin file does not hold compares nothing; it
+            # used to read VERIFIED, so a typo switched the check off.
+            return {"verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+                f"pins for {namespace!r} (--namespace)", str(wp), "name_not_found",
+                f"the pin file holds no pin for {namespace!r}; it holds {names}")}
         mine = [namespace]
+    elif len(names) > 1:
+        # Several namespaces and no --namespace: which one is this ledger's is
+        # not the pack's to say, nor a guess from which pins happen to match
+        # (review round 6, B2: pin a rewrite under a second namespace and that
+        # one matches).
+        return {"verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+            looked, str(wp), "name_not_found",
+            f"the pack lists no pin and the pin file holds {len(names)} namespaces "
+            f"{names}: pass this ledger's with --namespace")}
     else:
+        # One namespace: it is this ledger's if one of its pins with rows
+        # (a zero-row pin ties nothing) matches records.jsonl at its row.
         mine = [ns for ns in names
-                if any(isinstance(h.get("rows"), int) and h["rows"] <= head_rows
-                       and chain_at(records, h["rows"]) == h.get("chain")
-                       for h in store.history(ns))]
+                if any(h["rows"] >= 1 and h["rows"] <= head_rows
+                       and _here(h["rows"]) == h["chain"]
+                       for h in map(strict_pin, store.history(ns)))]
     if not mine:
         if not names:
             return {"verdict": V.VERIFIED}
@@ -1361,12 +1497,10 @@ def _unlisted_pins(pack: Path, manifest: dict, witness, namespace: str | None) -
     built = _when(manifest.get("built_at"))
     problems, predates = [], []
     for ns in mine:
-        for h in store.history(ns):
-            rows, chain = h.get("rows"), h.get("chain")
-            if not isinstance(rows, int):
-                continue
+        for h in map(strict_pin, store.history(ns)):
+            rows, chain = h["rows"], h["chain"]
             if rows <= head_rows:
-                if chain_at(records, rows) != chain:
+                if _here(rows) != chain:
                     problems.append(f"the witness pinned {ns!r} at row {rows} with chain "
                                     f"{chain}; records.jsonl does not hold it")
                 continue
@@ -1386,7 +1520,16 @@ def _unlisted_pins(pack: Path, manifest: dict, witness, namespace: str | None) -
             f"rows past row {head_rows} pinned for {mine}", str(wp), "bounded",
             f"the witness holds pins past this pack's head {predates}; the pack says it "
             "was built before them, and its build time is its own word")}
-    return {"verdict": V.VERIFIED, "namespaces": mine}
+    compared = sum(_chain_compared(records, [h for h in map(strict_pin, store.history(ns))
+                                             if h["rows"] <= head_rows])
+                   for ns in mine)
+    if compared == 0:
+        # "Compared" means a chain comparison happened (review round 7): a
+        # namespace whose only pins constrain nothing was not checked.
+        return {"verdict": V.COULD_NOT_LOOK, "namespaces": mine, **V.could_not_look(
+            f"a pin for {mine} whose chain can be compared with records.jsonl", str(wp),
+            "bounded", "no pin's chain was compared with records.jsonl")}
+    return {"verdict": V.VERIFIED, "namespaces": mine, "pins_compared": compared}
 
 
 def _pin_rows(wp: Path) -> list[dict]:
@@ -1427,7 +1570,7 @@ def _step_pins(pack: Path, manifest: dict, *, witness=None, remote: bool = False
         return res
     wb = integrity.get("witness") or {}
     results = [_check_remote(x, remote) if _is_remote(wb, x) else
-               _check_local(pack, x, witness) for x in listed]
+               _check_local(pack, x, witness, namespace) for x in listed]
     res["pins"] = results
     word = _worst([r["verdict"] for r in results])
     res["verdict"] = word

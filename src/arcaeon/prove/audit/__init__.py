@@ -590,6 +590,9 @@ def _could_not_look_fields(finding: str, vr: Any, wv: Any, witness_block: dict,
         if wv.verdict == "local_broken":
             return {"looked_for": "an intact chain in the log", "where": "records.jsonl",
                     "reason_word": "unreadable"}
+        if wv.verdict == "witness_unreadable":
+            return {"looked_for": "witness pins that pass the strict pin rules",
+                    "where": witness_where, "reason_word": "unreadable"}
         return {"looked_for": "a witness pin file that verifies itself",
                 "where": witness_where, "reason_word": "unreadable"}
     # UNRECOGNIZED_WITNESS_VERDICT:* or any finding this version does not know
@@ -610,8 +613,10 @@ def derive_finding(vr: Any, wv: Any) -> str:
         verdict = "REWRITE_DETECTED"
     elif wv is not None and wv.verdict == "truncated":
         verdict = "TRUNCATION_DETECTED"
-    elif wv is not None and wv.verdict in ("witness_broken", "local_broken"):
+    elif wv is not None and wv.verdict in ("witness_broken", "local_broken",
+                                           "witness_unreadable"):
         # the fault is in the named artifact, not necessarily the record set
+        # (witness_unreadable: a pin failing strict_pin, review round 7)
         verdict = "WITNESS_CHECK_FAILED"
     elif wv is not None and wv.verdict == "no_record":
         # C9 (pre-invite audit): `wv is not None` only when the CALLER explicitly

@@ -49,6 +49,8 @@ NEW_FIELDS = {
     # verify --witness compares every pin (review round 5)
     "pins_compared": "verify --witness", "earlier_pin": "verify --witness",
     "equivocation": "verify --witness",
+    # strict pins and the pack namespace (review round 7)
+    "witness_unreadable": "verify --witness", "namespace_checked": "evidence-pack verify",
 }
 
 
