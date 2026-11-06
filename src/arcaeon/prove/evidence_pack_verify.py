@@ -1190,6 +1190,22 @@ def _equivocation(history: list):
     return None
 
 
+def _every_pin_by_rows(records: Path, pins: list) -> tuple[str, str]:
+    """("consistent" | "rewritten", detail): each pin with a usable row count
+    and chain set against records.jsonl's chain at that row, lower-cased.
+    Used when records.jsonl fails its own chain, which another step reports."""
+    from arcaeon.record.ledger import chain_at
+    for p in pins:
+        r, c = p.get("rows"), p.get("chain")
+        if not (_int_rows(p) and r > 0 and isinstance(c, str) and c):
+            continue
+        here = chain_at(records, r)
+        if str(here).lower() != c.lower():
+            return "rewritten", (f"records.jsonl's chain at row {r} ({here}) differs from "
+                                 f"the pin's ({c})")
+    return "consistent", "records.jsonl holds every pin's chain at its row"
+
+
 class _PinsUpTo:
     """A pin file seen only up to a row count: the pins a pack whose records
     hold `rows` rows can be held to. Same verify() as the file itself."""
@@ -1265,19 +1281,26 @@ def _check_local(pack: Path, pin: dict, witness) -> dict:
                                 "two heads at one height")}
         view = _PinsUpTo(store, head_rows)
         via = verify_against_witness(view, ns, records)
-        res.update({"as_of": hit.get("as_of"), "against_every_pin": via.verdict,
+        verdict, detail = via.verdict, via.detail
+        if verdict == "local_broken":
+            # records.jsonl fails its own chain: the chain step already says
+            # BROKEN for that. This step still answers its own question, does
+            # records.jsonl hold every pin's chain at that pin's row, read
+            # straight off the rows (no self-check to stop at).
+            verdict, detail = _every_pin_by_rows(pack / "records.jsonl", view.history(ns))
+        res.update({"as_of": hit.get("as_of"), "against_every_pin": verdict,
                     "pins_compared": len(view.history(ns)),
                     "pins_past_head": len(history) - len(view.history(ns))})
-        if via.verdict == "consistent":
+        if verdict == "consistent":
             return {**res, "verdict": V.VERIFIED}
-        if via.verdict in ("truncated", "rewritten", "witness_broken", "local_broken"):
+        if verdict in ("truncated", "rewritten", "witness_broken"):
             return {**res, "verdict": V.BROKEN, "finding": (
                 f"records.jsonl holds the pin the pack names for {ns!r} (rows {rows}), "
-                f"but not every pin in the pin file: {via.verdict}: {via.detail}")}
+                f"but not every pin in the pin file: {verdict}: {detail}")}
         return {**res, "verdict": V.COULD_NOT_LOOK, **V.could_not_look(
             f"every pin for {ns!r} compared with records.jsonl", str(witness),
-            "name_not_found" if via.verdict == "no_record" else "unreadable",
-            f"the pins could not all be compared ({via.verdict}: {via.detail})")}
+            "name_not_found" if verdict == "no_record" else "unreadable",
+            f"the pins could not all be compared ({verdict}: {detail})")}
     return {**res, "verdict": V.BROKEN, "finding": (
         f"the pin file holds no pin for {ns!r} at rows {rows} with chain {chain}, "
         "the pin the pack says it was checked against")}

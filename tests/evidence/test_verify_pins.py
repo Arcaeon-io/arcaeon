@@ -171,6 +171,17 @@ def test_repin_after_rewrite_does_not_launder_the_pack(ledger, tmp_path):
     assert st["pins"][0]["against_every_pin"] == "rewritten"
     assert "against_latest_pin" not in st["pins"][0]
     assert "rewritten" in st["finding"] and "earlier pin" in st["finding"]
+    # Tamper one payload byte as well: records.jsonl now fails its own chain
+    # (the chain step's BROKEN). The pins step still reads every pin off the
+    # rows, so the re-pinned rewrite is still named here, not hidden behind
+    # "local_broken".
+    rec = out / "records.jsonl"
+    b = rec.read_bytes()
+    i = b.index(b"rewritten")
+    rec.write_bytes(b[:i] + b"R" + b[i + 1:])
+    st = _step(verify_pack(out, witness=pins))
+    assert st["verdict"] == V.BROKEN
+    assert st["pins"][0]["against_every_pin"] == "rewritten"
 
 
 def test_local_pin_ok_reports_every_pin_compared(local_pack, pins):
