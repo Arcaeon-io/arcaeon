@@ -850,6 +850,58 @@ def test_verify_rows_since_pin_truncation_is_broken(tmp_path, capsys):
     assert "fewer row(s) than its last pin" in cap.err
 
 
+def _rewrite_same_length(tmp_path, p, ops):
+    """Write a fresh, fully chained ledger of `ops` and put it in place of `p`:
+    every chain recomputed, so the file verifies clean on its own."""
+    fake = tmp_path / "rewritten.jsonl"
+    for op in ops:
+        cli.main(["log", str(fake), json.dumps(op)])
+    p.write_bytes(fake.read_bytes())
+
+
+def test_verify_witness_same_length_rewrite_is_broken(tmp_path, capsys):
+    # Break-it page finding 2026-11-05: a rewrite with the same row count and
+    # every chain recomputed verified clean on its own AND read rows_since_pin 0
+    # against the pin, so verify --witness said VERIFIED. The pin holds the
+    # chain at its row; verify must compare it.
+    p = tmp_path / "a.jsonl"
+    w = tmp_path / "pins.jsonl"
+    for i in range(4):
+        cli.main(["log", str(p), json.dumps({"note": "budget", "dollars": 40 + i})])
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 0
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 0
+    j = json.loads(capsys.readouterr().out)
+    assert j["since_pin"]["chain_matches"] is True and "rewritten" not in j["since_pin"]
+
+    _rewrite_same_length(tmp_path, p, [{"note": "budget", "dollars": 400 + i} for i in range(4)])
+    capsys.readouterr()
+    assert cli.main(["verify", str(p)]) == 0          # on its own the chain is clean
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w), "--ns", "demo"]) == 1
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    sp = j["since_pin"]
+    assert j["verdict"] == "BROKEN"
+    assert sp["rows_since_pin"] == 0 and sp["rewritten"] is True
+    assert sp["chain_matches"] is False and sp["chain_at_pin"] != sp["pinned_chain"]
+    assert "differs from its last pin" in cap.err and "rewritten" in cap.err
+
+
+def test_verify_witness_rewrite_then_growth_is_broken(tmp_path, capsys):
+    # More rows than the pin does not excuse a different chain at the pinned row.
+    p = tmp_path / "a.jsonl"
+    w = tmp_path / "pins.jsonl"
+    for i in range(3):
+        cli.main(["log", str(p), json.dumps({"op": i})])
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 0
+    _rewrite_same_length(tmp_path, p, [{"op": 100 + i} for i in range(5)])
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 1
+    sp = json.loads(capsys.readouterr().out)["since_pin"]
+    assert sp["rows_since_pin"] == 2 and sp["rewritten"] is True
+
+
 def test_verify_rows_since_pin_absent_or_ambiguous(tmp_path, capsys):
     p = tmp_path / "a.jsonl"
     cli.main(["log", str(p), '{"op": 1}'])

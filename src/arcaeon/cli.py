@@ -380,7 +380,9 @@ def _verify(argv) -> int:
     usage = ("usage: arcaeon verify <ledger.jsonl> [--strict] [--witness PINS [--ns NS]]\n"
              "exit 0 VERIFIED, 1 BROKEN, 3 COULD NOT LOOK (rows the chain could not speak "
              "for, or a file that could not be read). With --witness (a local pin file) "
-             "it also says how many rows were added since the ledger's last pin there.")
+             "it also says how many rows were added since the ledger's last pin there, "
+             "and is BROKEN if rows were cut off or the chain at the pinned row differs "
+             "from the pin.")
     if _wants_help(argv):
         print(usage)
         return V.EXIT_GOOD
@@ -443,6 +445,18 @@ def _verify(argv) -> int:
                 word = report["verdict"] = V.BROKEN
             print(f"{V.BROKEN}: the ledger holds {-sp['rows_since_pin']} fewer row(s) than "
                   f"its last pin ({sp['namespace']}, {sp['pinned_rows']} rows)", file=sys.stderr)
+        elif sp.get("rows_since_pin") is not None and sp.get("chain_matches") is not True:
+            # Same row count (or more) but the ledger no longer says, at the
+            # pinned row, the chain value the pin recorded: the history up to
+            # that row was rewritten, even if every chain was recomputed so the
+            # file verifies on its own. Counting rows alone cannot see this.
+            sp["rewritten"] = True
+            if word != V.BROKEN:
+                word = report["verdict"] = V.BROKEN
+            print(f"{V.BROKEN}: the ledger's chain at the pinned row {sp['pinned_rows']} "
+                  f"({sp['chain_at_pin']}) differs from its last pin ({sp['namespace']}, "
+                  f"{sp['pinned_chain']}): history at or before that row was rewritten",
+                  file=sys.stderr)
         elif sp.get("rows_since_pin") is not None:
             print(f"rows added since the last pin ({sp['namespace']}, {sp['pinned_rows']} "
                   f"rows): {sp['rows_since_pin']}", file=sys.stderr)
@@ -488,8 +502,20 @@ def _rows_since_pin_report(ledger: str, pins: str, ns: str | None) -> dict:
     if n is None:
         return {"rows_since_pin": None, "namespace": ns,
                 "reason": "this install has no witness.rows_since_pin"}
-    return {"rows_since_pin": n, "namespace": ns, "pinned_rows": pin.get("rows"),
-            "pinned_chain": pin.get("chain")}
+    out = {"rows_since_pin": n, "namespace": ns, "pinned_rows": pin.get("rows"),
+           "pinned_chain": pin.get("chain")}
+    if n >= 0:
+        # The pin is (rows, chain). The count says nothing was cut off; the
+        # chain at the pinned row says nothing before it was rewritten. Same
+        # comparison as witness.verify_against_witness: chain_at counts rows
+        # exactly as Head.rows (and so the pin) does.
+        from arcaeon.record.ledger import chain_at
+        here = chain_at(ledger, pin["rows"])
+        pinned = pin.get("chain")
+        out["chain_at_pin"] = here
+        out["chain_matches"] = (isinstance(here, str) and isinstance(pinned, str)
+                                and here.lower() == pinned.lower())
+    return out
 
 
 def _receipt(argv) -> int:

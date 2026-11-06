@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **`verify --witness` compares the pinned chain.** `arcaeon verify LEDGER --witness PINS` now also compares the ledger's chain at the pinned row with the pin's `chain`. `since_pin` gains `chain_at_pin` (what the ledger says at the pinned row) and `chain_matches` (true or false; absent when rows were cut off); on a mismatch it gains `rewritten: true` and the verdict is BROKEN, exit 1. Before, only the row count was compared, so a rewrite of the same length with every chain recomputed read VERIFIED with `rows_since_pin` 0.
 - **Bearer classes.** A pack's manifest now reads `pack_schema` 2 and the pack holds `README.json` (`bearer_schema`, `page`, `classes`, `counts`, and `sentences`: `id`, `line`, `sha256`, `class`, and `falsifier` on an `asserted` one), hashed in `files`. Each sentence line of README.md ends in `[bytes]`, `[order]` or `[asserted; falsifier: ...]`, and page one gains a legend line. `evidence-pack verify --json` adds `bearer` (the class counts, `null` for a schema 1 pack). A schema 1 pack with no README.json and no brackets verifies as before and prints `bearer classes: not present (pack schema 1)`.
 
 ## 0.10.0 (2026-09-27)

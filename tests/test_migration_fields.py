@@ -43,6 +43,9 @@ NEW_FIELDS = {
     # AAT chain (lane D, K062, K063)
     "prev_hash": "K062 AAT chain", "aat_chain": "K063 AAT chain",
     "which_chain": "K063 AAT chain", "chain": "K040/K062 chain",
+    # verify --witness (the pinned chain, break-it page 2026-11-05)
+    "chain_at_pin": "verify --witness", "chain_matches": "verify --witness",
+    "rewritten": "verify --witness",
 }
 
 
