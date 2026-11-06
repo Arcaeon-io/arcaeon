@@ -435,14 +435,22 @@ def _verify(argv) -> int:
         print(f"{V.COULD_NOT_LOOK} ({d['reason_word']}): looked for {d['looked_for']} "
               f"in {d['where']}: {d['reason']}", file=sys.stderr)
     if pins:
-        report["since_pin"] = _rows_since_pin_report(path, pins, ns)
+        # A ledger that could not be read has no rows and no chain to set
+        # against a pin: comparing would call a missing file "truncated".
+        report["since_pin"] = (
+            {"rows_since_pin": None,
+             "reason": "the ledger could not be read, so nothing was compared with the pin"}
+            if unread else _rows_since_pin_report(path, pins, ns))
         sp = report["since_pin"]
+        # A truncation or a rewrite found against the pin is BROKEN whatever
+        # the ledger said on its own: VERIFIED, or COULD NOT LOOK because some
+        # rows carry no chain. The pin speaks for the rows the chain cannot,
+        # and both detections are treated the same way.
         if sp.get("rows_since_pin") is not None and sp["rows_since_pin"] < 0:
             # Fewer rows than were pinned: rows were cut off the end. A chain
             # that verifies on its own cannot see this; the pin can.
             sp["truncated"] = True
-            if word == V.VERIFIED:
-                word = report["verdict"] = V.BROKEN
+            word = report["verdict"] = V.BROKEN
             print(f"{V.BROKEN}: the ledger holds {-sp['rows_since_pin']} fewer row(s) than "
                   f"its last pin ({sp['namespace']}, {sp['pinned_rows']} rows)", file=sys.stderr)
         elif sp.get("rows_since_pin") is not None and sp.get("chain_matches") is not True:
@@ -451,8 +459,7 @@ def _verify(argv) -> int:
             # that row was rewritten, even if every chain was recomputed so the
             # file verifies on its own. Counting rows alone cannot see this.
             sp["rewritten"] = True
-            if word != V.BROKEN:
-                word = report["verdict"] = V.BROKEN
+            word = report["verdict"] = V.BROKEN
             print(f"{V.BROKEN}: the ledger's chain at the pinned row {sp['pinned_rows']} "
                   f"({sp['chain_at_pin']}) differs from its last pin ({sp['namespace']}, "
                   f"{sp['pinned_chain']}): history at or before that row was rewritten",
@@ -494,6 +501,24 @@ def _rows_since_pin_report(ledger: str, pins: str, ns: str | None) -> dict:
     pin = store.latest(ns)
     if not pin:
         return {"rows_since_pin": None, "namespace": ns, "reason": f"no pin for {ns} in {pins}"}
+    p_rows, p_chain = pin.get("rows"), pin.get("chain")
+    if not isinstance(p_rows, int) or isinstance(p_rows, bool) or p_rows < 0             or not isinstance(p_chain, str) or not p_chain:
+        # A pin without a usable (rows, chain) cannot be compared. Before this
+        # check a pin with no chain read as a chain mismatch: BROKEN, "rewritten".
+        return {"rows_since_pin": None, "namespace": ns, "pinned_rows": p_rows,
+                "pinned_chain": p_chain,
+                "reason": f"the latest pin for {ns} in {pins} is malformed: rows must be a "
+                          f"non-negative integer and chain a non-empty string "
+                          f"(rows={p_rows!r}, chain={p_chain!r})"}
+    if p_rows == 0:
+        # A ZERO-ROW PIN CONSTRAINS NOTHING: its chain is genesis, and so is
+        # every ledger's at row 0, so the comparison would match any ledger.
+        # Refused the way witness.verify_against_witness refuses it (no_record).
+        return {"rows_since_pin": None, "namespace": ns, "pinned_rows": 0,
+                "pinned_chain": p_chain, "chain_matches": None,
+                "reason": f"the latest pin for {ns} in {pins} was taken over an empty log "
+                          f"(0 rows): it constrains nothing, so no chain was compared; "
+                          f"re-pin against a non-empty ledger"}
     rows_since = getattr(W, "rows_since_pin", None)
     try:
         n = rows_since(ledger, pin) if rows_since else None
@@ -505,10 +530,12 @@ def _rows_since_pin_report(ledger: str, pins: str, ns: str | None) -> dict:
     out = {"rows_since_pin": n, "namespace": ns, "pinned_rows": pin.get("rows"),
            "pinned_chain": pin.get("chain")}
     if n >= 0:
-        # The pin is (rows, chain). The count says nothing was cut off; the
-        # chain at the pinned row says nothing before it was rewritten. Same
-        # comparison as witness.verify_against_witness: chain_at counts rows
-        # exactly as Head.rows (and so the pin) does.
+        # The pin is (rows, chain), rows >= 1 here (a zero-row pin is refused
+        # above). n >= 0 means no pinned row was cut off the end; a chain at
+        # row `rows` equal to the pin's means no row up to it was changed. A
+        # differing chain means a rewrite at or before that row. Same
+        # comparison as witness.verify_against_witness; chain_at counts rows
+        # as Head.rows (and so the pin) does.
         from arcaeon.record.ledger import chain_at
         here = chain_at(ledger, pin["rows"])
         pinned = pin.get("chain")
