@@ -1108,18 +1108,179 @@ def test_verify_witness_missing_ledger_is_not_truncation(tmp_path, capsys):
     assert "could not be read" in j["since_pin"]["reason"]
 
 
+def _verified_ledger(tmp_path):
+    p = tmp_path / "a.jsonl"
+    for i in range(2):
+        cli.main(["log", str(p), json.dumps({"op": i})])
+    return p
+
+
+def _could_not_look_for_the_pin(capsys, argv, reason_word, where, says):
+    assert cli.main(argv) == 3
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    assert j["verdict"] == "COULD NOT LOOK"
+    assert j["reason_word"] == reason_word and j["where"] == str(where)
+    assert j["looked_for"] and says in j["reason"]
+    assert j["since_pin"]["rows_since_pin"] is None and j["since_pin"]["reason_word"] == reason_word
+    assert "no pin compared: " in cap.err and f"COULD NOT LOOK ({reason_word}): looked for " in cap.err
+    return j
+
+
+def test_verify_witness_that_compared_nothing_is_could_not_look(tmp_path, capsys):
+    # --witness that compared no pin used to read VERIFIED, exit 0: a caller
+    # who asked for the pin check got a pass for a check that never ran.
+    p = _verified_ledger(tmp_path)
+    capsys.readouterr()
+    assert cli.main(["verify", str(p)]) == 0                  # without --witness: VERIFIED
+    capsys.readouterr()
+
+    none = tmp_path / "none.jsonl"
+    _could_not_look_for_the_pin(capsys, ["verify", str(p), "--witness", str(none)],
+                                "missing", none, "no pin file at")
+
+    bad = tmp_path / "bad.jsonl"
+    bad.write_bytes(b"\xff\xfe not text\n")
+    _could_not_look_for_the_pin(capsys, ["verify", str(p), "--witness", str(bad)],
+                                "unreadable", bad, "the pin file cannot be read")
+
+    empty = tmp_path / "empty.jsonl"
+    empty.write_text("", encoding="utf-8")
+    _could_not_look_for_the_pin(capsys, ["verify", str(p), "--witness", str(empty)],
+                                "empty", empty, "holds no pins")
+
+    w = tmp_path / "pins.jsonl"
+    cli.main(["pin", str(p), "--ns", "one", "--witness", str(w)])
+    cli.main(["pin", str(p), "--ns", "two", "--witness", str(w)])
+    capsys.readouterr()
+    _could_not_look_for_the_pin(capsys, ["verify", str(p), "--witness", str(w)],
+                                "name_not_found", w, "pass --ns")
+    _could_not_look_for_the_pin(capsys, ["verify", str(p), "--witness", str(w), "--ns", "three"],
+                                "name_not_found", w, "no pin for three")
+    # The same file with --ns that has a pin: compared, VERIFIED.
+    assert cli.main(["verify", str(p), "--witness", str(w), "--ns", "one"]) == 0
+    assert json.loads(capsys.readouterr().out)["since_pin"]["chain_matches"] is True
+
+
+def test_verify_witness_malformed_or_zero_row_pin_is_could_not_look(tmp_path, capsys):
+    p = _verified_ledger(tmp_path)
+    w = tmp_path / "pins.jsonl"
+    w.write_text(json.dumps({"namespace": "demo", "rows": "2", "chain": "x" * 64}) + "\n",
+                 encoding="utf-8")
+    capsys.readouterr()
+    _could_not_look_for_the_pin(capsys, ["verify", str(p), "--witness", str(w)],
+                                "unreadable", w, "malformed")
+    z = tmp_path / "zero.jsonl"
+    _hand_pin(z, "demo", 0, "genesis")
+    _could_not_look_for_the_pin(capsys, ["verify", str(p), "--witness", str(z)],
+                                "empty", z, "constrains nothing")
+
+
+def test_verify_witness_compared_nothing_keeps_broken_and_the_ledgers_own_reason(tmp_path, capsys):
+    # BROKEN on its own stays BROKEN; COULD NOT LOOK on its own keeps its reason.
+    p = _verified_ledger(tmp_path)
+    lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
+    row = json.loads(lines[0])
+    row["op"] = 99
+    p.write_text(json.dumps(row) + "\n" + lines[1], encoding="utf-8")
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(tmp_path / "none.jsonl")]) == 1
+    assert json.loads(capsys.readouterr().out)["verdict"] == "BROKEN"
+    b = tmp_path / "b.jsonl"
+    b.write_text('{"a": 1}\n', encoding="utf-8")
+    assert cli.main(["verify", str(b), "--witness", str(tmp_path / "none.jsonl")]) == 3
+    j = json.loads(capsys.readouterr().out)
+    assert j["reason_word"] == "bounded" and j["where"] == str(b)
+    assert j["since_pin"]["reason_word"] == "missing"
+
+
+def test_verify_witness_chainless_pin_compares_rows_and_is_could_not_look(tmp_path, capsys):
+    # Usable rows, no usable chain: the row count is compared (a truncation is
+    # BROKEN, see test_verify_witness_chainless_pin_still_catches_truncation),
+    # the chain is not, so a ledger that verifies on its own is COULD NOT LOOK.
+    p = _verified_ledger(tmp_path)
+    w = tmp_path / "pins.jsonl"
+    w.write_text(json.dumps({"namespace": "demo", "rows": 2, "chain": None}) + "\n", encoding="utf-8")
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 3
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    sp = j["since_pin"]
+    assert j["verdict"] == "COULD NOT LOOK" and j["reason_word"] == "unreadable"
+    assert j["where"] == str(w) and "malformed" in j["reason"]
+    assert sp["rows_since_pin"] == 0 and sp["chain_matches"] is None
+    assert sp["where"] == str(w) and sp["reason_word"] == "unreadable"
+    assert "chain not compared with the pin" in cap.err and "no pin compared" not in cap.err
+
+
+def test_verify_witness_unreadable_ledger_since_pin_points_at_the_ledger(tmp_path, capsys):
+    # The ledger could not be read: since_pin's where is the ledger, not the
+    # pin file, and its reason_word is the ledger's (missing / unreadable).
+    p = _verified_ledger(tmp_path)
+    w = tmp_path / "pins.jsonl"
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 0
+    gone = tmp_path / "gone.jsonl"
+    capsys.readouterr()
+    assert cli.main(["verify", str(gone), "--witness", str(w)]) == 3
+    j = json.loads(capsys.readouterr().out)
+    sp = j["since_pin"]
+    assert sp["rows_since_pin"] is None and "truncated" not in sp
+    assert sp["where"] == str(gone) and sp["reason_word"] == "missing"
+    assert sp["looked_for"] == "a ledger file to compare with the pin"
+    assert "could not be read" in sp["reason"]
+    assert j["where"] == str(gone) and j["reason_word"] == "missing"     # the ledger's own
+    d = tmp_path / "adir"
+    d.mkdir()
+    capsys.readouterr()
+    assert cli.main(["verify", str(d), "--witness", str(w)]) == 3
+    sp = json.loads(capsys.readouterr().out)["since_pin"]
+    assert sp["where"] == str(d) and sp["reason_word"] == "unreadable"
+
+
+def test_verify_witness_row_count_failure_points_at_the_ledger(tmp_path, capsys, monkeypatch):
+    # rows_since_pin reads the ledger; when that raises, the ledger is what
+    # could not be looked at, not the pin file.
+    from arcaeon.record.ledger import witness as W
+    p = _verified_ledger(tmp_path)
+    w = tmp_path / "pins.jsonl"
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 0
+
+    def boom(ledger, pin):
+        raise OSError("disk went away")
+    monkeypatch.setattr(W, "rows_since_pin", boom)
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 3
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    sp = j["since_pin"]
+    assert j["verdict"] == "COULD NOT LOOK"
+    assert sp["rows_since_pin"] is None and sp["namespace"] == "demo"
+    assert sp["where"] == str(p) and sp["reason_word"] == "unreadable"
+    assert "disk went away" in sp["reason"] and "rows could not be counted" in sp["reason"]
+    assert j["where"] == str(p) and j["reason_word"] == "unreadable"
+    assert "no pin compared: " in cap.err
+
+    monkeypatch.delattr(W, "rows_since_pin")
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 3
+    sp = json.loads(capsys.readouterr().out)["since_pin"]
+    assert sp["reason_word"] == "missing" and sp["where"] == "arcaeon.record.ledger.witness"
+    assert sp["looked_for"] == "witness.rows_since_pin in this install"
+
+
 def test_verify_rows_since_pin_absent_or_ambiguous(tmp_path, capsys):
     p = tmp_path / "a.jsonl"
     cli.main(["log", str(p), '{"op": 1}'])
     capsys.readouterr()
-    assert cli.main(["verify", str(p), "--witness", str(tmp_path / "none.jsonl")]) == 0
+    # No comparison made is COULD NOT LOOK, exit 3 (it was VERIFIED, exit 0).
+    assert cli.main(["verify", str(p), "--witness", str(tmp_path / "none.jsonl")]) == 3
     j = json.loads(capsys.readouterr().out)
     assert j["since_pin"]["rows_since_pin"] is None
     w = tmp_path / "pins.jsonl"
     cli.main(["pin", str(p), "--ns", "one", "--witness", str(w)])
     cli.main(["pin", str(p), "--ns", "two", "--witness", str(w)])
     capsys.readouterr()
-    assert cli.main(["verify", str(p), "--witness", str(w)]) == 0
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 3
     assert "pass --ns" in json.loads(capsys.readouterr().out)["since_pin"]["reason"]
     assert cli.main(["verify", str(p), "--ns", "one"]) == 2
     assert cli.main(["verify", str(p), "--witness"]) == 2
