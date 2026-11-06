@@ -389,3 +389,64 @@ def test_r7_pack_all_chainless_pin_file_is_could_not_look(ledger, tmp_path):
     res = verify_pack(out, witness=pins, namespace=NS)
     st = _step(res)
     assert st["verdict"] == V.COULD_NOT_LOOK and res["exit"] == 3
+
+
+# -- review round 8: legacy genesis pins and an empty pin file (unlisted path) --
+
+def _r8_legacy_then_chained(tmp_path):
+    """A ledger whose rows 1-3 were written before chaining (no chain) and rows
+    4-6 after (chained), pinned honestly at (3, genesis) and at (6, C6)."""
+    led = tmp_path / "legacy.jsonl"
+    led.write_text("".join(json.dumps({"ts": f"2026-09-0{i + 1}T10:00:00Z",
+                                       "agent": "agent-a", "event": "e"}) + "\n"
+                           for i in range(3)), encoding="utf-8")
+    pins = tmp_path / "r8pins.jsonl"
+    store = WitnessStore(pins)
+    p3 = publish_head(store, NS, Ledger(led))
+    assert (p3["rows"], p3["chain"]) == (3, "genesis")
+    lg = Ledger(led)
+    for i in range(3, 6):
+        lg.append({"ts": f"2026-09-0{i + 1}T10:00:00Z", "agent": "agent-a", "event": "e"})
+    p6 = publish_head(store, NS, Ledger(led))
+    assert p6["rows"] == 6 and p6["chain"] != "genesis"
+    return led, pins
+
+
+def test_r8_unlisted_pack_legacy_genesis_pin_plus_chained_pin_verifies(tmp_path):
+    """Pack lists no pin; the pin file holds (3, genesis) over chainless rows
+    and (6, C6) over chained ones, both honest. The genesis pin is not
+    comparable, not a problem: VERIFIED with pin 6 compared, not BROKEN."""
+    led, pins = _r8_legacy_then_chained(tmp_path)
+    out = tmp_path / "pack"
+    build_pack(led, out)
+    res = verify_pack(out, witness=pins)
+    st = _step(res)
+    assert st["verdict"] != V.BROKEN, st
+    assert st["verdict"] == V.VERIFIED, st
+    assert st["pins_compared"] == 1
+
+
+def test_r8_unlisted_pack_cut_below_a_genesis_pin_is_still_broken(tmp_path):
+    """The same honest pins, but the pack holds only 2 of the 3 rows the
+    genesis pin saw (and none of pin 6's): truncation, BROKEN."""
+    led, pins = _r8_legacy_then_chained(tmp_path)
+    lines = led.read_text(encoding="utf-8").splitlines(keepends=True)
+    led.write_text("".join(lines[:2]), encoding="utf-8")
+    out = tmp_path / "pack"
+    build_pack(led, out)
+    res = verify_pack(out, witness=pins, namespace=NS)
+    st = _step(res)
+    assert st["verdict"] == V.BROKEN and res["exit"] == 1, st
+    assert "row 3" in st["finding"]
+
+
+def test_r8_unlisted_pack_empty_pin_file_is_could_not_look(ledger, tmp_path):
+    """An empty pin file compared nothing: COULD NOT LOOK, never VERIFIED."""
+    out = tmp_path / "pack"
+    build_pack(ledger, out)
+    pins = tmp_path / "empty.jsonl"
+    pins.write_bytes(b"")
+    res = verify_pack(out, witness=pins)
+    st = _step(res)
+    assert st["verdict"] == V.COULD_NOT_LOOK and res["exit"] == 3, st
+    assert st["reason_word"] == "empty"

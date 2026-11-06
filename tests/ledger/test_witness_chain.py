@@ -968,3 +968,54 @@ def test_an_earlier_genesis_pin_over_unchained_rows_is_not_a_false_alarm(tmp_pat
     v = verify_against_witness(store, "ns", lg)
     assert v.verdict == "consistent", v
     assert cli.main(["verify", str(log), "--witness", str(store.path)]) != 1
+
+
+# -- review round 8: a "genesis" latest pin over chainless rows -----------------
+
+def _r8_legacy_log(tmp_path, n=3):
+    """n rows written before chaining (no chain on any row), pinned once by
+    publish_head, which reads that head as (n, "genesis")."""
+    log = tmp_path / "log.jsonl"
+    log.write_text("".join(json.dumps({"a": i}) + "\n" for i in range(n)), encoding="utf-8")
+    store = WitnessStore(tmp_path / "w.jsonl")
+    pin = publish_head(store, "ns", Ledger(log))
+    assert (pin["rows"], pin["chain"]) == (n, "genesis")
+    return log, store
+
+
+def test_r8_latest_genesis_pin_over_chainless_rows_is_not_truncated(tmp_path):
+    """Honest legacy data: 3 chainless rows pinned (3, genesis). The row is
+    there; it carries no chain and the pin reads genesis, so the pin is not
+    comparable. Not "truncated" (round 7 said it was), and since no pin was
+    compared, not "consistent" either: "no_record", falsy."""
+    log, store = _r8_legacy_log(tmp_path)
+    v = verify_against_witness(store, "ns", Ledger(log))
+    assert v.verdict != "truncated", v
+    assert v.verdict == "no_record" and not v, v
+    assert v.witness_rows == 3 and v.local_rows == 3
+    assert "no chain" in v.detail
+
+
+def test_r8_audit_finding_for_legacy_genesis_pin_is_not_truncation(tmp_path):
+    """The audit export's finding for the same honest legacy log is not
+    TRUNCATION_DETECTED: the witness check could not compare anything."""
+    from arcaeon.prove.audit import derive_finding
+    log, store = _r8_legacy_log(tmp_path)
+    lg = Ledger(log)
+    finding = derive_finding(lg.verify(), verify_against_witness(store, "ns", lg))
+    assert finding != "TRUNCATION_DETECTED"
+    assert finding == "WITNESS_CHECK_FAILED"
+
+
+def test_r8_real_truncation_below_a_genesis_pin_is_still_truncated(tmp_path):
+    """The round 8 rule is for a row that is THERE with no chain. A ledger cut
+    below the genesis pin's row count is truncation, as before."""
+    from arcaeon.prove.audit import derive_finding
+    log, store = _r8_legacy_log(tmp_path)
+    lines = log.read_text(encoding="utf-8").splitlines(keepends=True)
+    log.write_text("".join(lines[:2]), encoding="utf-8")
+    lg = Ledger(log)
+    v = verify_against_witness(store, "ns", lg)
+    assert v.verdict == "truncated" and not v, v
+    assert v.witness_rows == 3 and v.local_rows == 2
+    assert derive_finding(lg.verify(), v) == "TRUNCATION_DETECTED"

@@ -113,7 +113,10 @@ class WitnessVerdict:
                        witnessed row is unreachable: witnessed history is missing.
       "rewritten"   — the log has enough rows but its chain at the witnessed row
                        DIFFERS from the pin: history was rewritten from some point.
-      "no_record"   — the witness holds no pin for this namespace to check against.
+      "no_record"   — the witness holds no pin for this namespace to check against,
+                       or no pin it holds could be compared: a zero-row pin, or a
+                       "genesis" pin whose row in the log carries no chain (rows
+                       written before chaining; review round 8). Not a detection.
       "witness_broken" — the witness pin file fails its OWN chain: a pin from a
                        tampered witness cannot be trusted, so no comparison is run.
                        Also when the witness holds two different chains at one row
@@ -940,6 +943,20 @@ def verify_against_witness(store: WitnessStore, namespace: str,
                 witness_rows=w_rows, witness_chain=w_chain, local_rows=local_rows)
 
         local_chain_at = chain_at(ledger.path, w_rows)
+        if local_chain_at is None and w_chain == GENESIS:
+            # The row is there (local_rows >= w_rows above) but carries no
+            # chain, and the pin reads "genesis" (publish_head over rows
+            # written before chaining): no chain on either side, so this pin is
+            # NOT COMPARABLE -- not truncation, and never a confirmation
+            # (review round 8; the CLI's `chain_matches` null and
+            # evidence_pack_verify._chain_compared read it the same way).
+            v = _V("no_record",
+                   f"the witness pin for namespace {namespace!r} at row {w_rows} reads "
+                   f"'genesis' and the log's row {w_rows} carries no chain: nothing to "
+                   f"compare, so this pin neither confirms nor contradicts the log",
+                   witness_rows=w_rows, witness_chain=w_chain, local_rows=local_rows)
+            v.not_comparable = True
+            return v
         if local_chain_at is None:
             return _V(
                 "truncated",
@@ -965,6 +982,9 @@ def verify_against_witness(store: WitnessStore, namespace: str,
     verdict = _compare(pin)
     if verdict.verdict in ("truncated", "rewritten"):
         return verdict
+    # The best (highest-row) earlier pin whose chain WAS compared and agreed:
+    # it stands in for a latest pin that was not comparable (round 8).
+    agreed = None
     # The latest pin agrees (or constrains nothing): every earlier pin must
     # agree too. A detection against any of them is the verdict; an earlier
     # pin that constrains nothing (zero rows) is skipped. Every pin carries a
@@ -976,17 +996,25 @@ def verify_against_witness(store: WitnessStore, namespace: str,
             continue
         done.add(key)
         v = _compare(p)
-        c, r = p["chain"], p["rows"]
-        if v.verdict == "truncated" and local_rows >= r and c == GENESIS:
-            # The row is there but carries no chain, and the pin read "genesis"
-            # (publish_head over rows written before chaining): no chain on
-            # either side, so not comparable -- not a detection against an
-            # earlier pin the latest has since superseded.
-            continue
+        # A not-comparable earlier pin (genesis over a chainless row, or zero
+        # rows) comes back "no_record" from _compare and is skipped here.
         if v.verdict in ("truncated", "rewritten"):
             v.detail = (f"an earlier pin (row {p.get('rows')}) disagrees with the log, "
                         f"though the latest does not: {v.detail}")
             return v
+        if v.verdict == "consistent" and (agreed is None
+                                          or v.witness_rows > agreed.witness_rows):
+            agreed = v
+    if getattr(verdict, "not_comparable", False):
+        # The latest pin compared nothing. If an earlier pin's chain was
+        # compared and agreed, that is the confirmation; if none was, no pin
+        # was compared at all and the answer is "no_record", never consistent.
+        if agreed is not None:
+            agreed.detail += (f" (earlier pin at row {agreed.witness_rows}; the latest "
+                              f"pin, at row {pin['rows']}, reads 'genesis' over a row "
+                              f"with no chain and was not comparable)")
+            return agreed
+        return verdict
     return verdict
 
 # -- staleness: rows written since the last pin -------------------------------

@@ -1435,10 +1435,13 @@ def _unlisted_pins(pack: Path, manifest: dict, witness, namespace: str | None) -
     does not hold is BROKEN; a pin past the head is BROKEN "pin beyond head"
     when it was taken before the pack was built, COULD NOT LOOK "bounded"
     when the pack's (self-stated) build time predates it. Pins that cannot
-    be tied to these records are COULD NOT LOOK "name_not_found".
+    be tied to these records are COULD NOT LOOK "name_not_found", and an
+    empty pin file is COULD NOT LOOK "empty". A "genesis" pin over a row
+    with no chain is not comparable and not a problem (_chain_compared).
     """
     from arcaeon.record.ledger import Ledger, chain_at
     from arcaeon.record.ledger.witness import WitnessStore
+    from arcaeon.record.row import GENESIS
 
     wp = Path(witness)
     looked = "pins for this ledger in the pin file"
@@ -1488,7 +1491,12 @@ def _unlisted_pins(pack: Path, manifest: dict, witness, namespace: str | None) -
                        for h in map(strict_pin, store.history(ns)))]
     if not mine:
         if not names:
-            return {"verdict": V.VERIFIED}
+            # An empty pin file compared nothing: never VERIFIED (review round
+            # 8), as `verify --witness` reads it and as the CHANGELOG says.
+            return {"verdict": V.COULD_NOT_LOOK, **V.could_not_look(
+                looked, str(wp), "empty",
+                "the pin file holds no pin, so no pin's chain was compared with "
+                "records.jsonl")}
         return {"verdict": V.COULD_NOT_LOOK, **V.could_not_look(
             looked, str(wp), "name_not_found",
             f"the pack lists no pin and the pin file holds pins for {names}, none of "
@@ -1500,7 +1508,13 @@ def _unlisted_pins(pack: Path, manifest: dict, witness, namespace: str | None) -
         for h in map(strict_pin, store.history(ns)):
             rows, chain = h["rows"], h["chain"]
             if rows <= head_rows:
-                if _here(rows) != chain:
+                here = _here(rows)
+                if (not isinstance(here, str) or not here) and chain == GENESIS:
+                    # a "genesis" pin over a row with no chain (rows written
+                    # before chaining) is not comparable, not a problem: the
+                    # rule _chain_compared applies (review round 8)
+                    continue
+                if here != chain:
                     problems.append(f"the witness pinned {ns!r} at row {rows} with chain "
                                     f"{chain}; records.jsonl does not hold it")
                 continue
