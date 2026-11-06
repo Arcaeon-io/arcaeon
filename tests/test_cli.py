@@ -937,8 +937,10 @@ def test_verify_witness_zero_row_pin_compares_nothing(tmp_path, capsys):
     {"namespace": "demo", "rows": 2, "chain": ""},
 ])
 def test_verify_witness_malformed_pin_is_not_a_rewrite(tmp_path, capsys, row):
-    # A pin with no usable (rows, chain) cannot be compared. A pin with no
-    # chain used to read as a mismatch: BROKEN, "rewritten", exit 1.
+    # A pin with no usable (rows, chain) cannot be compared in full. A pin with
+    # no chain used to read as a mismatch: BROKEN, "rewritten", exit 1. With
+    # usable rows the row count is still compared (see the truncation test
+    # below); with unusable rows nothing is.
     p = tmp_path / "a.jsonl"
     w = tmp_path / "pins.jsonl"
     for i in range(2):
@@ -950,8 +952,70 @@ def test_verify_witness_malformed_pin_is_not_a_rewrite(tmp_path, capsys, row):
     j = json.loads(cap.out)
     sp = j["since_pin"]
     assert rc != 1 and j["verdict"] != "BROKEN"
-    assert sp["rows_since_pin"] is None and "malformed" in sp["reason"]
+    assert "malformed" in sp["reason"]
     assert "rewritten" not in sp and "truncated" not in sp
+    if row["chain"]:                                   # rows unusable: nothing compared
+        assert sp["rows_since_pin"] is None
+    else:                                              # rows compared, chain not
+        assert sp["rows_since_pin"] == 0 and sp["chain_matches"] is None
+        assert "chain not compared with the pin" in cap.err
+
+
+@pytest.mark.parametrize("chain", [None, ""])
+def test_verify_witness_chainless_pin_still_catches_truncation(tmp_path, capsys, chain):
+    # Review round 3 blocker: a pin with usable rows but no chain returned
+    # before the row count was compared, so a ledger cut below the pin read
+    # VERIFIED, exit 0. The row count alone is enough to see truncation
+    # (witness.verify_against_witness checks it before the chain).
+    p = tmp_path / "a.jsonl"
+    w = tmp_path / "pins.jsonl"
+    for i in range(5):
+        cli.main(["log", str(p), json.dumps({"op": i})])
+    w.write_text(json.dumps({"namespace": "demo", "rows": 5, "chain": chain}) + "\n",
+                 encoding="utf-8")
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) != 1     # whole: not BROKEN
+    sp = json.loads(capsys.readouterr().out)["since_pin"]
+    assert sp["rows_since_pin"] == 0 and sp["chain_matches"] is None
+    assert "chain_at_pin" not in sp and "rewritten" not in sp and "truncated" not in sp
+    lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
+    p.write_text("".join(lines[:3]), encoding="utf-8")                # cut two rows off
+    capsys.readouterr()
+    assert cli.main(["verify", str(p)]) == 0                          # alone: clean
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 1
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    assert j["verdict"] == "BROKEN" and j["since_pin"]["truncated"] is True
+    assert j["since_pin"]["rows_since_pin"] == -2
+    assert "fewer row(s) than its last pin" in cap.err
+
+
+def test_verify_witness_library_pin_of_an_unchained_ledger_is_not_a_rewrite(tmp_path, capsys):
+    # Review round 3 minor: publish_head pins a ledger whose rows carry no
+    # chain at "genesis"; chain_at gives None for its row, which read as a
+    # mismatch: BROKEN, "rewritten". There is no chain there to compare: the
+    # ledger stays COULD NOT LOOK (bounded), and a truncation is still BROKEN.
+    from arcaeon.record.ledger import Ledger
+    from arcaeon.record.ledger.witness import WitnessStore, publish_head
+    p = tmp_path / "a.jsonl"
+    w = tmp_path / "pins.jsonl"
+    p.write_text("".join(json.dumps({"a": i}) + "\n" for i in range(3)), encoding="utf-8")
+    pin = publish_head(WitnessStore(str(w)), "demo", Ledger(str(p)))
+    assert pin["chain"] == "genesis" and pin["rows"] == 3
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 3
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    sp = j["since_pin"]
+    assert j["verdict"] == "COULD NOT LOOK" and j["reason_word"] == "bounded"
+    assert sp["rows_since_pin"] == 0 and sp["chain_matches"] is None
+    assert sp["chain_at_pin"] is None and "carries no chain" in sp["reason"]
+    assert "rewritten" not in sp and "rewritten" not in cap.err
+    p.write_text(json.dumps({"a": 0}) + "\n", encoding="utf-8")
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 1
+    assert json.loads(capsys.readouterr().out)["since_pin"]["truncated"] is True
 
 
 def test_verify_witness_several_pins_compares_the_latest(tmp_path, capsys):
