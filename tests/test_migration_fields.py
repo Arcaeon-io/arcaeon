@@ -46,6 +46,9 @@ NEW_FIELDS = {
     # verify --witness (the pinned chain, break-it page 2026-11-05)
     "chain_at_pin": "verify --witness", "chain_matches": "verify --witness",
     "rewritten": "verify --witness",
+    # verify --witness compares every pin (review round 5)
+    "pins_compared": "verify --witness", "earlier_pin": "verify --witness",
+    "equivocation": "verify --witness",
 }
 
 

@@ -714,7 +714,10 @@ def _a_local_tampered(d):
 
 def _a_witness_tampered(d):
     store, log = _pinned(d)
-    store.record("ns", Head(chain="b" * 32, rows=N_ROWS, as_of="2026-09-22T00:00:00Z"))
+    # N_ROWS + 1, not N_ROWS: a second chain at the pinned height is now
+    # refused by record() as equivocation (review round 5); the case under
+    # test is the edit below, not that.
+    store.record("ns", Head(chain="b" * 32, rows=N_ROWS + 1, as_of="2026-09-22T00:00:00Z"))
     _edit_pin(store, 0, lambda o: o.__setitem__("rows", 1))
     return store, "ns", log
 
