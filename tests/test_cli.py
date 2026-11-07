@@ -850,22 +850,534 @@ def test_verify_rows_since_pin_truncation_is_broken(tmp_path, capsys):
     assert "fewer row(s) than its last pin" in cap.err
 
 
+def _rewrite_same_length(tmp_path, p, ops):
+    """Write a fresh, fully chained ledger of `ops` and put it in place of `p`:
+    every chain recomputed, so the file verifies clean on its own."""
+    fake = tmp_path / "rewritten.jsonl"
+    for op in ops:
+        cli.main(["log", str(fake), json.dumps(op)])
+    p.write_bytes(fake.read_bytes())
+
+
+def test_verify_witness_same_length_rewrite_is_broken(tmp_path, capsys):
+    # Break-it page finding 2026-11-05: a rewrite with the same row count and
+    # every chain recomputed verified clean on its own AND read rows_since_pin 0
+    # against the pin, so verify --witness said VERIFIED. The pin holds the
+    # chain at its row; verify must compare it.
+    p = tmp_path / "a.jsonl"
+    w = tmp_path / "pins.jsonl"
+    for i in range(4):
+        cli.main(["log", str(p), json.dumps({"note": "budget", "dollars": 40 + i})])
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 0
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 0
+    j = json.loads(capsys.readouterr().out)
+    assert j["since_pin"]["chain_matches"] is True and "rewritten" not in j["since_pin"]
+
+    _rewrite_same_length(tmp_path, p, [{"note": "budget", "dollars": 400 + i} for i in range(4)])
+    capsys.readouterr()
+    assert cli.main(["verify", str(p)]) == 0          # on its own the chain is clean
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w), "--ns", "demo"]) == 1
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    sp = j["since_pin"]
+    assert j["verdict"] == "BROKEN"
+    assert sp["rows_since_pin"] == 0 and sp["rewritten"] is True
+    assert sp["chain_matches"] is False and sp["chain_at_pin"] != sp["pinned_chain"]
+    assert "differs from its last pin" in cap.err and "rewritten" in cap.err
+
+
+def test_verify_witness_rewrite_then_growth_is_broken(tmp_path, capsys):
+    # More rows than the pin does not excuse a different chain at the pinned row.
+    p = tmp_path / "a.jsonl"
+    w = tmp_path / "pins.jsonl"
+    for i in range(3):
+        cli.main(["log", str(p), json.dumps({"op": i})])
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 0
+    _rewrite_same_length(tmp_path, p, [{"op": 100 + i} for i in range(5)])
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 1
+    sp = json.loads(capsys.readouterr().out)["since_pin"]
+    assert sp["rows_since_pin"] == 2 and sp["rewritten"] is True
+
+
+def _hand_pin(w, ns, rows, chain, as_of="2026-11-05T00:00:00Z"):
+    """Record a pin straight into a local store, bypassing publish_head's
+    refusals (zero rows, a ledger that does not verify): pins minted before
+    those refusals, or by another store, still reach verify."""
+    from arcaeon.record.ledger import Head
+    from arcaeon.record.ledger.witness import WitnessStore
+    WitnessStore(str(w)).record(ns, Head(chain=chain, rows=rows, as_of=as_of))
+
+
+def test_verify_witness_zero_row_pin_compares_nothing(tmp_path, capsys):
+    # A zero-row pin's chain is genesis, and chain_at(ledger, 0) is genesis for
+    # every ledger: it used to read chain_matches true against anything.
+    p = tmp_path / "a.jsonl"
+    w = tmp_path / "pins.jsonl"
+    for i in range(2):
+        cli.main(["log", str(p), json.dumps({"op": i})])
+    _hand_pin(w, "demo", 0, "genesis")
+    capsys.readouterr()
+    cli.main(["verify", str(p), "--witness", str(w)])
+    cap = capsys.readouterr()
+    sp = json.loads(cap.out)["since_pin"]
+    assert sp["chain_matches"] is None and sp["rows_since_pin"] is None
+    assert sp["pinned_rows"] == 0 and "rewritten" not in sp and "truncated" not in sp
+    assert "empty log (0 rows)" in sp["reason"] and "constrains nothing" in sp["reason"]
+    assert "no pin compared:" in cap.err
+
+
+@pytest.mark.parametrize("row", [
+    {"namespace": "demo", "rows": "2", "chain": "a" * 32},
+    {"namespace": "demo", "rows": -1, "chain": "a" * 32},
+    {"namespace": "demo", "rows": True, "chain": "a" * 32},
+    {"namespace": "demo", "rows": 2.0, "chain": "a" * 32},
+    {"namespace": "demo", "rows": 2, "chain": None},
+    {"namespace": "demo", "rows": 2, "chain": ""},
+    {"namespace": "demo", "rows": 2, "chain": "x" * 32},
+    {"namespace": "demo", "rows": 2, "chain": "a" * 64},
+    {"namespace": "", "rows": 2, "chain": "a" * 32},
+])
+def test_verify_witness_malformed_pin_is_could_not_look(tmp_path, capsys, row):
+    # Review round 7: a pin that fails strict_pin makes the whole pin file
+    # unreadable, COULD NOT LOOK, exit 3. Before, a pin with no usable rows was
+    # skipped and one with no chain had its rows "compared"; both were the
+    # shapes later attacks hid behind. It is never a rewrite (exit 1) either:
+    # nothing was compared.
+    p = tmp_path / "a.jsonl"
+    w = tmp_path / "pins.jsonl"
+    for i in range(2):
+        cli.main(["log", str(p), json.dumps({"op": i})])
+    w.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    capsys.readouterr()
+    rc = cli.main(["verify", str(p), "--witness", str(w)])
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    sp = j["since_pin"]
+    assert rc == 3 and j["verdict"] == "COULD NOT LOOK" and j["reason_word"] == "unreadable"
+    assert "strict pin rules" in sp["reason"] and sp["rows_since_pin"] is None
+    assert "rewritten" not in sp and "truncated" not in sp
+
+
+@pytest.mark.parametrize("chain", [None, ""])
+def test_verify_witness_chainless_pin_is_could_not_look_even_after_a_cut(tmp_path, capsys,
+                                                                       chain):
+    # Round 3 had a chainless pin still compare rows (a cut below it read
+    # BROKEN) and count as compared. Round 7: it is not a pin this reader
+    # trusts, so the file is COULD NOT LOOK, exit 3, before and after a cut,
+    # and never VERIFIED, exit 0.
+    p = tmp_path / "a.jsonl"
+    w = tmp_path / "pins.jsonl"
+    for i in range(5):
+        cli.main(["log", str(p), json.dumps({"op": i})])
+    w.write_text(json.dumps({"namespace": "demo", "rows": 5, "chain": chain}) + "\n",
+                 encoding="utf-8")
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 3
+    j = json.loads(capsys.readouterr().out)
+    assert j["verdict"] == "COULD NOT LOOK" and "strict pin rules" in j["since_pin"]["reason"]
+    lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
+    p.write_text("".join(lines[:3]), encoding="utf-8")                # cut two rows off
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 3
+    j = json.loads(capsys.readouterr().out)
+    assert j["verdict"] == "COULD NOT LOOK" and "truncated" not in j["since_pin"]
+
+
+def test_verify_witness_library_pin_of_an_unchained_ledger_is_not_a_rewrite(tmp_path, capsys):
+    # Review round 3 minor: publish_head pins a ledger whose rows carry no
+    # chain at "genesis"; chain_at gives None for its row, which read as a
+    # mismatch: BROKEN, "rewritten". There is no chain there to compare: the
+    # ledger stays COULD NOT LOOK (bounded), and a truncation is still BROKEN.
+    from arcaeon.record.ledger import Ledger
+    from arcaeon.record.ledger.witness import WitnessStore, publish_head
+    p = tmp_path / "a.jsonl"
+    w = tmp_path / "pins.jsonl"
+    p.write_text("".join(json.dumps({"a": i}) + "\n" for i in range(3)), encoding="utf-8")
+    pin = publish_head(WitnessStore(str(w)), "demo", Ledger(str(p)))
+    assert pin["chain"] == "genesis" and pin["rows"] == 3
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 3
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    sp = j["since_pin"]
+    assert j["verdict"] == "COULD NOT LOOK" and j["reason_word"] == "bounded"
+    assert sp["rows_since_pin"] == 0 and sp["chain_matches"] is None
+    assert sp["chain_at_pin"] is None and "carries no chain" in sp["reason"]
+    assert "rewritten" not in sp and "rewritten" not in cap.err
+    p.write_text(json.dumps({"a": 0}) + "\n", encoding="utf-8")
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 1
+    assert json.loads(capsys.readouterr().out)["since_pin"]["truncated"] is True
+
+
+def _strip_chains(p):
+    """Rewrite `p` with the `chain` key removed from every row."""
+    rows = [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines() if x.strip()]
+    for r in rows:
+        r.pop("chain", None)
+    p.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+
+
+def test_verify_witness_real_chain_pin_vs_stripped_chains_is_broken(tmp_path, capsys):
+    # Review round 4 blocker: a row with no chain was "not comparable" whatever
+    # the pin said, so a rewrite that stripped the chains read COULD NOT LOOK,
+    # exit 3. The pin recorded a real chain at that row: it is a mismatch.
+    p = tmp_path / "a.jsonl"
+    w = tmp_path / "pins.jsonl"
+    for i in range(3):
+        cli.main(["log", str(p), json.dumps({"op": i})])
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 0
+    _strip_chains(p)
+    capsys.readouterr()
+    assert cli.main(["verify", str(p)]) == 3                          # alone: bounded
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 1
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    sp = j["since_pin"]
+    assert j["verdict"] == "BROKEN"
+    assert sp["rows_since_pin"] == 0 and sp["chain_at_pin"] is None
+    assert sp["pinned_chain"] != "genesis"
+    assert sp["chain_matches"] is False and sp["rewritten"] is True
+    assert "rewritten" in cap.err
+
+
+def test_verify_witness_genesis_pin_vs_chainless_row_is_not_comparable(tmp_path, capsys):
+    # The other side of the round 4 rule: a pin at "genesis" against a row
+    # with no chain has no chain on either side, so it stays not comparable.
+    p = tmp_path / "a.jsonl"
+    w = tmp_path / "pins.jsonl"
+    p.write_text("".join(json.dumps({"a": i}) + "\n" for i in range(3)), encoding="utf-8")
+    _hand_pin(w, "demo", 3, "genesis")
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 3
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    sp = j["since_pin"]
+    assert j["verdict"] == "COULD NOT LOOK"
+    assert sp["rows_since_pin"] == 0 and sp["chain_matches"] is None
+    assert "carries no chain" in sp["reason"]
+    assert "rewritten" not in sp and "rewritten" not in cap.err
+
+
+def test_verify_witness_several_pins_compares_every_pin(tmp_path, capsys):
+    """Every pin for the namespace is compared at its own row count, not only
+    the latest (review round 5). This test used to lock in the latest-only
+    rule ("the latest is the one compared"), and that rule is the hole: a
+    rewrite re-pinned afterwards at the same or a higher row count agrees with
+    the newest pin, and the older pins it disagrees with went unread."""
+    p = tmp_path / "a.jsonl"
+    w = tmp_path / "pins.jsonl"
+    ops = [{"op": i} for i in range(5)]
+    for op in ops[:2]:
+        cli.main(["log", str(p), json.dumps(op)])
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 0
+    for op in ops[2:4]:
+        cli.main(["log", str(p), json.dumps(op)])
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 0
+    cli.main(["log", str(p), json.dumps(ops[4])])
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 0
+    sp = json.loads(capsys.readouterr().out)["since_pin"]
+    assert sp["pinned_rows"] == 4 and sp["rows_since_pin"] == 1 and sp["chain_matches"] is True
+    assert sp["pins_compared"] == 2 and "earlier_pin" not in sp
+    # Rows 1-2 kept, rows 3-5 rewritten: the first pin (at row 2) still
+    # matches; the latest (at row 4) does not: BROKEN.
+    keep = p.read_text(encoding="utf-8").splitlines(keepends=True)[:2]
+    fake = tmp_path / "fake.jsonl"
+    fake.write_text("".join(keep), encoding="utf-8")
+    for i in range(3):
+        cli.main(["log", str(fake), json.dumps({"op": 100 + i})])
+    p.write_bytes(fake.read_bytes())
+    capsys.readouterr()
+    assert cli.main(["verify", str(p)]) == 0
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 1
+    sp = json.loads(capsys.readouterr().out)["since_pin"]
+    assert sp["pinned_rows"] == 4 and sp["rewritten"] is True
+    # Now re-pin the rewrite at a higher row count (record() accepts it: rows
+    # grew). The latest pin agrees with the ledger; the earlier pin at row 4
+    # is the disproof, and it is no longer left unread.
+    cli.main(["log", str(p), json.dumps({"op": 200})])
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 0
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 1
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    sp = j["since_pin"]
+    assert j["verdict"] == "BROKEN" and sp["pins_compared"] == 3
+    assert sp["pinned_rows"] == 6 and sp["chain_matches"] is True     # the latest agrees
+    assert sp["rewritten"] is True
+    ep = sp["earlier_pin"]
+    assert ep["pinned_rows"] == 4 and ep["rewritten"] is True and ep["chain_matches"] is False
+    assert ep["chain_at_pin"] != ep["pinned_chain"]
+    assert "differs from an earlier pin" in cap.err
+
+
+def test_verify_witness_repin_at_same_height_is_refused_m1(tmp_path, capsys):
+    # Review round 5 blocker M1, the exact inputs: log x3; pin; rewrite all 3
+    # rows recomputing every chain from genesis; pin again. The second pin was
+    # accepted (an equal-rows re-pin was allowed whatever its chain), became
+    # the latest, and verify --witness read chain_matches true, VERIFIED, 0.
+    p = tmp_path / "L.jsonl"
+    w = tmp_path / "W.jsonl"
+    for i in range(3):
+        cli.main(["log", str(p), json.dumps({"op": i})])
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 0
+    first = w.read_bytes()
+    _rewrite_same_length(tmp_path, p, [{"op": 100 + i} for i in range(3)])
+    capsys.readouterr()
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 1
+    j = json.loads(capsys.readouterr().out)
+    assert j["ok"] is False and j["error"].startswith("equivocation:")
+    assert "row 3" in j["error"]
+    assert w.read_bytes() == first                    # nothing was written
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 1
+    j = json.loads(capsys.readouterr().out)
+    assert j["verdict"] == "BROKEN" and j["since_pin"]["rewritten"] is True
+    # The honest heartbeat stays allowed: same rows, same chain.
+    q = tmp_path / "Q.jsonl"
+    v = tmp_path / "V.jsonl"
+    for i in range(3):
+        cli.main(["log", str(q), json.dumps({"op": i})])
+    assert cli.main(["pin", str(q), "--ns", "demo", "--witness", str(v)]) == 0
+    assert cli.main(["pin", str(q), "--ns", "demo", "--witness", str(v)]) == 0
+    capsys.readouterr()
+    assert cli.main(["verify", str(q), "--witness", str(v)]) == 0
+    sp = json.loads(capsys.readouterr().out)["since_pin"]
+    assert sp["pins_compared"] == 2 and "equivocation" not in sp
+
+
+def _plant_pin(w, ns, rows, chain):
+    """Append a correctly chained pin straight to the file, bypassing every
+    refusal in WitnessStore.record (as an older store, or a hand edit, would):
+    the pin file still verifies on its own."""
+    from arcaeon.record.ledger.witness import WitnessStore
+    s = WitnessStore(str(w))
+    rec = {"namespace": ns, "rows": rows, "chain": chain,
+           "as_of": "2026-11-06T00:00:00Z", "received_at": None, "prev": s._tail_digest()}
+    rec["self"] = s._digest_record(rec)
+    with open(w, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(rec) + "\n")
+
+
+def test_verify_witness_two_heads_at_one_height_is_broken(tmp_path, capsys):
+    # A pin file that already holds two different chains at one row count
+    # (bypassing record()) is equivocation: BROKEN, exit 1, against EITHER
+    # history, including the one that matches the latest pin.
+    from arcaeon.record.ledger import Ledger
+    from arcaeon.record.ledger.witness import WitnessStore
+    p = tmp_path / "L.jsonl"
+    w = tmp_path / "W.jsonl"
+    for i in range(3):
+        cli.main(["log", str(p), json.dumps({"op": i})])
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 0
+    original = p.read_bytes()
+    _rewrite_same_length(tmp_path, p, [{"op": 100 + i} for i in range(3)])
+    _plant_pin(w, "demo", 3, Ledger(str(p)).head().chain)
+    assert WitnessStore(str(w)).verify()["ok"] is True      # the file itself is intact
+    capsys.readouterr()
+    assert cli.main(["verify", str(p)]) == 0                 # alone: clean
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 1
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    sp = j["since_pin"]
+    assert j["verdict"] == "BROKEN"
+    assert sp["chain_matches"] is True                        # the planted latest agrees
+    assert sp["equivocation"]["rows"] == 3 and len(set(sp["equivocation"]["chains"])) == 2
+    assert sp["earlier_pin"]["rewritten"] is True
+    assert "two different chains at row 3" in cap.err
+    p.write_bytes(original)                                   # the other history
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 1
+    j = json.loads(capsys.readouterr().out)
+    assert j["verdict"] == "BROKEN" and j["since_pin"]["equivocation"]["rows"] == 3
+
+
+@pytest.mark.parametrize("chain", [None, ""])
+def test_verify_witness_real_chain_pin_vs_null_or_empty_chain_is_broken(tmp_path, capsys, chain):
+    # Review round 4 coverage gap: the stripped-chains test removed the key;
+    # a row whose chain is null or "" is the same rewrite against a real pin.
+    p = tmp_path / "a.jsonl"
+    w = tmp_path / "pins.jsonl"
+    for i in range(3):
+        cli.main(["log", str(p), json.dumps({"op": i})])
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 0
+    rows = [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines() if x.strip()]
+    for r in rows:
+        r["chain"] = chain
+    p.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 1
+    j = json.loads(capsys.readouterr().out)
+    sp = j["since_pin"]
+    assert j["verdict"] == "BROKEN" and sp["rewritten"] is True
+    assert sp["chain_matches"] is False and sp["chain_at_pin"] == chain
+    assert sp["pinned_chain"] != "genesis"
+
+
+def test_verify_witness_partial_strip_and_recompute_is_broken(tmp_path, capsys):
+    # Review round 4 coverage gap: strip the chain from the first row and
+    # recompute the chains of the rest from genesis, so the ledger reads
+    # COULD NOT LOOK (bounded) on its own. Against a pin with a real chain at
+    # row 4 it is a rewrite: BROKEN, exit 1, and the report carries one signal
+    # (no stale reason_word / looked_for / where from the bounded verdict).
+    p = tmp_path / "a.jsonl"
+    w = tmp_path / "pins.jsonl"
+    for i in range(4):
+        cli.main(["log", str(p), json.dumps({"op": i})])
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 0
+    p.write_bytes(_bounded_ledger(tmp_path, "b.jsonl",
+                                  [{"op": i} for i in range(1, 4)]).read_bytes())
+    capsys.readouterr()
+    assert cli.main(["verify", str(p)]) == 3                          # alone: bounded
+    assert json.loads(capsys.readouterr().out)["reason_word"] == "bounded"
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 1
+    j = json.loads(capsys.readouterr().out)
+    sp = j["since_pin"]
+    assert j["verdict"] == "BROKEN" and sp["rewritten"] is True
+    assert sp["rows_since_pin"] == 0 and sp["chain_matches"] is False
+    for k in ("reason_word", "looked_for", "where", "reason"):
+        assert k not in j, k
+
+
+def _bounded_ledger(tmp_path, name, ops):
+    """One row with no chain, then `ops` freshly chained: verify alone says
+    COULD NOT LOOK (bounded_prechain_skipped)."""
+    c = tmp_path / (name + ".chained.jsonl")
+    for op in ops:
+        cli.main(["log", str(c), json.dumps(op)])
+    b = tmp_path / name
+    b.write_bytes(b'{"a": 1}\n' + c.read_bytes())
+    return b
+
+
+def test_verify_witness_rewrite_of_a_could_not_look_ledger_is_broken(tmp_path, capsys):
+    from arcaeon.record.ledger import chain_at
+    p = _bounded_ledger(tmp_path, "a.jsonl", [{"op": i} for i in range(3)])
+    w = tmp_path / "pins.jsonl"
+    _hand_pin(w, "demo", 4, chain_at(str(p), 4))
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 3     # unchanged: bounded
+    assert json.loads(capsys.readouterr().out)["since_pin"]["chain_matches"] is True
+    p.write_bytes(_bounded_ledger(tmp_path, "b.jsonl",
+                                  [{"op": 100 + i} for i in range(3)]).read_bytes())
+    capsys.readouterr()
+    assert cli.main(["verify", str(p)]) == 3                           # alone: bounded
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 1
+    j = json.loads(capsys.readouterr().out)
+    assert j["verdict"] == "BROKEN" and j["since_pin"]["rewritten"] is True
+
+
+def test_verify_witness_truncation_of_a_could_not_look_ledger_is_broken(tmp_path, capsys):
+    # Truncation used to upgrade only VERIFIED to BROKEN, while a rewrite
+    # upgraded COULD NOT LOOK too. Both are detections: both are BROKEN.
+    from arcaeon.record.ledger import chain_at
+    p = _bounded_ledger(tmp_path, "a.jsonl", [{"op": i} for i in range(3)])
+    w = tmp_path / "pins.jsonl"
+    _hand_pin(w, "demo", 4, chain_at(str(p), 4))
+    lines = p.read_text(encoding="utf-8").splitlines(keepends=True)
+    p.write_text("".join(lines[:3]), encoding="utf-8")
+    capsys.readouterr()
+    assert cli.main(["verify", str(p)]) == 3
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 1
+    j = json.loads(capsys.readouterr().out)
+    assert j["verdict"] == "BROKEN" and j["since_pin"]["truncated"] is True
+
+
+def test_verify_witness_missing_ledger_is_not_truncation(tmp_path, capsys):
+    p = tmp_path / "a.jsonl"
+    w = tmp_path / "pins.jsonl"
+    for i in range(2):
+        cli.main(["log", str(p), json.dumps({"op": i})])
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 0
+    capsys.readouterr()
+    assert cli.main(["verify", str(tmp_path / "gone.jsonl"), "--witness", str(w)]) == 3
+    j = json.loads(capsys.readouterr().out)
+    assert j["verdict"] == "COULD NOT LOOK" and "truncated" not in j["since_pin"]
+    assert "could not be read" in j["since_pin"]["reason"]
+
+
 def test_verify_rows_since_pin_absent_or_ambiguous(tmp_path, capsys):
+    # Review round 6 (B1): --witness given and no pin compared is COULD NOT
+    # LOOK, exit 3, never the ledger's own VERIFIED (these used to exit 0).
     p = tmp_path / "a.jsonl"
     cli.main(["log", str(p), '{"op": 1}'])
     capsys.readouterr()
-    assert cli.main(["verify", str(p), "--witness", str(tmp_path / "none.jsonl")]) == 0
-    j = json.loads(capsys.readouterr().out)
+    assert cli.main(["verify", str(p), "--witness", str(tmp_path / "none.jsonl")]) == 3
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    assert j["verdict"] == "COULD NOT LOOK" and j["reason_word"] == "missing"
     assert j["since_pin"]["rows_since_pin"] is None
+    assert "no pin file at" in cap.err
     w = tmp_path / "pins.jsonl"
     cli.main(["pin", str(p), "--ns", "one", "--witness", str(w)])
     cli.main(["pin", str(p), "--ns", "two", "--witness", str(w)])
     capsys.readouterr()
-    assert cli.main(["verify", str(p), "--witness", str(w)]) == 0
-    assert "pass --ns" in json.loads(capsys.readouterr().out)["since_pin"]["reason"]
+    assert cli.main(["verify", str(p), "--witness", str(w)]) == 3
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    assert j["verdict"] == "COULD NOT LOOK" and "pass --ns" in j["since_pin"]["reason"]
+    assert "pass --ns" in cap.err
+    assert cli.main(["verify", str(p), "--witness", str(w), "--ns", "one"]) == 0
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w), "--ns", "three"]) == 3
+    j = json.loads(capsys.readouterr().out)
+    assert j["verdict"] == "COULD NOT LOOK" and j["reason_word"] == "name_not_found"
     assert cli.main(["verify", str(p), "--ns", "one"]) == 2
     assert cli.main(["verify", str(p), "--witness"]) == 2
     capsys.readouterr()
+
+
+def test_verify_witness_second_namespace_pin_cannot_switch_the_check_off(tmp_path, capsys):
+    # Review round 6 blocker B1, the exact attack: pin under `demo`, rewrite
+    # the ledger with every chain recomputed, pin it again under ANOTHER
+    # namespace (accepted: a new namespace has no history), then verify
+    # --witness without --ns. The pin file now holds two namespaces, nothing
+    # was compared, and verify used to print the ledger's own VERIFIED, exit 0.
+    p = tmp_path / "a.jsonl"
+    w = tmp_path / "pins.jsonl"
+    for i in range(3):
+        cli.main(["log", str(p), json.dumps({"op": i})])
+    assert cli.main(["pin", str(p), "--ns", "demo", "--witness", str(w)]) == 0
+    _rewrite_same_length(tmp_path, p, [{"op": 100 + i} for i in range(3)])
+    assert cli.main(["pin", str(p), "--ns", "other", "--witness", str(w)]) == 0
+    capsys.readouterr()
+    assert cli.main(["verify", str(p)]) == 0               # on its own: clean
+    capsys.readouterr()
+    rc = cli.main(["verify", str(p), "--witness", str(w)])
+    cap = capsys.readouterr()
+    j = json.loads(cap.out)
+    assert rc == 3 and j["verdict"] == "COULD NOT LOOK"
+    assert j["verdict"] != "VERIFIED" and "pass --ns" in cap.err
+    capsys.readouterr()
+    assert cli.main(["verify", str(p), "--witness", str(w), "--ns", "demo"]) == 1
+
+
+def test_verify_witness_unreadable_or_empty_pin_is_could_not_look(tmp_path, capsys):
+    # Review round 6 (B1): an unreadable pin file and a pin that constrains
+    # nothing (zero rows) compare no pin either: COULD NOT LOOK, exit 3.
+    p = tmp_path / "a.jsonl"
+    for i in range(2):
+        cli.main(["log", str(p), json.dumps({"op": i})])
+    bad = tmp_path / "bad.jsonl"
+    bad.write_bytes(bytes([0xFF, 0xFE, 0]) + b"garbage" + bytes([10]))
+    capsys.readouterr()
+    rc = cli.main(["verify", str(p), "--witness", str(bad)])
+    j = json.loads(capsys.readouterr().out)
+    assert rc == 3 and j["verdict"] == "COULD NOT LOOK"
+    w = tmp_path / "pins.jsonl"
+    _hand_pin(w, "demo", 0, "genesis")
+    capsys.readouterr()
+    rc = cli.main(["verify", str(p), "--witness", str(w)])
+    j = json.loads(capsys.readouterr().out)
+    assert rc == 3 and j["verdict"] == "COULD NOT LOOK" and j["reason_word"] == "empty"
 
 
 def test_audit_verify_accepts_a_bundle_directory(tmp_path, capsys):

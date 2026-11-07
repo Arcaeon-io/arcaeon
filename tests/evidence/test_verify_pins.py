@@ -125,6 +125,72 @@ def test_later_pin_does_not_accuse_an_older_pack(local_pack, ledger, pins):
     assert st["pins"][0]["pin_file_latest_rows"] == 5
 
 
+class _LatestOnly(WitnessStore):
+    """A local pin file whose reader sees only the latest pin per namespace."""
+
+    def history(self, namespace):
+        h = super().history(namespace)
+        return h[-1:]
+
+    def latest(self, namespace):
+        h = super().history(namespace)
+        return h[-1] if h else None
+
+
+def test_repin_after_rewrite_does_not_launder_the_pack(ledger, tmp_path):
+    """Review round 6 (M1): pin P1 at 3 rows, rewrite all three rows with
+    every chain recomputed and add a 4th, pin P2 at 4 rows (accepted: rows
+    grew). A pack built from the rewrite lists P2, and records.jsonl holds
+    P2's head, so the named pin matches. P1, still in the pin file, is the
+    disproof: the pack is BROKEN. The every-pin result used to be stored as
+    `against_latest_pin` and never changed the verdict (exit 0).
+
+    An honest build reads every pin and lists P1 (rewritten), so the pack is
+    built through a writer that sees only `latest()` (the documented store
+    contract), the way a pack built by an older export, or by hand, lists P2."""
+    pins = tmp_path / "p.jsonl"
+    lines = ledger.read_bytes().splitlines(keepends=True)
+    ledger.write_bytes(b"".join(lines[:3]))
+    p1 = publish_head(WitnessStore(pins), NS, Ledger(ledger))
+    assert p1["rows"] == 3
+    ledger.unlink()
+    lg = Ledger(ledger)
+    for i in range(4):
+        lg.append({"ts": f"2026-09-0{i + 1}T10:00:00Z", "agent": "agent-a",
+                   "event": "rewritten", "n": i})
+    assert lg.verify().ok is True                      # clean on its own
+    p2 = publish_head(WitnessStore(pins), NS, lg)
+    assert p2["rows"] == 4 and p2["chain"] != p1["chain"]
+    out = tmp_path / "pack"
+    build_pack(ledger, out, agent="agent-a", witness=_LatestOnly(pins),
+               witness_namespace=NS)
+    assert [x["rows"] for x in _manifest(out)["pins"]] == [4]
+    res = verify_pack(out, witness=pins)
+    st = _step(res)
+    assert st["verdict"] == V.BROKEN and res["exit"] == 1
+    assert st["pins"][0]["against_every_pin"] == "rewritten"
+    assert "against_latest_pin" not in st["pins"][0]
+    assert "rewritten" in st["finding"] and "earlier pin" in st["finding"]
+    # Tamper one payload byte as well: records.jsonl now fails its own chain
+    # (the chain step's BROKEN). The pins step still reads every pin off the
+    # rows, so the re-pinned rewrite is still named here, not hidden behind
+    # "local_broken".
+    rec = out / "records.jsonl"
+    b = rec.read_bytes()
+    i = b.index(b"rewritten")
+    rec.write_bytes(b[:i] + b"R" + b[i + 1:])
+    st = _step(verify_pack(out, witness=pins))
+    assert st["verdict"] == V.BROKEN
+    assert st["pins"][0]["against_every_pin"] == "rewritten"
+
+
+def test_local_pin_ok_reports_every_pin_compared(local_pack, pins):
+    st = _step(verify_pack(local_pack, witness=pins))
+    pin = st["pins"][0]
+    assert pin["against_every_pin"] == "consistent" and pin["pins_compared"] == 1
+    assert pin["pins_past_head"] == 0
+
+
 def test_namespace_absent_from_pin_file_is_could_not_look(local_pack, tmp_path):
     empty = tmp_path / "elsewhere.jsonl"
     lg = Ledger(tmp_path / "x.jsonl")
@@ -222,3 +288,165 @@ def test_remote_via_cli_unreachable_exit_3(remote_pack, monkeypatch, capsys):
     monkeypatch.setattr(R, "_request", lambda *a, **kw: (0, {"error": "offline"}))
     assert evidence_pack_cli.main(["verify", str(remote_pack), "--remote"]) == 3
     assert "[network]" in capsys.readouterr().out
+
+
+# ---- review round 7: strict pins, the namespace, file order -------------------
+
+def _plant(w, ns, rows, chain, as_of="2026-09-05T00:00:00Z"):
+    """Append a correctly chained pin straight to the file, bypassing every
+    refusal in WitnessStore.record (a hand edit, or another store)."""
+    s = WitnessStore(w)
+    rec = {"namespace": ns, "rows": rows, "chain": chain, "as_of": as_of,
+           "received_at": None, "prev": s._tail_digest()}
+    rec["self"] = s._digest_record(rec)
+    with open(w, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(rec) + "\n")
+
+
+def _rewrite_ledger(ledger, n):
+    ledger.unlink()
+    lg = Ledger(ledger)
+    for i in range(n):
+        lg.append({"ts": f"2026-09-0{i + 1}T10:00:00Z", "agent": "agent-a",
+                   "event": "rewritten", "n": i})
+    assert lg.verify().ok is True                      # clean on its own
+    return lg
+
+
+def test_r7_b2_second_namespace_pack_needs_namespace(ledger, tmp_path):
+    """Round-6 review B2: honest pin under prod, rewrite every row, pin the
+    rewrite under prod2, export a pack naming prod2. Every pin the pack names
+    agrees, and the pack verified. Now: COULD NOT LOOK without --namespace
+    (the pack's own listed namespace never settles which is this ledger's),
+    BROKEN with --namespace prod."""
+    pins = tmp_path / "p.jsonl"
+    publish_head(WitnessStore(pins), "prod", Ledger(ledger))
+    lg = _rewrite_ledger(ledger, 4)
+    publish_head(WitnessStore(pins), "prod2", lg)
+    out = tmp_path / "pack"
+    build_pack(ledger, out, agent="agent-a", witness=str(pins), witness_namespace="prod2")
+    assert [x["namespace"] for x in _manifest(out)["pins"]] == ["prod2"]
+    res = verify_pack(out, witness=pins)
+    st = _step(res)
+    assert st["verdict"] == V.COULD_NOT_LOOK and res["exit"] == 3
+    assert st["reason_word"] == "name_not_found" and "--namespace" in st["reason"]
+    res = verify_pack(out, witness=pins, namespace="prod")
+    st = _step(res)
+    assert st["verdict"] == V.BROKEN and res["exit"] == 1
+    assert "'prod'" in st["finding"] and "rewritten" in st["finding"]
+    assert evidence_pack_cli.main(["verify", str(out), "--witness", str(pins)]) == 3
+    assert evidence_pack_cli.main(["verify", str(out), "--witness", str(pins),
+                                   "--namespace", "prod"]) == 1
+    # The pack's own namespace named on purpose verifies, and an absent one
+    # compares nothing.
+    assert _step(verify_pack(out, witness=pins, namespace="prod2"))["verdict"] == V.VERIFIED
+    st = _step(verify_pack(out, witness=pins, namespace="nope"))
+    assert st["verdict"] == V.COULD_NOT_LOOK and st["reason_word"] == "name_not_found"
+
+
+def test_r7_m1_pin_past_head_recorded_before_the_packs_pin_is_truncation(ledger, tmp_path):
+    """Round-6 review M1: pins past the pack's head were all left out as
+    "the pack is older". A pin past the head that the witness recorded
+    BEFORE the pin the pack names means the witness had already seen more
+    rows when it took the pack's pin: the pack is a truncation, BROKEN."""
+    pins = tmp_path / "p.jsonl"
+    publish_head(WitnessStore(pins), NS, Ledger(ledger))              # 4 rows
+    lines = ledger.read_bytes().splitlines(keepends=True)
+    ledger.write_bytes(b"".join(lines[:3]))                           # cut to 3
+    lo = Ledger(ledger).head()
+    with pytest.raises(ValueError, match="monotonic"):
+        WitnessStore(pins).record(NS, lo)                             # record() refuses
+    _plant(pins, NS, lo.rows, lo.chain)                               # a hand edit does not
+    out = tmp_path / "pack"
+    build_pack(ledger, out, agent="agent-a", witness=_LatestOnly(pins), witness_namespace=NS)
+    assert [x["rows"] for x in _manifest(out)["pins"]] == [3]
+    res = verify_pack(out, witness=pins)
+    st = _step(res)
+    assert st["verdict"] == V.BROKEN and res["exit"] == 1
+    assert st["pins"][0]["against_every_pin"] == "truncated"
+    assert "before it pinned the head this pack names" in st["finding"]
+
+
+@pytest.mark.parametrize("rows,chain", [(4, None), (4, ""), (True, "a" * 32),
+                                        (-1, "a" * 32), (4.0, "a" * 32)])
+def test_r7_pack_pin_file_with_a_malformed_pin_is_could_not_look(local_pack, pins,
+                                                                rows, chain):
+    _plant(pins, NS, rows, chain)
+    res = verify_pack(local_pack, witness=pins)
+    st = _step(res)
+    assert st["verdict"] == V.COULD_NOT_LOOK and res["exit"] == 3
+    assert st["reason_word"] == "unreadable" and "strict pin rules" in st["reason"]
+
+
+def test_r7_pack_all_chainless_pin_file_is_could_not_look(ledger, tmp_path):
+    """A pack that lists no pin, checked against a pin file whose every pin
+    has no chain: nothing was compared, never VERIFIED."""
+    out = tmp_path / "pack"
+    build_pack(ledger, out)
+    pins = tmp_path / "p.jsonl"
+    for rows in (2, 4):
+        _plant(pins, NS, rows, None)
+    res = verify_pack(out, witness=pins, namespace=NS)
+    st = _step(res)
+    assert st["verdict"] == V.COULD_NOT_LOOK and res["exit"] == 3
+
+
+# -- review round 8: legacy genesis pins and an empty pin file (unlisted path) --
+
+def _r8_legacy_then_chained(tmp_path):
+    """A ledger whose rows 1-3 were written before chaining (no chain) and rows
+    4-6 after (chained), pinned honestly at (3, genesis) and at (6, C6)."""
+    led = tmp_path / "legacy.jsonl"
+    led.write_text("".join(json.dumps({"ts": f"2026-09-0{i + 1}T10:00:00Z",
+                                       "agent": "agent-a", "event": "e"}) + "\n"
+                           for i in range(3)), encoding="utf-8")
+    pins = tmp_path / "r8pins.jsonl"
+    store = WitnessStore(pins)
+    p3 = publish_head(store, NS, Ledger(led))
+    assert (p3["rows"], p3["chain"]) == (3, "genesis")
+    lg = Ledger(led)
+    for i in range(3, 6):
+        lg.append({"ts": f"2026-09-0{i + 1}T10:00:00Z", "agent": "agent-a", "event": "e"})
+    p6 = publish_head(store, NS, Ledger(led))
+    assert p6["rows"] == 6 and p6["chain"] != "genesis"
+    return led, pins
+
+
+def test_r8_unlisted_pack_legacy_genesis_pin_plus_chained_pin_verifies(tmp_path):
+    """Pack lists no pin; the pin file holds (3, genesis) over chainless rows
+    and (6, C6) over chained ones, both honest. The genesis pin is not
+    comparable, not a problem: VERIFIED with pin 6 compared, not BROKEN."""
+    led, pins = _r8_legacy_then_chained(tmp_path)
+    out = tmp_path / "pack"
+    build_pack(led, out)
+    res = verify_pack(out, witness=pins)
+    st = _step(res)
+    assert st["verdict"] != V.BROKEN, st
+    assert st["verdict"] == V.VERIFIED, st
+    assert st["pins_compared"] == 1
+
+
+def test_r8_unlisted_pack_cut_below_a_genesis_pin_is_still_broken(tmp_path):
+    """The same honest pins, but the pack holds only 2 of the 3 rows the
+    genesis pin saw (and none of pin 6's): truncation, BROKEN."""
+    led, pins = _r8_legacy_then_chained(tmp_path)
+    lines = led.read_text(encoding="utf-8").splitlines(keepends=True)
+    led.write_text("".join(lines[:2]), encoding="utf-8")
+    out = tmp_path / "pack"
+    build_pack(led, out)
+    res = verify_pack(out, witness=pins, namespace=NS)
+    st = _step(res)
+    assert st["verdict"] == V.BROKEN and res["exit"] == 1, st
+    assert "row 3" in st["finding"]
+
+
+def test_r8_unlisted_pack_empty_pin_file_is_could_not_look(ledger, tmp_path):
+    """An empty pin file compared nothing: COULD NOT LOOK, never VERIFIED."""
+    out = tmp_path / "pack"
+    build_pack(ledger, out)
+    pins = tmp_path / "empty.jsonl"
+    pins.write_bytes(b"")
+    res = verify_pack(out, witness=pins)
+    st = _step(res)
+    assert st["verdict"] == V.COULD_NOT_LOOK and res["exit"] == 3, st
+    assert st["reason_word"] == "empty"

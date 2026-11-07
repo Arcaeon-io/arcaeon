@@ -244,6 +244,9 @@ def test_a_legacy_file_can_be_extended_and_the_new_pins_verify(tmp_path):
         encoding="utf-8")
     lg = Ledger(tmp_path / "l.jsonl")
     lg.append({"x": 1})
+    # Two rows, not one: the legacy pin holds row 1 with another chain, and a
+    # second head at that height is refused as equivocation (review round 5).
+    lg.append({"x": 2})
     store.record("ns", lg.head())
 
     v = store.verify()
@@ -845,63 +848,174 @@ def test_stamp_ordering_guard_refusal_is_logged_legibly(tmp_path):
     assert not store.path.exists() or store.verify()["ok"] in (True, None)
 
 
-# --- fork detection: two heads that disagree (BATCH_500 B-006) ---------------
-# The monotonic guard (C3, above) only blocks a SHRINKING row count. It has no
-# opinion about two pins at the SAME row count with DIFFERENT chains, because
-# the legitimate heartbeat case -- re-pinning an unchanged head -- is also
-# equal-rows. That means record() silently accepts a genuine fork: two heads
-# the log implies are the same history that cannot both be right. This is a
-# first-class case, not the same thing as the "rewritten" tests above (which
-# check ONE log against ONE stored pin) -- here the STORE ITSELF is asked to
-# hold two disagreeing pins for one namespace, and nothing in `record()` or
-# `verify()` refuses it.
+# --- fork detection: two heads at one height (BATCH_500 B-006; round 5) ------
+# The monotonic guard (C3, above) only blocks a SHRINKING row count. Until
+# review round 5 on the verify-witness branch (2026-11-06), record() also
+# accepted a second pin at the SAME row count with a DIFFERENT chain, because
+# the heartbeat case (re-pinning an unchanged head) is also equal-rows; and
+# verify_against_witness read only latest(), so that second pin laundered a
+# same-length rewrite to "consistent" (M1). Both sides are closed now: record()
+# refuses two heads at one height, and the verifier compares every pin.
 
-def test_two_equal_row_pins_with_different_chains_is_an_undetected_fork(tmp_path):
-    """record() admits a same-row-count, different-chain pin for a namespace
-    that already has one -- the fork the monotonic guard does not cover.
-
-    store.verify() stays GREEN: both pins are individually well-formed and
-    correctly chained to EACH OTHER in the pin file's own back-chain, so the
-    pin file's own tamper check has nothing to catch -- it verifies that the
-    FILE wasn't edited, not that the CLAIMS inside it are mutually
-    consistent. The fork is only visible to a caller who reads history() and
-    compares rows across records by hand, or who checks a specific log
-    against the now-conflicting latest(): verify_against_witness against the
-    log matching the FIRST chain correctly reports "rewritten" once the
-    second, disagreeing pin becomes latest(). So the fork is
-    downstream-detectable through the existing verdict machinery -- it is
-    NOT a new verdict, and none of the three existing verdicts are
-    reinterpreted here -- but the witness store's OWN chain check does not
-    surface it, and this test exists so nobody assumes it does.
-    """
+def test_two_equal_row_pins_with_different_chains_is_refused(tmp_path):
+    """record() refuses a same-row-count, different-chain pin for a namespace
+    that already has one, naming both chains and the row. This test used to
+    assert the opposite ("NOT refused: equal rows is the allowed heartbeat
+    shape"); that acceptance is the M1 laundering, so the rule changed. The
+    same-chain heartbeat stays allowed (test_monotonic_guard_allows_equal_and_
+    advancing_pins above)."""
+    import pytest
     store = WitnessStore(tmp_path / "w.jsonl")
-
-    log_a = tmp_path / "a.jsonl"
-    lg_a = Ledger(log_a)
+    lg_a = Ledger(tmp_path / "a.jsonl")
     for i in range(3):
         lg_a.append({"branch": "a", "i": i})
     store.record("ns", lg_a.head())
-
-    log_b = tmp_path / "b.jsonl"
-    lg_b = Ledger(log_b)
+    lg_b = Ledger(tmp_path / "b.jsonl")
     for i in range(3):
         lg_b.append({"branch": "b", "i": i})  # same row count, different content
     assert lg_b.head().rows == lg_a.head().rows
     assert lg_b.head().chain != lg_a.head().chain
+    with pytest.raises(ValueError, match="equivocation") as e:
+        store.record("ns", lg_b.head())
+    assert lg_a.head().chain in str(e.value) and lg_b.head().chain in str(e.value)
+    assert "row 3" in str(e.value)
+    assert len(store.history("ns")) == 1
+    store.record("other", lg_b.head())       # another namespace is another witness line
+    assert verify_against_witness(store, "ns", lg_a).verdict == "consistent"
 
-    store.record("ns", lg_b.head())  # NOT refused: equal rows is the allowed heartbeat shape
 
-    # The pin file's own tamper check is blind to this fork.
+def test_m1_rewrite_then_repin_at_same_height_is_refused(tmp_path):
+    """Review round 5 M1, through the library: log 3, publish, rewrite all 3
+    rows with every chain recomputed from genesis, publish again. The second
+    publish is refused, and the rewrite reads "rewritten" against the pin."""
+    import pytest
+    log = tmp_path / "log.jsonl"
+    lg = Ledger(log)
+    for i in range(3):
+        lg.append({"e": i})
+    store = WitnessStore(tmp_path / "w.jsonl")
+    publish_head(store, "ns", lg)
+    log.unlink()
+    lg = Ledger(log)
+    for i in range(3):
+        lg.append({"e": 100 + i})
+    assert lg.verify().ok is True
+    with pytest.raises(ValueError, match="equivocation"):
+        publish_head(store, "ns", lg)
+    v = verify_against_witness(store, "ns", lg)
+    assert v.verdict == "rewritten" and not v
+
+
+def test_rewrite_repinned_higher_is_caught_by_the_earlier_pin(tmp_path):
+    """The re-pin record() still accepts (more rows) must not launder either:
+    the latest pin agrees with the rewrite, the earlier pin does not, and
+    every pin is compared, so the verdict is "rewritten", naming the earlier pin."""
+    log = tmp_path / "log.jsonl"
+    lg = Ledger(log)
+    for i in range(3):
+        lg.append({"e": i})
+    store = WitnessStore(tmp_path / "w.jsonl")
+    publish_head(store, "ns", lg)
+    log.unlink()
+    lg = Ledger(log)
+    for i in range(4):
+        lg.append({"e": 100 + i})
+    publish_head(store, "ns", lg)          # rows grew: accepted
+    v = verify_against_witness(store, "ns", lg)
+    assert v.verdict == "rewritten" and not v
+    assert v.witness_rows == 3 and "earlier pin" in v.detail
+
+
+def test_a_planted_fork_in_the_pin_file_is_witness_broken(tmp_path):
+    """A pin file that already holds two chains at one height (written before
+    the refusal, or by hand, still correctly chained so store.verify() is
+    green) is equivocation: "witness_broken" against EITHER history."""
+    store = WitnessStore(tmp_path / "w.jsonl")
+    lg_a = Ledger(tmp_path / "a.jsonl")
+    lg_b = Ledger(tmp_path / "b.jsonl")
+    for i in range(3):
+        lg_a.append({"branch": "a", "i": i})
+        lg_b.append({"branch": "b", "i": i})
+    store.record("ns", lg_a.head())
+    rec = {"namespace": "ns", "rows": 3, "chain": lg_b.head().chain,
+           "as_of": lg_b.head().as_of, "received_at": None, "prev": store._tail_digest()}
+    rec["self"] = store._digest_record(rec)
+    with store.path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(rec) + "\n")
     assert store.verify()["ok"] is True
+    for lg in (lg_a, lg_b):
+        v = verify_against_witness(store, "ns", lg)
+        assert v.verdict == "witness_broken" and not v
+        assert "equivocation" in v.detail and v.witness_rows == 3
 
-    hist = store.history("ns")
-    assert len(hist) == 2
-    assert hist[0]["rows"] == hist[1]["rows"] == 3
-    assert hist[0]["chain"] != hist[1]["chain"], "the fork: same row count, disagreeing chains"
 
-    # Downstream, through the existing verdict machinery, the fork DOES surface:
-    # checking branch A's log against a store now serving branch B's chain as
-    # latest() reports "rewritten", never a false "consistent".
-    v = verify_against_witness(store, "ns", lg_a)
-    assert v.verdict == "rewritten", v
-    assert not v
+def test_an_earlier_genesis_pin_over_unchained_rows_is_not_a_false_alarm(tmp_path):
+    """Comparing every pin must not turn a superseded, honest pin into an
+    alarm: a ledger whose first rows were written before chaining is pinned at
+    "genesis", grows chained rows, and is pinned again. The earlier pin has no
+    chain to compare on either side (not comparable, the round 3 rule), so the
+    verdict is the latest pin's, "consistent"; the CLI agrees (not BROKEN)."""
+    from arcaeon import cli
+    log = tmp_path / "log.jsonl"
+    log.write_text("".join(json.dumps({"a": i}) + "\n" for i in range(3)), encoding="utf-8")
+    store = WitnessStore(tmp_path / "w.jsonl")
+    assert publish_head(store, "ns", Ledger(log))["chain"] == "genesis"
+    lg = Ledger(log)
+    lg.append({"a": 3})
+    lg.append({"a": 4})
+    pin = publish_head(store, "ns", lg)
+    assert pin["rows"] == 5 and pin["chain"] != "genesis"
+    v = verify_against_witness(store, "ns", lg)
+    assert v.verdict == "consistent", v
+    assert cli.main(["verify", str(log), "--witness", str(store.path)]) != 1
+
+
+# -- review round 8: a "genesis" latest pin over chainless rows -----------------
+
+def _r8_legacy_log(tmp_path, n=3):
+    """n rows written before chaining (no chain on any row), pinned once by
+    publish_head, which reads that head as (n, "genesis")."""
+    log = tmp_path / "log.jsonl"
+    log.write_text("".join(json.dumps({"a": i}) + "\n" for i in range(n)), encoding="utf-8")
+    store = WitnessStore(tmp_path / "w.jsonl")
+    pin = publish_head(store, "ns", Ledger(log))
+    assert (pin["rows"], pin["chain"]) == (n, "genesis")
+    return log, store
+
+
+def test_r8_latest_genesis_pin_over_chainless_rows_is_not_truncated(tmp_path):
+    """Honest legacy data: 3 chainless rows pinned (3, genesis). The row is
+    there; it carries no chain and the pin reads genesis, so the pin is not
+    comparable. Not "truncated" (round 7 said it was), and since no pin was
+    compared, not "consistent" either: "no_record", falsy."""
+    log, store = _r8_legacy_log(tmp_path)
+    v = verify_against_witness(store, "ns", Ledger(log))
+    assert v.verdict != "truncated", v
+    assert v.verdict == "no_record" and not v, v
+    assert v.witness_rows == 3 and v.local_rows == 3
+    assert "no chain" in v.detail
+
+
+def test_r8_audit_finding_for_legacy_genesis_pin_is_not_truncation(tmp_path):
+    """The audit export's finding for the same honest legacy log is not
+    TRUNCATION_DETECTED: the witness check could not compare anything."""
+    from arcaeon.prove.audit import derive_finding
+    log, store = _r8_legacy_log(tmp_path)
+    lg = Ledger(log)
+    finding = derive_finding(lg.verify(), verify_against_witness(store, "ns", lg))
+    assert finding != "TRUNCATION_DETECTED"
+    assert finding == "WITNESS_CHECK_FAILED"
+
+
+def test_r8_real_truncation_below_a_genesis_pin_is_still_truncated(tmp_path):
+    """The round 8 rule is for a row that is THERE with no chain. A ledger cut
+    below the genesis pin's row count is truncation, as before."""
+    from arcaeon.prove.audit import derive_finding
+    log, store = _r8_legacy_log(tmp_path)
+    lines = log.read_text(encoding="utf-8").splitlines(keepends=True)
+    log.write_text("".join(lines[:2]), encoding="utf-8")
+    lg = Ledger(log)
+    v = verify_against_witness(store, "ns", lg)
+    assert v.verdict == "truncated" and not v, v
+    assert v.witness_rows == 3 and v.local_rows == 2
+    assert derive_finding(lg.verify(), v) == "TRUNCATION_DETECTED"

@@ -104,12 +104,15 @@ def test_r2_pack_claiming_to_predate_the_pin_is_exit_3(ledger, pins, tmp_path):
     assert res["exit"] == 3 and res["reason_word"] == "bounded"
 
 
-def test_r2_honest_unpinned_pack_with_empty_pin_file_still_verifies(ledger, tmp_path):
+def test_r2_honest_unpinned_pack_with_empty_pin_file_is_could_not_look(ledger, tmp_path):
+    # Round 2 had this read VERIFIED, exit 0. Review round 8: an empty pin
+    # file compared nothing, so --witness is COULD NOT LOOK, exit 3, as
+    # `verify --witness` reads it and as the CHANGELOG states.
     out = tmp_path / "pack"
     build_pack(ledger, out, agent="agent-a")
     empty = tmp_path / "none.jsonl"
     empty.write_bytes(b"")
-    assert verify_pack(out, witness=empty)["exit"] == 0
+    assert verify_pack(out, witness=empty)["exit"] == 3
 
 
 def test_r2_matching_pin_at_head_verifies(ledger, pins, tmp_path):

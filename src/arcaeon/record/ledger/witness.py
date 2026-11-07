@@ -28,8 +28,8 @@ This module ships two halves:
     self-controlled pin does and does not prove).
 
   * the client half — `publish_head` (send your current head to a witness) and
-    `verify_against_witness` (fetch the last pin and check your log against it,
-    HONESTLY: consistent / truncated / rewritten / no-record).
+    `verify_against_witness` (fetch the pins and check your log against every
+    one, HONESTLY: consistent / truncated / rewritten / no-record).
 
 The honest boundary: a witness proves your log was not truncated or rewritten
 *relative to what the witness saw, and only as recently as the last pin*. The MAX
@@ -41,9 +41,10 @@ from __future__ import annotations
 
 import hashlib
 
-from arcaeon.record.row import body_digest
+from arcaeon.record.row import CHAIN_LEN, GENESIS, body_digest
 import json
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,7 +53,53 @@ from arcaeon.record.ledger import Head, Ledger, UnverifiedLedgerError, chain_at
 
 __all__ = ["WitnessStore", "publish_head", "verify_against_witness", "WitnessVerdict",
            "HostedWitness", "HostedWitnessError", "rows_since_pin", "stale",
-           "STALE_AFTER_ROWS"]
+           "STALE_AFTER_ROWS", "strict_pin", "PinShapeError"]
+
+
+class PinShapeError(ValueError):
+    """A pin that fails `strict_pin`. A ValueError, so existing handlers of
+    record()'s refusals catch it unchanged."""
+
+
+_HEX_CHAIN = re.compile(r"[0-9a-fA-F]{%d}" % CHAIN_LEN)
+
+
+def strict_pin(rec) -> dict:
+    """The one test every reader and writer applies before trusting a pin.
+
+    Returns a copy of `rec` with `chain` lower-cased; raises PinShapeError
+    naming the field otherwise. The rules:
+
+      namespace  a non-empty str.
+      rows       an int (not a bool, not a float, not a str), >= 0.
+      chain      the literal "genesis", or CHAIN_LEN hex characters (any
+                 case on input; lower-cased on the way out).
+      as_of      not checked here; the stamp-ordering guard in record() reads it.
+
+    WHY ONE FUNCTION (review round 7 on the verify-witness branch,
+    2026-11-06). Six rounds each closed one hole and the next review found
+    another, because every reader checked the pin's SHAPE its own way: one
+    skipped a pin whose rows were 3.0, another counted a pin with no chain
+    as compared because its row count was. The round-6 attack wrote
+    Head(rows=3, chain=None), rewrote the log, then wrote
+    Head(rows=3.0, chain=<the rewrite's chain>): neither pin tripped the
+    equivocation or high-water guards, and verify --witness read VERIFIED.
+    Now `WitnessStore.record` refuses both, and a reader that meets a pin
+    failing this in a file treats the whole file as unreadable (COULD NOT
+    LOOK), never skipping the pin and never counting it as compared.
+    """
+    if not isinstance(rec, dict):
+        raise PinShapeError(f"a pin is a JSON object, got {type(rec).__name__}")
+    ns, rows, chain = rec.get("namespace"), rec.get("rows"), rec.get("chain")
+    if not isinstance(ns, str) or not ns:
+        raise PinShapeError(f"pin namespace must be a non-empty string, got {ns!r}")
+    if type(rows) is not int or rows < 0:
+        raise PinShapeError(f"pin rows must be an integer >= 0 (not a bool, float or "
+                            f"string), got {rows!r}")
+    if not isinstance(chain, str) or not (chain == GENESIS or _HEX_CHAIN.fullmatch(chain)):
+        raise PinShapeError(f"pin chain must be {GENESIS!r} or {CHAIN_LEN} hex characters, "
+                            f"got {chain!r}")
+    return {**rec, "chain": chain.lower()}
 
 
 @dataclass
@@ -66,11 +113,23 @@ class WitnessVerdict:
                        witnessed row is unreachable: witnessed history is missing.
       "rewritten"   — the log has enough rows but its chain at the witnessed row
                        DIFFERS from the pin: history was rewritten from some point.
-      "no_record"   — the witness holds no pin for this namespace to check against.
+      "no_record"   — the witness holds no pin for this namespace to check against,
+                       or no pin it holds could be compared: a zero-row pin, or a
+                       "genesis" pin whose row in the log carries no chain (rows
+                       written before chaining; review round 8). Not a detection.
       "witness_broken" — the witness pin file fails its OWN chain: a pin from a
                        tampered witness cannot be trusted, so no comparison is run.
+                       Also when the witness holds two different chains at one row
+                       count (equivocation): it attested to two heads at one
+                       height, so neither can say which history is the real one.
       "local_broken"   — the log fails its own chain; agreement at the pinned row
                        does not make a locally tampered log consistent.
+      "witness_unreadable" — the witness holds a pin that fails `strict_pin`
+                       (rows not an int >= 0, chain not "genesis" or hex of the
+                       chain's length, namespace not a non-empty string): no pin
+                       from it is trusted and none is compared (review round 7).
+                       Not a detection against the log; a check that could not
+                       be made.
     (The docstring listed only the first four while the code returned six —
     a consumer switching on the documented set silently mishandled a tampered
     witness. Pre-invite audit, 2026-08-23.)
@@ -249,17 +308,48 @@ class WitnessStore:
         Python reference now matches. The bar is the HISTORY HIGH-WATER MARK,
         not `latest()`: a file that already contains a backward pin (written
         before this guard existed) must not anchor the guard to the low mark.
-        Equal rows re-pin stays allowed (idempotent heartbeat, same as JS).
+        Equal rows re-pin stays allowed only with the SAME chain (an idempotent
+        heartbeat; see ONE HEAD PER HEIGHT below). The hosted JS witness still
+        accepts an equal-rows re-pin with a DIFFERENT chain: this local store
+        is stricter than it, not the same.
         Honest limit, unchanged from the class docstring: this stops a
         backward pin arriving through the API. It cannot stop an actor who
         can rewrite the store file itself — that protection is, as ever, the
         independence of the host.
+
+        ONE HEAD PER HEIGHT (review round 5 on the verify-witness branch,
+        2026-11-06): equal rows re-pin is allowed only with the SAME chain.
+        Before this, log three rows, pin, rewrite all three with every chain
+        recomputed, pin again: the second pin was accepted at the same row
+        count, became `latest()`, and the rewrite verified against it while
+        the original pin sat unread in `history()`. That is the C3 laundering
+        above at equal height instead of a lower one. A witness never holds
+        two different heads at one row count; the second is refused naming
+        both chains. (Readers also compare every pin, not only `latest()`,
+        so a file that already holds two heads at one height reads BROKEN.)
+
+        STRICT PINS (review round 7): the pin must pass `strict_pin` (rows an
+        int >= 0, chain "genesis" or CHAIN_LEN hex, namespace a non-empty
+        string), or PinShapeError is raised and nothing is written; the chain
+        is stored lower-cased. Every earlier pin for the namespace must pass it
+        too: the guards below cannot hold a pin they cannot read to the rules,
+        so a namespace whose history holds a malformed pin takes no new pins.
         """
+        clean = strict_pin({"namespace": namespace, "rows": head.rows, "chain": head.chain})
+        priors = []
+        for i, prior in enumerate(self.history(namespace), 1):
+            try:
+                priors.append(strict_pin(prior))
+            except PinShapeError as e:
+                raise PinShapeError(
+                    f"refusing to pin namespace {namespace!r}: its pin #{i} in "
+                    f"{self.path} fails the strict pin rules ({e}); the monotonic and "
+                    f"one-head-per-height guards cannot be held against it") from None
+        head = Head(chain=clean["chain"], rows=clean["rows"], as_of=head.as_of)
         high_water = None
-        for prior in self.history(namespace):
-            r = prior.get("rows")
-            if isinstance(r, int) and not isinstance(r, bool) \
-                    and (high_water is None or r > high_water):
+        for prior in priors:
+            r = prior["rows"]
+            if high_water is None or r > high_water:
                 high_water = r
         if high_water is not None and head.rows < high_water:
             raise ValueError(
@@ -269,6 +359,15 @@ class WitnessStore:
                 f"truncation this witness exists to catch; if the log was "
                 f"legitimately reset, use a new namespace rather than "
                 f"rewriting this one's history.")
+        for prior in priors:
+            r, c = prior["rows"], prior["chain"]
+            if r == head.rows and c != head.chain:
+                raise ValueError(
+                    f"equivocation: a witness never holds two heads at one height — "
+                    f"namespace {namespace!r} is already pinned at row {r} with chain "
+                    f"{c}; submitted row {head.rows} with chain {head.chain}. The same "
+                    f"row count with a different chain is a rewrite of the pinned "
+                    f"history; if the log was legitimately reset, use a new namespace.")
         # STAMP-ORDERING GUARD (0.7.4): only when this store is clock-authoritative.
         # Two clocks are written on every pin and, until this guard, nothing compared
         # them — a pin whose publisher stamp post-dated the witness's own receipt was
@@ -499,6 +598,31 @@ class WitnessStore:
             pass
         return out
 
+    def pin_problem(self) -> str | None:
+        """The first pin in the file that fails `strict_pin`, named by line, or
+        None when every pin passes (or the file is absent). Lines that do not
+        parse, or are not objects, are `verify()`'s to name, not this one's.
+        A reader that gets a non-None answer trusts no pin in the file."""
+        try:
+            lines = self.path.read_text(encoding="utf-8", errors="replace").split("\n")
+        except OSError:
+            return None
+        for i, raw in enumerate(lines, 1):
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                rec = json.loads(raw)
+            except (ValueError, RecursionError):
+                continue
+            if not isinstance(rec, dict):
+                continue
+            try:
+                strict_pin(rec)
+            except PinShapeError as e:
+                return f"line {i}: {e}"
+        return None
+
 
 def publish_head(store: WitnessStore, namespace: str, ledger: Ledger,
                  *, received_at: str | None = None, extra: dict | None = None) -> dict:
@@ -648,7 +772,14 @@ class HostedWitness:
 
 def verify_against_witness(store: WitnessStore, namespace: str,
                            ledger: Ledger) -> WitnessVerdict:
-    """Check the ledger against the witness's most recent pin for `namespace`.
+    """Check the ledger against every witness pin for `namespace`.
+
+    Each pin in `store.history(namespace)` is compared at its own row count, the
+    latest first; a store exposing only `.latest()` is compared against that one
+    pin. Any truncation or rewrite against any pin is the verdict, and two
+    different chains at one row count is "witness_broken" (equivocation). Before
+    review round 5 (2026-11-06) only the latest pin was read, so a rewrite
+    re-pinned at the same or a higher row count read "consistent".
 
     This is the outside check the chain alone cannot do. Returns a WitnessVerdict;
     it is truthy only on "consistent". Honest by construction: "truncated" and
@@ -717,6 +848,16 @@ def verify_against_witness(store: WitnessStore, namespace: str,
             "witness cannot be trusted, so no comparison is meaningful"
             % wv.get("first_break"))
 
+    # STRICT PINS (review round 7): a pin file holding any pin that fails
+    # `strict_pin` is not read at all. Skipping the bad pin is how six rounds
+    # of attacks got through: the skipped pin was always the disproof.
+    _pp = getattr(store, "pin_problem", None)
+    problem = _pp() if callable(_pp) else None
+    if problem:
+        return _V("witness_unreadable",
+                  f"the witness pin file holds a pin that fails the strict pin rules "
+                  f"({problem}): no pin in it is trusted, so none was compared")
+
     # Then the log itself. Agreeing with a pin at one row says nothing about a log
     # whose own chain is already broken elsewhere.
     lv = ledger.verify()
@@ -731,57 +872,150 @@ def verify_against_witness(store: WitnessStore, namespace: str,
         return _V("no_record",
                               f"witness holds no pin for namespace {namespace!r}")
 
-    w_rows = pin.get("rows")
-    w_chain = pin.get("chain")
     local = ledger.head()
     local_rows = local.rows
 
-    if not isinstance(w_rows, int):
-        return _V("no_record", "witness pin missing a valid row count",
-                              witness_chain=w_chain, local_rows=local_rows)
+    # EVERY PIN, NOT ONLY THE LATEST (review round 5 on the verify-witness
+    # branch, 2026-11-06). Reading only `latest()` let a re-pin launder a
+    # rewrite: log 3 rows, pin, rewrite all 3 with every chain recomputed,
+    # pin again (or pin after growing it), and the rewrite agreed with the
+    # newest pin while the original, the standing disproof, sat unread in
+    # `history()` -- the C3 shape that `WitnessStore.record` documents. Each
+    # pin is compared at its OWN row count with the same rules as the latest.
+    # A store exposing only `.latest()` (the documented remote contract) is
+    # checked against that one pin, as before.
+    _hist = getattr(store, "history", None)
+    pins = list(_hist(namespace) or []) if callable(_hist) else []
+    # Every pin read, through `strict_pin`, whatever the store: a remote store
+    # has no pin_problem() and its pins are held to the same rules here.
+    try:
+        pin = strict_pin(pin)
+        pins = [strict_pin(p) for p in pins]
+    except PinShapeError as e:
+        return _V("witness_unreadable",
+                  f"the witness holds a pin for namespace {namespace!r} that fails the "
+                  f"strict pin rules ({e}): no pin from it is trusted, so none was compared",
+                  local_rows=local_rows)
 
-    # A ZERO-ROW PIN CONSTRAINS NOTHING (pre-invite audit 2026-08-23, C2).
-    # publish_head now refuses to mint one, but pins minted before that fix — or
-    # by a remote store that does not refuse — must still never read as a
-    # positive confirmation. The comparison below would match "genesis" against
-    # "genesis" and return the one truthy verdict against ANY log, including one
-    # truncated to almost nothing. "The witness saw nothing" is a no_record, not
-    # a pass.
-    if w_rows == 0:
-        return _V("no_record",
-                  "the witness pin for namespace %r was taken over an EMPTY log "
-                  "(0 rows): it constrains nothing and cannot confirm this or any "
-                  "other log. Re-pin against a non-empty head." % namespace,
-                  witness_rows=0, witness_chain=w_chain, local_rows=local_rows)
+    # Two different chains at one row count is equivocation: the witness has
+    # attested to two heads at one height, so neither pin can be trusted to
+    # say which history is the real one. `record()` now refuses the second;
+    # a file that already holds both (written before that, or by hand) is a
+    # broken witness, never a consistent one.
+    seen: dict[int, str] = {}
+    for p in pins:
+        r, c = p["rows"], p["chain"]
+        if r == 0:
+            continue
+        first = seen.setdefault(r, c)
+        if first != c:
+            return _V(
+                "witness_broken",
+                f"equivocation: the witness holds two different chains at row {r} for "
+                f"namespace {namespace!r} ({first} and {c}): a witness that attests to "
+                f"two heads at one height cannot say which history is the real one",
+                witness_rows=r, witness_chain=c, local_rows=local_rows)
 
-    if local_rows < w_rows:
-        return _V(
-            "truncated",
-            f"log has {local_rows} rows but the witness recorded {w_rows}: "
-            f"{w_rows - local_rows} witnessed row(s) are missing (truncation)",
-            witness_rows=w_rows, witness_chain=w_chain, local_rows=local_rows)
+    def _compare(p) -> WitnessVerdict:
+        # p passed strict_pin above: rows an int >= 0, chain lower-case hex or genesis.
+        w_rows = p["rows"]
+        w_chain = p["chain"]
 
-    local_chain_at = chain_at(ledger.path, w_rows)
-    if local_chain_at is None:
-        return _V(
-            "truncated",
-            f"cannot reach row {w_rows} in the log to compare against the witness",
-            witness_rows=w_rows, witness_chain=w_chain, local_rows=local_rows)
+        # A ZERO-ROW PIN CONSTRAINS NOTHING (pre-invite audit 2026-08-23, C2).
+        # publish_head now refuses to mint one, but pins minted before that fix — or
+        # by a remote store that does not refuse — must still never read as a
+        # positive confirmation. The comparison below would match "genesis" against
+        # "genesis" and return the one truthy verdict against ANY log, including one
+        # truncated to almost nothing. "The witness saw nothing" is a no_record, not
+        # a pass.
+        if w_rows == 0:
+            return _V("no_record",
+                      "the witness pin for namespace %r was taken over an EMPTY log "
+                      "(0 rows): it constrains nothing and cannot confirm this or any "
+                      "other log. Re-pin against a non-empty head." % namespace,
+                      witness_rows=0, witness_chain=w_chain, local_rows=local_rows)
 
-    if local_chain_at != w_chain:
-        return _V(
-            "rewritten",
-            f"log's chain at the witnessed row {w_rows} differs from the pin: "
-            f"history was rewritten from at or before that point",
-            witness_rows=w_rows, witness_chain=w_chain, local_rows=local_rows)
+        if local_rows < w_rows:
+            return _V(
+                "truncated",
+                f"log has {local_rows} rows but the witness recorded {w_rows}: "
+                f"{w_rows - local_rows} witnessed row(s) are missing (truncation)",
+                witness_rows=w_rows, witness_chain=w_chain, local_rows=local_rows)
 
-    grew = local_rows - w_rows
-    detail = "log matches the witness at the witnessed row"
-    if grew:
-        detail += f" and has grown {grew} row(s) since (expected)"
-    return _V("consistent", detail,
-                          witness_rows=w_rows, witness_chain=w_chain, local_rows=local_rows)
+        local_chain_at = chain_at(ledger.path, w_rows)
+        if local_chain_at is None and w_chain == GENESIS:
+            # The row is there (local_rows >= w_rows above) but carries no
+            # chain, and the pin reads "genesis" (publish_head over rows
+            # written before chaining): no chain on either side, so this pin is
+            # NOT COMPARABLE -- not truncation, and never a confirmation
+            # (review round 8; the CLI's `chain_matches` null and
+            # evidence_pack_verify._chain_compared read it the same way).
+            v = _V("no_record",
+                   f"the witness pin for namespace {namespace!r} at row {w_rows} reads "
+                   f"'genesis' and the log's row {w_rows} carries no chain: nothing to "
+                   f"compare, so this pin neither confirms nor contradicts the log",
+                   witness_rows=w_rows, witness_chain=w_chain, local_rows=local_rows)
+            v.not_comparable = True
+            return v
+        if local_chain_at is None:
+            return _V(
+                "truncated",
+                f"cannot reach row {w_rows} in the log to compare against the witness",
+                witness_rows=w_rows, witness_chain=w_chain, local_rows=local_rows)
 
+        # Lower-cased on both sides, as record() stores a chain (review round
+        # 6): an honest pin written upper-case by another store is not a rewrite.
+        if str(local_chain_at).lower() != w_chain:
+            return _V(
+                "rewritten",
+                f"log's chain at the witnessed row {w_rows} differs from the pin: "
+                f"history was rewritten from at or before that point",
+                witness_rows=w_rows, witness_chain=w_chain, local_rows=local_rows)
+
+        grew = local_rows - w_rows
+        detail = "log matches the witness at the witnessed row"
+        if grew:
+            detail += f" and has grown {grew} row(s) since (expected)"
+        return _V("consistent", detail,
+                  witness_rows=w_rows, witness_chain=w_chain, local_rows=local_rows)
+
+    verdict = _compare(pin)
+    if verdict.verdict in ("truncated", "rewritten"):
+        return verdict
+    # The best (highest-row) earlier pin whose chain WAS compared and agreed:
+    # it stands in for a latest pin that was not comparable (round 8).
+    agreed = None
+    # The latest pin agrees (or constrains nothing): every earlier pin must
+    # agree too. A detection against any of them is the verdict; an earlier
+    # pin that constrains nothing (zero rows) is skipped. Every pin carries a
+    # chain (strict_pin), so none is checked by its row count alone.
+    done = {(pin["rows"], pin["chain"])}
+    for p in pins:
+        key = (p["rows"], p["chain"])
+        if key in done:
+            continue
+        done.add(key)
+        v = _compare(p)
+        # A not-comparable earlier pin (genesis over a chainless row, or zero
+        # rows) comes back "no_record" from _compare and is skipped here.
+        if v.verdict in ("truncated", "rewritten"):
+            v.detail = (f"an earlier pin (row {p.get('rows')}) disagrees with the log, "
+                        f"though the latest does not: {v.detail}")
+            return v
+        if v.verdict == "consistent" and (agreed is None
+                                          or v.witness_rows > agreed.witness_rows):
+            agreed = v
+    if getattr(verdict, "not_comparable", False):
+        # The latest pin compared nothing. If an earlier pin's chain was
+        # compared and agreed, that is the confirmation; if none was, no pin
+        # was compared at all and the answer is "no_record", never consistent.
+        if agreed is not None:
+            agreed.detail += (f" (earlier pin at row {agreed.witness_rows}; the latest "
+                              f"pin, at row {pin['rows']}, reads 'genesis' over a row "
+                              f"with no chain and was not comparable)")
+            return agreed
+        return verdict
+    return verdict
 
 # -- staleness: rows written since the last pin -------------------------------
 

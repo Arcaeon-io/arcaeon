@@ -380,14 +380,22 @@ def _verify(argv) -> int:
     usage = ("usage: arcaeon verify <ledger.jsonl> [--strict] [--witness PINS [--ns NS]]\n"
              "exit 0 VERIFIED, 1 BROKEN, 3 COULD NOT LOOK (rows the chain could not speak "
              "for, or a file that could not be read). With --witness (a local pin file) "
-             "it also says how many rows were added since the ledger's last pin there.")
+             "it also says how many rows were added since the ledger's last pin there, "
+             "and is BROKEN if rows were cut off or the chain at a pinned row differs "
+             "from the pin, for every pin of the namespace, not only the last; with "
+             "--witness and no pin's chain compared (no pin file, several namespaces and "
+             "no --ns, no pin for the namespace, a pin file holding any pin whose rows are "
+             "not an integer >= 0 or whose chain is not 'genesis' or hex) it is COULD NOT "
+             "LOOK, exit 3.")
     if _wants_help(argv):
         print(usage)
         return V.EXIT_GOOD
     # The ledger's own report, with the verdict word added as the first key
-    # (the ledger CLI prints the same fields without it). The word comes from
-    # the same three-valued `ok` the old exit code came from, so the two
-    # cannot disagree: True VERIFIED 0, None COULD NOT LOOK 3, False BROKEN 1.
+    # (the ledger CLI prints the same fields without it). The word starts from
+    # the ledger's own three-valued `ok`: True VERIFIED 0, None COULD NOT LOOK
+    # 3, False BROKEN 1. It can then move away from `ok`: an unreadable file is
+    # COULD NOT LOOK, and a truncation or rewrite found against a --witness pin
+    # is BROKEN. The exit code follows the word, not `ok`.
     from arcaeon.record.ledger import verify_file
     strict, pins, ns, pos, i = False, None, None, [], 0
     while i < len(argv):
@@ -419,6 +427,7 @@ def _verify(argv) -> int:
     if unread:
         word = V.COULD_NOT_LOOK
     report = {"verdict": word, **r.__dict__}
+    cnl_keys = ()
     if word == V.COULD_NOT_LOOK:
         if unread:
             rw = "missing" if not Path(path).exists() else "unreadable"
@@ -430,34 +439,127 @@ def _verify(argv) -> int:
                                  f"{r.prechain} row(s) carry no chain, so the chain cannot "
                                  f"speak for them ({r.verified_scope})")
         report.update(d)
+        cnl_keys = tuple(d)
         print(f"{V.COULD_NOT_LOOK} ({d['reason_word']}): looked for {d['looked_for']} "
               f"in {d['where']}: {d['reason']}", file=sys.stderr)
     if pins:
-        report["since_pin"] = _rows_since_pin_report(path, pins, ns)
+        # A ledger that could not be read has no rows and no chain to set
+        # against a pin: comparing would call a missing file "truncated".
+        report["since_pin"] = (
+            {"rows_since_pin": None,
+             "reason": "the ledger could not be read, so nothing was compared with the pin"}
+            if unread else _rows_since_pin_report(path, pins, ns))
         sp = report["since_pin"]
+        # A truncation or a rewrite found against the pin is BROKEN whatever
+        # the ledger said on its own: VERIFIED, or COULD NOT LOOK because some
+        # rows carry no chain. The pin speaks for the rows the chain cannot,
+        # and both detections are treated the same way.
         if sp.get("rows_since_pin") is not None and sp["rows_since_pin"] < 0:
             # Fewer rows than were pinned: rows were cut off the end. A chain
             # that verifies on its own cannot see this; the pin can.
             sp["truncated"] = True
-            if word == V.VERIFIED:
-                word = report["verdict"] = V.BROKEN
+            word = report["verdict"] = V.BROKEN
             print(f"{V.BROKEN}: the ledger holds {-sp['rows_since_pin']} fewer row(s) than "
                   f"its last pin ({sp['namespace']}, {sp['pinned_rows']} rows)", file=sys.stderr)
+        elif sp.get("rows_since_pin") is not None and sp.get("chain_matches") is False:
+            # Same row count (or more) but the ledger no longer says, at the
+            # pinned row, the chain value the pin recorded: the history up to
+            # that row was rewritten, even if every chain was recomputed so the
+            # file verifies on its own. Counting rows alone cannot see this.
+            sp["rewritten"] = True
+            word = report["verdict"] = V.BROKEN
+            print(f"{V.BROKEN}: the ledger's chain at the pinned row {sp['pinned_rows']} "
+                  f"({sp['chain_at_pin']}) differs from its last pin ({sp['namespace']}, "
+                  f"{sp['pinned_chain']}): history at or before that row was rewritten",
+                  file=sys.stderr)
         elif sp.get("rows_since_pin") is not None:
             print(f"rows added since the last pin ({sp['namespace']}, {sp['pinned_rows']} "
                   f"rows): {sp['rows_since_pin']}", file=sys.stderr)
+            if sp.get("chain_matches") is None:
+                print(f"chain not compared with the pin: {sp['reason']}", file=sys.stderr)
         else:
             print(f"no pin compared: {sp['reason']}", file=sys.stderr)
+        # Every pin, not only the latest (review round 5): a rewrite re-pinned
+        # at the same or a higher row count agrees with the newest pin, and the
+        # original pin, which it does not agree with, is the disproof.
+        ep = sp.get("earlier_pin")
+        if ep and word != V.BROKEN:
+            sp["truncated" if ep.get("truncated") else "rewritten"] = True
+            word = report["verdict"] = V.BROKEN
+            if ep.get("truncated"):
+                print(f"{V.BROKEN}: the ledger holds {-ep['rows_since_pin']} fewer row(s) than "
+                      f"an earlier pin ({sp['namespace']}, {ep['pinned_rows']} rows)",
+                      file=sys.stderr)
+            else:
+                print(f"{V.BROKEN}: the ledger's chain at row {ep['pinned_rows']} "
+                      f"({ep['chain_at_pin']}) differs from an earlier pin ({sp['namespace']}, "
+                      f"{ep['pinned_chain']}): history at or before that row was rewritten "
+                      f"(the latest pin agrees: it was taken after the rewrite)",
+                      file=sys.stderr)
+        eq = sp.get("equivocation")
+        if eq:
+            # Two chains at one row count: the pin file attests to two heads at
+            # one height. WitnessStore.record refuses the second; a file that
+            # holds both anyway cannot vouch for either history.
+            word = report["verdict"] = V.BROKEN
+            print(f"{V.BROKEN}: the pin file holds two different chains at row {eq['rows']} "
+                  f"({sp['namespace']}: {eq['chains'][0]} and {eq['chains'][1]}): this pin "
+                  f"file holds two heads at one height; a local WitnessStore refuses that",
+                  file=sys.stderr)
+        # --witness was asked for and NO pin was compared (review round 6): an
+        # ambiguous pin file without --ns, no pin for the namespace, a missing
+        # or unreadable pin file, a pin that constrains nothing. The ledger's
+        # own VERIFIED does not answer the question that was asked; a second
+        # namespace pinned into the file must not switch the pin check off.
+        # "Compared" means a CHAIN was compared (review round 7): the latest
+        # pin's chain_matches is True or False, or an earlier pin's chain was
+        # set against the ledger's. A row count alone never counts.
+        compared = (sp.get("chain_matches") is not None
+                    or sp.get("earlier_pins_checked", 0) > 0)
+        if word == V.VERIFIED and not compared:
+            word = report["verdict"] = V.COULD_NOT_LOOK
+            why = sp.get("reason") or "no pin was compared"
+            d = V.could_not_look("a witness pin to compare the ledger with", pins,
+                                 _no_pin_reason_word(sp, pins), why)
+            report.update(d)
+            cnl_keys = tuple(d)
+            print(f"{V.COULD_NOT_LOOK} ({d['reason_word']}): --witness was given but no pin "
+                  f"was compared, so the ledger's own VERIFIED does not stand: {why}",
+                  file=sys.stderr)
+        if word == V.BROKEN:
+            # The ledger alone may have read COULD NOT LOOK (bounded); the pin
+            # turned that into BROKEN. Its looked_for / where / reason_word
+            # describe the verdict that no longer stands: drop them, so the
+            # report carries one signal.
+            for k in cnl_keys:
+                report.pop(k, None)
     print(json.dumps(report, indent=1))
     if unread and legacy:
         return V.EXIT_BAD                      # 0.9.0 / arcaeon-ledger verify said 1
     return V.exit_for(word)
 
 
+def _no_pin_reason_word(sp: dict, pins: str) -> str:
+    """The COULD NOT LOOK reason word for a --witness check that compared no
+    pin: the pin file is missing, unreadable, holds no pin for the namespace
+    (or several namespaces and no --ns), or its pin constrains nothing."""
+    if sp.get("reason_word") in V.REASON_WORDS:
+        return sp["reason_word"]
+    if not Path(pins).exists():
+        return "missing"
+    if sp.get("pinned_rows") == 0:
+        return "empty"
+    if "malformed" in str(sp.get("reason", "")):
+        return "unreadable"
+    return "name_not_found"
+
+
 def _rows_since_pin_report(ledger: str, pins: str, ns: str | None) -> dict:
     """The ledger's latest pin in a local pin file and the rows added since it
-    (arcaeon.record.ledger.witness.rows_since_pin). Without --ns the file must
-    hold pins for one namespace only. Never raises; says why when it cannot."""
+    (arcaeon.record.ledger.witness.rows_since_pin), then every earlier pin for
+    the namespace checked the same way (_every_pin_report). Without --ns the
+    file must hold pins for one namespace only. Never raises; says why when
+    it cannot."""
     from arcaeon.record.ledger import witness as W
     if not Path(pins).is_file():
         return {"rows_since_pin": None, "reason": f"no pin file at {pins}"}
@@ -480,6 +582,31 @@ def _rows_since_pin_report(ledger: str, pins: str, ns: str | None) -> dict:
     pin = store.latest(ns)
     if not pin:
         return {"rows_since_pin": None, "namespace": ns, "reason": f"no pin for {ns} in {pins}"}
+    # _witness_file_problem above held every pin to strict_pin; the pins are
+    # read through it again here, so the chain compared is the lower-cased one.
+    pin = W.strict_pin(pin)
+    out = _latest_pin_report(ledger, pins, ns, pin)
+    _every_pin_report(ledger, [W.strict_pin(p) for p in store.history(ns)], pin, out)
+    return out
+
+
+def _latest_pin_report(ledger: str, pins: str, ns: str, pin: dict) -> dict:
+    """The latest pin compared with the ledger: rows since it, and the chain at
+    its row. `pin` has passed witness.strict_pin (rows an int >= 0, chain
+    "genesis" or lower-case hex): a pin that fails it never reaches here, the
+    whole pin file is COULD NOT LOOK instead (review round 7). Never raises;
+    says why when it cannot."""
+    from arcaeon.record.ledger import witness as W
+    p_rows, p_chain = pin["rows"], pin["chain"]
+    if p_rows == 0:
+        # A ZERO-ROW PIN CONSTRAINS NOTHING: its chain is genesis, and so is
+        # every ledger's at row 0, so the comparison would match any ledger.
+        # Refused the way witness.verify_against_witness refuses it (no_record).
+        return {"rows_since_pin": None, "namespace": ns, "pinned_rows": 0,
+                "pinned_chain": p_chain, "chain_matches": None,
+                "reason": f"the latest pin for {ns} in {pins} was taken over an empty log "
+                          f"(0 rows): it constrains nothing, so no chain was compared; "
+                          f"re-pin against a non-empty ledger"}
     rows_since = getattr(W, "rows_since_pin", None)
     try:
         n = rows_since(ledger, pin) if rows_since else None
@@ -488,8 +615,103 @@ def _rows_since_pin_report(ledger: str, pins: str, ns: str | None) -> dict:
     if n is None:
         return {"rows_since_pin": None, "namespace": ns,
                 "reason": "this install has no witness.rows_since_pin"}
-    return {"rows_since_pin": n, "namespace": ns, "pinned_rows": pin.get("rows"),
-            "pinned_chain": pin.get("chain")}
+    out = {"rows_since_pin": n, "namespace": ns, "pinned_rows": p_rows,
+           "pinned_chain": p_chain}
+    if n < 0:
+        # Fewer rows than were pinned: truncation, whatever the pin's chain
+        # says. A usable row count is enough to see it (witness.py checks
+        # local_rows < w_rows before it looks at the chain).
+        return out
+    # The pin is (rows, chain), rows >= 1 here (a zero-row pin is refused
+    # above). n >= 0 means no pinned row was cut off the end. A chain at row
+    # `rows` equal to the pin's says no row up to it changed only when the
+    # ledger also verifies on its own (verify_file above): agreement at one
+    # row does not vouch for a chain broken elsewhere, and a COULD NOT LOOK
+    # ledger stays COULD NOT LOOK. A differing chain means a rewrite at or
+    # before that row, whatever the ledger says alone. Same comparison as
+    # witness.verify_against_witness; chain_at counts rows as Head.rows (and
+    # so the pin) does.
+    from arcaeon.record.ledger import chain_at
+    from arcaeon.record.row import GENESIS
+    here = chain_at(ledger, p_rows)
+    out["chain_at_pin"] = here
+    if (not isinstance(here, str) or not here) and p_chain.lower() != GENESIS:
+        # The ledger's row at the pin carries no chain, but the pin recorded a
+        # real one: the row was chained when pinned and is not now. Stripping
+        # the chains is a rewrite (review round 4), not "not comparable".
+        out["chain_matches"] = False
+        return out
+    if not isinstance(here, str) or not here:
+        # The ledger's row at the pin carries no chain and the pin reads
+        # "genesis" (how the library pins a ledger whose rows were written
+        # before chaining). There is no chain on either side to compare: not
+        # comparable, which is not the same as rewritten.
+        out["chain_matches"] = None
+        out["reason"] = (f"the ledger's row {p_rows} carries no chain, so its chain cannot "
+                         f"be compared with the pin's; rows were compared, the chain was not")
+        return out
+    out["chain_matches"] = here.lower() == p_chain.lower()
+    return out
+
+
+def _every_pin_report(ledger: str, history: list, latest: dict, out: dict) -> None:
+    """Compare the ledger with EVERY pin for the namespace, each at its own row
+    count, with the rules the latest pin gets (review round 5). Reading only the
+    latest let a re-pin launder a rewrite: rewrite every row, recompute every
+    chain, pin again at the same or a higher row count, and the ledger agreed
+    with the newest pin while the original one sat unread. Adds to `out`:
+    `pins_compared`; `earlier_pins_checked` (earlier pins whose CHAIN was set
+    against the ledger's chain at that row: a row count alone is not a
+    comparison, review round 7); `earlier_pin` (the first
+    earlier pin the ledger disagrees with: truncated or rewritten);
+    `equivocation` (two different chains at one
+    row count in the pin file). Pins that constrain nothing (zero rows) are
+    skipped, as the latest is. Every pin in `history` has passed
+    witness.strict_pin, so every one carries an int row count and a chain."""
+    from arcaeon.record.ledger import Ledger, chain_at
+    from arcaeon.record.row import GENESIS
+
+    pins_ = list(history)
+    out["pins_compared"] = len(pins_)
+    seen = {}
+    for p in pins_:
+        if p["rows"] >= 1:
+            first = seen.setdefault(p["rows"], p["chain"])
+            if first != p["chain"]:
+                out["equivocation"] = {"rows": p["rows"], "chains": [first, p["chain"]]}
+                break
+    if out.get("rows_since_pin") is not None and (
+            out["rows_since_pin"] < 0 or out.get("chain_matches") is False):
+        return                                 # the latest pin already disagrees
+    try:
+        ledger_rows = Ledger(ledger).head().rows
+    except (ValueError, OSError):
+        return
+    done = {(latest["rows"], latest["chain"])}
+    for p in pins_:
+        key = (p["rows"], p["chain"])
+        if key in done:
+            continue
+        done.add(key)
+        r, c = p["rows"], p["chain"]
+        if r < 1:
+            continue
+        found = {"pinned_rows": r, "pinned_chain": c, "rows_since_pin": ledger_rows - r}
+        if ledger_rows < r:
+            out["earlier_pin"] = dict(found, truncated=True)
+            return
+        here = chain_at(ledger, r)
+        if not isinstance(here, str) or not here:
+            if c == GENESIS:
+                continue       # no chain on either side: not compared, not counted
+            differs = True     # a real-chain pin vs a chainless row: the round 4 rule
+        else:
+            differs = here.lower() != c
+        out["earlier_pins_checked"] = out.get("earlier_pins_checked", 0) + 1
+        if differs:
+            out["earlier_pin"] = dict(found, chain_at_pin=here, chain_matches=False,
+                                      rewritten=True)
+            return
 
 
 def _receipt(argv) -> int:
@@ -696,6 +918,15 @@ def _witness_file_problem(p: Path) -> str | None:
             return f"line {i} does not parse ({e})"
         if not (isinstance(row, dict) and {"namespace", "rows", "chain"} <= set(row)):
             return f"line {i} is not a witness pin (a pin carries namespace, rows, chain)"
+        # The one strict test every reader uses (review round 7): a pin whose
+        # rows are 3.0 or True, or whose chain is null, empty or not hex, makes
+        # the whole file unreadable. It is never skipped, so it can never be
+        # the pin that was quietly not compared.
+        from arcaeon.record.ledger.witness import PinShapeError, strict_pin
+        try:
+            strict_pin(row)
+        except PinShapeError as e:
+            return f"line {i} fails the strict pin rules ({e})"
     from arcaeon.record.ledger.witness import WitnessStore
     wv = WitnessStore(p).verify()
     if wv.get("ok") is False:

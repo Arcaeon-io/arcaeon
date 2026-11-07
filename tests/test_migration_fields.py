@@ -43,6 +43,14 @@ NEW_FIELDS = {
     # AAT chain (lane D, K062, K063)
     "prev_hash": "K062 AAT chain", "aat_chain": "K063 AAT chain",
     "which_chain": "K063 AAT chain", "chain": "K040/K062 chain",
+    # verify --witness (the pinned chain, break-it page 2026-11-05)
+    "chain_at_pin": "verify --witness", "chain_matches": "verify --witness",
+    "rewritten": "verify --witness",
+    # verify --witness compares every pin (review round 5)
+    "pins_compared": "verify --witness", "earlier_pin": "verify --witness",
+    "equivocation": "verify --witness",
+    # strict pins and the pack namespace (review round 7)
+    "witness_unreadable": "verify --witness", "namespace_checked": "evidence-pack verify",
 }
 
 
