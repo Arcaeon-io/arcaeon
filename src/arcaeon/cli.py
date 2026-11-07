@@ -446,8 +446,9 @@ def _verify(argv) -> int:
         # A ledger that could not be read has no rows and no chain to set
         # against a pin: comparing would call a missing file "truncated".
         report["since_pin"] = (
-            {"rows_since_pin": None,
-             "reason": "the ledger could not be read, so nothing was compared with the pin"}
+            _no_compare(path, "missing" if not Path(path).exists() else "unreadable",
+                        "the ledger could not be read, so nothing was compared with the pin",
+                        looked_for="a ledger file to compare with the pin")
             if unread else _rows_since_pin_report(path, pins, ns))
         sp = report["since_pin"]
         # A truncation or a rewrite found against the pin is BROKEN whatever
@@ -519,13 +520,18 @@ def _verify(argv) -> int:
         if word == V.VERIFIED and not compared:
             word = report["verdict"] = V.COULD_NOT_LOOK
             why = sp.get("reason") or "no pin was compared"
-            d = V.could_not_look("a witness pin to compare the ledger with", pins,
-                                 _no_pin_reason_word(sp, pins), why)
+            if sp.get("reason_word") in V.REASON_WORDS and sp.get("where") and sp.get("looked_for"):
+                # since_pin already names what could not be looked at: the pin
+                # file, the ledger (its rows could not be counted) or the install.
+                d = {k: sp[k] for k in ("looked_for", "where", "reason_word", "reason")}
+            else:
+                d = V.could_not_look("a witness pin to compare the ledger with", pins,
+                                     _no_pin_reason_word(sp, pins), why)
             report.update(d)
             cnl_keys = tuple(d)
-            print(f"{V.COULD_NOT_LOOK} ({d['reason_word']}): --witness was given but no pin "
-                  f"was compared, so the ledger's own VERIFIED does not stand: {why}",
-                  file=sys.stderr)
+            print(f"{V.COULD_NOT_LOOK} ({d['reason_word']}): looked for {d['looked_for']} in "
+                  f"{d['where']}: --witness was given but no pin was compared, so the ledger's "
+                  f"own VERIFIED does not stand: {why}", file=sys.stderr)
         if word == V.BROKEN:
             # The ledger alone may have read COULD NOT LOOK (bounded); the pin
             # turned that into BROKEN. Its looked_for / where / reason_word
@@ -537,6 +543,16 @@ def _verify(argv) -> int:
     if unread and legacy:
         return V.EXIT_BAD                      # 0.9.0 / arcaeon-ledger verify said 1
     return V.exit_for(word)
+
+
+def _no_compare(where: str, reason_word: str, reason: str, *,
+                looked_for: str = "a witness pin to compare the ledger with", **fields) -> dict:
+    """since_pin when no pin was compared: rows_since_pin null and the COULD
+    NOT LOOK keys (looked_for, where, reason_word, reason). `where` is what
+    could not be looked at: the pin file, or the ledger when it is the ledger
+    that could not be read or counted."""
+    return {"rows_since_pin": None, **fields,
+            **V.could_not_look(looked_for, where, reason_word, reason)}
 
 
 def _no_pin_reason_word(sp: dict, pins: str) -> str:
@@ -562,11 +578,12 @@ def _rows_since_pin_report(ledger: str, pins: str, ns: str | None) -> dict:
     it cannot."""
     from arcaeon.record.ledger import witness as W
     if not Path(pins).is_file():
-        return {"rows_since_pin": None, "reason": f"no pin file at {pins}"}
+        return _no_compare(pins, "missing", f"no pin file at {pins}")
     problem = _witness_file_problem(Path(pins))
     if problem:
-        return {"rows_since_pin": None, "reason": f"the pin file cannot be read: {problem}",
-                **V.could_not_look("a witness pin file", pins, "unreadable", problem)}
+        return {"rows_since_pin": None,
+                **V.could_not_look("a witness pin file", pins, "unreadable",
+                                   f"the pin file cannot be read: {problem}")}
     store = W.WitnessStore(pins)
     if ns is None:
         names = set()
@@ -576,12 +593,13 @@ def _rows_since_pin_report(ledger: str, pins: str, ns: str | None) -> dict:
             except (ValueError, KeyError, TypeError):
                 continue
         if len(names) != 1:
-            return {"rows_since_pin": None,
-                    "reason": f"the pin file holds {len(names)} namespaces; pass --ns"}
+            return _no_compare(pins, "name_not_found" if names else "empty",
+                               f"the pin file holds {len(names)} namespaces; pass --ns"
+                               if names else "the pin file holds no pins")
         ns = names.pop()
     pin = store.latest(ns)
     if not pin:
-        return {"rows_since_pin": None, "namespace": ns, "reason": f"no pin for {ns} in {pins}"}
+        return _no_compare(pins, "name_not_found", f"no pin for {ns} in {pins}", namespace=ns)
     # _witness_file_problem above held every pin to strict_pin; the pins are
     # read through it again here, so the chain compared is the lower-cased one.
     pin = W.strict_pin(pin)
@@ -602,19 +620,24 @@ def _latest_pin_report(ledger: str, pins: str, ns: str, pin: dict) -> dict:
         # A ZERO-ROW PIN CONSTRAINS NOTHING: its chain is genesis, and so is
         # every ledger's at row 0, so the comparison would match any ledger.
         # Refused the way witness.verify_against_witness refuses it (no_record).
-        return {"rows_since_pin": None, "namespace": ns, "pinned_rows": 0,
-                "pinned_chain": p_chain, "chain_matches": None,
-                "reason": f"the latest pin for {ns} in {pins} was taken over an empty log "
-                          f"(0 rows): it constrains nothing, so no chain was compared; "
-                          f"re-pin against a non-empty ledger"}
+        return _no_compare(pins, "empty",
+                           f"the latest pin for {ns} in {pins} was taken over an empty log "
+                           f"(0 rows): it constrains nothing, so no chain was compared; "
+                           f"re-pin against a non-empty ledger",
+                           namespace=ns, pinned_rows=0, pinned_chain=p_chain, chain_matches=None)
     rows_since = getattr(W, "rows_since_pin", None)
     try:
         n = rows_since(ledger, pin) if rows_since else None
     except (ValueError, OSError) as e:
-        return {"rows_since_pin": None, "namespace": ns, "reason": str(e)}
+        # rows_since_pin reads the ledger: what failed is the ledger, not the
+        # pin file (the pins passed strict_pin above).
+        return _no_compare(ledger, "unreadable", f"the ledger's rows could not be counted: {e}",
+                           looked_for="the ledger's row count to compare with the pin",
+                           namespace=ns)
     if n is None:
-        return {"rows_since_pin": None, "namespace": ns,
-                "reason": "this install has no witness.rows_since_pin"}
+        return _no_compare("arcaeon.record.ledger.witness", "missing",
+                           "this install has no witness.rows_since_pin",
+                           looked_for="witness.rows_since_pin in this install", namespace=ns)
     out = {"rows_since_pin": n, "namespace": ns, "pinned_rows": p_rows,
            "pinned_chain": p_chain}
     if n < 0:
