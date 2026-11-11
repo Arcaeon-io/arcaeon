@@ -6,16 +6,18 @@ the `arcaeon` Python package, version 0.10.0. It is the same server that
 this repository under the MIT license.
 
 The server keeps a record of what an agent did that the agent cannot quietly
-rewrite. Every row is hash-chained to the row before it, so a changed, deleted
-or swapped row shows up as a break at the line where it happened. Anyone you
-hand the file to can run the same check without asking you for anything.
+rewrite. Every row is hash-chained to the row before it, so a changed or
+swapped row, or one deleted from the middle, breaks the chain, and the check
+names the line. Rows cut from the end are caught by a pin, not by the chain.
+Anyone you hand the file to can run the same check without asking you for
+anything.
 
 It also scans the source of a Python MCP server before you connect to it, and
 keeps deal terms, mandates and second readings on the same kind of chained
 ledger.
 
-What a check does not prove: it says a record was not altered after it was
-written. It does not say the record is true, or who wrote it.
+What the chain proves: the rows were not changed in place after they were
+written. It does not prove the record is true, or who wrote it.
 
 ## What you need
 
@@ -67,25 +69,30 @@ Seventeen tools are free and need no key:
 - `evidence_pack_build`, `evidence_pack_verify`: build a folder of evidence for
   one agent and one time window, and verify a pack someone handed you.
 - `arcaeon_status`: versions, the free and paid split, whether a key is set,
-  and where the files are. Call it first if a tool refused you.
+  and where the ledger and call record are. Call it first if a tool refused
+  you.
 
 Two tools need a key:
 
-- `witness_pin`: record your ledger head with the hosted witness, a party you
-  cannot advance. This is what catches a log that was cut short, which a hash
-  chain alone cannot.
+- `witness_pin`: record your ledger head (row count and chain hash) with the
+  hosted witness at witness.arcaeon.io, which we run. The witness never moves
+  backward: once it holds a head, a log that was cut short or rewritten no
+  longer matches it.
 - `witness_renew`: restate an unchanged head so a finished log does not look
   abandoned.
 
-A pin shows the log was not cut short only relative to what the witness saw,
-and only as of the last pin.
+The hosted witness is one witness, run by us, the people who make this
+package. A pin there shows your head as it stood when we recorded it. It is
+not an independent party vouching for you. A pin shows the log was not cut
+short or rewritten only relative to what the witness saw, and only as of the
+last pin.
 
 ## The key
 
 The two witness tools read a witness key from the `ARCAEON_KEY` environment
 variable of the server process. This plugin does not ask for a key, store one
 or set one. Without a key, those two tools send nothing and answer with a short
-note on how to get one. Prices and plans are at https://arcaeon.io/pricing.
+note on how to get one. Plans are at https://arcaeon.io/pricing.
 
 The server runs with the same environment variables as your other MCP servers.
 So if `ARCAEON_KEY` is already set where Claude Code runs, the two witness
@@ -96,20 +103,43 @@ Treat it like a password.
 
 ## What it writes on your machine
 
-- A ledger, `agent.log.jsonl`, in the folder the server starts in, with
-  per-namespace ledgers in a `ledgers` folder beside it. `ARCAEON_LEDGER_LOG`
-  sets another path.
-- Its own call record, `arcaeon.calls.jsonl`, beside the ledger. Each tool call
-  adds one row with the tool name, the UTC time, a sha256 digest of the
-  arguments and the outcome. The arguments themselves are not copied.
+The plugin sets `ARCAEON_LEDGER_LOG` to `${CLAUDE_PROJECT_DIR}/agent.log.jsonl`,
+so the ledger and the two call records beside it land in your project folder
+and stay there across plugin updates. They are not kept in the plugin's
+install folder, which changes with each version.
+
+- A ledger, `agent.log.jsonl`, in your project folder, with
+  per-namespace ledgers in a `ledgers` folder beside it. The ledger keeps the
+  records the agent appends exactly as they were written.
+- The server's call record, `arcaeon.calls.jsonl`, beside the ledger. Each tool
+  call adds one row with the tool name, the UTC time, a sha256 digest of the
+  arguments and the outcome. The arguments themselves are not copied there.
+  When a call fails, its row keeps the error text, and that text can quote an
+  argument.
+- The ledger tools' own call record, `agent.log.jsonl.calls.jsonl`, beside the
+  ledger. Each call to one of the five `ledger_*` tools adds one row with the
+  tool name, the time, a sha256 digest of the arguments, the arguments
+  themselves when they come to 4096 bytes or less, the outcome, and the error
+  text of a failed call.
 - When you use `vet_scan` or `vet_grade`, a call record for the vet tools at
-  `~/.mcp_vet/audit.jsonl`. `MCP_VET_AUDIT_LEDGER` sets another path.
+  `~/.mcp_vet/audit.jsonl`: the path scanned, a sha256 digest of the source,
+  the findings, the verdict and any error text. The source itself is not
+  copied. `MCP_VET_AUDIT_LEDGER` sets another path.
+- A `.lock` file beside each of these while the server writes to it.
 - Files at the paths you or Claude give a tool, such as a deal ledger or an
   evidence pack folder.
 
+So keep secrets out of what the agent appends and out of the arguments to the
+ledger tools: they are stored as given.
+
 The tools read the files at the paths they are given. `MCP_VET_SCAN_ROOT`
-limits what the vet tools may read to one folder. `arcaeon_status` shows the
-exact paths in use.
+limits what the vet tools may read to one folder. To see the paths in use:
+
+- `arcaeon_status` shows the ledger, the `ledgers` folder and the server's call
+  record. The ledger tools' call record is the ledger's path with
+  `.calls.jsonl` added.
+- `vet_audit_verify` shows the vet record, which is `~/.mcp_vet/audit.jsonl`
+  unless `MCP_VET_AUDIT_LEDGER` is set.
 
 ## What it sends over the network
 
@@ -121,6 +151,13 @@ exact paths in use.
 - `evidence_pack_verify`, only when you set `remote` to true: an HTTPS request
   to the same witness for each remote pin in the pack, looking the pin up by
   namespace, row count and chain hash. No key is sent.
+
+The witness publishes each pin, with its namespace, row count, chain hash and
+the time it was pinned, in a public, append-only record that is not built to
+be deleted. Once a pin is there, it cannot be taken out without visibly
+rewriting that public record. So keep anything private or identifying out of
+the namespace: no names, no email addresses, nothing that points to a person
+or a customer.
 
 No other tool opens a network connection. `ARCAEON_WITNESS_URL` points these
 requests at another witness, such as one you run yourself.
