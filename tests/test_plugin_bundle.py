@@ -9,6 +9,11 @@
 - the marketplace entry points at this folder under the manifest's name;
 - the README names every tool the server has, and names exactly the paid ones
   as the tools that need a key.
+
+This repository has no CI workflow, so these run with the local suite.
+arcaeon.mcp.server imports without the MCP SDK (the [mcp] extra loads it only
+when the server is built), so the tool-name test runs on a base install too;
+it skips, and says why, only if that import ever starts needing the extra.
 """
 from __future__ import annotations
 
@@ -64,11 +69,20 @@ def test_no_key_is_set_in_the_bundle():
 
 
 def test_ledger_lives_in_the_project_not_the_plugin_cache():
-    # the plugin's own folder changes with every version, so a ledger left in
-    # the server's start folder could be stranded on update
+    # The bare form on purpose. Claude Code fills ${CLAUDE_PROJECT_DIR} itself
+    # in a plugin's MCP env. The defaulted form ${CLAUDE_PROJECT_DIR:-.} goes
+    # through ordinary variable expansion instead, where CLAUDE_PROJECT_DIR is
+    # not set in Claude Code's own environment, so it comes out as "." and the
+    # ledger path turns relative again (seen with a probe plugin installed in a
+    # throwaway CLAUDE_CONFIG_DIR: bare -> <project>/agent.log.jsonl, defaulted
+    # -> ./agent.log.jsonl).
     assert SERVER.get("env") == {
         "ARCAEON_LEDGER_LOG": "${CLAUDE_PROJECT_DIR}/agent.log.jsonl"}
     assert "${CLAUDE_PROJECT_DIR}/agent.log.jsonl" in README
+    # and the README owns the two consequences: it overrides the user's own
+    # setting, and the files sit in the project root
+    assert "replaces any `ARCAEON_LEDGER_LOG`" in README
+    assert "`.gitignore`" in README
 
 
 def test_marketplace_entry_points_at_this_plugin():

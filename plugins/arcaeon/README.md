@@ -76,8 +76,11 @@ Two tools need a key:
 
 - `witness_pin`: record your ledger head (row count and chain hash) with the
   hosted witness at witness.arcaeon.io, which we run. The witness never moves
-  backward: once it holds a head, a log that was cut short or rewritten no
-  longer matches it.
+  backward: once it holds a head, a log that is shorter than that head, or
+  different at that row count, no longer matches it. A log that is rewritten
+  and then pinned again at a higher row count is not flagged by these tools in
+  this version: the witness takes the new pin, and the earlier pin, which the
+  rewritten log does not match, stays in its public record.
 - `witness_renew`: restate an unchanged head so a finished log does not look
   abandoned.
 
@@ -103,14 +106,17 @@ Treat it like a password.
 
 ## What it writes on your machine
 
-The plugin sets `ARCAEON_LEDGER_LOG` to `${CLAUDE_PROJECT_DIR}/agent.log.jsonl`,
-so the ledger and the two call records beside it land in your project folder
-and stay there across plugin updates. They are not kept in the plugin's
-install folder, which changes with each version.
+The plugin sets `ARCAEON_LEDGER_LOG` to `${CLAUDE_PROJECT_DIR}/agent.log.jsonl`.
+Claude Code fills in `${CLAUDE_PROJECT_DIR}` with your project folder, so the
+ledger and the two call records beside it land in the root of that folder and
+stay there across plugin updates. This value replaces any `ARCAEON_LEDGER_LOG`
+you set yourself.
 
-- A ledger, `agent.log.jsonl`, in your project folder, with
-  per-namespace ledgers in a `ledgers` folder beside it. The ledger keeps the
-  records the agent appends exactly as they were written.
+The server writes:
+
+- A ledger, `agent.log.jsonl`, with per-namespace ledgers in a `ledgers`
+  folder beside it. The ledger keeps each record the agent appends as given,
+  with a timestamp and a chain value added to the row.
 - The server's call record, `arcaeon.calls.jsonl`, beside the ledger. Each tool
   call adds one row with the tool name, the UTC time, a sha256 digest of the
   arguments and the outcome. The arguments themselves are not copied there.
@@ -123,14 +129,26 @@ install folder, which changes with each version.
   text of a failed call.
 - When you use `vet_scan` or `vet_grade`, a call record for the vet tools at
   `~/.mcp_vet/audit.jsonl`: the path scanned, a sha256 digest of the source,
-  the findings, the verdict and any error text. The source itself is not
-  copied. `MCP_VET_AUDIT_LEDGER` sets another path.
-- A `.lock` file beside each of these while the server writes to it.
+  the number of findings, the verdict and any error text. The source itself
+  and the findings are not copied. `MCP_VET_AUDIT_LEDGER` sets another path.
+- A `.lock` file beside each of these, created on the first write and left in
+  place after it.
 - Files at the paths you or Claude give a tool, such as a deal ledger or an
   evidence pack folder.
 
 So keep secrets out of what the agent appends and out of the arguments to the
 ledger tools: they are stored as given.
+
+If the project is shared, add these lines to its `.gitignore` so the records
+in the project root are not committed by accident:
+
+```gitignore
+agent.log.jsonl
+agent.log.jsonl.*
+arcaeon.calls.jsonl
+arcaeon.calls.jsonl.*
+ledgers/
+```
 
 The tools read the files at the paths they are given. `MCP_VET_SCAN_ROOT`
 limits what the vet tools may read to one folder. To see the paths in use:
