@@ -1,18 +1,52 @@
-# arcaeon
+# Arcaeon
 
 <!-- mcp-name: io.arcaeon/arcaeon -->
 
-A record of what an agent did that the agent cannot quietly rewrite, and a way
-for anyone who doubts it to check.
+This repository is the `arcaeon` command line and MCP server: a record of
+what an AI agent did that the agent cannot quietly rewrite, and a way for
+anyone who doubts it to check. Each row an agent writes is hash-chained to
+the one before it, and a pin to our hosted witness catches a record cut
+short.
 
-Every row your agent writes is hash-chained to the row before it. Change a row,
-delete one, or swap two, and the check names the line where the chain breaks.
-Hand the file to someone else and they can run the same check without asking
-you for anything.
+Arcaeon does not prove that the notes are true, or who typed them.
 
-One package. One command: `arcaeon <verb>`.
+Arcaeon also has a Windows desktop app, at arcaeon.io, that guards the
+folder an AI agent keeps its memory in and shows when something changed
+that was not approved. The desktop app is not in this repository; it has
+its own MCP server and its own witness switch, described on arcaeon.io.
+
+## What it does
+
+- **Keeps a record an agent cannot quietly rewrite** (`arcaeon log`,
+  `arcaeon verify`): each row is hash-chained to the row before it, so a
+  changed or swapped row, or one deleted from the middle, breaks the chain
+  and `verify` names the line. Rows cut from the end are caught by a pin,
+  not by the chain (see Limits).
+- **Pins a record's head with our witness** (`arcaeon pin --remote`, and the
+  `witness_pin` MCP tool), which catches a record cut short.
+- **Reads an MCP server's source and grades it** (`arcaeon vet`, and
+  `arcaeon badge` on the command line).
+- **Gives an agent its ledger, vet, witness, deal, second read and evidence
+  pack tools over MCP** (`arcaeon mcp`, on stdio).
 
 ## Install
+
+```console
+pip install "arcaeon[mcp]"
+arcaeon mcp
+```
+
+`arcaeon mcp` starts the MCP server on stdio. `arcaeon connect <client>`
+prints the config that client needs.
+
+Free to install. Two MCP tools are paid and need an `ARCAEON_KEY`:
+`witness_pin` and `witness_renew`. Every other MCP tool works without a key.
+On the command line, `seal` is paid, `pin --remote` (with or without
+`--renew`) is paid the same way as `witness_pin`, and `credits` needs the
+key as well (see The hosted door below). The `arcaeon_status` tool lists
+which tools are free and which are paid.
+
+The base install, without the MCP server:
 
 ```console
 pip install arcaeon
@@ -61,6 +95,18 @@ py -m pip install --user arcaeon
 
 On Windows, when `pip` is not found, the `py` launcher that comes with Python
 installs it for your user alone, no administrator needed.
+
+## The record
+
+A record of what an agent did that the agent cannot quietly rewrite, and a way
+for anyone who doubts it to check.
+
+Every row your agent writes is hash-chained to the row before it. Change a row,
+delete one, or swap two, and the check names the line where the chain breaks.
+Hand the file to someone else and they can run the same check without asking
+you for anything.
+
+One package. One command: `arcaeon <verb>`.
 
 ## A 60-second first run
 
