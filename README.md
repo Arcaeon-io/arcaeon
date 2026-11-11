@@ -17,7 +17,7 @@ Arcaeon does not prove that your notes are true, or who typed them.
 
 The guard is the Arcaeon desktop app for Windows, at arcaeon.io. This
 repository holds the `arcaeon` Python package: a command line and an MCP
-server. The MCP server also ships inside the desktop app.
+server. The desktop app carries its own MCP server as well.
 
 ## What it does
 
