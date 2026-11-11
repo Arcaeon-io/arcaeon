@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "arcaeon": {
+      "command": "uvx",
+      "args": ["--from", "arcaeon[mcp]==0.10.0", "arcaeon", "mcp"]
+    }
+  }
+}
