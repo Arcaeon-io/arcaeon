@@ -78,7 +78,7 @@ Two tools need a key:
   hosted witness at witness.arcaeon.io, which we run. The witness never moves
   backward: once it holds a head, a log that is shorter than that head, or
   different at that row count, no longer matches it. A log that is rewritten
-  and then pinned again at a higher row count is not flagged by these tools in
+  and then pinned again at the same or a higher row count is not flagged by these tools in
   this version: the witness takes the new pin, and the earlier pin, which the
   rewritten log does not match, stays in its public record.
 - `witness_renew`: restate an unchanged head so a finished log does not look
