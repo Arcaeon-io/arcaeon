@@ -1,0 +1,15 @@
+{
+  "name": "arcaeon",
+  "description": "Arcaeon's Claude Code plugin: the Arcaeon MCP server from the arcaeon Python package.",
+  "owner": {
+    "name": "Arcaeon",
+    "url": "https://arcaeon.io"
+  },
+  "plugins": [
+    {
+      "name": "arcaeon",
+      "source": "./plugins/arcaeon",
+      "description": "The Arcaeon MCP server: a hash-chained record of what an agent did that anyone can check, static checks of MCP server source, and two optional paid witness tools."
+    }
+  ]
+}

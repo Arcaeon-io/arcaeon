@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "arcaeon": {
+      "command": "uvx",
+      "args": ["--from", "arcaeon[mcp]==0.10.0", "arcaeon", "mcp"],
+      "env": {
+        "ARCAEON_LEDGER_LOG": "${CLAUDE_PROJECT_DIR}/agent.log.jsonl"
+      }
+    }
+  }
+}

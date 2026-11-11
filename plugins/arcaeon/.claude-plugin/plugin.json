@@ -1,0 +1,17 @@
+{
+  "name": "arcaeon",
+  "displayName": "Arcaeon",
+  "version": "0.10.0",
+  "description": "The Arcaeon MCP server: a hash-chained record of what an agent did that anyone can check, static checks of MCP server source before you connect to it, and two optional paid tools that pin a ledger head with a hosted witness.",
+  "author": {
+    "name": "Arcaeon",
+    "url": "https://arcaeon.io"
+  },
+  "homepage": "https://arcaeon.io",
+  "repository": "https://github.com/Arcaeon-io/arcaeon",
+  "license": "MIT",
+  "keywords": ["agents", "audit", "tamper-evident", "hash-chain", "ledger", "provenance"],
+  "documentationUrl": "https://github.com/Arcaeon-io/arcaeon#readme",
+  "privacyPolicyUrl": "https://arcaeon.io/privacy",
+  "termsOfServiceUrl": "https://arcaeon.io/terms"
+}
