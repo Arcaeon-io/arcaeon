@@ -31,33 +31,41 @@ its own MCP server and its own witness switch, described on arcaeon.io.
 
 ## Install
 
-```console
-pip install "arcaeon[mcp]"
-arcaeon mcp
-```
+You need Python 3.10 or newer. Where Windows differs, a note says so.
 
-`arcaeon mcp` starts the MCP server on stdio. `arcaeon connect <client>`
-prints the config that client needs.
-
-Free to install. Two MCP tools are paid and need an `ARCAEON_KEY`:
-`witness_pin` and `witness_renew`. Every other MCP tool works without a key.
-On the command line, `seal` is paid, `pin --remote` (with or without
-`--renew`) is paid the same way as `witness_pin`, and `credits` needs the
-key as well (see The hosted door below). The `arcaeon_status` tool lists
-which tools are free and which are paid.
-
-The base install, without the MCP server:
+**macOS and Linux.** Install into a folder of its own, a virtual
+environment. This works the same on macOS and on Linux, including where the
+system Python refuses a plain `pip install`:
 
 ```console
+python3 -m venv ~/.venvs/arcaeon
+. ~/.venvs/arcaeon/bin/activate
 pip install arcaeon
 ```
 
-Python 3.10 or newer. The base install has zero dependencies. That means `pip`
-pulls in `arcaeon` and nothing else: no protocol SDK, no crypto library, no
-parser. Everything in the Record, Prove and Save lists below runs on the
-Python standard library. It also means no network on import. The hosted
-verbs open a connection when you run them, and so do a few options that say
-so: `proxy --pin-witness`, and `receipt cite`, which looks each citation up
+The second line lasts for this terminal only: in a new terminal, run it
+again before you type `arcaeon`. If Debian or Ubuntu answers the first line
+with "ensurepip is not available", run the `apt install` line it prints,
+then the first line again.
+
+**Windows.** In PowerShell or cmd, the `py` launcher that comes with Python
+from python.org installs it for your user alone, no administrator needed:
+
+```console
+py -m pip install --user arcaeon
+```
+
+Windows note: pip puts the `arcaeon` command in a folder that is usually
+not on your PATH, so `arcaeon` alone answers "not recognized". Type
+`py -m arcaeon` wherever this page says `arcaeon`, and `py` wherever it says
+`python`. Both work in PowerShell and in cmd.
+
+The base install has zero dependencies. That means `pip` pulls in `arcaeon`
+and nothing else: no protocol SDK, no crypto library, no parser. Everything
+in the Record, Prove and Save lists below runs on the Python standard
+library. It also means no network on import. The hosted verbs open a
+connection when you run them, and so do a few options that say so:
+`proxy --pin-witness`, and `receipt cite`, which looks each citation up
 online. Everything else works offline.
 
 The heavy parts are extras. Add only what you use:
@@ -69,18 +77,38 @@ The heavy parts are extras. Add only what you use:
 | `arcaeon[sign]` | signed vet reports (`badge --receipt`, and SIGNED rather than UNSIGNED seals), receipt signature checks | cryptography |
 | `arcaeon[all]` | all three | all of the above |
 
+To give an AI app the MCP server, install the `mcp` extra the same way
+(Windows: `py -m pip install --user "arcaeon[mcp]"`):
+
 ```console
 pip install "arcaeon[mcp]"
+arcaeon connect --list
 ```
 
-Other ways in, same package:
+`arcaeon connect --list` names the AI apps it knows and the config file
+each one reads. `arcaeon connect <app>` prints the lines that app needs and
+writes nothing; add `--write` to put them in, then restart the app. The app
+starts `arcaeon mcp` itself. If you run `arcaeon mcp` by hand it waits,
+silently, for an app to talk to it on stdin; Ctrl+C stops it.
+
+Free to install. Two MCP tools are paid and need an `ARCAEON_KEY`:
+`witness_pin` and `witness_renew`. Every other MCP tool works without a key.
+On the command line, `seal` is paid, `pin --remote` (with or without
+`--renew`) is paid the same way as `witness_pin`, and `credits` needs the
+key as well (see The hosted door below). The `arcaeon_status` tool lists
+which tools are free and which are paid.
+
+Other ways in, same package. If you already use pipx:
 
 ```console
 pipx install "arcaeon[mcp]"
 ```
 
 `pipx` keeps arcaeon in a space of its own, apart from your other Python
-packages, and still puts `arcaeon` on your path.
+packages. If it says the folder it uses is not on your PATH, run
+`pipx ensurepath` and open a new terminal.
+
+If you already use uv:
 
 ```console
 uvx arcaeon demo
@@ -88,13 +116,6 @@ uvx arcaeon demo
 
 `uvx` (from uv) runs it once without keeping an install: the demo logs two
 rows, changes one word and shows the BROKEN line.
-
-```console
-py -m pip install --user arcaeon
-```
-
-On Windows, when `pip` is not found, the `py` launcher that comes with Python
-installs it for your user alone, no administrator needed.
 
 ## The record
 
@@ -110,10 +131,20 @@ One package. One command: `arcaeon <verb>`.
 
 ## A 60-second first run
 
-Log two rows, check them, change one word of history, check again. The lines
-run as typed in PowerShell, cmd and a POSIX shell. `--field KEY=VALUE` builds
-the row for you, so there is no JSON to quote; that matters on Windows, where
-PowerShell 5.1 strips the inner double quotes from a JSON argument like
+Log two rows, check them, change one word of history, check again. Do it in
+an empty folder, so no earlier `agent.jsonl` is in the way.
+
+Type each line that starts with `$`, without the `$`. The lines under it
+are what it prints: `<...>` stands for a value that differs on every machine,
+`...` marks output cut short here, and `(exit 0)` is the exit code, which the
+shell does not print. To see it, type `echo $?` in a POSIX shell,
+`$LASTEXITCODE` in PowerShell, or `echo %errorlevel%` in cmd.
+
+The same lines work in PowerShell, cmd and a POSIX shell. Windows note: if
+`arcaeon` is "not recognized", type `py -m arcaeon` instead, and `py` in
+place of `python` on the fourth line. `--field KEY=VALUE` builds the row for
+you, so there is no JSON to quote; that matters on Windows, where PowerShell
+5.1 strips the inner double quotes from a JSON argument like
 `'{"tool": "search"}'` before `arcaeon` ever sees it.
 
 ```console
@@ -219,8 +250,13 @@ pip install "arcaeon[mcp]"
 arcaeon mcp
 ```
 
+Windows note: `py -m pip install --user "arcaeon[mcp]"`, then
+`py -m arcaeon mcp`.
+
 `arcaeon mcp` starts the MCP server on stdio. It gives an agent the ledger,
-vet and witness tools. `arcaeon mcp --tools` lists them without starting
+vet and witness tools. Started by hand, it waits silently for an AI app to
+talk to it; Ctrl+C stops it. Usually the app starts it: `arcaeon connect
+<app> --write` puts the lines in the app's config. `arcaeon mcp --tools` lists them without starting
 anything; it needs the `[mcp]` extra too (on the base install it prints the
 `pip install 'arcaeon[mcp]'` hint and exits 2).
 
