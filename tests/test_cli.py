@@ -25,7 +25,8 @@ COUNCIL_VERBS = ["log", "verify", "reconcile", "pin", "seal", "stamp", "vet", "b
 #: Verbs added after the council's list, each with its authority.
 #: deal: DEAL_LANE_DESIGN_2026-09-24.md (the witnessed-transaction lane).
 #: status: Daniel's HUD slice 1 (batch lane B, B015), reads the activity journal.
-ADDED_VERBS = ["deal", "status"]
+#: start: owner plan item 4 (lane A), one front door for shell agents.
+ADDED_VERBS = ["deal", "status", "start"]
 #: Registered up front by the 9/27 plug-in batch (BATCH_OPUS_2026-09-27_PLUGIN.md,
 #: K001), each dispatched lazily to a module a later item builds.
 PLUGIN_VERBS = ["serve", "connect", "schema", "second-read", "evidence-pack", "export",

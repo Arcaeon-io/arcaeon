@@ -2,6 +2,21 @@
 
 <!-- mcp-name: io.arcaeon/arcaeon -->
 
+## Quick start
+
+```console
+pip install "arcaeon>=0.11.0"
+arcaeon start ./memory
+arcaeon start ./memory
+```
+
+For an agent in any shell: point `start` at the folder it already keeps its
+memory in. The first run starts a sealed record of it; run the same line again
+after each session and it adds a row only when a file changed. No key, no
+network. [docs/SHELL_AGENTS.md](docs/SHELL_AGENTS.md) has the detail.
+
+## What this is
+
 This repository is the `arcaeon` command line and MCP server: a record of
 what an AI agent did that the agent cannot quietly rewrite, and a way for
 anyone who doubts it to check. Each row an agent writes is hash-chained to
@@ -153,6 +168,7 @@ Three families. The full reference, with usage lines and examples, is
 
 ### Record: write down what happened
 
+- `start`: keep a sealed record of the folder an agent keeps its memory in. Safe to run again.
 - `log`: add one JSON row to a ledger.
 - `verify`: check a ledger's chain. VERIFIED, BROKEN or COULD NOT LOOK.
 - `receipt`: issue or check a portable receipt someone else can verify.

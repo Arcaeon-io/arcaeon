@@ -19,7 +19,7 @@ BROKEN and COULD NOT LOOK separately and never folds them into one rate: a
 file nobody could read is not a pass and not a break, and a percentage would
 make it look like one or the other.
 
-Contents: Record (`log`, `verify`, `receipt`, `once`, `proxy`, `pin`, `deal`,
+Contents: Record (`start`, `log`, `verify`, `receipt`, `once`, `proxy`, `pin`, `deal`,
 `mandate`), Prove (`reconcile`, `audit`, `vet`, `badge`, `seal`, `baseline`,
 `compact`, `second-read`, `evidence-pack`, `export`), Save (`distill`, `dedup`,
 `meter`), Hosted (`stamp`, `credits`, `buy`), Serve (`mcp`, `serve`, `connect`,
@@ -32,6 +32,53 @@ registered before its code landed: until that code is in, the verb answers
 check fails until the code and the section are both written.
 
 ---
+
+## `start`
+
+Answers: how does an agent in a shell start keeping a record of its memory
+folder? Reads every file in the folder, writes one hash-chained row naming
+each file and its sha256, and pins the record's head in a local pin file.
+Run again, it writes a row only when something in the folder changed.
+
+**Usage**
+
+```text
+usage: arcaeon start <memory folder>
+```
+
+The record and its pins live under `~/.arcaeon/memory/<id>/` (`ARCAEON_HOME`
+moves `~/.arcaeon`), never in the memory folder; `<id>` comes from the
+folder's full path, so the same folder always finds the same record. No key,
+no network. File bytes are hashed, never copied. A symbolic link is recorded
+as a link and not followed. "Sealed" here means chained and pinned locally;
+it is not the paid `seal` verb. The rows are `memory_started` (the first run)
+and `memory_changed`, each carrying the whole `manifest` plus what was
+`added`, `changed`, `removed` and `unread` since the row before.
+
+Before it writes anything it checks the record it already has. A record that
+does not verify, a record cut short or rewritten against its own pins, or a
+record or pin file that was deleted while the other was kept, is BROKEN and
+nothing is added on top: move that record folder aside to start a new one.
+
+**Exit codes:** 0 the record is kept (a row written, or nothing changed and
+nothing written). 1 BROKEN: the record already there does not check out. 2 no
+folder given, not a folder, a whole home folder or drive, more than 20000
+files, or a record that belongs to another folder. 3 COULD NOT LOOK: a file
+could not be read (the readable files are still recorded, and the unread ones
+are named in the row and on stderr), or the record could not be written.
+
+```console
+$ arcaeon start ./memory
+Keeping a sealed record of ~/agent/memory
+First look: 2 files. Written as row 1 and sealed.
+Record: ~/.arcaeon/memory/<id>/record.jsonl
+Run this same command again after each session. It adds a row only when something changed.
+Anyone can check it: arcaeon verify ~/.arcaeon/memory/<id>/record.jsonl --witness ~/.arcaeon/memory/<id>/pins.jsonl
+$ arcaeon start ./memory
+Keeping a sealed record of ~/agent/memory
+No change since row 1: 2 files, the same as last time. Nothing written.
+...
+```
 
 ## `log`
 

@@ -33,6 +33,7 @@ from arcaeon import verdict as V
 
 # verb -> (family, one-line summary). Order is the order `--help` prints.
 VERBS = {
+    "start":     ("record", "keep a sealed record of an agent's memory folder; safe to run again"),
     "log":       ("record", "append one JSON row to a ledger"),
     "verify":    ("record", "check a ledger's chain: VERIFIED / BROKEN / COULD NOT LOOK"),
     "receipt":   ("record", "issue or verify a portable receipt (cite, ballot, verify, ...)"),
@@ -247,6 +248,11 @@ def _asks_version(argv) -> bool:
 
 
 # --- record --------------------------------------------------------------------
+
+def _start(argv) -> int:
+    from arcaeon.record import start
+    return _run(start.main, argv)
+
 
 _LOG_USAGE = ("usage: arcaeon log <ledger.jsonl> '<json object>' | - | --field KEY=VALUE ...\n"
               "The row is a JSON object: as one argument, read from stdin (-), or built\n"
@@ -1411,7 +1417,7 @@ def _lazy(verb: str, argv) -> int:
 
 
 HANDLERS = {
-    "log": _log, "verify": _verify, "receipt": _receipt, "once": _once, "proxy": _proxy,
+    "start": _start, "log": _log, "verify": _verify, "receipt": _receipt, "once": _once, "proxy": _proxy,
     "pin": _pin, "deal": _deal, "reconcile": _reconcile, "audit": _audit, "vet": _vet, "badge": _badge,
     "seal": _seal, "baseline": _baseline, "compact": _compact, "distill": _distill,
     "dedup": _dedup, "meter": _meter, "stamp": _stamp, "credits": _credits, "buy": _buy,
