@@ -25,12 +25,11 @@ MINI_PACK = {
     "checkout": "https://buy.stripe.com/aFa4gAb10ead3xy35f0RG08",
 }
 
-# The registration grant (decision 2026-09-27 8:47 AM PT) replaced the old
-# "100 pins a month" free tier for new keys: every new key comes with a one-time
-# grant of credits per verified email. It is read from the bundled offers.json
-# (hosted-witness -> registration_grant), not retyped here, so the number lives
-# in one place. It is named in the upgrade message on purpose -- a paywall that
-# hides the free door is selling something the catalog says is free.
+# The free door: the hosted witness gives each key free pins every month (the
+# site's price list now carries hosted-witness free_pins_per_month and no
+# registration grant). The upgrade message names the free door on purpose -- a
+# paywall that hides it is selling something the catalog says is free -- but
+# not its number, which lives on the pricing page.
 PRICING_URL = "https://arcaeon.io/pricing"
 
 
@@ -53,11 +52,12 @@ REGISTRATION_GRANT = _load_registration_grant()
 
 
 def registration_sentence() -> str:
-    """The one sentence naming the free door, ASCII only, no dashes."""
-    if REGISTRATION_GRANT and REGISTRATION_GRANT.get("statement"):
-        return (f"Every new key comes with {REGISTRATION_GRANT['statement']}; "
-                f"registration is at {PRICING_URL}.")
-    return f"Registration and the current offer: {PRICING_URL}."
+    """The one sentence naming the free door, ASCII only, no dashes.
+
+    The hosted witness gives each key free pins every month (the site's
+    price list, hosted-witness free_pins_per_month). The number is not typed
+    here; the pricing page has it."""
+    return f"Each key has free pins every month; the numbers and plans: {PRICING_URL}."
 
 
 WITNESS_ENDPOINT = "https://witness.arcaeon.io"
@@ -138,8 +138,6 @@ def upgrade_message(tool: str, free_tools: list[str] | None = None) -> str:
         "you cannot advance, which is the only thing that catches truncation.",
         "",
         registration_sentence(),
-        f"Entry pack: ${MINI_PACK['price_usd']} for {MINI_PACK['pins']:,} pins "
-        f"(${MINI_PACK['price_per_pin_usd']}/pin): {MINI_PACK['checkout']}",
         "",
         "Then set ARCAEON_KEY=<your witness key> in this server's environment and call again.",
         f"Full price list: {CATALOG_URL}",

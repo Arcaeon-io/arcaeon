@@ -180,7 +180,7 @@ def test_zero_balance_refuses_with_a_plain_message_and_no_traceback(monkeypatch,
     out = sealed_scan.seal(RECORD, ledger_path=tmp_path / "sealed.jsonl")
 
     assert out["sealed"] is False
-    assert "credit balance is zero" in out["reason"]
+    assert "no pins left on this key" in out["reason"]
     assert len(posted) == 1, "the pin is still attempted once; it is refused, not skipped"
     for leak in ("Traceback", 'File "', "Exception"):
         assert leak not in out["reason"], out["reason"]
