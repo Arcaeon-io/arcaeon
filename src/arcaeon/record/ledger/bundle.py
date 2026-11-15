@@ -47,7 +47,7 @@ from arcaeon.record.ledger import __version__, verify_file
 
 __all__ = ["build_bundle", "BundleResult", "WITNESS_API_BASE", "WITNESS_HISTORY_BASE"]
 
-WITNESS_API_BASE = "https://arcaeon-witness.vercel.app/api/latest?ns="
+WITNESS_API_BASE = "https://witness.arcaeon.io/api/latest?ns="
 WITNESS_HISTORY_BASE = "https://github.com/dan8433-user/arcaeon-witness-pins/commits/main/pins/"
 
 _FETCH_TIMEOUT = 10.0

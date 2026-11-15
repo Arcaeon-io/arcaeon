@@ -764,10 +764,10 @@ $ ARCAEON_WITNESS_URL=http://127.0.0.1:9 arcaeon stamp notes.txt
 ## `credits`
 
 Answers: how many credits are left on my key? Reads `ARCAEON_KEY`. Looking
-never uses a credit. Prints one sentence, such as `500 credits on the key`; a
-key on an older plan with a monthly cap also shows its count, such as `1000
-credits left, 7 of 100 free pins used this month`. `--json` prints the
-witness's raw answer.
+never uses a credit. Prints one sentence with your key's numbers as the
+witness gives them: `<n> credits on the key`, or, for a key with free pins
+each month, `<n> credits left, <used> of <free> free pins used this month`.
+`--json` prints the witness's raw answer.
 
 **Usage**
 

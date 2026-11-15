@@ -13,7 +13,12 @@ Arcaeon does not prove that the notes are true, or who typed them.
 Arcaeon also has a Windows desktop app, at arcaeon.io, that guards the
 folder an AI agent keeps its memory in and shows when something changed
 that was not approved. The desktop app is not in this repository; it has
-its own MCP server and its own witness switch, described on arcaeon.io.
+its own MCP server and its own witness switch, described on arcaeon.io. That
+switch pins to a different witness from this package's: the desktop app's
+witness, at arcaeon.io/witness/v1, takes pins signed with a key the app makes
+and answers each one with a receipt it signs. This package pins to
+witness.arcaeon.io, which takes a bearer key and answers with a public
+record of the pin, not a signed receipt. Each counts its own free pins.
 
 ## What it does
 
@@ -39,8 +44,10 @@ arcaeon mcp
 `arcaeon mcp` starts the MCP server on stdio. `arcaeon connect <client>`
 prints the config that client needs.
 
-Free to install. Two MCP tools are paid and need an `ARCAEON_KEY`:
-`witness_pin` and `witness_renew`. Every other MCP tool works without a key.
+Free to install. Two MCP tools need an `ARCAEON_KEY`: `witness_pin` and
+`witness_renew`. Each key has free pins every month on the hosted witness;
+past those, pins are bought (arcaeon.io/pricing has the numbers). Every other
+MCP tool works without a key.
 On the command line, `seal` is paid, `pin --remote` (with or without
 `--renew`) is paid the same way as `witness_pin`, and `credits` needs the
 key as well (see The hosted door below). The `arcaeon_status` tool lists
@@ -264,10 +271,12 @@ The short version, before the detail:
 - **Tamper-evident, not tamper-proof.** Anyone who can write the file can
   still change it. What they cannot do is change it without the check
   noticing and naming the line.
-- **One witness, and we operate it.** The hosted witness at
-  witness.arcaeon.io is run by us, the people who make this package. A pin
-  there shows your head as it stood when we recorded it; it is not a second,
-  unrelated party vouching for you.
+- **Two witnesses, and we operate both.** This package pins to the hosted
+  witness at witness.arcaeon.io. The Arcaeon desktop app's "Pin to our
+  witness" switch pins to a different one, at arcaeon.io/witness/v1. Both are
+  run by us, the people who make this package. A pin with either shows your
+  head as it stood when we recorded it; it is not a second, unrelated party
+  vouching for you.
 - **The daily anchor is a clock, not a party.** The witness anchors its pin
   store to a public timestamp once a day. That fixes when the pins existed.
   It says nothing about whether they were right, and nobody behind it checked
@@ -302,7 +311,10 @@ What it does not prove:
 What a pin proves: the log was not cut short or rewritten relative to what the
 witness saw, and only as of the last pin. The longest gap between pins is your
 real exposure. A pin file you keep yourself shows the mechanism works; it is
-not an outside party. The hosted witness uses a bearer key, not a signature.
+not an outside party. The hosted witness this package pins to takes a bearer
+key, not a signature, and keeps a public record of each pin instead of
+handing back a signed receipt. Signed pins and signed receipts belong to the
+desktop app's witness, which this package does not pin to.
 
 What `reconcile` proves, in its own words:
 

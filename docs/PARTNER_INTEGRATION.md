@@ -159,7 +159,8 @@ https://arcaeon.io/pricing, not here.
   the gap between pins is how much you could lose without anyone noticing.
 - **Who wrote a row.** Authorship is data in the row, not a signature.
 - **A second party, by itself.** A local pin file you alone hold is not a
-  witness. The hosted witness is one witness, which we operate; it is a party
-  you cannot advance, not a group of strangers.
+  witness. The hosted witness this package pins to (witness.arcaeon.io) is
+  one witness, which we operate; it is a party you cannot advance, not a group
+  of strangers. The desktop app pins to a second witness we also operate.
 - **Anything about law.** A pack is evidence toward record-keeping duties a
   customer may have; it does not make anyone meet one.
