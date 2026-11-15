@@ -51,6 +51,11 @@ NEW_FIELDS = {
     "equivocation": "verify --witness",
     # strict pins and the pack namespace (review round 7)
     "witness_unreadable": "verify --witness", "namespace_checked": "evidence-pack verify",
+    # arcaeon start, the shell-agent front door (owner plan item 4)
+    "memory_started": "start row", "memory_changed": "start row", "folder": "start row",
+    "manifest": "start row", "manifest_sha256": "start row", "added": "start row",
+    "changed": "start row", "removed": "start row", "unread": "start row",
+    "bytes": "start row",
 }
 
 

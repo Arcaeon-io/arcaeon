@@ -51,7 +51,7 @@ def test_importing_the_adapter_pulls_no_heavy_dependency():
 
 @pytest.mark.parametrize("module", [
     "arcaeon", "arcaeon.verdict", "arcaeon.cli", "arcaeon.record.row",
-    "arcaeon.record.ledger", "arcaeon.record.adapter.proxy", "arcaeon.record.once",
+    "arcaeon.record.ledger", "arcaeon.record.start", "arcaeon.record.adapter.proxy", "arcaeon.record.once",
     "arcaeon.record.receipt", "arcaeon.record.deal", "arcaeon.prove.reconcile", "arcaeon.prove.audit",
     "arcaeon.prove.compact", "arcaeon.prove.continuity", "arcaeon.prove.baseline",
     "arcaeon.save.dedup", "arcaeon.save.distill", "arcaeon.save.meter", "arcaeon.remote",
