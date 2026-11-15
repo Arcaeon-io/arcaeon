@@ -6,6 +6,8 @@ Arcaeon keeps that record and checks it. It came out of a 911 dispatch floor. Th
 
 You do not need to know the terminal for this page. You will paste a few lines, and each one says what it did.
 
+In the boxes below, a line that starts with `$` is one to paste. Paste what comes after the `$`, not the `$` itself. The lines under it are what you should see. A line in `<...>` differs on every computer.
+
 ## What it cannot do
 
 Read this part first. It is short.
@@ -19,7 +21,7 @@ Read this part first. It is short.
 
 You need Python 3.10 or newer. On Windows, get it from python.org and keep "py launcher" ticked.
 
-The installer is a short script you can read before you run it. It lands on the Arcaeon get page in the next release of the site. Save it in any folder.
+The installer is a short script you can read before you run it. It lands on the Arcaeon get page in the next release of the site. Until then, skip to "No installer yet" below. Once it is there, save it in any folder.
 
 On Windows, open that folder. Hold Shift, right-click an empty spot, and pick "Open PowerShell window here". Paste this line first. It only prints the steps and changes nothing:
 
@@ -55,6 +57,32 @@ arcaeon installer: applying
 <step 3: arcaeon doctor prints one line per check>
 ```
 
+### No installer yet: the same two steps by hand
+
+After it finds Python, the installer runs two lines. You can run them yourself today.
+
+On Windows, open PowerShell. Paste these two lines, one at a time:
+
+```console
+py -m pip install --user "arcaeon[mcp]"
+py -m arcaeon doctor
+```
+
+On a Mac or on Linux, open Terminal. Paste these four lines, one at a time:
+
+```console
+python3 -m venv ~/.venvs/arcaeon
+. ~/.venvs/arcaeon/bin/activate
+pip install "arcaeon[mcp]"
+arcaeon doctor
+```
+
+The first line makes a folder that keeps Arcaeon apart from the rest of your computer. The second turns it on for this window. In a new window, paste the second line again first. If Linux answers the first line with "ensurepip is not available", paste the `apt install` line it prints. Then paste the first line again.
+
+### On Windows, one change for the rest of this page
+
+The pip step puts the `arcaeon` command in a folder Windows does not search. So Windows answers `arcaeon` with "not recognized". Wherever this page says `arcaeon`, type `py -m arcaeon` instead. The installer does the same.
+
 ## Minute two: watch it catch a change
 
 This makes a tiny record in a scratch folder. Then it changes one word and checks again:
@@ -86,16 +114,27 @@ $ arcaeon open
 <your browser opens the dashboard on this computer>
 ```
 
-The dashboard runs on your own computer only. Nothing on it is sent anywhere.
+The dashboard runs on your own computer only. Nothing on it is sent anywhere. If no browser opens, the window shows a link. Paste that link into your browser.
+
+The window keeps the dashboard running while you look. When you are done, click the window and press Ctrl+C. That stops it.
 
 ## Minute five: ask your AI
 
-First, tell your AI app where Arcaeon is. This prints the lines to add and the file they go in. It writes nothing:
+First, tell your AI app where Arcaeon is. This line only shows what it would add, and to which file. It writes nothing:
 
 ```console
 $ arcaeon connect claude-desktop
 nothing written (add --write to apply)
 ```
+
+If that looks right, this line adds it. It keeps a copy of the file first. `arcaeon connect claude-desktop --undo` puts the copy back:
+
+```console
+$ arcaeon connect claude-desktop --write
+written
+```
+
+Run it twice and the second time says the entry is already there. The desktop app runs on Windows and Mac, so on Linux pick another app from the list below.
 
 Other apps have their own names. This line shows them all:
 
@@ -104,7 +143,7 @@ $ arcaeon connect --list
 <one line per app, with the file it uses>
 ```
 
-Restart the app. Then ask it, in plain words:
+Quit the app fully, then open it again. It reads the file only when it starts. Then ask it, in plain words:
 
 > check my agent log with arcaeon
 

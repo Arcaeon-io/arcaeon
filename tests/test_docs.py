@@ -915,9 +915,19 @@ def _site_script(name: str, tmp_path: Path) -> Path:
     return dst
 
 
+#: `connect <desktop app> --write` writes only where the app's docs state its
+#: config path, and the desktop app documents Windows and macOS only: on any
+#: other OS the page's step is run as macOS, the OS its reader is on.
+_AS_MACOS = ("import sys; sys.platform = 'darwin'; from arcaeon import cli; "
+             "sys.exit(cli.main(sys.argv[1:]))")
+
+
 def _first_five_argv(cmd: str, tmp_path: Path, env: dict):
     import shutil
     argv = shlex.split(cmd)
+    if argv[:3] == ["arcaeon", "connect", "claude-desktop"] and "--write" in argv \
+            and not sys.platform.startswith(("win", "darwin")):
+        return [sys.executable, "-c", _AS_MACOS, *argv[1:]]
     if argv[0] == "arcaeon":
         return [sys.executable, "-m", "arcaeon", *argv[1:]]
     if argv[0] == "powershell" and "install.ps1" in argv:
@@ -966,6 +976,20 @@ def test_first_five_arcaeon_steps_print_what_the_page_says(tmp_path):
     steps = [s for s in _first_five_steps("arcaeon ") if s["cmd"] != "arcaeon open"]
     assert len(steps) >= 4
     _run_first_five(steps, tmp_path)
+
+
+def test_first_five_connect_write_twice_writes_once(tmp_path):
+    """The page says a second `--write` finds the entry there and writes nothing."""
+    steps = [s for s in _first_five_steps("arcaeon connect ") if "--write" in s["cmd"]]
+    assert len(steps) == 1
+    _run_first_five(steps, tmp_path)
+    cfg = next((tmp_path / "connect-home").rglob("claude_desktop_config.json"))
+    before = cfg.read_bytes()
+    again = [dict(steps[0], expect=["the 'arcaeon' entry is already there, the same; "
+                                    "nothing written"])]
+    _run_first_five(again, tmp_path)
+    assert cfg.read_bytes() == before
+    assert "Run it twice and the second time says the entry is already there." in FIRST_FIVE
 
 
 def test_first_five_windows_installer_steps_run_without_the_network(tmp_path):
