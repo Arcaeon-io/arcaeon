@@ -2,6 +2,27 @@
 
 <!-- mcp-name: io.arcaeon/arcaeon -->
 
+## Start here: three lines
+
+In a Python 3.10 or newer virtual environment, in any folder:
+
+```bash
+pip install arcaeon
+arcaeon log agent.jsonl --field action=started
+cat agent.jsonl ~/.arcaeon/activity.jsonl
+```
+
+The first line installs the command, with no other packages. The second
+writes the first row of a record. The third shows where the records live:
+your record is `agent.jsonl` in the folder you ran it in, one JSON row per
+line, each chained to the row before it (`arcaeon verify agent.jsonl`
+checks it); `~/.arcaeon/activity.jsonl` is arcaeon's own note of each
+command it ran, never sent anywhere. With `ARCAEON_HOME` set, that note is
+in `$ARCAEON_HOME/activity.jsonl` instead, and `ARCAEON_JOURNAL=0` turns it
+off, so the third line then finds no such file. Outside a virtual
+environment, a system Python managed by the operating system refuses the
+first line; make a virtual environment first.
+
 This repository is the `arcaeon` command line and MCP server: a record of
 what an AI agent did that the agent cannot quietly rewrite, and a way for
 anyone who doubts it to check. Each row an agent writes is hash-chained to
