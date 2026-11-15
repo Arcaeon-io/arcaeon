@@ -267,23 +267,25 @@ def test_bare_arcaeon_on_a_pipe_still_serves_mcp(tmp_path):
     assert "fallback is removed in 1.0.0" in err
 
 
-def test_buy_prints_the_checkout_link_from_offers_json(capsys, tmp_path):
-    from arcaeon import remote
-    links = remote.checkout_links()
-    mini = next(x for x in links if x["plan"] == "mini")
-    assert cli.main(["buy", "mini"]) == 0
-    assert capsys.readouterr().out.strip() == mini["checkout"]
-    assert mini["checkout"].startswith("https://buy.stripe.com/")
-    assert cli.main(["buy"]) == 0
-    listing = capsys.readouterr().out
-    assert all(x["checkout"] in listing for x in links)
-    assert cli.main(["buy", "no-such-plan"]) == 2
+def test_buy_prints_the_checkout_link_from_a_catalog_file(capsys, tmp_path):
     custom = tmp_path / "offers.json"
     custom.write_text(json.dumps({"products": [{"id": "p", "tiers": [
-        {"plan": "x", "price_usd": 1, "checkout": "https://buy.stripe.com/test_x"}]}]}),
-        encoding="utf-8")
+        {"plan": "x", "price_usd": 1, "status": "live",
+         "checkout": "https://buy.stripe.com/test_x"}]}]}), encoding="utf-8")
     assert cli.main(["buy", "x", "--offers", str(custom)]) == 0
     assert capsys.readouterr().out.strip() == "https://buy.stripe.com/test_x"
+    assert cli.main(["buy", "--offers", str(custom)]) == 0
+    assert "https://buy.stripe.com/test_x" in capsys.readouterr().out
+    assert cli.main(["buy", "no-such-plan", "--offers", str(custom)]) == 2
+    capsys.readouterr()
+
+
+def test_buy_offline_prints_only_the_pricing_line(capsys):
+    """The suite runs with ARCAEON_OFFERS_OFFLINE=1 (root conftest)."""
+    assert cli.main(["buy"]) == 0
+    assert capsys.readouterr().out == "Prices and how to buy: https://arcaeon.io/pricing\n"
+    assert cli.main(["buy", "mini"]) == 0
+    assert capsys.readouterr().out == "Prices and how to buy: https://arcaeon.io/pricing\n"
 
 
 def test_buy_never_opens_a_browser(monkeypatch, capsys):
@@ -291,19 +293,6 @@ def test_buy_never_opens_a_browser(monkeypatch, capsys):
     monkeypatch.setattr(webbrowser, "open", lambda *a, **k: pytest.fail("opened a browser"))
     assert cli.main(["buy", "mini"]) == 0
     capsys.readouterr()
-
-
-def test_bundled_offers_snapshot_matches_the_site_copy():
-    """Drift check, workstation only: the snapshot `buy` reads must match the
-    site's offers.json (the single source of truth for what Arcaeon charges)."""
-    from arcaeon import remote
-    root = os.environ.get("ARCAEON_SITE_ROOT")
-    if not root:
-        pytest.skip("ARCAEON_SITE_ROOT is not set (no site checkout to compare against)")
-    site = Path(root) / ".well-known" / "offers.json"
-    if not site.exists():
-        pytest.skip("ARCAEON_SITE_ROOT has no .well-known/offers.json")
-    assert json.loads(site.read_text(encoding="utf-8")) == remote.load_offers()
 
 
 def test_credits_without_a_key_sends_nothing(monkeypatch, capsys):

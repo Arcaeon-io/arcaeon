@@ -19,11 +19,13 @@ a password). ARCAEON_WITNESS_URL overrides the endpoint for a self-hoster.
 
 Failure is DATA, never an exception: every function returns a dict with
 `ok`, `status` (0 = the request never completed) and the server's own words.
-The paid step lives on Stripe: `checkout_links()` reads the offers snapshot
-and returns links; nothing here opens a browser or takes a card.
+The paid step lives on Stripe: `checkout_links()` reads the live catalog at
+arcaeon.io/.well-known/offers.json (arcaeon.remote.catalog: one GET, 3 s,
+1 MB, kept 10 minutes, never with ARCAEON_OFFERS_OFFLINE=1) and returns the
+links it marks live; nothing here opens a browser or takes a card.
 
-Also here, moved from the connector: `offers` (the price facts the upgrade
-message quotes), `sealed_scan` (the paid mcp-vet seal) and `licensing` (the
+Also here, moved from the connector: `offers` (the upgrade message, which
+names no price), `sealed_scan` (the paid mcp-vet seal) and `licensing` (the
 optional, default-off license gate).
 """
 from __future__ import annotations
@@ -33,20 +35,15 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
-from pathlib import Path
 from typing import Any
 
 from .witness import BLANK_KEY_ERROR, DEFAULT_TIMEOUT, base_url, pin, renew
 
 __all__ = ["pin", "renew", "balance", "stamp", "latest", "check_head", "reconcile_tapes",
-           "key", "base_url", "load_offers", "checkout_links", "OFFERS_SNAPSHOT",
-           "BLANK_KEY_ERROR"]
+           "key", "base_url", "load_offers", "checkout_links", "BLANK_KEY_ERROR"]
 
 KEY_ENV = "ARCAEON_KEY"
 OFFERS_ENV = "ARCAEON_OFFERS_FILE"
-#: A snapshot of arcaeon.io/.well-known/offers.json taken at build time. The
-#: live file is the source of truth; tests/remote checks the copy for drift.
-OFFERS_SNAPSHOT = Path(__file__).with_name("offers.json")
 
 
 def key() -> str | None:
@@ -141,27 +138,30 @@ def reconcile_tapes(agent_tape: str, tool_tape: str) -> dict:
 
 
 def load_offers(path: str | os.PathLike | None = None) -> dict:
-    """offers.json: `path`, else $ARCAEON_OFFERS_FILE, else the bundled snapshot."""
-    p = Path(path or os.environ.get(OFFERS_ENV) or OFFERS_SNAPSHOT)
-    return json.loads(p.read_text(encoding="utf-8"))
+    """The price catalog: the file at `path`, else $ARCAEON_OFFERS_FILE, else the
+    live arcaeon.io/.well-known/offers.json (arcaeon.remote.catalog.load).
+
+    Raises ValueError when none of those yields a catalog of the right shape.
+    The package carries no copy of its own."""
+    from . import catalog
+
+    named = path or os.environ.get(OFFERS_ENV)
+    cat = catalog.load_file(named) if named else catalog.load()
+    if cat is None:
+        where = str(named) if named else catalog.CATALOG_URL
+        raise ValueError(f"no price catalog could be read from {where}")
+    return cat
 
 
 def checkout_links(offers: dict | None = None) -> list[dict]:
-    """Every purchasable plan with a checkout link, in catalog order:
-    [{"product", "plan", "price", "cap", "checkout"}]. Prints nothing, opens nothing."""
-    offers = offers if offers is not None else load_offers()
-    out = []
-    for product in offers.get("products", []):
-        for tier in product.get("tiers", []) or []:
-            link = tier.get("checkout")
-            if not link:
-                continue
-            if "price_usd_month" in tier:
-                price = f"${tier['price_usd_month']}/month"
-            elif "price_usd" in tier:
-                price = f"${tier['price_usd']}"
-            else:
-                price = "see catalog"
-            out.append({"product": product.get("id"), "plan": tier.get("plan"),
-                        "price": price, "cap": tier.get("cap", ""), "checkout": link})
-    return out
+    """Every tier the catalog marks live with an https buy.stripe.com link, in
+    catalog order: [{"product", "plan", "price", "cap", "checkout"}]. Empty when
+    the catalog cannot be read. Prints nothing, opens nothing."""
+    from . import catalog
+
+    if offers is None:
+        try:
+            offers = load_offers()
+        except ValueError:
+            return []
+    return catalog.live_tiers(offers)

@@ -45,6 +45,13 @@ import tempfile  # noqa: E402
 os.environ["ARCAEON_HOME"] = tempfile.mkdtemp(prefix="arcaeon-test-home-")
 os.environ.pop("ARCAEON_JOURNAL", None)
 
+# 4b. No price catalog fetch in the suite, subprocesses included: `arcaeon buy`
+#     reads https://arcaeon.io/.well-known/offers.json unless this is set.
+#     tests/test_buy.py clears it per test and stubs the one fetch seam
+#     (arcaeon.remote.catalog._fetch).
+os.environ["ARCAEON_OFFERS_OFFLINE"] = "1"
+os.environ.pop("ARCAEON_OFFERS_FILE", None)
+
 # 5. The real home is never written (K14xR). mcp_vet's call record defaults to
 #    ~/.mcp_vet/audit.jsonl; it is pointed at the session's throwaway home too
 #    (tests/vet/conftest.py still gives the vet tree its own). The real
