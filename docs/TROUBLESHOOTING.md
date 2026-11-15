@@ -283,6 +283,159 @@ answers `DIFFERENT TERMS: ...` or `MISSING: ...` with exit 1, and
 | `outside: <reason>` | The call is outside the mandate: a forbidden tool, a tool no pattern allows, too much spend, or outside the time window. Exit 1. | Do not make that call under this mandate. |
 | `could not look: <reason>` | The call could not be judged: an unreadable mandate, no tool name, an amount or time it cannot read. Exit 3. | Fix the mandate, the fields or `--at`. |
 
+## reconcile
+
+`reconcile` compares an agent's tape with a tool's tape. Its JSON carries
+`verdict` (`MATCHED`, `MISSING`, `ALTERED` or `COULD_NOT_LOOK`), `reason`,
+`reason_word`, `looked_for`, `where` and `findings`.
+
+| Message | What it means | What to do |
+|---|---|---|
+| `usage: arcaeon reconcile <tape_a> <tape_b> [--pin <pin.json>] [--legacy-exit]` | Not exactly two tapes. Exit 2. | Give two tapes. |
+| `usage: arcaeon reconcile --kind {tapes\|readings} <a> <b>` | `--kind` has no value or a wrong one. Exit 2. | Use `tapes` or `readings`. |
+| `usage: arcaeon reconcile --kind readings <ledger_a> <ledger_b>` | `--kind readings` takes two ledgers and no `--pin`. Exit 2. | Drop `--pin`. |
+| `--pin needs a path` | Exit 3. | Give the pin file. |
+| `tape_a not found: <path>`, `tape_a unreadable: <detail>`, `tape_a is a directory, not a tape: <path>` (or `tape_b`) | Exit 3. | Check the path. |
+| `tape_a line <n> is nested deeper than 512 levels [nesting_too_deep]`, `... holds a duplicate key and does not parse [duplicate_key_unparseable]`, `... verifies but does not read a second time ... [whitespace_outside_json]` | A line of the tape cannot be read the same way twice. Exit 3. | Check what wrote that tape. |
+| `tape_a row <n> is not an arcaeon-tape/1 row` | The file is not a tape. Exit 3. | Use the tapes `arcaeon proxy --tape` writes. |
+| `tape_a mixes sides (<side> and <side>) at row <n>` | One file holds both sides. Exit 3. | Give one agent tape and one tool tape. |
+| `both tapes are <side>-side tapes; reconcile needs one of each` | Exit 3. | Give one of each side. |
+| `both tapes are empty: an idle agent and a silent recorder look identical` | Exit 3. | Record some calls first. |
+| `the two tapes could not be paired` | Exit 3. | Check they are tapes of the same session. |
+| `pin unreadable: <detail>`, or `pin for <side> could not be checked: <reason>` | The pin file is missing, not a pin, or the tape behind it could not be read. Exit 3. | Fix the pin file or that tape. |
+| `reconcile could not finish: <ExceptionName> [internal_error]` | Exit 3. | Run it again; report it if it repeats. |
+| `<side> tape does not verify (<first_break>); a tape that was edited after it was written cannot be reconciled` | ALTERED, exit 1. | That tape was edited; `arcaeon verify` it. |
+| `call <n>: the request differs: ...`, `call <n>: same request, different response: ...`, `... the order was altered`, `<side> tape records call <k> twice ...`, `... index out of order` | ALTERED, exit 1: the two sides recorded different things. | Compare the two tapes at that call. |
+| `call <n> is on the agent tape and not on the tool tape` (or the other way), `call <n>'s response is on one tape and not the other ...`, `<side> tape skips from call <a> to call <k>: ...` | MISSING, exit 1: one side has a call the other does not. | Find out which side left it out. |
+| `the witness pinned <m> calls on the <side> tape and it now holds <n>: calls ... were removed after the pin`, or `the <side> tape's head at call <m> is <h>, the witness pinned <h>: the tape was rewritten after the pin` | The tape was cut short or rewritten after it was pinned. Exit 1. | Treat that tape as tampered with. |
+
+## audit
+
+| Message | What it means | What to do |
+|---|---|---|
+| `COULD NOT LOOK: <dir> is a directory with no records.jsonl (not an exported bundle). Nothing to verify and nothing to accuse.` | Exit 3. | Point at the log file, or at a folder `audit export` wrote. |
+| A line starting `COULD NOT LOOK` and going on `EMPTY: no records have been written yet. ...` | Exit 3. | Write records first. |
+| A line starting `UNVERIFIED` and going on `<n> record(s) present, but the chain could not speak for all of them (...). This is not a pass and not an accusation: chain the log going forward and pin it to a witness.` | Some records carry no chain. Exit 3. | Do what it says. |
+| A line starting `FAIL` and going on `integrity broken at <first_break>. The log was altered, truncated, or reordered since it was written.` | The chain breaks at that line. Exit 1. A missing or unreadable file also shows this, with `first_break` `unreadable: ...`. | Check the path first; if it is right, the log was changed. |
+| `arcaeon-audit: --instrument-notes: cannot read '<path>': <reason>`, or `... is not valid UTF-8 (...)`, then `arcaeon-audit: aborting; no bundle was written.` | The notes file could not be read. Exit 3. | Fix the path, or save it as UTF-8. |
+| `Verdict: <word>  (finding: <finding>)  (...)` after `export` | The export ran. A finding of FAIL, TRUNCATION_DETECTED or REWRITE_DETECTED exits 1; EMPTY_LOG, UNVERIFIED_SCOPE or WITNESS_CHECK_FAILED exits 3. | Read the summary and `integrity.json` in the bundle. |
+| `arcaeon audit: could not finish: FileNotFoundError [internal_error]` | `export` was given a log that is not there. The output folder may already have been made. Exit 3. | Check the log path. |
+
+`audit export --witness` without `--namespace` makes no truncation check, and
+exits 0.
+
+## vet and badge
+
+| Message | What it means | What to do |
+|---|---|---|
+| `scan target does not exist or is not a file: <path>` (`vet scan`) | Exit 2. `scan` reads one file. | Use `vet grade-target` for a folder. |
+| `scan target does not exist: <path>` (`grade-target`, `badge`) | Exit 2. | Check the path. |
+| `grade target could not be read: <detail>` | Exit 2. | Check the path. |
+| `[high] <check> @ <file>:<line>` with a detail, and `<n> finding(s)` | A high severity problem in the server's source. Exit 1 from `scan`, `grade-target` and `badge`. `vet grade` reports it but exits 0. | Fix the finding. |
+| `NO GRADEABLE FILES: a TypeScript file needs the [ts] extra: pip install 'arcaeon[ts]'` | Exit 3. | Install the extra. |
+| `NO GRADEABLE FILES: no file could be parsed, so zero checks ran`, `... could not parse: <detail>`, or `... no .py, .ts or .js file to grade` | Nothing could be graded, so nothing was cleared. Exit 3. | Fix the syntax, or point at the server's source folder. |
+| `UNSIGNED (--receipt not passed)` | The report is not signed. Exit 0. | Pass `--receipt` to sign it. |
+| `UNSIGNED (grade receipts: OFF, no Ed25519 backend ... Install the extra: pip install 'arcaeon[sign]')` | Signing needs an extra. Exit 0. | Install `arcaeon[sign]`. |
+| `UNSIGNED (no signing key: set MCP_VET_RECEIPT_KEY (32-byte seed, base64) or pass a key file)` | Exit 0. | Set the key. |
+| `UNSIGNED (bad receipt key: MCP_VET_RECEIPT_KEY is not valid base64: ...)`, or `... must decode to 32 bytes, got <n>` | Exit 0. | Fix the key. |
+| `verify could not read its inputs: <detail>` (`vet verify`) | The grade file or the source could not be read. Exit 1. | Check both paths. |
+| `{"reproduced": false, "reasons": [...]}`, such as `source bytes differ: ... not the same file`, `findings differ on re-run (tool version drift?): ...`, `verdict differs: ...`, `hollow pass: ...` | The grade does not come out the same again. Exit 1. | Use the same file and the same arcaeon version. |
+| `audit-verify` JSON with `"detail": "chain broken"` | The vet server's own call record was changed. Exit 1. | Look at `first_break`. |
+| `audit-verify` JSON with `ok` null and `no ledger at <path> yet ...`, or `... the scan was bounded`, or `arcaeon_ledger is not available (...)` | No record to check, or only part of it. Exit 3. | Check `MCP_VET_AUDIT_LEDGER`. |
+| `arcaeon vet: could not finish: RuntimeError [internal_error]` | Seen from `vet serve` without the `[mcp]` extra. Exit 3. | Install `arcaeon[mcp]`. |
+| `arcaeon vet: could not finish: PermissionError [internal_error]` | Seen from `audit-verify` on a path outside `MCP_VET_SCAN_ROOT`. Exit 3. | Use a path inside that folder, or unset the variable. |
+| `probe needs a server command after `--`, e.g. arcaeon vet probe -- python my_server.py` | Exit 3. | Add the command after `--`. |
+| `arcaeon vet probe needs the MCP Python SDK (the [mcp] extra): pip install 'arcaeon[mcp]'` | Exit 3. | Install the extra. |
+| `NOT CONNECTED: connection failed: <ExceptionName>: <detail>` | The server did not start, or did not answer the MCP handshake. Exit 3. | Run the command yourself and check it starts. |
+| `[high] param-binding-liveness @ tool <tool>: declared parameter does not bind: ...` | A filter the tool declares has no effect. Exit 1. | Fix the server. |
+| `blind spot: ...` lines, and `(CAP HIT, probe stopped early)` | Parts of the server were not probed. Not a failure. | Raise `--max-calls` or `--timeout` to cover more. |
+
+`badge --sealed` and `seal` add the refusals listed under seal above.
+
+## baseline
+
+| Message | What it means | What to do |
+|---|---|---|
+| `arcaeon baseline: error: the following arguments are required: ...` | Exit 2. | Add them. |
+| `arcaeon baseline: could not finish: ValueError [internal_error]` (or `FileNotFoundError`, `JSONDecodeError`) | A probe file or the registration could not be read: not there, not JSON, a probe with no `id`, a duplicate id, an unknown scoring type, or `--against` that is not a registration. The plain reason is not shown. Exit 3. | Run `python -m arcaeon.prove.baseline` with the same arguments to see it. |
+| `INVALID: probe set changed since registration` | The exam changed since the baseline was registered. Exit 1. | Register a new baseline. |
+| `INVALID: scoring semantics changed since registration ...`, or `... registration predates scoring-semantics recording ...` | The scorer changed. Exit 1. | Register a new baseline. |
+| `INVALID: a ledger was requested but the file is absent, ...`, `... no longer verifies (broken chain) ...`, `... could not be verified end to end ...`, or `no chained ledger record could be located for this registration ...` | The registration's own record could not confirm it. Exit 1. | Run from the folder you registered from, or pass `--ledger ''`. |
+| `INVALID: registration file's scored content does not match its own ledger-chained record` | The registration file was edited. Exit 1. | Do not trust it; register again. |
+| `chain_check: skipped_...`, `NOTE: <n> of <m> probe(s) could not be scored ...`, `NOTE: n=<n> is a smoke test, not a benchmark ...` | Informational. Exit 0. | Read the note. |
+
+## compact
+
+| Message | What it means | What to do |
+|---|---|---|
+| `{"verdict": "COULD NOT LOOK", "reason": "<detail>"}` | The receipt, `--pre` or `--post` could not be read as JSON. Exit 3. | Check those files. |
+| `{"verdict": "BROKEN", "ok": false, "notes": [...]}` | The compaction receipt does not add up: counts or bytes that do not reconcile, a digest that does not reproduce, a dropped item the content does not hold. Exit 1. | Read the notes; the receipt or the content was changed. |
+| VERIFIED with `verified_scope` `bounded_no_content` | Only the receipt's own arithmetic was checked; no content was recomputed. Exit 0. | Pass `--pre` and `--post` for a full check. |
+
+## second-read
+
+| Message | What it means | What to do |
+|---|---|---|
+| `arcaeon second-read: unknown subcommand '<name>'` | Exit 2. | See the usage it prints. |
+| `arcaeon second-read <subcommand>: cannot read <what> file <path> [<ExceptionName>]` | Exit 2. | Check the path. |
+| `arcaeon second-read criterion: criterion text is empty`, or `supersedes ...` | Exit 2. | Fix the criterion. |
+| `arcaeon second-read submit: <detail>`, such as `<field> must be a non-empty string`, `give the claim text or its claim_sha256`, `unknown reading word '<word>'; expected one of ('yes', 'no', 'undetermined')`, `claim_sha256 does not match the sha256 of claim_text` | Exit 2. | Fix the field it names. |
+| `<ledger> has no frozen criterion; freeze one first (second-read criterion FILE --ledger L)`, or `criterion <id>... is not frozen in <ledger>` | Exit 3. | Run `second-read criterion` first. |
+| `arcaeon second-read ask: <detail>`, such as `<path> line <n> is not JSON`, `claim_id '<id>' appears twice`, `<path> holds no claims`, `environment variable <name> is not set`, `reader spec must look like <preset>:<model>, ...`, `base_url must be an http(s) URL with a host, ...` | Bad usage, found before anything was sent. Exit 2. | Fix what it names; the reader message lists the presets. |
+| `COULD NOT LOOK <claim_id>: <detail> (after 2 tries); no reading was written` | The reader's service failed twice: no answer, an HTTP error, an answer without text, or a redirect that was not followed (`redirect_refused`; the key was not sent on). Exit 3. | Check the address and the key, then run it again. |
+| `arcaeon second-read run: --ledger-a and --ledger-b must be two different ledgers` | Exit 2. | Use two files. |
+| `COULD NOT LOOK: the same reader on both sides; nothing was sent` | Two readings by one reader are not a second read. Refused even on a dry run. Exit 3. | Use two different readers. |
+| `arcaeon second-read compare: cannot write the receipt [<ExceptionName>]` (or `run`) | Exit 2. | Check the `--receipt` path. |
+| `compare` lines `ledger <a or b> (<path>) does not exist`, `... [unreadable: ...]`, `... has no rows`, `... verifies only within scope <scope>`, `... line <n> is not a readable arcaeon-reading/1 row ...`, `... cites criterion <id>..., which is not frozen earlier in that ledger`, `neither ledger holds a reading` | A readings ledger could not be used. Exit 3. | Fix the ledger it names. |
+| `ledger <a or b> (<path>) chain is broken: <first_break>` | BROKEN, exit 1. | That ledger was edited. |
+| `MISSING: <n> claim(s) read on one side only` | Exit 1. | Have both readers read every claim. |
+| `COULD NOT LOOK <id>: claim <id>: the two readings hash different claim text` (or `cite different criteria`) | The two sides did not read the same thing. Exit 3. | Use the same claim text and one criterion. |
+| `not yet informative: fewer than 20 claims read (<n>)` | Informational. Exit 0. | Read more claims. |
+
+## evidence-pack
+
+Building a pack:
+
+| Message | What it means | What to do |
+|---|---|---|
+| `arcaeon evidence-pack: <detail>`, such as `<out> exists and is not an empty folder; ...`, `<out>.zip exists; ...`, `--deal needs a deal id`, `--built-at '<value>' is not YYYY-MM-DDTHH:MM:SSZ`, `--from '<a>' is after --to '<b>'`, `--built-at <t> is before the ledger's newest record (<t>); ...` | Bad usage; nothing was written. Exit 2. | Fix the option it names. |
+| `COULD NOT LOOK: no evidence pack written (missing: the ledger named was not found, so there is nothing to pack)` | Exit 3. | Check `--ledger`. |
+| `COULD NOT LOOK: evidence pack at <out> (empty: no row in the ledger matches that agent and window)` | The pack was written, but holds nothing. Exit 3. | Widen `--agent`, `--from` or `--to`. |
+| `COULD NOT LOOK: evidence pack at <out> (<reason_word>: <reason>)` | One of the extra checks (mandate, second-read receipt, deal) could not look. Exit 3. | Fix what the reason names. |
+| `COULD NOT LOOK: evidence pack at <out>`, with no reason | The records check reached no verdict. Exit 3. | Read `could_not_look.json` in the pack, or run with `--json`. |
+| `BROKEN: evidence pack at <out>`, with no finding | A chain, receipt or deal check found something wrong. Exit 1. | Run with `--json` to see the finding. |
+
+Checking a pack (`evidence-pack verify`) prints
+`<word>: evidence pack <pack> (<finding or reason>)`, then one line per check
+that could not look: `COULD NOT LOOK [<reason_word>] <check>: <reason>`.
+
+| Kind of line | What it means | What to do |
+|---|---|---|
+| `no folder at that path, so there is no pack to check` | Exit 3. | Check the path. |
+| `the pack has no <file>, ...`, or `<file> could not be read ...` | A file the check needs is missing or damaged. Exit 3. | Get the pack again from whoever made it. |
+| A BROKEN line naming files `missing from the pack`, whose `sha256 differs from the manifest`, or `not listed in the manifest` | Files were changed, added or removed after the pack was built. Exit 1. | Treat the pack as altered. |
+| `records.jsonl chain breaks at <first_break>`, `... head ... differs from the manifest's chain_head ...`, `manifest.json's sha256 differs from manifest.sha256: ...` | The records or the manifest were changed. Exit 1. | Treat the pack as altered. |
+| `... drift: ...`, `... overclaimed: ...`, `prose not labelled: ...` | The pack's prose says more than its records show. Exit 1. | Treat the pack's text as unreliable. |
+| `a pin is checked against the witness itself, not the pack's copy of it; pass the pin file with --witness` | Pins inside a pack are not trusted on their own. Exit 3. | Pass `--witness <pin file>`, and `--namespace` if it asks. |
+| `a remote pin is read only when asked (--remote); unread, it is not verified` | Exit 3. | Add `--remote`. |
+| `the public witness could not be reached (...)`, or `the public witness answered <status>: ...` | Exit 3. | Check the network, then run it again. |
+| `truncated: the witness pinned ...`, `the public witness does not hold the head the pack says was pinned ...`, `the witness pinned '<ns>' at row <r> with chain <c>; records.jsonl does not hold it` | The records do not match what the witness holds. Exit 1. | Treat the records as cut short or rewritten. |
+| `bearer classes: not present (pack schema <n>)` | An older pack; informational. | Nothing. |
+| `the file could not be read as a zip (...)`, `the zip unpacks to more than 4294967296 bytes, ...`, or `entries that are not a plain top-level file: ...` | The zip is damaged, too large, or holds paths a pack never has (exit 1 for the last). | Get the pack again. |
+
+## export
+
+| Message | What it means | What to do |
+|---|---|---|
+| `arcaeon export: <out>: the export is JSONL only (...); name a .jsonl file` | Exit 2. | Name a `.jsonl` file. |
+| `arcaeon export: <out> exists; an export is written to a new file` (or `<name>_gaps.json exists; ...`) | Exit 2. | Pick a new name. |
+| `COULD NOT LOOK: nothing exported (missing: the ledger named was not found, so nothing was exported)` | Exit 3. | Check the ledger path. |
+| `BROKEN: <n> record(s) written to <out> (source chain broken) (...)` | The file was written, but the source ledger's chain breaks. Exit 1. | `arcaeon verify` the source. |
+| `COULD NOT LOOK: <n> record(s) written to <out> (source chain could not look) (...)` | The file was written from rows nothing vouches for. Exit 3. | `arcaeon verify` the source. |
+
+Fields that could not be carried over are listed in `<name>_gaps.json`,
+not printed.
+
 ## status
 
 | Message | What it means | What to do |
@@ -373,7 +526,7 @@ for previews`.
 
 | Message | What it means | What to do |
 |---|---|---|
-| `arcaeon connect: chatgpt has no local config to change. ... It needs a public URL, which is a deploy decision; nothing written` | That client reaches tools only through a public address, and arcaeon's server is local only. Exit 2. | Nothing to write on this machine. |
+| `arcaeon connect: <client> has no local config to change. ... It needs a public URL, which is a deploy decision; nothing written` | That client reaches tools only through a public address, and arcaeon's server is local only. Exit 2. | Nothing to write on this machine. |
 | ``arcaeon connect: generic-http has no config file to write: point the framework at GET /openapi.json on a running `arcaeon serve` `` | Exit 2. | Do that. |
 | `confirmed: NO, the client's docs did not state this path; check it before --write` | A preview: the settings file path is arcaeon's best guess. Exit 0. | Check where that client keeps its settings. |
 | `COULD NOT LOOK (path_unconfirmed): <client>'s docs did not state <file>; check where it keeps its config and pass --path FILE` | `--write` will not guess the path. Nothing written. Exit 3. | Pass `--path` with the real file. |
@@ -509,3 +662,15 @@ On the dashboard pages:
 | `could not reach the server (<ExceptionName>)` | Nothing answered. Exit 3. | Check that `arcaeon serve` is running and the port is right. |
 | `the server's answer (HTTP <status>) is not a JSON object` | Something other than arcaeon answered on that port. Exit 3. | Check the address. |
 | The server's own refusal with `http_status` added | See "What an HTTP client gets back" above. | As there. |
+
+## If nothing here fits
+
+- Run the command with `--help` to see its usage.
+- Run `arcaeon doctor`: it checks Python, the optional extras, the key, the
+  local server, the AI client settings and the activity journal.
+- A message ending in `[internal_error]` only names the kind of failure, on
+  purpose. Where this page names the usual cause, check that first; for
+  `baseline`, running the same thing as `python -m arcaeon.prove.baseline`
+  shows the full message.
+- `arcaeon status` lists the checks whose last run could not look.
+
