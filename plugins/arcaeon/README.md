@@ -1,7 +1,7 @@
 # Arcaeon
 
 This plugin adds the Arcaeon MCP server to Claude Code. The server comes from
-the `arcaeon` Python package, version 0.11.0. It is the same server that
+the `arcaeon` Python package, version 0.11.1. It is the same server that
 `pip install "arcaeon[mcp]"` and then `arcaeon mcp` start, and the source is in
 this repository under the MIT license.
 
@@ -24,12 +24,12 @@ written. It does not prove the record is true, or who wrote it.
 The plugin starts the server on stdio with this command:
 
 ```console
-uvx --from "arcaeon[mcp]==0.11.0" arcaeon mcp
+uvx --from "arcaeon[mcp]==0.11.1" arcaeon mcp
 ```
 
 So you need [uv](https://docs.astral.sh/uv/), which provides `uvx`, and
 Python 3.10 or newer (uv can fetch one for you). On the first start, uvx
-downloads `arcaeon` 0.11.0 from PyPI with its `[mcp]` extra. The extra pulls
+downloads `arcaeon` 0.11.1 from PyPI with its `[mcp]` extra. The extra pulls
 in the MCP Python SDK and its dependencies, about 30 packages. uv keeps them in
 its cache for later starts.
 

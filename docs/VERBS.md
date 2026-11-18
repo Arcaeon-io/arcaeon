@@ -1137,7 +1137,7 @@ report gets pasted into bug reports), then each moved family's version.
 
 ```console
 $ arcaeon version --short
-0.11.0
+0.11.1
 ```
 
 ## `doctor`

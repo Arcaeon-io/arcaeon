@@ -1,7 +1,7 @@
 {
   "name": "arcaeon",
   "displayName": "Arcaeon",
-  "version": "0.11.0",
+  "version": "0.11.1",
   "description": "The Arcaeon MCP server: a hash-chained record of what an agent did that anyone can check, static checks of MCP server source before you connect to it, and two optional paid tools that pin a ledger head with a hosted witness.",
   "author": {
     "name": "Arcaeon",
