@@ -19,6 +19,12 @@ ledger.
 What the chain proves: the rows were not changed in place after they were
 written. It does not prove the record is true, or who wrote it.
 
+## Why it matters
+
+When an AI acts for someone, makes a trade, changes a file, sends a message, the record of what it did usually lives with whoever ran it. Arcaeon keeps that record on the person's own machine instead, sealed as it is written, so nobody can quietly change it later. It works a little like a notary's stamp: it shows the record existed, exactly as it is, at that moment. It is not a legal notarization, and it is one tool that can help, not the whole answer.
+
+The reasoning inside a model can be hard to explain. What the agent actually did is not: it is a small amount of plain text any computer can keep. For a business doing honest work, that record is what clears it when its agent's actions are questioned. For everyone else, it means an agent that will not keep a checkable record stands out.
+
 ## What you need
 
 The plugin starts the server on stdio with this command:
