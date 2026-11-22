@@ -88,3 +88,8 @@ textarea {
   color: var(--unknown);
   font-size: 0.9rem;
 }
+
+pre.check-yourself {
+  white-space: pre-wrap;
+  word-break: break-all;
+}

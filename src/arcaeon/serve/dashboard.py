@@ -73,6 +73,7 @@ PAGES = {
     "/status": "arcaeon.serve.pages.status",
     "/verify": "arcaeon.serve.pages.verify",
     "/packs": "arcaeon.serve.pages.packs",
+    "/pins": "arcaeon.serve.pages.pins",
     "/readings": "arcaeon.serve.pages.readings",
     "/mandate": "arcaeon.serve.pages.mandate",
 }

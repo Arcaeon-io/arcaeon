@@ -15,3 +15,12 @@ document.addEventListener("submit", function (event) {
     buttons[i].textContent = "Checking...";
   }
 });
+
+// The pin receipt's Print button. Without this file the browser's own Print
+// command prints the same page.
+document.addEventListener("click", function (event) {
+  var target = event.target;
+  if (target && target.hasAttribute && target.hasAttribute("data-print")) {
+    window.print();
+  }
+});
