@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """Ledger binding — use `arcaeon-ledger` when it's importable, degrade honestly when it isn't.
 
 WHY this file exists at all: the adapter's whole value proposition is that the

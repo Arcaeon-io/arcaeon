@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """The OpenAPI 3.1 document for `arcaeon serve`, built from the route table (K013).
 
 `document()` is both `GET /openapi.json` and `arcaeon schema --format

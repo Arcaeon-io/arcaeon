@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """Handler core, no HTTP: a request dict in, the CLI's JSON dict plus `exit` out.
 
 Never a second implementation. Each function builds the argv the CLI would

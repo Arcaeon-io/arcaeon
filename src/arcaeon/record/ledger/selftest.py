@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """Self-test: golden digest vectors, planted unsupported recipes, witness fixture.
 
     python -m arcaeon.record.ledger.selftest

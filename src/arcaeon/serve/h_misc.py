@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """POST /v1/receipt/verify and GET /v1/status (K011).
 
 `/v1/receipt/verify` runs `arcaeon receipt verify <receipt>` (a path under

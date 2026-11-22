@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """POST /v1/log and POST /v1/verify (K008).
 
 `/v1/log` takes `{"ledger": path, "fields": {...}}` or

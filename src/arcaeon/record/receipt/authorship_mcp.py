@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """Authorship Receipt MCP server — lets a recording tool other than
 `web/authorship-recorder.html` (an editor plugin, a CLI wrapper) drive an
 authorship session directly, and lets any agent ingest an already-exported

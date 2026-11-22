@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """`arcaeon serve`: start the local HTTP/JSON API on 127.0.0.1.
 
 Exit codes: 0 a clean stop (Ctrl+C), 2 bad usage (including any --host but

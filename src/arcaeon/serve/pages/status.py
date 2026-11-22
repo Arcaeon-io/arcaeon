@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """GET /status: what arcaeon checked on this machine, in sentences (K102).
 
 The headline counts today's checks from the activity journal (the file

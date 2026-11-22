@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """`arcaeon`: one command, one verb list.
 
 Every verb dispatches to the moved code of the tool it replaces; nothing here

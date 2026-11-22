@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon_ledger.witness — the outside check that closes the truncation gap.
 
 An append-only hash chain cannot, by itself, catch TRUNCATION: lop off the most

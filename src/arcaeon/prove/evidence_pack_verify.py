@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """`arcaeon evidence-pack verify PACK`: check an evidence pack someone handed you.
 
     arcaeon evidence-pack verify PACK [--witness PINS] [--remote] [--json]

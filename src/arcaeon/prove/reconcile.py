@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """Two tapes and a counter: a COMPLETENESS verdict for an agent's tool calls.
 
     arcaeon-ledger reconcile agent.tape.jsonl tool.tape.jsonl [--pin pin.json]

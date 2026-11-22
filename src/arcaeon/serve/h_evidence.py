@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """POST /v1/evidence-pack, /v1/evidence-pack/verify and /v1/export/aat (K069).
 
 Each runs the CLI's own verb with --json through h_core, so the answer is

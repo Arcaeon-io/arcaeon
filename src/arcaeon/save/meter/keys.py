@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """Key management for arcaeon_meter.
 
 Secrets are random (`secrets.token_urlsafe`), shown ONCE at creation, and

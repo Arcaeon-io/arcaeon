@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon.remote: the hosted pieces, reached over HTTPS, only when asked.
 
 The hosted witness (witness.arcaeon.io) is Node.js on Vercel and stays there;

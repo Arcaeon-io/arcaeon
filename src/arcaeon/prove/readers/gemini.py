@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon.prove.readers.gemini: the Gemini generateContent API as a second reader.
 
 `POST {base_url}/v1beta/models/{model}:generateContent` (default base

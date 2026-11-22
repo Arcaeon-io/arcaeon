@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """The mandate gate: is this tool call inside what the agent was allowed to do?
 
     gate = load("mandate.json")

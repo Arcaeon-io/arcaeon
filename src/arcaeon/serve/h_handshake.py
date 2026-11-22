@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """Handlers for `POST /v1/handshake/propose`, `/accept` and `/verify` (KH7).
 
 The routes are declared in routes.py (K002); this module only answers them.

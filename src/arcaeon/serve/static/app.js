@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 // arcaeon dashboard: small conveniences only. Every page is rendered on the
 // server and reads the same with this file blocked. No fetch, no network,
 // nothing loaded from anywhere else.

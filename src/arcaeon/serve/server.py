@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """The HTTP server: stdlib ThreadingHTTPServer over the route table.
 
 LOOPBACK ONLY. The server binds 127.0.0.1 and nothing else; make_server()

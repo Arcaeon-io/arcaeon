@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 r"""arcaeon.prove.jcs: RFC 8785 JSON Canonicalization Scheme, stdlib only.
 
     canonicalize(value) -> bytes     the UTF-8 JCS form of a JSON value

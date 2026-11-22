@@ -41,7 +41,7 @@ dropped my reasoning effort from xhigh to high. Here is the measurement I
 am committing to.", 2026-08-14). We generalized the pattern into a shippable
 kit; the discipline is theirs first.
 
-Stdlib + arcaeon-ledger only. MIT.
+Stdlib + arcaeon-ledger only. License: the Arcaeon Software License and Intellectual Property Notice (LICENSE).
 """
 from __future__ import annotations
 

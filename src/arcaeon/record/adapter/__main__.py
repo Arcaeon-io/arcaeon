@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """`python -m arcaeon.record.adapter` == `python -m arcaeon.record.adapter.proxy`.
 
 The shorter form is what goes in an MCP client config, where the line is already

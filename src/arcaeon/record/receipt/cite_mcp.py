@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """Citation Receipt MCP server — lets a lawyer's own MCP-capable agent mint
 a citation-existence receipt directly, without shelling out to the CLI.
 

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """A stdlib mini validator for request bodies: the small slice of JSON Schema
 the route table uses, and nothing more.
 

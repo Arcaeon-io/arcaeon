@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon-adapter — infrastructure-grade action logging at the MCP stdio seam.
 
 `arcaeon-ledger` proves a record wasn't altered. It cannot prove the record is

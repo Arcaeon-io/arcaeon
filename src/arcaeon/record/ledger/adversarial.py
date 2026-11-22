@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """Hostile stdio lines for JSON-RPC servers, and a runner that feeds them.
 
 Any MCP server that reads newline-delimited JSON-RPC off stdin has the same

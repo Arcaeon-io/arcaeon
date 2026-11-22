@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """`arcaeon open`: open the local dashboard in a browser (K107).
 
     arcaeon open                 # find a running serve, or start one, then open the browser

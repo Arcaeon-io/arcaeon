@@ -8,7 +8,7 @@ version = "0.11.1"
 description = "A record of what an agent did that the agent cannot quietly rewrite, and a way for anyone who doubts it to check."
 readme = "README.md"
 requires-python = ">=3.10"
-license = "MIT"
+license = "LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice"
 license-files = ["LICENSE"]
 authors = [{ name = "Arcaeon" }]
 keywords = ["ai", "agents", "mcp", "audit", "tamper-evident", "provenance", "hash-chain", "ledger"]

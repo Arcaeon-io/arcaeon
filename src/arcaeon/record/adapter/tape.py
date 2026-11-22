@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """The tape: one row per tool call, in call order, from ONE side of the call.
 
 Two tapes and a counter. The agent side and the tool side each keep a tape of

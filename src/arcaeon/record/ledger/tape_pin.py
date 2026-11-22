@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """Pin a tape's head at the witness: the COUNTER in "two tapes and a counter".
 
     pin = pin_tape("tool.tape.jsonl", HostedWitness(url, key), pair="acme-agent")

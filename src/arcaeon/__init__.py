@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon: a record of what an agent did that the agent cannot quietly
 rewrite, and a way for anyone who doubts it to check.
 

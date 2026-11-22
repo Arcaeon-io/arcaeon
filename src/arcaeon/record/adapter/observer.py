@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """Non-destructive observation of a relayed JSON-RPC stream.
 
 This module never touches the bytes on their way through. `proxy.py` writes each

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """GET and POST /packs: evidence packs under the served root (K104).
 
 GET lists every folder under the root holding an evidence pack's

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """The HTTP forward mode: the agent-side tape for an agent that talks to an HTTP MCP server.
 
     arcaeon-adapter --ledger seam.jsonl --tape agent.tape.jsonl \\

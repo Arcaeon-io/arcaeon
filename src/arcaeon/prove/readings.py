@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon.prove.readings: the reading row, and the frozen criterion it cites.
 
 A READING is one reader's answer to one frozen sentence about one claim:

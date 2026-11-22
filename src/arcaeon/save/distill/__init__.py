@@ -100,7 +100,7 @@ Non-proofs — read before the features
 
 Stdlib only. `arcaeon_ledger` is an optional dependency, imported only if you
 call `DropReceipt.seal()` to chain a receipt onto a tamper-evident ledger.
-MIT.
+License: the Arcaeon Software License and Intellectual Property Notice (LICENSE).
 """
 from __future__ import annotations
 

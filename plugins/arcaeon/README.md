@@ -3,7 +3,8 @@
 This plugin adds the Arcaeon MCP server to Claude Code. The server comes from
 the `arcaeon` Python package, version 0.11.1. It is the same server that
 `pip install "arcaeon[mcp]"` and then `arcaeon mcp` start, and the source is in
-this repository under the MIT license.
+this repository under the Arcaeon Software License and
+Intellectual Property Notice (see [LICENSE](LICENSE)).
 
 The server keeps a record of what an agent did that the agent cannot quietly
 rewrite. Every row is hash-chained to the row before it, so a changed or
@@ -188,4 +189,12 @@ requests at another witness, such as one you run yourself.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+The Arcaeon Software License and Intellectual Property Notice, effective
+17 November 2026. See [LICENSE](LICENSE), the same text as
+[arcaeon.io/license](https://arcaeon.io/license). Anyone may read the code,
+use it for their own records on machines they control, and use the open record
+formats and the checker to check any record or receipt. Using it in a product
+or service that is sold or that a company makes money with, running a witness
+on it, or offering it to others as a hosted service needs a written license
+from Arcaeon (legal@arcaeon.io). Copies of earlier versions that were released
+under the MIT license keep that license for those copies.

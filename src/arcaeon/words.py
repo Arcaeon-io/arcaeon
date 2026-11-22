@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon.words: every verdict word as one plain sentence (K101).
 
 One mapping, shared by the dashboard pages and anything else that shows a

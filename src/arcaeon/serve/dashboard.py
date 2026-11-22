@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """The local dashboard (K100): pages for a person, served by `arcaeon serve`.
 
 A browser cannot send the bearer token an agent sends, so the dashboard signs

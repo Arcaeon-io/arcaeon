@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """POST /v1/reconcile (K009).
 
 `kind: "tapes"` (the default): two tapes and an optional pin, answered with

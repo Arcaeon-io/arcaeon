@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """Path fence for `arcaeon serve` (K006).
 
 The server answers for one directory, the served root (`--root DIR`, default

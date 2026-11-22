@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon.prove.readings_cli: the `arcaeon second-read` verb.
 
     arcaeon second-read criterion FILE --ledger L [--supersedes SHA] [--json]

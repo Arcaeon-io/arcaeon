@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """A stdlib-only mini-ledger for the MCP server's own call record (OWASP MCP08).
 
 arcaeon-mcp-vet's `audit-record` check graded this package's MCP server on

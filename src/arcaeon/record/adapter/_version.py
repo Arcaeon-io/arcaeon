@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """One place the version lives.
 
 `__init__.py` and `proxy.py` both need it, and `__init__.py` deliberately does NOT

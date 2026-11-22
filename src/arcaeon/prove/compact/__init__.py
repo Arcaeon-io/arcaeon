@@ -42,7 +42,7 @@ WHAT IT PROVES, AND WHAT IT DOESN'T — the boundary is the product:
      prove an item you still HOLD was dropped (hash it, find it in the
      manifest); you cannot resurrect an item you lost.
 
-Stdlib + arcaeon-ledger only. MIT.
+Stdlib + arcaeon-ledger only. License: the Arcaeon Software License and Intellectual Property Notice (LICENSE).
 """
 from __future__ import annotations
 
