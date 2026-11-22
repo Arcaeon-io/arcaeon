@@ -6,7 +6,7 @@ that adds a JSON field or a verb.
 
 ## Unreleased
 
-Nothing yet.
+- **The pins page (branch claude/festive-newton-kx7emi-pins-page).** `arcaeon serve`'s dashboard has a Pins page, `/pins`. It lists every pin file under the served root and checks each one first, the strict pin rules and the pin chain that `arcaeon verify --witness` reads, answering VERIFIED, BROKEN or COULD NOT LOOK for the file (a file that fails the strict rules lists no pins). Each pin shows its namespace, rows, chain, `as_of` and `received_at`, and `/pins?file=F&line=N` shows one pin as a printable receipt with the `arcaeon verify --witness` command that checks a ledger against it. The page never opens a ledger. A pin records no assistant label and no assistant name, and the page says so.
 
 ## 0.11.1
 

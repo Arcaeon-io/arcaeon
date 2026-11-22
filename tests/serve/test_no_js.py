@@ -7,12 +7,15 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
 
 import pytest
 
 from arcaeon import words
 from arcaeon.prove.readings_cli import submit
 from arcaeon.record.adapter import mandate_gate
+from arcaeon.record.ledger import Ledger
+from arcaeon.record.ledger.witness import WitnessStore, publish_head
 from arcaeon.record.adapter import proxy
 from arcaeon.record.adapter._ledger import open_ledger
 from arcaeon.record.adapter.observer import SeamObserver
@@ -38,6 +41,8 @@ def root(tmp_path, monkeypatch):
     for i in range(3):
         assert h_core.log({"ledger": str(r / "good.jsonl"),
                            "fields": {"t": f"2026-09-27T10:0{i}:00Z", "n": i}})["exit"] == 0
+    publish_head(WitnessStore(r / "pins.jsonl"), "ns", Ledger(str(r / "good.jsonl")),
+                 received_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
     bad = r / "bad.jsonl"
     bad.write_bytes((r / "good.jsonl").read_bytes().replace(b'"n":1', b'"n":7')
                     .replace(b'"n": 1', b'"n": 7'))
@@ -62,6 +67,7 @@ CASES = [
     ("POST", "/verify", {"ledger": "bad.jsonl"}, "BROKEN"),
     ("POST", "/verify", {"ledger": "nope.jsonl"}, "COULD NOT LOOK"),
     ("POST", "/packs", {"pack": "pack"}, "VERIFIED"),
+    ("GET", "/pins", {}, "VERIFIED"),
     ("POST", "/readings", {"a": "ra.jsonl", "b": "rb.jsonl"}, "COMPARED"),
     ("POST", "/readings", {"a": "ra.jsonl", "b": "gone.jsonl"}, "COULD NOT LOOK"),
     ("POST", "/mandate", {"mandate": "mandate.json", "ledger": "seam.jsonl"}, "VERIFIED"),

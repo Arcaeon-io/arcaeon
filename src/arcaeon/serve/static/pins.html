@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>$title</title>
+<link rel="stylesheet" href="/static/placeholder.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+$nav
+<main>
+<h1>$title</h1>
+<p>A pin is a ledger's head recorded with a witness: how many rows the ledger
+had and its chain at that row, with the publisher's time and the witness's
+time. Each pin file under the served root is checked first, the same strict
+rules and pin chain <code>arcaeon verify --witness</code> reads, and the answer
+is VERIFIED, BROKEN or COULD NOT LOOK for that file.</p>
+<p class="note">$no_assistant</p>
+$main
+<p class="note">A pin says what the witness recorded, not that a ledger is
+fine today. To compare a ledger with a pin, open its receipt and run the
+command there against your copy of the ledger.</p>
+</main>
+</body>
+</html>
