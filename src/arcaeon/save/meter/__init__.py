@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon_meter — keyed usage metering for agent tools, in 3 lines.
 
 You built a tool agents want to call. Now you need keys, per-key monthly
@@ -35,7 +35,7 @@ Tamper-evident option: `Meter(..., ledger="usage.log.jsonl")` hash-chains
 every grant and denial via arcaeon-ledger, so the metering record itself is
 auditable. Soft dependency; only required if you pass `ledger=`.
 
-Zero required dependencies (stdlib only). MIT.
+Zero required dependencies (stdlib only). License: the Arcaeon Software License and Intellectual Property Notice (LICENSE).
 """
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """POST /v1/pin (free, local) and the paid lane: /v1/pin with remote, /v1/seal (K012).
 
 Local pin is free: `{"ledger", "witness", "ns"}` runs `arcaeon pin <ledger>

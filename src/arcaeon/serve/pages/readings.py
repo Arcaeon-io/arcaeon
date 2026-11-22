@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """GET and POST /readings: two readers, one frozen sentence, side by side (K105).
 
 Pick two readings ledgers under the served root (the `a` side and the `b`

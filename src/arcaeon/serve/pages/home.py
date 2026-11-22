@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """GET /: the dashboard's home page (K100)."""
 from __future__ import annotations
 

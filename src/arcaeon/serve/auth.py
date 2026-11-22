@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """Token auth for `arcaeon serve` (K005).
 
 The first run creates <ARCAEON_HOME or ~/.arcaeon>/serve.token holding

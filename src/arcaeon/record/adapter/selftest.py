@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """Selftest + mutation harness: every claimed check, observed actually failing.
 
     python -m arcaeon.record.adapter.selftest

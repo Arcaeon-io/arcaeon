@@ -29,7 +29,7 @@ integrity report, and a manifest mapping to Article 12's requirements — so
     assert log.verify().ok            # tamper-evident, any time
     log.export_bundle("audit-export/")  # regulator-ready folder
 
-Zero heavy deps (arcaeon-ledger is stdlib-only). One JSONL file. MIT.
+Zero heavy deps (arcaeon-ledger is stdlib-only). One JSONL file. License: the Arcaeon Software License and Intellectual Property Notice (LICENSE).
 
 NOTE: this is an engineering control that produces tamper-evident, exportable
 records. It is not legal advice and does not by itself make a system compliant;

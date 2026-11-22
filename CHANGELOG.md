@@ -6,7 +6,7 @@ that adds a JSON field or a verb.
 
 ## Unreleased
 
-Nothing yet.
+- **License (branch claude/festive-newton-kx7emi).** From the next version, the arcaeon package and the Claude plugin are under the Arcaeon Software License and Intellectual Property Notice, effective 17 November 2026 (LICENSE, the same text as arcaeon.io/license; pyproject's `license` is `LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice` with `license-files = ["LICENSE"]`), not MIT. Copies of 0.11.1 and every earlier version, released under the MIT license, keep the MIT license.
 
 ## 0.11.1
 

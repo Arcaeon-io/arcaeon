@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """POST /v1/readings and POST /v1/second-read/compare (K040).
 
 `/v1/readings` is the interop door: another agent posts its OWN reading of a

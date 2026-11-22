@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """`arcaeon schema --format FORMAT [--out FILE]` (K013, K081).
 
 `openapi` (the default) prints the OpenAPI 3.1 document `arcaeon serve`

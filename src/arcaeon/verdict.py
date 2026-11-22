@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon.verdict: the words every Arcaeon check prints, and ONE exit-code table.
 
 THE WORDS. A record check answers VERIFIED, BROKEN or COULD NOT LOOK. A

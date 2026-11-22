@@ -151,7 +151,7 @@ checkpoint substrate):
     (rows 1..N stay bound by the last live pin forever; only fresh claims
     die with the witness).
 
-Stdlib + the three arcaeon-* packages above. MIT.
+Stdlib + the three arcaeon-* packages above. License: the Arcaeon Software License and Intellectual Property Notice (LICENSE).
 """
 from __future__ import annotations
 

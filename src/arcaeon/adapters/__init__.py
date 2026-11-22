@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon.adapters: one tool list, every agent framework (K080).
 
     from arcaeon.adapters import tool_specs

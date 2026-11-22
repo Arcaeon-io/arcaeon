@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """A synthetic MCP server, for proving passthrough fidelity. Not a product surface.
 
     python -m arcaeon.record.adapter._echo_server

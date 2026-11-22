@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon.record.deal: a witnessed transaction, recorded by both sides.
 
     from arcaeon.record.deal import Deal, dispute, pack

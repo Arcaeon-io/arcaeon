@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """`arcaeon export`: write a ledger out in another record format.
 
     arcaeon export --format agent-audit-trail LEDGER --out FILE.jsonl [--json]

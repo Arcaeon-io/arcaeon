@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """Receipted Call MCP server — lets an agent that made an x402 (or kin) call
 itself mint the delivery receipt, without standing up `call_proxy`'s reverse
 proxy in front of the traffic.

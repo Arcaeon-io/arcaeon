@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """GET and POST /verify: check a ledger's chain from the browser (K103).
 
 Pick a `.jsonl` file under the served root, or paste a ledger's text. Either

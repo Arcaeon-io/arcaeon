@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """POST /v1/audit/verify and POST /v1/audit/export (K010).
 
 `/v1/audit/verify` takes `path` (an audit log, or an exported bundle

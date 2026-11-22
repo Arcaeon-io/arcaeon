@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """POST /v1/mandate/check: is one call inside a mandate? (K075)
 
     {"mandate": "mandate.json", "fields": {"name": "place_order", "total": "19.00"}}

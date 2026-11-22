@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """`arcaeon connect <client> --write | --undo | --check` (K020, K021).
 
 write   backs the config file up to `<file>.arcaeon-bak-<UTC stamp>` (a byte

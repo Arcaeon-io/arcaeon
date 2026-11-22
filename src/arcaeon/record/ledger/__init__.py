@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon_ledger — a tamper-evident, append-only action log for AI agents.
 
 Observability tools show you what your agent did. `arcaeon_ledger` lets you
@@ -67,7 +67,7 @@ TWO WRITE-SIDE BOUNDARIES, named because a cross-language verifier will meet the
     to different verifiers while the chain stays green over the last-wins parse.
     Don't hand-write rows; `append()` never produces one.
 
-Extracted from a hash-chained action ledger running in production. MIT.
+Extracted from a hash-chained action ledger running in production. License: the Arcaeon Software License and Intellectual Property Notice (LICENSE).
 """
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """`arcaeon mcp --http`: the same MCP server over streamable HTTP, loopback only (KH8).
 
 Some MCP clients only take a remote URL. This runs the exact server

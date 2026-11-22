@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon.prove.aat_export: a ledger as draft-sharif-agent-audit-trail records.
 
 Spec: memory/EVIDENCE_PACK_SPEC_2026-09-27.md, section 3 (field names quoted

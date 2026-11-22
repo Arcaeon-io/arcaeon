@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """The client catalog for `arcaeon connect` (K018).
 
 One Entry per AI client. For each: the config file per OS (a template over

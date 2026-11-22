@@ -86,7 +86,7 @@ typed, documented, raised BEFORE any claim or ledger row, never a raw
 `sqlite3.OperationalError` leaking out of `guard()`. Nothing that comes out of
 this library is an untyped surprise.
 
-Zero required dependencies beyond `arcaeon-ledger` (stdlib + sqlite3 otherwise). MIT.
+Zero required dependencies beyond `arcaeon-ledger` (stdlib + sqlite3 otherwise). License: the Arcaeon Software License and Intellectual Property Notice (LICENSE).
 """
 from __future__ import annotations
 

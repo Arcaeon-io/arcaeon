@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon.prove.readers.openai_compat: any OpenAI-compatible chat endpoint.
 
 `POST {base_url}/chat/completions` with one user message and temperature 0.

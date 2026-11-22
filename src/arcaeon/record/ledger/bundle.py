@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon_ledger.bundle — one-command auditor evidence bundle.
 
     python -m arcaeon.record.ledger.bundle <ledger.jsonl> [--out DIR|ZIP] [--namespace NS]

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """AutoGen adapter (K089), for AutoGen 0.4 and later (autogen-core).
 
     from autogen_agentchat.agents import AssistantAgent

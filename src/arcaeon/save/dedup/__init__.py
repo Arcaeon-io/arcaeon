@@ -40,7 +40,7 @@ WHAT IT REMOVES, AND WHAT IT WILL NOT — the boundary is the product:
      legal, financial records — pass `min_overlap=1.0`, which drops only
      items whose normalized feature sets match exactly.
 
-Zero dependencies. MIT. Built by Arcaeon — the evidence layer for AI.
+Zero dependencies. License: the Arcaeon Software License and Intellectual Property Notice (LICENSE). Built by Arcaeon — the evidence layer for AI.
 """
 from __future__ import annotations
 

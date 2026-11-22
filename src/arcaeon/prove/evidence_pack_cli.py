@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """`arcaeon evidence-pack`: build an evidence pack folder.
 
     arcaeon evidence-pack --ledger L --out DIR [--agent ID] [--from TS] [--to TS]

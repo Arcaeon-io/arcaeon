@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """`arcaeon connect`: the config an AI client needs to reach arcaeon.
 
 The catalog (catalog.py) is the one list of clients: where each keeps its

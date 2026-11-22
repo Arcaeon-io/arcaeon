@@ -1,21 +1,57 @@
-MIT License
+# Arcaeon Software License and Intellectual Property Notice
 
-Copyright (c) 2026 Arcaeon
+Not legal advice; the terms under which the Arcaeon software is licensed.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Effective date: 17 November 2026
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Previous version: effective 24 October 2026. This version opens reading the code and the record formats and writing checkers to everyone, and says what needs a paid license.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+Copyright 2026 Daniel Hill, founder of Arcaeon, doing business as Arcaeon. All rights reserved.
+
+## 1. What this covers
+
+This license covers every version of the Arcaeon app, the arcaeon package, the seal and the door released from now on. Copies of earlier versions that were released under the MIT license keep that license for those copies; nothing here takes it back. Using the Arcaeon witness, from any version of anything, is covered by the Witness Terms of Service, which apply to everyone who connects to it.
+
+## 2. Free, for everyone
+
+You may read the code. You may install and use Arcaeon for yourself, on machines you control, for your own records, your own work and your own agents. You may use the open record formats and the open checker to check any Arcaeon record or receipt, yours or anyone else's, without asking us.
+
+## 3. Needs a paid license from us
+
+You need a written license from Arcaeon to:
+
+a. use the code, or a modified copy of it, in a product or service that you sell, or that a company uses to make money;
+
+b. run a witness, or any service that stamps or vouches for records the way the Arcaeon witness does, built on our code or our record formats;
+
+c. offer the software to other people as a hosted service.
+
+Write to legal@arcaeon.io. We would rather say yes on fair terms than say no.
+
+## 4. Never allowed
+
+Using our code or formats to run a witness that routes around ours without a license; removing or changing our copyright and license notices; saying a record was witnessed by Arcaeon when it was not.
+
+## 5. Why the formats are open
+
+The record formats and the checker are published so anyone can verify a record without having to trust us. Reading them and writing tools that check records is free. Using them to run a competing witness is item 3b. If you like everything else about Arcaeon, we ask that you consider our witness: it is how the project pays for itself and stays free for personal use.
+
+## 6. Your records are yours
+
+Your records are yours; the software that keeps them is ours. Nothing in this license gives us any right to your records.
+
+## 7. Unchanged from the current license
+
+No warranty: a sealed record proves the record has not changed since it was written, not that what was written is true. Limitation of liability, governing law (California, San Bernardino County courts), and notices to legal@arcaeon.io stay as they are today, along with the trademark notice.
+
+They read, word for word:
+
+**No warranty.** THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE," WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING ANY WARRANTY OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, OR NON-INFRINGEMENT. A SEALED RECORD PROVES THAT THE RECORD HAS NOT CHANGED SINCE IT WAS WRITTEN; IT DOES NOT PROVE THAT WHAT WAS WRITTEN IS TRUE.
+
+**Limitation of liability.** TO THE FULLEST EXTENT PERMITTED BY LAW, ARCAEON WILL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR ANY LOSS OF DATA, PROFITS, OR BUSINESS, ARISING OUT OF OR RELATED TO THE SOFTWARE, HOWEVER CAUSED, AND ARCAEON'S TOTAL LIABILITY WILL NOT EXCEED THE AMOUNT YOU PAID FOR THE SOFTWARE IN THE TWELVE MONTHS BEFORE THE CLAIM.
+
+**Governing law and venue.** These terms are governed by the laws of the State of California and the United States, without regard to conflict of law rules. Any dispute arising out of or relating to the Software will be brought exclusively in the state or federal courts located in San Bernardino County, California, and you consent to their jurisdiction. Arcaeon may seek injunctive relief in any court of competent jurisdiction.
+
+**Notices and contact.** Notices to Arcaeon: legal@arcaeon.io. Copyright complaints under the DMCA: the same address, marked DMCA. These terms may be updated; the version on arcaeon.io/license on the date you use the Software applies.
+
+**Trademarks.** ARCAEON is a trademark of Daniel Hill, doing business as Arcaeon. A US trademark application is pending (serial number 50204888). Other names are the property of their owners.

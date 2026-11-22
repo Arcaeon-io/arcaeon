@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """Approval Receipt MCP server — the decision never comes from the agent.
 
 Zero dependencies beyond arcaeon-ledger: MCP is JSON-RPC 2.0 over stdio, so

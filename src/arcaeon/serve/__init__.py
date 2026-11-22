@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """`arcaeon serve`: one local HTTP/JSON API any model or agent framework can call.
 
 The route table (routes.py) is the one list of what the server answers; the

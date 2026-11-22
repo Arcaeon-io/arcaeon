@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """Record: write the row, and keep it honest.
 
     arcaeon.record.row          the row format every tool reads and writes

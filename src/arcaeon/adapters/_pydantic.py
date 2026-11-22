@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """A pydantic arguments model per tool, derived from its JSON schema.
 
 LlamaIndex, CrewAI and AutoGen describe a tool's arguments with a pydantic

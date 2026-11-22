@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """Prove: check a record, and say what the check could not see.
 
     arcaeon.prove.reconcile   two tapes and a counter (was arcaeon_ledger.reconcile)

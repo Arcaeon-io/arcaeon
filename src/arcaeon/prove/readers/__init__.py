@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon.prove.readers: other models as second readers, behind one interface.
 
 A READER takes one frozen criterion sentence and one claim, asks a model one

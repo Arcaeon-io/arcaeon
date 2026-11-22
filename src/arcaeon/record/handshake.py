@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon.record.handshake: two agents countersign any agreement (roadmap N23).
 
     from arcaeon.record import handshake as H

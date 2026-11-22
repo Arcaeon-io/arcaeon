@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """LlamaIndex adapter (K087).
 
     from llama_index.core.agent.workflow import FunctionAgent

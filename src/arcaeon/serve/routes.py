@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """The route table: every HTTP route `arcaeon serve` answers, in one list.
 
 Declared up front by K002 so parallel work never edits the list: later items

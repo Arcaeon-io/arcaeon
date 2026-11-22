@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """GET and POST /mandate: a mandate in sentences, and the last session's
 outside rows (K106).
 

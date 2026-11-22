@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """`arcaeon status`: what this install did lately, read from the activity journal.
 
     last run per verb    the newest journal line for each verb: word and time

@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon.journal: a local record of what the `arcaeon` command did.
 
 One JSON line per verb run, appended to ~/.arcaeon/activity.jsonl

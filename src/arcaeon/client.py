@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon.client: a stdlib Python client for `arcaeon serve` (K016).
 
     from arcaeon.client import Client

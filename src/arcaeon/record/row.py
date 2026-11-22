@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon.record.row: the ledger row format, in one place.
 
 Every Arcaeon tool that writes or reads a hash-chained JSONL row imports the

@@ -9,7 +9,7 @@
   },
   "homepage": "https://arcaeon.io",
   "repository": "https://github.com/Arcaeon-io/arcaeon",
-  "license": "MIT",
+  "license": "LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice",
   "keywords": ["agents", "audit", "tamper-evident", "hash-chain", "ledger", "provenance"],
   "documentationUrl": "https://github.com/Arcaeon-io/arcaeon#readme",
   "privacyPolicyUrl": "https://arcaeon.io/privacy",

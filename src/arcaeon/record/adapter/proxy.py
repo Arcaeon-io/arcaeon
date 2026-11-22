@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon-adapter — an MCP stdio proxy that records every tool call without the agent's help.
 
     python -m arcaeon.record.adapter.proxy --ledger seam.log.jsonl -- <server command...>

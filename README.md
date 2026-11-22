@@ -347,4 +347,12 @@ command for each name, and which exit codes changed.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+The Arcaeon Software License and Intellectual Property Notice, effective
+17 November 2026. See [LICENSE](LICENSE), the same text as
+[arcaeon.io/license](https://arcaeon.io/license). Anyone may read the code,
+use it for their own records on machines they control, and use the open record
+formats and the checker to check any record or receipt. Using it in a product
+or service that is sold or that a company makes money with, running a witness
+on it, or offering it to others as a hosted service needs a written license
+from Arcaeon (legal@arcaeon.io). Copies of earlier versions that were released
+under the MIT license keep that license for those copies.

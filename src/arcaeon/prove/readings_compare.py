@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """arcaeon.prove.readings_compare: line up two readings ledgers, claim by claim.
 
 Two ledgers, each written by one reader (see `arcaeon.prove.readings`), each

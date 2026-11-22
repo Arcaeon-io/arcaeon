@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: LicenseRef-Arcaeon-Software-License-and-Intellectual-Property-Notice
 """`arcaeon mandate`: read a mandate file before an agent runs under it.
 
     arcaeon mandate lint mandate.json        # unknown keys, bad types; exit 2 if invalid
