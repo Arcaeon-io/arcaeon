@@ -211,10 +211,12 @@ def seal(record: dict[str, Any], *, key: str | None = None,
     if not result.get("ok"):
         if _insufficient_credit(result):
             reason = (
-                "sealed scan refused: credit balance is zero. The badge "
-                "record above was appended to the ledger (true, but "
-                "unwitnessed); top up at the connector's existing $5 pack "
-                "and re-run --sealed to witness it. %s"
+                "sealed scan refused: no pins left on this key: this "
+                "month's free pins are used and it holds no bought pins. "
+                "The badge record above was appended to the ledger (true, "
+                "but unwitnessed); buy pins (https://arcaeon.io/pricing) or "
+                "wait for next month's free pins, and re-run --sealed to "
+                "witness it. %s"
                 % (result.get("error") or ""))
         elif result.get("status") == 403:
             if prefix:

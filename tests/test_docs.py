@@ -355,7 +355,7 @@ def test_readme_overclaims_appear_only_in_a_negation(phrase):
 
 def test_readme_honest_limits_block():
     limits = " ".join(_section(README, "Limits").split())
-    for must in ("Tamper-evident, not tamper-proof", "One witness, and we operate it",
+    for must in ("Tamper-evident, not tamper-proof", "Two witnesses, and we operate both",
                  "a clock, not a party", "custody record"):
         assert must in limits, must
 

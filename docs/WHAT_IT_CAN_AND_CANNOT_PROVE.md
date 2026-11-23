@@ -13,10 +13,12 @@ These are the README's limits, word for word.
 - **Tamper-evident, not tamper-proof.** Anyone who can write the file can
   still change it. What they cannot do is change it without the check
   noticing and naming the line.
-- **One witness, and we operate it.** The hosted witness at
-  witness.arcaeon.io is run by us, the people who make this package. A pin
-  there shows your head as it stood when we recorded it; it is not a second,
-  unrelated party vouching for you.
+- **Two witnesses, and we operate both.** This package pins to the hosted
+  witness at witness.arcaeon.io. The Arcaeon desktop app's "Pin to our
+  witness" switch pins to a different one, at arcaeon.io/witness/v1. Both are
+  run by us, the people who make this package. A pin with either shows your
+  head as it stood when we recorded it; it is not a second, unrelated party
+  vouching for you.
 - **The daily anchor is a clock, not a party.** The witness anchors its pin
   store to a public timestamp once a day. That fixes when the pins existed.
   It says nothing about whether they were right, and nobody behind it checked

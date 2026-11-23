@@ -27,12 +27,12 @@ def test_bundled_offers_is_byte_identical_to_the_site_copy():
         f"{BUNDLED} has drifted from {site}; copy the site file over, do not hand-edit")
 
 
-def test_upgrade_message_names_the_registration_grant_not_a_monthly_tier():
-    g = offers.REGISTRATION_GRANT
-    assert g and g["credits"] == 500 and g["once"] is True
+def test_upgrade_message_names_the_free_monthly_pins_not_a_grant():
+    """The live price list gives each key free pins every month and no
+    registration grant; the refusal names that free door, not a number."""
     msg = offers.upgrade_message("witness_pin")
-    assert ("Every new key comes with 500 credits, one time, per verified email; "
-            "registration is at https://arcaeon.io/pricing.") in msg
-    assert "pins/month" not in msg and "no card" not in msg
-    assert not hasattr(offers, "FREE_TIER")
+    assert ("Each key has free pins every month; the numbers and plans: "
+            "https://arcaeon.io/pricing.") in msg
+    assert "500 credits" not in msg and "per verified email" not in msg
+    assert "buy.stripe.com" not in msg
     msg.encode("ascii")

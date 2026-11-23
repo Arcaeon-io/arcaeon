@@ -90,9 +90,12 @@ Two tools need a key:
 - `witness_renew`: restate an unchanged head so a finished log does not look
   abandoned.
 
-The hosted witness is one witness, run by us, the people who make this
-package. A pin there shows your head as it stood when we recorded it. It is
-not an independent party vouching for you. A pin shows the log was not cut
+The hosted witness at witness.arcaeon.io is run by us, the people who make
+this package. A pin there shows your head as it stood when we recorded it. It
+is not an independent party vouching for you. It takes the key as a bearer
+key, not a signature, and answers with a public record of the pin, not a
+signed receipt. The Arcaeon desktop app pins to a different witness of ours,
+at arcaeon.io/witness/v1; this plugin does not. A pin shows the log was not cut
 short or rewritten only relative to what the witness saw, and only as of the
 last pin.
 
@@ -101,7 +104,8 @@ last pin.
 The two witness tools read a witness key from the `ARCAEON_KEY` environment
 variable of the server process. This plugin does not ask for a key, store one
 or set one. Without a key, those two tools send nothing and answer with a short
-note on how to get one. Plans are at https://arcaeon.io/pricing.
+note on how to get one. Each key has free pins every month; plans for more are
+at https://arcaeon.io/pricing.
 
 The server runs with the same environment variables as your other MCP servers.
 So if `ARCAEON_KEY` is already set where Claude Code runs, the two witness
