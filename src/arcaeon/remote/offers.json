@@ -23,7 +23,7 @@
   {
    "id": "arcaeon",
    "name": "arcaeon",
-   "version": "0.10.0",
+   "version": "0.9.1",
    "status": "shipped",
    "status_note": "version and status are synced from products.yaml (the one place they live) by `py site.py build`; publish day flips status to shipped there, not here",
    "price_usd": 0,
@@ -171,6 +171,14 @@
      "credits": 500,
      "once": true,
      "how": "verified email registration at https://arcaeon.io/pricing (in the next release)"
+    },
+    {
+     "plan": "stamp",
+     "free_per_day": 3,
+     "free_scope": "per internet address, UTC day, no key",
+     "credits": 0.25,
+     "unit": "per stamp past the free allowance, with a key",
+     "how": "https://arcaeon.io/stamp"
     },
     {
      "plan": "witnessed",
